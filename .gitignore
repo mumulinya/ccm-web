@@ -1,0 +1,12 @@
+node_modules/
+*.log
+pids/
+logs/
+sessions/
+crons/
+run/
+weixin/
+dir_history.json
+.cc-connect.lock
+mcp-feishu/node_modules/
+mcp-feishu/.env

@@ -1,0 +1,28 @@
+{
+  "name": "ccm",
+  "version": "1.0.0",
+  "description": "cc-connect 多项目管理器 - 同时管理多个 AI 编程助手项目，集成飞书 MCP",
+  "main": "bin/ccm.js",
+  "bin": {
+    "ccm": "bin/ccm.js",
+    "ccm-setup": "bin/setup.js"
+  },
+  "scripts": {
+    "postinstall": "node bin/setup.js",
+    "start": "node bin/ccm.js"
+  },
+  "keywords": [
+    "cc-connect",
+    "claude-code",
+    "feishu",
+    "mcp",
+    "ai-coding",
+    "multi-project"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": ""
+  }
+}

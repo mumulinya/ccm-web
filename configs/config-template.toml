@@ -1,0 +1,54 @@
+# cc-connect 项目配置模板
+# 复制此文件并重命名为 config-你的项目名.toml
+
+language = "zh"
+
+[[projects]]
+name = "your-project-name"
+work_dir = "D:\\path\\to\\your\\project"
+admin_from = "*"
+
+[projects.agent]
+type = "claudecode"
+mode = "default"
+
+[projects.agent.options]
+work_dir = "D:\\path\\to\\your\\project"
+
+[[projects.platforms]]
+type = "feishu"
+
+[projects.platforms.options]
+app_id = "your-feishu-app-id"
+app_secret = "your-feishu-app-secret"
+enable_feishu_card = true
+thread_isolation = true
+progress_style = "card"
+
+# 自定义命令
+[[commands]]
+name = "history"
+description = "查看会话历史记录"
+exec = "cc-connect sessions show {{1}} -n {{2:20}}"
+
+[[commands]]
+name = "sessions"
+description = "列出所有会话"
+exec = "cc-connect sessions list"
+
+[[commands]]
+name = "projects"
+description = "查看所有可操作的代码项目目录"
+exec = "cmd /c type C:\\Users\\你的用户名\\.cc-connect\\projects.txt"
+
+[[aliases]]
+name = "历史"
+command = "/history"
+
+[[aliases]]
+name = "会话"
+command = "/sessions"
+
+[[aliases]]
+name = "项目"
+command = "/projects"
