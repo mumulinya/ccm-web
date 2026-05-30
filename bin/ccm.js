@@ -3,6 +3,7 @@
 // 用法: ccm                  交互式选择
 //       ccm start all        启动所有项目
 //       ccm start 1          启动指定项目
+//       ccm start 1 cursor   用指定 Agent 启动
 //       ccm stop all         停止所有项目
 //       ccm stop 1           停止指定项目
 //       ccm status           查看运行状态
@@ -19,10 +20,32 @@ const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
 const PID_DIR = path.join(CCM_DIR, "pids");
 const LOG_DIR = path.join(CCM_DIR, "logs");
+const TEMP_DIR = path.join(CCM_DIR, "temp");
 const PROJECTS_FILE = path.join(CCM_DIR, "projects.txt");
 
+// 支持的 Agent 列表
+const AGENTS = [
+  { type: "claudecode", name: "Claude Code", modes: ["default", "acceptEdits", "plan", "auto", "bypassPermissions"], defaultMode: "default" },
+  { type: "cursor", name: "Cursor", modes: ["default", "force", "plan", "ask"], defaultMode: "default" },
+  { type: "gemini", name: "Gemini CLI", modes: ["default", "auto_edit", "yolo", "plan"], defaultMode: "yolo" },
+  { type: "codex", name: "Codex", modes: ["suggest", "auto-edit", "full-auto", "yolo"], defaultMode: "full-auto" },
+  { type: "qoder", name: "Qoder CLI", modes: ["default", "yolo"], defaultMode: "default" },
+  { type: "opencode", name: "OpenCode", modes: ["default", "yolo"], defaultMode: "default" },
+];
+
+// 支持的平台列表
+const PLATFORMS = [
+  { type: "feishu", name: "飞书", hasQrSetup: true, fields: ["app_id", "app_secret"] },
+  { type: "lark", name: "Lark (国际版飞书)", hasQrSetup: true, fields: ["app_id", "app_secret"] },
+  { type: "weixin", name: "微信", hasQrSetup: false, fields: ["token", "base_url", "account_id"] },
+  { type: "telegram", name: "Telegram", hasQrSetup: false, fields: ["token"] },
+  { type: "slack", name: "Slack", hasQrSetup: false, fields: ["bot_token", "app_token"] },
+  { type: "discord", name: "Discord", hasQrSetup: false, fields: ["token"] },
+  { type: "dingtalk", name: "钉钉", hasQrSetup: false, fields: ["token"] },
+];
+
 function ensureDirs() {
-  [CCM_DIR, CONFIGS_DIR, PID_DIR, LOG_DIR].forEach((dir) => {
+  [CCM_DIR, CONFIGS_DIR, PID_DIR, LOG_DIR, TEMP_DIR].forEach((dir) => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   });
 }
@@ -79,6 +102,40 @@ function getConfigInfo(configPath) {
   return projects;
 }
 
+// 获取当前配置中的 agent type
+function getCurrentAgent(configPath) {
+  const content = fs.readFileSync(configPath, "utf-8");
+  const match = content.match(/\[projects\.agent\][\s\S]*?type\s*=\s*"([^"]+)"/);
+  return match ? match[1] : "claudecode";
+}
+
+// 生成临时配置，替换 agent type
+function generateTempConfig(configPath, newAgentType) {
+  let content = fs.readFileSync(configPath, "utf-8");
+
+  // 找到 agent 定义，替换 type
+  content = content.replace(
+    /(\[projects\.agent\]\s*\n\s*type\s*=\s*)"[^"]+"/g,
+    `$1"${newAgentType}"`
+  );
+
+  // 移除 [projects.agent.options] 下的 mode 行（不同 agent 的 mode 值不同）
+  // 保留其他 options
+  const agentInfo = AGENTS.find(a => a.type === newAgentType);
+  if (agentInfo) {
+    content = content.replace(
+      /(\[projects\.agent\.options\][\s\S]*?mode\s*=\s*)"[^"]+"/g,
+      `$1"${agentInfo.defaultMode}"`
+    );
+  }
+
+  // 写入临时文件
+  const baseName = path.basename(configPath, ".toml");
+  const tempPath = path.join(TEMP_DIR, `${baseName}-${newAgentType}.toml`);
+  fs.writeFileSync(tempPath, content);
+  return tempPath;
+}
+
 function getRunningStatus() {
   const status = {};
   if (!fs.existsSync(PID_DIR)) return status;
@@ -110,16 +167,29 @@ function isRunning(name) {
   }
 }
 
-function startProject(config) {
+function startProject(config, agentType) {
+  const displayName = agentType ? `${config.name} (${agentType})` : config.name;
+
   if (isRunning(config.name)) {
-    console.log(`  ⚠ ${config.name} 已在运行中`);
+    console.log(`  ⚠ ${config.name} 已在运行中，先停止再切换 Agent`);
     return;
+  }
+
+  let configPath = config.path;
+
+  // 如果指定了不同的 agent，生成临时配置
+  if (agentType) {
+    const currentAgent = getCurrentAgent(config.path);
+    if (currentAgent !== agentType) {
+      configPath = generateTempConfig(config.path, agentType);
+      console.log(`  → 切换 Agent: ${currentAgent} → ${agentType}`);
+    }
   }
 
   const logFile = path.join(LOG_DIR, `${config.name}.log`);
   const logStream = fs.openSync(logFile, "w");
 
-  const child = spawn("cc-connect", ["--config", config.path, "--force"], {
+  const child = spawn("cc-connect", ["--config", configPath, "--force"], {
     stdio: ["ignore", logStream, logStream],
     shell: true,
     detached: true,
@@ -130,11 +200,12 @@ function startProject(config) {
 
   setTimeout(() => {
     if (isRunning(config.name)) {
-      const projects = getConfigInfo(config.path);
+      const projects = getConfigInfo(configPath);
       const platform = projects.map((p) => p.platform).join(", ");
-      console.log(`  ✓ ${config.name} 已启动 (PID: ${child.pid}, 平台: ${platform})`);
+      const agent = agentType || getCurrentAgent(config.path);
+      console.log(`  ✓ ${config.name} 已启动 (PID: ${child.pid}, Agent: ${agent}, 平台: ${platform})`);
     } else {
-      console.log(`  ✗ ${config.name} 启动失败，查看日志: ${logFile}`);
+      console.log(`  ✗ ${displayName} 启动失败，查看日志: ${logFile}`);
     }
   }, 2000);
 }
@@ -168,28 +239,57 @@ function showStatus() {
     const projects = getConfigInfo(config.path);
     const platform = projects.map((p) => p.platform).join(", ");
     const dir = [...new Set(projects.map((p) => p.workDir))].join(", ");
+    const agent = getCurrentAgent(config.path);
     const isUp = running[config.name];
     const icon = isUp ? "🟢" : "⚪";
     const pidInfo = isUp ? ` (PID: ${isUp.pid})` : "";
-    console.log(`  ${icon} [${config.index}] ${config.name.padEnd(25)} ${platform.padEnd(8)}${pidInfo}`);
+    console.log(`  ${icon} [${config.index}] ${config.name.padEnd(20)} Agent: ${agent.padEnd(12)} ${platform.padEnd(6)}${pidInfo}`);
     console.log(`     ${dir}`);
   }
   const runningCount = Object.keys(running).length;
   console.log(`\n运行中: ${runningCount}/${configs.length}`);
 }
 
-function initProject() {
+// Agent 选择菜单
+function selectAgent(config, callback) {
+  const currentAgent = getCurrentAgent(config.path);
+
+  console.log(`\n选择 Agent (当前: ${currentAgent}):\n`);
+  AGENTS.forEach((agent, i) => {
+    const isCurrent = agent.type === currentAgent;
+    const mark = isCurrent ? " ← 当前" : "";
+    console.log(`  [${i + 1}] ${agent.name.padEnd(15)} (${agent.type})${mark}`);
+  });
+  console.log(`  [0] 使用当前 Agent\n`);
+
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  rl.question("选择 Agent 编号: ", (answer) => {
+    const idx = parseInt(answer);
+    rl.close();
 
-  console.log("\n╔══════════════════════════════════════╗");
-  console.log("║     新建项目配置                      ║");
-  console.log("╚══════════════════════════════════════╝\n");
+    if (idx === 0 || isNaN(idx)) {
+      callback(null); // 使用当前
+    } else if (idx >= 1 && idx <= AGENTS.length) {
+      callback(AGENTS[idx - 1].type);
+    } else {
+      console.log("无效选择，使用当前 Agent");
+      callback(null);
+    }
+  });
+}
 
-  rl.question("项目名称 (英文，如 my-app): ", (name) => {
-    rl.question("代码目录路径 (如 D:\\projects\\my-app): ", (workDir) => {
-      rl.question("飞书 App ID: ", (appId) => {
-        rl.question("飞书 App Secret: ", (appSecret) => {
-          const template = `# cc-connect - ${name}
+function generateConfig(name, workDir, selectedAgent, selectedPlatform, platformOptions) {
+  // 构建平台选项
+  const optionsLines = Object.entries(platformOptions)
+    .map(([k, v]) => `${k} = "${v}"`)
+    .join("\n");
+
+  // 飞书/Lark 特有选项
+  const extraOptions = (selectedPlatform.type === "feishu" || selectedPlatform.type === "lark")
+    ? "\nenable_feishu_card = true\nthread_isolation = true\nprogress_style = \"card\""
+    : "";
+
+  return `# cc-connect - ${name}
 language = "zh"
 
 [[projects]]
@@ -198,21 +298,17 @@ work_dir = "${workDir.replace(/\\/g, "\\\\")}"
 admin_from = "*"
 
 [projects.agent]
-type = "claudecode"
-mode = "default"
+type = "${selectedAgent.type}"
+mode = "${selectedAgent.defaultMode}"
 
 [projects.agent.options]
 work_dir = "${workDir.replace(/\\/g, "\\\\")}"
 
 [[projects.platforms]]
-type = "feishu"
+type = "${selectedPlatform.type}"
 
 [projects.platforms.options]
-app_id = "${appId}"
-app_secret = "${appSecret}"
-enable_feishu_card = true
-thread_isolation = true
-progress_style = "card"
+${optionsLines}${extraOptions}
 
 # 自定义命令
 [[commands]]
@@ -242,21 +338,153 @@ command = "/sessions"
 name = "项目"
 command = "/projects"
 `;
-          const configPath = path.join(CONFIGS_DIR, `config-${name}.toml`);
-          fs.writeFileSync(configPath, template);
+}
 
-          // 更新 projects.txt
-          let projectsContent = "";
-          if (fs.existsSync(PROJECTS_FILE)) {
-            projectsContent = fs.readFileSync(PROJECTS_FILE, "utf-8");
-          }
-          const lineNum = projectsContent.split("\n").filter((l) => l.trim()).length + 1;
-          projectsContent += `\n${lineNum}. ${name} → ${workDir}`;
-          fs.writeFileSync(PROJECTS_FILE, projectsContent.trim() + "\n");
+function finalizeConfig(name, workDir) {
+  let projectsContent = "";
+  if (fs.existsSync(PROJECTS_FILE)) {
+    projectsContent = fs.readFileSync(PROJECTS_FILE, "utf-8");
+  }
+  const lineNum = projectsContent.split("\n").filter((l) => l.trim()).length + 1;
+  projectsContent += `\n${lineNum}. ${name} → ${workDir}`;
+  fs.writeFileSync(PROJECTS_FILE, projectsContent.trim() + "\n");
+}
 
-          console.log(`\n✓ 配置已创建: ${configPath}`);
-          console.log(`  启动: ccm start ${name}`);
-          rl.close();
+function setupFeishuQrCode(name, configPath) {
+  console.log("\n正在启动飞书扫码配置...\n");
+  try {
+    execSync(`cc-connect feishu setup --project "${name}" --config "${configPath}"`, {
+      stdio: "inherit",
+      timeout: 600000,
+    });
+    console.log("\n✓ 飞书机器人配置完成");
+    return true;
+  } catch (err) {
+    console.log("\n✗ 扫码配置失败或已取消");
+    return false;
+  }
+}
+
+function promptPlatformConfig(rl, selectedPlatform, callback) {
+  // 飞书/Lark 支持扫码
+  if (selectedPlatform.hasQrSetup) {
+    console.log(`\n${selectedPlatform.name}机器人配置方式:\n`);
+    console.log("  [1] 扫码创建新机器人（推荐）");
+    console.log("  [2] 绑定已有机器人（手动输入凭证）");
+
+    rl.question("\n选择 (默认 1): ", (choice) => {
+      if (choice === "2") {
+        promptPlatformFields(rl, selectedPlatform, callback);
+      } else {
+        callback({ qrSetup: true });
+      }
+    });
+  } else {
+    // 其他平台直接输入凭证
+    console.log(`\n请输入 ${selectedPlatform.name} 凭证:\n`);
+    promptPlatformFields(rl, selectedPlatform, callback);
+  }
+}
+
+function promptPlatformFields(rl, selectedPlatform, callback) {
+  const fields = selectedPlatform.fields;
+  const options = {};
+  let i = 0;
+
+  const fieldLabels = {
+    app_id: "App ID",
+    app_secret: "App Secret",
+    token: "Bot Token",
+    base_url: "Base URL",
+    account_id: "Account ID",
+    bot_token: "Bot Token",
+    app_token: "App Token",
+  };
+
+  function askNext() {
+    if (i >= fields.length) {
+      callback(options);
+      return;
+    }
+    const field = fields[i];
+    const label = fieldLabels[field] || field;
+    rl.question(`${label}: `, (value) => {
+      options[field] = value;
+      i++;
+      askNext();
+    });
+  }
+  askNext();
+}
+
+function initProject() {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+  console.log("\n╔══════════════════════════════════════╗");
+  console.log("║     新建项目配置                      ║");
+  console.log("╚══════════════════════════════════════╝\n");
+
+  // 选择 Agent
+  console.log("① 选择 Agent:\n");
+  AGENTS.forEach((agent, i) => {
+    const mark = agent.type === "claudecode" ? " ← 默认" : "";
+    console.log(`  [${i + 1}] ${agent.name.padEnd(15)} (${agent.type})${mark}`);
+  });
+
+  rl.question("\nAgent 编号 (默认 1): ", (agentAnswer) => {
+    const agentIdx = parseInt(agentAnswer) || 1;
+    const selectedAgent = AGENTS[agentIdx - 1] || AGENTS[0];
+
+    // 选择平台
+    console.log("\n② 选择平台:\n");
+    PLATFORMS.forEach((platform, i) => {
+      const mark = platform.type === "feishu" ? " ← 默认" : "";
+      const qrTag = platform.hasQrSetup ? " [支持扫码]" : "";
+      console.log(`  [${i + 1}] ${platform.name.padEnd(18)} (${platform.type})${qrTag}${mark}`);
+    });
+
+    rl.question("\n平台编号 (默认 1): ", (platformAnswer) => {
+      const platformIdx = parseInt(platformAnswer) || 1;
+      const selectedPlatform = PLATFORMS[platformIdx - 1] || PLATFORMS[0];
+
+      rl.question("\n③ 项目名称 (英文，如 my-app): ", (name) => {
+        rl.question("④ 代码目录路径 (如 D:\\projects\\my-app): ", (workDir) => {
+
+          promptPlatformConfig(rl, selectedPlatform, (platformOptions) => {
+            if (platformOptions.qrSetup) {
+              // 扫码方式
+              rl.close();
+              const placeholderOptions = {};
+              selectedPlatform.fields.forEach(f => placeholderOptions[f] = `PLACEHOLDER_${f.toUpperCase()}`);
+              const template = generateConfig(name, workDir, selectedAgent, selectedPlatform, placeholderOptions);
+              const configPath = path.join(CONFIGS_DIR, `config-${name}.toml`);
+              fs.writeFileSync(configPath, template);
+
+              const success = setupFeishuQrCode(name, configPath);
+              if (success) {
+                finalizeConfig(name, workDir);
+                console.log(`\n✓ 项目配置完成`);
+                console.log(`  Agent: ${selectedAgent.name}`);
+                console.log(`  平台: ${selectedPlatform.name}`);
+                console.log(`  启动: ccm start ${name}`);
+              } else {
+                try { fs.unlinkSync(configPath); } catch {}
+                console.log("\n配置已取消");
+              }
+            } else {
+              // 手动输入凭证
+              const template = generateConfig(name, workDir, selectedAgent, selectedPlatform, platformOptions);
+              const configPath = path.join(CONFIGS_DIR, `config-${name}.toml`);
+              fs.writeFileSync(configPath, template);
+              finalizeConfig(name, workDir);
+
+              console.log(`\n✓ 配置已创建: ${configPath}`);
+              console.log(`  Agent: ${selectedAgent.name}`);
+              console.log(`  平台: ${selectedPlatform.name}`);
+              console.log(`  启动: ccm start ${name}`);
+              rl.close();
+            }
+          });
         });
       });
     });
@@ -279,17 +507,19 @@ function interactive() {
   for (const config of configs) {
     const projects = getConfigInfo(config.path);
     const platform = projects.map((p) => p.platform).join(", ");
+    const agent = getCurrentAgent(config.path);
     const isUp = running[config.name];
     const icon = isUp ? "🟢" : "⚪";
-    console.log(`  ${icon} [${config.index}] ${config.name.padEnd(25)} ${platform}`);
+    console.log(`  ${icon} [${config.index}] ${config.name.padEnd(20)} ${agent.padEnd(12)} ${platform}`);
   }
 
   console.log(`\n  操作:`);
-  console.log(`    输入编号 → 启动该项目`);
+  console.log(`    输入编号 → 启动该项目（可选 Agent）`);
   console.log(`    stop 编号 → 停止该项目`);
   console.log(`    all → 启动所有项目`);
   console.log(`    stop all → 停止所有项目`);
   console.log(`    status → 查看状态`);
+  console.log(`    agents → 查看支持的 Agent 列表`);
   console.log(`    init → 新建项目`);
   console.log(`    0 → 退出\n`);
 
@@ -306,6 +536,16 @@ function interactive() {
 
       if (input === "status") {
         showStatus();
+        prompt();
+        return;
+      }
+
+      if (input === "agents") {
+        console.log("\n支持的 Agent:\n");
+        AGENTS.forEach((a, i) => {
+          console.log(`  [${i + 1}] ${a.name.padEnd(15)} ${a.type.padEnd(14)} 模式: ${a.modes.join(", ")}`);
+        });
+        console.log();
         prompt();
         return;
       }
@@ -343,13 +583,19 @@ function interactive() {
         return;
       }
 
+      // 启动项目
       const idx = parseInt(input);
       if (!isNaN(idx) && idx > 0) {
         const config = configs.find((c) => c.index === idx);
         if (config) {
-          console.log();
-          startProject(config);
-          setTimeout(prompt, 2500);
+          // 弹出 Agent 选择
+          rl.close();
+          selectAgent(config, (agentType) => {
+            console.log();
+            startProject(config, agentType);
+            // 重新创建 rl 继续交互
+            setTimeout(() => interactive(), 2500);
+          });
         } else {
           console.log("无效编号");
           prompt();
@@ -377,8 +623,10 @@ if (args.includes("--list") || args.includes("-l")) {
     const projects = getConfigInfo(config.path);
     const platform = projects.map((p) => p.platform).join(", ");
     const dir = [...new Set(projects.map((p) => p.workDir))].join(", ");
+    const agent = getCurrentAgent(config.path);
     const icon = running[config.name] ? "🟢" : "⚪";
     console.log(`  ${icon} ${config.name}`);
+    console.log(`     Agent: ${agent}`);
     console.log(`     平台: ${platform}`);
     console.log(`     目录: ${dir}\n`);
   }
@@ -386,15 +634,25 @@ if (args.includes("--list") || args.includes("-l")) {
   initProject();
 } else if (args[0] === "status") {
   showStatus();
+} else if (args[0] === "agents") {
+  console.log("\n支持的 Agent:\n");
+  AGENTS.forEach((a, i) => {
+    console.log(`  [${i + 1}] ${a.name.padEnd(15)} ${a.type.padEnd(14)} 模式: ${a.modes.join(", ")}`);
+  });
+  console.log();
+} else if (args[0] === "web") {
+  const port = args.includes("--port") ? parseInt(args[args.indexOf("--port") + 1]) : 3080;
+  const { startServer } = require("./server.js");
+  startServer(port);
 } else if (args[0] === "start" && args[1]) {
   const configs = getConfigs();
   if (args[1] === "all") {
     console.log("\n启动所有项目...\n");
-    for (const config of configs) startProject(config);
+    for (const config of configs) startProject(config, args[2]);
   } else {
     const idx = parseInt(args[1]);
     const config = configs.find((c) => c.index === idx || c.name === args[1]);
-    if (config) startProject(config);
+    if (config) startProject(config, args[2]);
     else console.log("项目不存在");
   }
 } else if (args[0] === "stop" && args[1]) {
@@ -416,7 +674,7 @@ if (args.includes("--list") || args.includes("-l")) {
 } else if (args.length > 0 && !args[0].startsWith("-")) {
   const configs = getConfigs();
   const config = configs.find((c) => c.name === args[0]);
-  if (config) startProject(config);
+  if (config) startProject(config, args[1]);
   else console.log(`项目 "${args[0]}" 不存在，用 ccm --list 查看`);
 } else {
   interactive();

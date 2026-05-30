@@ -10,3 +10,8 @@ dir_history.json
 .cc-connect.lock
 mcp-feishu/node_modules/
 mcp-feishu/.env
+uploads/
+temp/
+project-configs.json
+task-logs.json
+group-logs.json

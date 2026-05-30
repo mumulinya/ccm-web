@@ -1,28 +1,27 @@
 {
-  "name": "ccm",
+  "name": "ccm-web",
   "version": "1.0.0",
-  "description": "cc-connect 多项目管理器 - 同时管理多个 AI 编程助手项目，集成飞书 MCP",
-  "main": "bin/ccm.js",
+  "description": "ccm Web 控制台 - cc-connect 的 Web 管理界面，支持多 Agent 协作、任务派发、代码变更查看等",
+  "main": "bin/server.js",
   "bin": {
-    "ccm": "bin/ccm.js",
-    "ccm-setup": "bin/setup.js"
+    "ccm": "bin/ccm.js"
   },
   "scripts": {
-    "postinstall": "node bin/setup.js",
-    "start": "node bin/ccm.js"
+    "start": "node bin/server.js",
+    "dev": "node bin/server.js"
   },
   "keywords": [
     "cc-connect",
     "claude-code",
+    "ai-agent",
     "feishu",
-    "mcp",
-    "ai-coding",
-    "multi-project"
+    "multi-agent",
+    "web-console"
   ],
   "author": "",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": ""
+  "dependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
