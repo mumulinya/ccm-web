@@ -1,6 +1,6 @@
 {
   "name": "@mumulinya167/cc-web",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "cc-web - cc-connect 的 Web 管理界面，支持多 Agent 协作、任务派发、代码变更查看等",
   "main": "dist/server.js",
   "bin": {
