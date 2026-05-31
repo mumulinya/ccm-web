@@ -1,4 +1,4 @@
-# ccm Web 控制台
+# cc-web
 
 cc-connect 的 Web 管理界面，支持多 Agent 协作、任务派发、代码变更查看等。
 
@@ -18,21 +18,21 @@ cc-connect 的 Web 管理界面，支持多 Agent 协作、任务派发、代码
 ## 安装
 
 ```bash
-npm install -g git+https://github.com/你的用户名/ccm-web.git
+npm install -g git+https://github.com/mumulinya/ccm-web.git
 ```
 
 ## 使用
 
 ```bash
 # 启动 Web 控制台
-ccm web
+cc-web
 
 # 访问 http://localhost:3080
 ```
 
 ## 首次使用
 
-1. 启动 `ccm web`
+1. 启动 `cc-web`
 2. 访问 http://localhost:3080
 3. 点击"+ 新建项目"创建第一个项目
 4. 配置飞书通知（可选）

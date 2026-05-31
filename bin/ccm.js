@@ -1,14 +1,10 @@
 #!/usr/bin/env node
-// ccm - cc-connect 多项目管理器
-// 用法: ccm                  交互式选择
-//       ccm start all        启动所有项目
-//       ccm start 1          启动指定项目
-//       ccm start 1 cursor   用指定 Agent 启动
-//       ccm stop all         停止所有项目
-//       ccm stop 1           停止指定项目
-//       ccm status           查看运行状态
-//       ccm --list           列出所有配置
-//       ccm --init           初始化配置目录
+// cc-web - cc-connect Web 管理界面
+// 用法: cc-web              启动 Web 控制台
+//       cc-web start        启动 Web 服务器
+//       cc-web start all    启动所有项目
+//       cc-web stop all     停止所有项目
+//       cc-web status       查看运行状态
 
 const { execSync, spawn } = require("child_process");
 const fs = require("fs");
@@ -675,7 +671,10 @@ if (args.includes("--list") || args.includes("-l")) {
   const configs = getConfigs();
   const config = configs.find((c) => c.name === args[0]);
   if (config) startProject(config, args[1]);
-  else console.log(`项目 "${args[0]}" 不存在，用 ccm --list 查看`);
+  else console.log(`项目 "${args[0]}" 不存在，用 cc-web --list 查看`);
 } else {
-  interactive();
+  // 默认启动 Web 控制台
+  const port = 3080;
+  const { startServer } = require("./server.js");
+  startServer(port);
 }

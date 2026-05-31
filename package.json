@@ -1,10 +1,10 @@
 {
-  "name": "ccm-web",
+  "name": "cc-web",
   "version": "1.0.0",
-  "description": "ccm Web 控制台 - cc-connect 的 Web 管理界面，支持多 Agent 协作、任务派发、代码变更查看等",
+  "description": "cc-web - cc-connect 的 Web 管理界面，支持多 Agent 协作、任务派发、代码变更查看等",
   "main": "bin/server.js",
   "bin": {
-    "ccm": "bin/ccm.js"
+    "cc-web": "bin/ccm.js"
   },
   "scripts": {
     "start": "node bin/server.js",
