@@ -1,0 +1,5776 @@
+let currentProject = null;
+let currentSession = null;
+let currentSessionNew = false; // 标记是否是新会话（第一条消息后自动命名）
+let projects = [];
+
+// === API 调用 ===
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  return res.json();
+}
+
+// === 项目列表 ===
+async function loadProjects() {
+  const data = await api("/api/projects");
+  projects = data.projects || [];
+  renderProjects();
+
+  const infoText = `${projects.length} 个项目 · ${projects.filter(p => p.running).length} 个运行中`;
+  const headerInfo = document.getElementById("headerInfo");
+  const pageInfo = document.getElementById("pageInfo");
+  if (headerInfo) headerInfo.textContent = infoText;
+  if (pageInfo) pageInfo.textContent = infoText;
+}
+
+function getProjectIcon(name) {
+  const icons = { 'smart-live': '🏠', 'nova-erp': '📦', 'smart': '⚡' };
+  for (const [k, v] of Object.entries(icons)) {
+    if (name.toLowerCase().includes(k)) return v;
+  }
+  return '🚀';
+}
+
+function renderProjects() {
+  const el = document.getElementById("projectSelect");
+  if (!el) return;
+
+  el.innerHTML = `
+    <div style="position:relative;width:100%">
+      <div onclick="toggleProjectDropdown()" style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-sm);cursor:pointer;transition:all 0.2s;width:100%">
+        <span class="dot ${currentProject ? (projects.find(p => p.name === currentProject)?.running ? 'on' : 'off') : 'off'}"></span>
+        <span style="flex:1;font-size:14px;color:${currentProject ? 'var(--text-primary)' : 'var(--text-muted)'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          ${currentProject ? `${getProjectIcon(currentProject)} ${currentProject}` : '选择项目...'}
+        </span>
+        <span style="font-size:12px;color:var(--text-muted)">▼</span>
+      </div>
+      <div id="projectDropdown" style="display:none;position:fixed;top:60px;left:240px;width:400px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-sm);box-shadow:0 8px 32px rgba(0,0,0,0.5);z-index:9999;max-height:400px;overflow-y:auto">
+        ${projects.map(p => `
+          <div onclick="selectProject('${p.name}');document.getElementById('projectDropdown').style.display='none'" style="display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;transition:background 0.15s;border-bottom:1px solid rgba(55,65,81,0.3);${currentProject === p.name ? 'background:rgba(56,189,248,0.08)' : ''}"
+               onmouseover="this.style.background='rgba(56,189,248,0.05)'"
+               onmouseout="this.style.background='${currentProject === p.name ? 'rgba(56,189,248,0.08)' : 'transparent'}'">
+            <span class="dot ${p.running ? 'on' : 'off'}"></span>
+            <span style="flex:1;font-size:13px;color:var(--text-primary)">${getProjectIcon(p.name)} ${p.name}</span>
+            <span class="tag" style="font-size:10px">${p.platform}</span>
+            <div style="display:flex;gap:4px;margin-left:8px">
+              ${p.running
+                ? `<button class="btn btn-stop btn-sm" onclick="event.stopPropagation();stopProject('${p.name}')" title="停止" style="padding:3px 8px;font-size:10px">⏹</button>
+                   <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();showSwitchAgentModal('${p.name}','${p.agent}')" title="切换" style="padding:3px 8px;font-size:10px">🔄</button>`
+                : `<button class="btn btn-start btn-sm" onclick="event.stopPropagation();showAgentModal('${p.name}')" title="启动" style="padding:3px 8px;font-size:10px">▶</button>
+                   <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();showEditProjectModal('${p.name}')" title="编辑" style="padding:3px 8px;font-size:10px">✏️</button>
+                   <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();deleteProject('${p.name}')" title="删除" style="padding:3px 8px;font-size:10px">🗑️</button>`
+              }
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `;
+
+  // 更新页面信息
+  const pageInfo = document.getElementById('pageInfo');
+  if (pageInfo) {
+    pageInfo.textContent = `${projects.length} 个项目 · ${projects.filter(p => p.running).length} 个运行中`;
+  }
+}
+
+function toggleProjectDropdown() {
+  const dropdown = document.getElementById("projectDropdown");
+  if (!dropdown) return;
+
+  if (dropdown.style.display === "none") {
+    // 计算位置
+    const selectEl = document.querySelector('#projectSelect > div');
+    if (selectEl) {
+      const rect = selectEl.getBoundingClientRect();
+      dropdown.style.top = (rect.bottom + 4) + 'px';
+      dropdown.style.left = rect.left + 'px';
+      dropdown.style.width = rect.width + 'px';
+    }
+    dropdown.style.display = "block";
+  } else {
+    dropdown.style.display = "none";
+  }
+}
+
+// 点击外部关闭下拉框
+document.addEventListener("click", (e) => {
+  const dropdown = document.getElementById("projectDropdown");
+  const selectArea = document.getElementById("projectSelect");
+  if (dropdown && selectArea && !selectArea.contains(e.target)) {
+    dropdown.style.display = "none";
+  }
+});
+
+// === 启停项目 ===
+async function stopProject(name) {
+  await api("/api/stop", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ project: name }) });
+  setTimeout(loadProjects, 500);
+}
+
+async function startProject(name, agent) {
+  await api("/api/start", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ project: name, agent }) });
+  setTimeout(loadProjects, 1500);
+}
+
+// === 文件夹浏览器 ===
+let currentBrowseTarget = null;
+let currentBrowsePath = '';
+
+async function showFolderBrowser(targetInputId) {
+  currentBrowseTarget = targetInputId;
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:600px;max-height:75vh;display:flex;flex-direction:column">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>📁 选择项目目录</h3>
+
+    <!-- 磁盘选择 -->
+    <div id="browseDrives" style="display:flex;gap:6px;margin:12px 0;flex-wrap:wrap"></div>
+
+    <!-- 当前路径 -->
+    <div id="browsePath" style="padding:8px 12px;background:var(--bg-glass);border-radius:6px;margin-bottom:12px;font-size:12px;color:var(--text-muted);font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">加载中...</div>
+
+    <!-- 文件列表 -->
+    <div id="browseList" style="flex:1;overflow-y:auto;min-height:250px;max-height:400px;border:1px solid var(--border-color);border-radius:8px;padding:8px">
+      <div class="empty">加载中...</div>
+    </div>
+
+    <!-- 操作按钮 -->
+    <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+      <button class="btn btn-outline btn-sm" onclick="browseGoUp()">⬆ 上级</button>
+      <button class="btn btn-outline btn-sm" onclick="loadFolderContents(currentBrowsePath)">🔄 刷新</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="selectCurrentFolder()">✓ 选择此目录</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+
+  // 加载磁盘列表和默认路径
+  await loadDrives();
+  await loadFolderContents('');
+}
+
+async function loadDrives() {
+  const drivesEl = document.getElementById("browseDrives");
+
+  try {
+    const res = await api("/api/filesystem/drives");
+    if (res.success) {
+      const drives = res.drives || [];
+      drivesEl.innerHTML = drives.map(d =>
+        `<button class="btn btn-outline btn-sm" onclick="loadFolderContents('${d.path.replace(/\\/g, '\\\\')}')" style="padding:4px 10px;font-size:11px">${d.name}:</button>`
+      ).join('') + `
+        <button class="btn btn-outline btn-sm" onclick="loadFolderContents('${res.home?.replace(/\\/g, '\\\\') || ''}')" style="padding:4px 10px;font-size:11px">🏠 主目录</button>
+      `;
+    }
+  } catch (e) {
+    drivesEl.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">无法获取磁盘列表</span>';
+  }
+}
+
+async function loadFolderContents(dir) {
+  const pathEl = document.getElementById("browsePath");
+  const listEl = document.getElementById("browseList");
+
+  try {
+    const res = await api(`/api/filesystem/browse?dir=${encodeURIComponent(dir)}`);
+    if (!res.success) {
+      listEl.innerHTML = `<div class="empty" style="color:var(--accent-red)">${escapeHtml(res.error)}</div>`;
+      return;
+    }
+
+    currentBrowsePath = res.path;
+    pathEl.textContent = res.path;
+
+    if (res.items.length === 0) {
+      listEl.innerHTML = '<div class="empty" style="padding:20px;color:var(--text-muted)">空目录</div>';
+      return;
+    }
+
+    listEl.innerHTML = res.items.map(item => {
+      const icon = item.isDirectory ? '📁' : '📄';
+      const color = item.isDirectory ? 'var(--accent-blue)' : 'var(--text-secondary)';
+      const clickHandler = item.isDirectory ? `loadFolderContents('${item.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')` : '';
+      return `<div onclick="${clickHandler}" style="display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:${item.isDirectory ? 'pointer' : 'default'};border-radius:6px;transition:background 0.15s"
+        onmouseover="this.style.background='rgba(56,189,248,0.05)'"
+        onmouseout="this.style.background='transparent'">
+        <span style="font-size:16px">${icon}</span>
+        <span style="font-size:13px;color:${color};flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(item.name)}</span>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty" style="color:var(--accent-red)">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function browseGoUp() {
+  if (!currentBrowsePath) return;
+  // 处理 Windows 路径
+  let parentPath;
+  if (currentBrowsePath.match(/^[A-Z]:\\?$/i)) {
+    // 已经是磁盘根目录，不能再往上
+    return;
+  }
+  parentPath = currentBrowsePath.replace(/[/\\][^/\\]+$/, '');
+  // Windows 磁盘根目录处理
+  if (parentPath.match(/^[A-Z]:$/i)) {
+    parentPath += '\\';
+  }
+  loadFolderContents(parentPath || '/');
+}
+
+function selectCurrentFolder() {
+  if (currentBrowseTarget && currentBrowsePath) {
+    const input = document.getElementById(currentBrowseTarget);
+    if (input) {
+      input.value = currentBrowsePath;
+    }
+  }
+  document.querySelector('.modal-overlay')?.remove();
+}
+
+// === 编辑项目 ===
+function showEditProjectModal(name) {
+  const project = projects.find(p => p.name === name);
+  if (!project) return;
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:450px">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>✏️ 编辑项目 - ${escapeHtml(name)}</h3>
+    <div class="form-group">
+      <label>项目名称</label>
+      <input type="text" value="${escapeHtml(name)}" disabled style="opacity:0.6">
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">项目名称不可修改</div>
+    </div>
+    <div class="form-group">
+      <label>代码目录</label>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="editWorkDir" value="${escapeHtml(project.work_dir || '')}" placeholder="项目代码目录路径" style="flex:1">
+        <button class="btn btn-outline btn-sm" onclick="showFolderBrowser('editWorkDir')" style="white-space:nowrap">📁 浏览</button>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Agent 类型</label>
+      <select id="editAgent">
+        ${["claudecode|Claude Code","cursor|Cursor","gemini|Gemini CLI","codex|Codex","qoder|Qoder CLI","opencode|OpenCode"]
+          .map(a => {
+            const [type, label] = a.split("|");
+            return `<option value="${type}" ${project.agent === type ? 'selected' : ''}>${label} (${type})</option>`;
+          }).join("")}
+      </select>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitEditProject('${escapeHtml(name)}')">保存修改</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitEditProject(name) {
+  const workDir = document.getElementById("editWorkDir").value.trim();
+  const agent = document.getElementById("editAgent").value;
+
+  if (!workDir) {
+    alert("请填写代码目录");
+    return;
+  }
+
+  const res = await api("/api/projects/update", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ name, work_dir: workDir, agent })
+  });
+
+  if (res.success) {
+    document.querySelector(".modal-overlay").remove();
+    loadProjects();
+    alert("项目配置已更新！");
+  } else {
+    alert("更新失败: " + (res.error || "未知错误"));
+  }
+}
+
+// === 删除项目 ===
+async function deleteProject(name) {
+  const project = projects.find(p => p.name === name);
+  if (!project) return;
+
+  if (project.running) {
+    alert("项目正在运行，请先停止后再删除");
+    return;
+  }
+
+  if (!confirm(`确定删除项目 "${name}"？\n\n删除后将无法恢复，所有会话记录也会被删除。`)) return;
+
+  const res = await api("/api/projects/delete", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ name })
+  });
+
+  if (res.success) {
+    // 如果删除的是当前选中的项目，清除选中状态
+    if (currentProject === name) {
+      currentProject = null;
+      document.getElementById("contentTitle").textContent = "消息记录";
+      document.getElementById("contentBody").innerHTML = '<div class="empty" style="flex-direction:column;gap:12px"><span style="font-size:48px;opacity:0.3">💬</span><span style="font-size:16px;color:var(--text-secondary)">选择一个会话开始对话</span></div>';
+    }
+    loadProjects();
+    alert("项目已删除！");
+  } else {
+    alert("删除失败: " + (res.error || "未知错误"));
+  }
+}
+
+function showAgentModal(name) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal">
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+      <h3>选择 Agent 启动 ${name}</h3>
+      ${["claudecode|Claude Code","cursor|Cursor","gemini|Gemini CLI","codex|Codex","qoder|Qoder CLI","opencode|OpenCode"]
+        .map(a => {
+          const [type, label] = a.split("|");
+          return `<div class="agent-option" onclick="this.closest('.modal-overlay').remove();startProject('${name}','${type}')">
+            <span class="name">${label}</span><span class="type">${type}</span>
+          </div>`;
+        }).join("")}
+    </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+// === 新建项目弹窗 ===
+function showCreateModal() {
+  const AGENTS = [
+    { type: "claudecode", name: "Claude Code" },
+    { type: "cursor", name: "Cursor" },
+    { type: "gemini", name: "Gemini CLI" },
+    { type: "codex", name: "Codex" },
+    { type: "qoder", name: "Qoder CLI" },
+    { type: "opencode", name: "OpenCode" },
+  ];
+  const PLATFORMS = [
+    { type: "feishu", name: "飞书", hasQr: true },
+    { type: "lark", name: "Lark", hasQr: true },
+    { type: "weixin", name: "微信", hasQr: false },
+    { type: "telegram", name: "Telegram", hasQr: false },
+    { type: "slack", name: "Slack", hasQr: false },
+    { type: "discord", name: "Discord", hasQr: false },
+  ];
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal" style="min-width:440px">
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+      <h3>新建项目</h3>
+
+      <div class="form-group">
+        <label>项目名称</label>
+        <input type="text" id="createName" placeholder="如 my-app">
+      </div>
+
+      <div class="form-group">
+        <label>代码目录路径</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="createWorkDir" placeholder="如 D:\\projects\\my-app" style="flex:1">
+          <button class="btn btn-outline btn-sm" onclick="showFolderBrowser('createWorkDir')" style="white-space:nowrap">📁 浏览</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Agent</label>
+        <select id="createAgent">
+          ${AGENTS.map(a => `<option value="${a.type}" ${a.type==="claudecode"?"selected":""}>${a.name} (${a.type})</option>`).join("")}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>平台</label>
+        <select id="createPlatform" onchange="onPlatformChange()">
+          ${PLATFORMS.map(p => `<option value="${p.type}" data-hasqr="${p.hasQr}" ${p.type==="feishu"?"selected":""}>${p.name} (${p.type})</option>`).join("")}
+        </select>
+      </div>
+
+      <div id="platformFields">
+        <div class="form-group">
+          <label>App ID</label>
+          <input type="text" id="createAppId" placeholder="飞书 App ID">
+        </div>
+        <div class="form-group">
+          <label>App Secret</label>
+          <input type="text" id="createAppSecret" placeholder="飞书 App Secret">
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+        <button class="btn btn-primary" onclick="submitCreate()">创建</button>
+      </div>
+    </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+function onPlatformChange() {
+  const sel = document.getElementById("createPlatform");
+  const opt = sel.options[sel.selectedIndex];
+  const hasQr = opt.dataset.hasqr === "true";
+  const fields = document.getElementById("platformFields");
+
+  if (hasQr) {
+    fields.innerHTML = `
+      <div class="form-group">
+        <label style="display:flex;justify-content:space-between;align-items:center">
+          App ID
+          <button class="btn btn-outline btn-sm" onclick="event.preventDefault();feishuQrSetup()" style="font-size:11px">扫码创建机器人</button>
+        </label>
+        <input type="text" id="createAppId" placeholder="飞书 App ID（可扫码自动填写）">
+      </div>
+      <div class="form-group">
+        <label>App Secret</label>
+        <input type="text" id="createAppSecret" placeholder="飞书 App Secret（可扫码自动填写）">
+      </div>
+      <div id="qrStatus" style="display:none;margin-top:8px;padding:10px;border-radius:6px;background:#0f172a;border:1px solid #334155;font-size:12px">
+        <div id="qrStatusText" style="color:#94a3b8">准备中...</div>
+        <a id="qrScanLink" href="#" target="_blank" style="display:none;color:#38bdf8;margin-top:6px;word-break:break-all"></a>
+      </div>`;
+  } else {
+    fields.innerHTML = `
+      <div class="form-group">
+        <label>Bot Token</label>
+        <input type="text" id="createToken" placeholder="Bot Token">
+      </div>`;
+  }
+}
+
+async function feishuQrSetup() {
+  const name = document.getElementById("createName").value.trim();
+  const workDir = document.getElementById("createWorkDir").value.trim();
+
+  if (!name) { alert("请先填写项目名称"); return; }
+  if (!workDir) { alert("请先填写代码目录路径"); return; }
+
+  const statusEl = document.getElementById("qrStatus");
+  const statusText = document.getElementById("qrStatusText");
+  const scanLink = document.getElementById("qrScanLink");
+
+  statusEl.style.display = "block";
+  statusText.style.color = "var(--accent-yellow)";
+  statusText.textContent = "正在调用 cc-connect 创建飞书机器人...";
+  scanLink.style.display = "none";
+
+  // 调用后端创建飞书机器人
+  const res = await api("/api/projects/feishu-setup", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ name })
+  });
+
+  if (res.success && res.scan_url) {
+    statusText.style.color = "var(--accent-green)";
+    statusText.textContent = "请用飞书 App 扫码完成授权：";
+    scanLink.href = res.scan_url;
+    scanLink.textContent = "点击打开授权页面";
+    scanLink.style.display = "block";
+
+    // 生成二维码显示
+    const qrDiv = document.createElement("div");
+    qrDiv.style.cssText = "text-align:center;margin-top:12px";
+    qrDiv.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(res.scan_url)}" style="border-radius:8px" alt="飞书扫码">`;
+    statusEl.appendChild(qrDiv);
+
+    // 轮询检查配置状态
+    let checks = 0;
+    const poll = setInterval(async () => {
+      checks++;
+      if (checks > 60) { clearInterval(poll); return; }
+
+      const configRes = await api("/api/feishu/config");
+      if (configRes.config?.app_id) {
+        clearInterval(poll);
+        statusText.style.color = "var(--accent-green)";
+        statusText.textContent = "✅ 飞书机器人配置完成！";
+
+        // 自动填入 App ID 和 Secret
+        document.getElementById("createAppId").value = configRes.config.app_id;
+      }
+    }, 3000);
+  } else {
+    statusText.style.color = "var(--accent-red)";
+    statusText.textContent = "创建失败: " + (res.error || "请检查 cc-connect 是否可用");
+  }
+}
+
+async function submitCreate() {
+  const name = document.getElementById("createName").value.trim();
+  const workDir = document.getElementById("createWorkDir").value.trim();
+  const agent = document.getElementById("createAgent").value;
+  const platform = document.getElementById("createPlatform").value;
+
+  if (!name || !workDir) { alert("请填写项目名称和目录"); return; }
+
+  const platform_options = {};
+  const appId = document.getElementById("createAppId");
+  const appSecret = document.getElementById("createAppSecret");
+  const token = document.getElementById("createToken");
+
+  if (appId) platform_options.app_id = appId.value.trim();
+  if (appSecret) platform_options.app_secret = appSecret.value.trim();
+  if (token) platform_options.token = token.value.trim();
+
+  const res = await api("/api/projects/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, work_dir: workDir, agent, platform, platform_options })
+  });
+
+  if (res.success) {
+    document.querySelector(".modal-overlay").remove();
+    loadProjects();
+  } else {
+    alert(res.error || "创建失败");
+  }
+}
+
+// === 切换 Agent 弹窗（运行中的项目） ===
+function showSwitchAgentModal(name, currentAgent) {
+  const AGENTS = [
+    { type: "claudecode", name: "Claude Code" },
+    { type: "cursor", name: "Cursor" },
+    { type: "gemini", name: "Gemini CLI" },
+    { type: "codex", name: "Codex" },
+    { type: "qoder", name: "Qoder CLI" },
+    { type: "opencode", name: "OpenCode" },
+  ];
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `
+    <div class="modal">
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+      <h3>切换 Agent - ${name}</h3>
+      <p style="font-size:12px;color:#64748b;margin-bottom:14px">当前: ${currentAgent} · 需要先停止再切换</p>
+      ${AGENTS.map(a => `
+        <div class="agent-option" style="${a.type===currentAgent?'border:1px solid #38bdf8':''}" onclick="this.closest('.modal-overlay').remove();switchAgent('${name}','${a.type}')">
+          <span class="name">${a.name} ${a.type===currentAgent?'← 当前':''}</span>
+          <span class="type">${a.type}</span>
+        </div>`).join("")}
+    </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function switchAgent(name, agent) {
+  await stopProject(name);
+  setTimeout(() => startProject(name, agent), 1000);
+}
+
+// === 会话管理 ===
+let sessionsData = [];
+
+async function loadSessions(projectName) {
+  const data = await api(`/api/projects/${encodeURIComponent(projectName)}/sessions`);
+  sessionsData = data.sessions || [];
+  renderSessions(projectName);
+}
+
+function renderSessions(projectName) {
+  const el = document.getElementById("sessionList");
+
+  if (sessionsData.length === 0) {
+    el.innerHTML = '<div class="empty" style="height:auto;padding:40px 20px;flex-direction:column;gap:8px"><span style="font-size:32px;opacity:0.5">💬</span><span>暂无会话</span><small style="color:var(--text-muted)">在飞书发消息或点上方新建</small></div>';
+    return;
+  }
+
+  el.innerHTML = sessionsData.map(s => {
+    const time = s.updated_at ? new Date(s.updated_at).toLocaleString("zh-CN") : "";
+    const isActive = currentSession === s.id;
+    const displayName = s.name || s.id;
+    return `
+      <div class="session-item ${isActive ? 'active' : ''}" onclick="selectSession('${projectName}','${s.id}')" style="position:relative">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div style="flex:1;min-width:0">
+            <div class="sid" style="display:flex;align-items:center;gap:6px">
+              <span style="font-weight:600;color:var(--text-primary);font-size:13px">💬 ${escapeHtml(displayName)}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:4px">
+              <span style="font-size:11px;color:var(--text-muted)">${s.id}</span>
+              <span style="font-size:11px;color:var(--accent-blue)">${s.message_count} 条</span>
+            </div>
+            <div class="preview">${escapeHtml(s.last_message)}</div>
+            <div class="time">${time}</div>
+          </div>
+          <div class="actions" style="display:${isActive?'flex':'none'};gap:4px;margin-left:4px">
+            <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();renameSession('${s.id}')" title="重命名" style="padding:3px 8px;font-size:11px">✏️</button>
+            <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteSession('${s.id}')" title="删除" style="padding:3px 8px;font-size:11px">🗑️</button>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+async function createNewSession() {
+  if (!currentProject) { alert("请先选择一个项目"); return; }
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>新建会话 - ${currentProject}</h3>
+    <div class="form-group"><label>会话名称（可选）</label><input type="text" id="newSessionName" placeholder="如：购物车功能开发"></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitNewSession()">创建</button>
+    </div></div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitNewSession() {
+  const name = document.getElementById("newSessionName").value.trim() || `s${sessionsData.length + 1}`;
+  document.querySelector(".modal-overlay").remove();
+
+  // 创建空会话记录
+  const res = await api("/api/sessions/create", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ project: currentProject, name })
+  });
+
+  if (res.success) {
+    currentSession = res.sessionId;
+    currentSessionNew = true;
+    loadSessions(currentProject);
+    document.getElementById("contentBody").innerHTML = '<div class="empty">新会话已创建，开始对话吧</div>';
+    document.getElementById("contentTitle").textContent = `${currentProject} - ${res.name || res.sessionId}`;
+    updateChatTarget();
+  } else {
+    alert("创建失败: " + (res.error || "未知错误"));
+  }
+}
+
+async function deleteSession(sessionId) {
+  if (!confirm(`确定删除会话 ${sessionId}？消息记录将丢失`)) return;
+
+  await api("/api/sessions/delete", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ project: currentProject, sessionId })
+  });
+
+  if (currentSession === sessionId) {
+    currentSession = null;
+    document.getElementById("contentBody").innerHTML = '<div class="empty">会话已删除</div>';
+  }
+  loadSessions(currentProject);
+}
+
+async function renameSession(sessionId) {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>重命名会话 ${sessionId}</h3>
+    <div class="form-group"><label>新名称</label><input type="text" id="renameSessionName" placeholder="会话名称"></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitRenameSession('${sessionId}')">确定</button>
+    </div></div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitRenameSession(sessionId) {
+  const name = document.getElementById("renameSessionName").value.trim();
+  if (!name) return;
+  document.querySelector(".modal-overlay").remove();
+
+  await api("/api/sessions/rename", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ project: currentProject, sessionId, name })
+  });
+  loadSessions(currentProject);
+}
+
+// === 消息详情 ===
+async function loadMessages(projectName, sessionId) {
+  const data = await api(`/api/projects/${encodeURIComponent(projectName)}/sessions/${encodeURIComponent(sessionId)}`);
+  const history = data.history || [];
+  const el = document.getElementById("contentBody");
+
+  if (history.length === 0) {
+    el.innerHTML = '<div class="empty" style="flex-direction:column;gap:8px"><span style="font-size:40px;opacity:0.5">💬</span>暂无消息</div>';
+    return;
+  }
+
+  el.innerHTML = history.map(msg => {
+    const time = msg.timestamp ? new Date(msg.timestamp).toLocaleString("zh-CN") : "";
+    const role = msg.role === "user" ? "user" : "assistant";
+    const agentLabel = role === "assistant" ? `<span style="color:var(--accent-blue);font-size:11px;display:block;margin-bottom:6px;font-weight:500">🤖 Agent</span>` : "";
+    return `
+      <div class="message ${role}">
+        <div class="bubble">${agentLabel}${escapeHtml(msg.content)}</div>
+        <div class="msg-meta">${time}</div>
+      </div>`;
+  }).join("");
+
+  el.scrollTop = el.scrollHeight;
+}
+
+// === 日志 ===
+async function loadLogs(projectName) {
+  const data = await api(`/api/projects/${encodeURIComponent(projectName)}/logs?lines=200`);
+  document.getElementById("logsContent").textContent = data.logs || "(暂无日志)";
+  document.getElementById("logProject").textContent = projectName;
+}
+
+function toggleLogs() {
+  document.getElementById("logsPanel").classList.toggle("open");
+  if (currentProject && document.getElementById("logsPanel").classList.contains("open")) {
+    loadLogs(currentProject);
+  }
+}
+
+// === 交互 ===
+function selectProject(name) {
+  currentProject = name;
+  currentSession = null;
+  renderProjects();
+  loadSessions(name);
+  document.getElementById("contentTitle").textContent = `${name} - 消息记录`;
+  document.getElementById("contentBody").innerHTML = '<div class="empty" style="flex-direction:column;gap:8px"><span style="font-size:40px;opacity:0.5">💬</span>选择一个会话查看消息</div>';
+  // 显示项目操作按钮
+  document.getElementById("projectActions").style.display = "flex";
+}
+
+function selectSession(project, sessionId) {
+  currentProject = project;
+  currentSession = sessionId;
+  currentSessionNew = false; // 选已有会话，不需要自动命名
+  renderProjects();
+  loadSessions(project);
+  loadMessages(project, sessionId);
+  // 显示会话名称
+  const session = sessionsData.find(s => s.id === sessionId);
+  const displayName = session?.name || sessionId;
+  document.getElementById("contentTitle").textContent = `${project} - ${displayName}`;
+  updateChatTarget();
+}
+
+function refreshAll() {
+  loadProjects();
+  if (currentProject) loadSessions(currentProject);
+}
+
+function escapeHtml(str) {
+  if (!str) return "";
+  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\n/g,"<br>");
+}
+
+// === Tab 切换 ===
+const tabTitles = {
+  'projects': '📂 项目管理',
+  'groups': '💬 群聊协作',
+  'tools': '🔧 工具配置',
+  'changes': '📝 代码变更',
+  'tasks': '📋 任务派发',
+  'shared': '📁 共享上下文',
+  'cron': '⏰ 定时任务',
+  'terminal': '💻 内置终端',
+  'templates': '📚 对话模板',
+  'dashboard': '📊 协作仪表盘',
+  'settings': '⚙️ 系统设置'
+};
+
+function switchTab(name) {
+  document.querySelectorAll('.nav-item').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+
+  // 找到对应的 nav-item 并激活
+  const navItems = document.querySelectorAll('.nav-item');
+  navItems.forEach(item => {
+    if (item.onclick && item.onclick.toString().includes(`'${name}'`)) {
+      item.classList.add('active');
+    }
+  });
+
+  document.getElementById(`panel-${name}`).classList.add('active');
+
+  // 更新页面标题
+  const pageTitle = document.getElementById('pageTitle');
+  if (pageTitle && tabTitles[name]) {
+    pageTitle.textContent = tabTitles[name];
+  }
+
+  // 如果切换到其他页面，停止群聊轮询
+  if (name !== 'groups' && groupPollTimer) {
+    clearInterval(groupPollTimer);
+    groupPollTimer = null;
+  }
+
+  if (name === 'tasks') loadTasks();
+  if (name === 'shared') loadSharedFiles();
+  if (name === 'tools') loadTools();
+  if (name === 'changes') initChangeViewer();
+  if (name === 'cron') loadCronJobs();
+  if (name === 'terminal') loadTerminal();
+  if (name === 'templates') loadTemplates();
+  if (name === 'settings') loadSettings();
+  if (name === 'groups') {
+    loadGroups();
+    // 如果有选中的群聊，启动轮询
+    if (currentGroup) {
+      startGroupPolling();
+    }
+  }
+  if (name === 'dashboard') loadDashboard();
+}
+
+// === 群聊协作 ===
+let currentGroup = null;
+let groupsData = [];
+
+async function loadGroups() {
+  const data = await api("/api/groups");
+  groupsData = data.groups || [];
+  renderGroupList();
+}
+
+function renderGroupList() {
+  const el = document.getElementById("groupList");
+  if (groupsData.length === 0) {
+    el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;white-space:nowrap">暂无群聊</div>';
+    return;
+  }
+  el.innerHTML = groupsData.map(g => {
+    const memberCount = g.members?.length || 0;
+    const memberNames = g.members?.filter(m => m.project !== "coordinator").map(m => m.project).join(", ") || "";
+    return `
+    <div class="project-card ${currentGroup?.id === g.id ? 'active' : ''}" onclick="selectGroup('${g.id}')" style="min-width:160px;padding:8px 14px" title="${escapeHtml(memberNames)}">
+      <span style="font-size:14px">💬</span>
+      <div class="name" style="font-size:13px">${escapeHtml(g.name)}</div>
+      <div class="meta">
+        <span class="tag">${memberCount}人</span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function selectGroup(groupId) {
+  currentGroup = groupsData.find(g => g.id === groupId);
+  if (!currentGroup) return;
+
+  document.getElementById("groupTitle").textContent = `💬 ${currentGroup.name}`;
+  document.getElementById("groupActions").style.display = "flex";
+  document.getElementById("groupChatBar").style.display = "block";
+
+  // 更新 Agent 选择器（主 Agent 在最前面）
+  const sel = document.getElementById("groupTargetAgent");
+  const sorted = [...currentGroup.members].sort((a, b) => a.project === "coordinator" ? -1 : b.project === "coordinator" ? 1 : 0);
+  sel.innerHTML = `<option value="all">群发所有人</option>` +
+    sorted.map(m => {
+      const label = m.project === "coordinator" ? "🎯 主Agent (协调者)" : `@ ${m.project}`;
+      return `<option value="${m.project}" ${m.project === "coordinator" ? "selected" : ""}>${label}</option>`;
+    }).join("");
+
+  renderGroupList();
+  loadGroupMessages();
+}
+
+async function loadGroupMessages() {
+  if (!currentGroup) return;
+  const data = await api(`/api/groups/messages?id=${currentGroup.id}&limit=100`);
+  const messages = data.messages || [];
+  const el = document.getElementById("groupBody");
+
+  // 更新消息计数
+  lastGroupMsgCount = messages.length;
+
+  if (messages.length === 0) {
+    el.innerHTML = '<div class="empty" style="flex-direction:column;gap:8px"><span style="font-size:40px;opacity:0.5">💬</span>暂无消息，开始对话吧</div>';
+    return;
+  }
+
+  el.innerHTML = messages.map(m => {
+    const time = new Date(m.timestamp).toLocaleString("zh-CN");
+    // 高亮 @mentions
+    const highlightMentions = (text) => {
+      return escapeHtml(text).replace(/@([\w-]+)/g, '<span style="color:var(--accent-blue);font-weight:600">@$1</span>');
+    };
+
+    // 跳过转发消息
+    const isForward = m.content && m.content.startsWith("📤");
+    if (isForward) return "";
+
+    if (m.role === "user") {
+      const target = m.target === "all" ? "所有人" : m.target;
+      return `<div class="message user">
+        <div class="bubble"><span style="opacity:0.8;font-size:11px;font-weight:500">👤 → @${escapeHtml(target)}</span><br>${highlightMentions(m.content)}</div>
+        <div class="msg-meta">${time}</div></div>`;
+    } else {
+      const isSystem = m.agent === "system";
+      let agentLabel, labelColor;
+
+      if (isSystem) {
+        agentLabel = "⚠️ 系统";
+        labelColor = "var(--accent-red)";
+      } else {
+        agentLabel = `🤖 ${escapeHtml(m.agent || "Agent")}`;
+        labelColor = "var(--accent-blue)";
+      }
+
+      return `<div class="message assistant">
+        <div class="bubble"><span style="color:${labelColor};font-size:11px;font-weight:500">${agentLabel}</span><br>${highlightMentions(m.content)}</div>
+        <div class="msg-meta">${time}</div></div>`;
+    }
+  }).join("");
+
+  el.scrollTop = el.scrollHeight;
+}
+
+function showCreateGroupModal() {
+  const projectOptions = projects.map(p => `
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer">
+      <input type="checkbox" value="${p.name}" class="group-member-check">
+      <span>${p.name}</span>
+      <span class="tag">${p.agent}</span>
+    </label>`).join("");
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:400px">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>新建群聊</h3>
+    <div class="form-group"><label>群聊名称</label><input type="text" id="groupName" placeholder="如：智评生活开发群"></div>
+    <div class="form-group"><label>选择加入的项目 Agent</label>
+      <div style="max-height:200px;overflow-y:auto;padding:4px 0">${projectOptions}</div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitCreateGroup()">创建</button>
+    </div></div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitCreateGroup() {
+  const name = document.getElementById("groupName").value.trim();
+  if (!name) { alert("请填写群聊名称"); return; }
+
+  const members = [];
+  document.querySelectorAll(".group-member-check:checked").forEach(cb => {
+    const proj = projects.find(p => p.name === cb.value);
+    members.push({ project: cb.value, agent: proj?.agent || "claudecode" });
+  });
+  if (members.length === 0) { alert("请至少选择一个项目"); return; }
+
+  const res = await api("/api/groups/create", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ name, members })
+  });
+
+  if (res.success) {
+    document.querySelector(".modal-overlay").remove();
+    loadGroups();
+    selectGroup(res.group.id);
+  } else {
+    alert("创建失败: " + (res.error || "未知错误"));
+  }
+}
+
+// === @ 提及自动完成 ===
+let mentionStartIndex = -1;
+
+function handleGroupInputKeydown(event) {
+  const dropdown = document.getElementById("mentionDropdown");
+
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    if (dropdown.style.display !== "none") {
+      // 选择第一个选项
+      const firstOption = dropdown.querySelector("[data-agent]");
+      if (firstOption) firstOption.click();
+      return;
+    }
+    sendGroupMessage();
+    return;
+  }
+
+  if (event.key === "Escape") {
+    dropdown.style.display = "none";
+    return;
+  }
+
+  if (dropdown.style.display !== "none") {
+    const items = dropdown.querySelectorAll("[data-agent]");
+    const current = dropdown.querySelector("[data-selected]");
+    let next;
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (current) {
+        current.removeAttribute("data-selected");
+        current.style.background = "";
+        next = current.nextElementSibling || items[0];
+      } else {
+        next = items[0];
+      }
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (current) {
+        current.removeAttribute("data-selected");
+        current.style.background = "";
+        next = current.previousElementSibling || items[items.length - 1];
+      } else {
+        next = items[items.length - 1];
+      }
+    }
+
+    if (next) {
+      next.setAttribute("data-selected", "true");
+      next.style.background = "rgba(56,189,248,0.1)";
+    }
+  }
+}
+
+function handleGroupInput() {
+  const input = document.getElementById("groupChatInput");
+  const value = input.value;
+  const cursorPos = input.selectionStart;
+  const dropdown = document.getElementById("mentionDropdown");
+
+  // 查找 @ 符号
+  const beforeCursor = value.substring(0, cursorPos);
+  const atIndex = beforeCursor.lastIndexOf("@");
+
+  if (atIndex >= 0) {
+    const query = beforeCursor.substring(atIndex + 1).toLowerCase();
+    const agents = getGroupAgents();
+
+    const filtered = agents.filter(a =>
+      a.project.toLowerCase().includes(query) ||
+      a.label.toLowerCase().includes(query)
+    );
+
+    if (filtered.length > 0 && (query.length > 0 || beforeCursor.endsWith("@"))) {
+      mentionStartIndex = atIndex;
+      dropdown.innerHTML = filtered.map(a => `
+        <div data-agent="${a.project}" style="padding:10px 14px;cursor:pointer;display:flex;align-items:center;gap:10px;transition:background 0.2s"
+             onmouseover="this.style.background='rgba(56,189,248,0.1)'"
+             onmouseout="if(!this.hasAttribute('data-selected'))this.style.background=''"
+             onclick="insertMention('${a.project}')">
+          <span style="color:var(--accent-blue)">@</span>
+          <span style="color:var(--text-primary);font-weight:500">${a.project}</span>
+          <span style="color:var(--text-muted);font-size:12px">${a.label}</span>
+        </div>
+      `).join("");
+      dropdown.style.display = "block";
+    } else {
+      dropdown.style.display = "none";
+    }
+  } else {
+    dropdown.style.display = "none";
+  }
+}
+
+function getGroupAgents() {
+  if (!currentGroup) return [];
+  return currentGroup.members
+    .filter(m => m.project !== "coordinator")
+    .map(m => ({
+      project: m.project,
+      label: m.project === "coordinator" ? "🎯 协调者" : m.project
+    }));
+}
+
+function insertMention(projectName) {
+  const input = document.getElementById("groupChatInput");
+  const value = input.value;
+  const cursorPos = input.selectionStart;
+
+  if (mentionStartIndex >= 0) {
+    const before = value.substring(0, mentionStartIndex);
+    const after = value.substring(cursorPos);
+    input.value = before + "@" + projectName + " " + after;
+    input.focus();
+    const newPos = before.length + projectName.length + 2;
+    input.setSelectionRange(newPos, newPos);
+  }
+
+  document.getElementById("mentionDropdown").style.display = "none";
+  mentionStartIndex = -1;
+}
+
+async function sendGroupMessage() {
+  if (!currentGroup) return;
+  const input = document.getElementById("groupChatInput");
+  const message = input.value.trim();
+  if (!message && groupPendingFiles.length === 0) return;
+
+  // 检测消息中的 @mentions
+  const mentionRegex = /@([\w-]+)/g;
+  const mentions = [];
+  let match;
+  while ((match = mentionRegex.exec(message)) !== null) {
+    const agentName = match[1];
+    if (currentGroup.members.find(m => m.project === agentName)) {
+      mentions.push(agentName);
+    }
+  }
+
+  // 确定主要目标
+  let target = document.getElementById("groupTargetAgent").value;
+
+  // 如果消息中有 @mention，且下拉选择的是"群发所有人"，则自动选择第一个 mention 的目标
+  if (target === "all" && mentions.length > 0) {
+    target = mentions[0];
+    // 更新下拉框显示
+    const sel = document.getElementById("groupTargetAgent");
+    sel.value = target;
+  }
+
+  input.value = "";
+
+  // 构建完整消息（包含文件信息和共享文件）
+  let fullMessage = message;
+  if (groupPendingFiles.length > 0) {
+    const fileNames = groupPendingFiles.map(f => f.name).join(", ");
+    fullMessage = fullMessage ? `${fullMessage}\n\n附件: ${fileNames}` : `请处理附件: ${fileNames}`;
+  }
+
+  const groupBody = document.getElementById("groupBody");
+  const empty = groupBody.querySelector(".empty");
+  if (empty) empty.remove();
+  // 显示文件预览
+  const fileChips = groupPendingFiles.length > 0
+    ? `<div style="margin-top:6px;font-size:11px;opacity:0.7">📎 ${groupPendingFiles.map(f=>f.name).join(", ")}</div>`
+    : "";
+
+  // 高亮显示 @mentions
+  const displayMessage = escapeHtml(message).replace(/@([\w-]+)/g, '<span style="color:var(--accent-blue);font-weight:600">@$1</span>');
+
+  const time = new Date().toLocaleString("zh-CN");
+  groupBody.innerHTML += `<div class="message user">
+    <div class="bubble"><span style="opacity:0.7;font-size:11px">👤 → @${target === "all" ? "所有人" : target}</span><br>${displayMessage}${fileChips}</div>
+    <div class="msg-meta">${time}</div></div>`;
+
+  // 清理文件预览
+  groupPendingFiles = [];
+  renderGroupFilePreview();
+  groupBody.scrollTop = groupBody.scrollHeight;
+
+  // 更新消息计数，防止轮询重复添加
+  lastGroupMsgCount = groupBody.querySelectorAll(".message").length;
+
+  try {
+    // 所有消息都使用流式输出
+    const statusDiv = document.createElement("div");
+    statusDiv.className = "sending-indicator";
+    statusDiv.textContent = target === "all" ? "🧠 群发中，所有 Agent 处理中..." : "🧠 Agent 正在思考...";
+    statusDiv.style.display = "block";
+    statusDiv.style.padding = "8px 22px";
+    groupBody.appendChild(statusDiv);
+
+    // 创建流式气泡
+    const bubbleDiv = document.createElement("div");
+    bubbleDiv.className = "message assistant";
+    const agentLabel = target === "all" ? "📢 群发回复" : `🤖 ${escapeHtml(target)}`;
+    bubbleDiv.innerHTML = `
+      <div class="bubble"><span style="color:var(--accent-blue);font-size:11px;display:block;margin-bottom:6px;font-weight:500">${agentLabel}</span><span class="stream-content"></span><span class="stream-cursor" style="animation:blink 1s infinite;color:var(--accent-blue)">▌</span></div>
+      <div class="msg-meta">${new Date().toLocaleString("zh-CN")}</div>`;
+    groupBody.appendChild(bubbleDiv);
+    const streamEl = bubbleDiv.querySelector(".stream-content");
+
+    let fullText = "";
+
+    // 使用流式 API 发送消息
+    const res = await fetch(`/api/groups/send?stream=1`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        group_id: currentGroup.id,
+        target_project: target,
+        message: fullMessage
+      })
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const evt = JSON.parse(line.slice(6));
+          if (evt.type === "status") {
+            statusDiv.textContent = "🧠 " + evt.text;
+          } else if (evt.type === "chunk") {
+            statusDiv.textContent = target === "all" ? "✍️ 所有 Agent 回复中..." : "✍️ Agent 正在回复...";
+            fullText += evt.text;
+            streamEl.textContent = fullText;
+            groupBody.scrollTop = groupBody.scrollHeight;
+          } else if (evt.type === "done") {
+            const cursor = bubbleDiv.querySelector(".stream-cursor");
+            if (cursor) cursor.remove();
+            statusDiv.remove();
+
+            // 检查并显示代码变更
+            if (target !== "coordinator" && target !== "all") {
+              await showInlineCodeChanges(groupBody, target, bubbleDiv);
+            }
+
+            // 更新消息计数，防止轮询重复添加
+            lastGroupMsgCount = groupBody.querySelectorAll(".message").length;
+
+            // 如果回复包含 @mentions 或者是发送给协调者的，自动轮询新消息
+            if (fullText.includes("@") || target === "coordinator") {
+              pollCrossReplies(groupBody, lastGroupMsgCount);
+            }
+          } else if (evt.type === "error") {
+            streamEl.textContent = "错误: " + evt.text;
+            const cursor = bubbleDiv.querySelector(".stream-cursor");
+            if (cursor) cursor.remove();
+            statusDiv.remove();
+          }
+        } catch {}
+      }
+    }
+
+    groupBody.scrollTop = groupBody.scrollHeight;
+  } catch (e) {
+    groupBody.innerHTML += `<div class="message assistant">
+      <div class="bubble" style="color:var(--accent-red)">发送失败: ${escapeHtml(e.message)}</div></div>`;
+  }
+}
+
+// === 任务派发 ===
+async function loadTasks() {
+  const data = await api("/api/tasks");
+  const tasks = data.tasks || [];
+  const el = document.getElementById("tasksBody");
+
+  // 更新统计
+  const pending = tasks.filter(t => t.status === 'pending').length;
+  const inProgress = tasks.filter(t => t.status === 'in_progress').length;
+  const done = tasks.filter(t => t.status === 'done').length;
+  document.getElementById('taskTotal').textContent = tasks.length;
+  document.getElementById('taskPending').textContent = pending;
+  document.getElementById('taskInProgress').textContent = inProgress;
+  document.getElementById('taskDone').textContent = done;
+
+  if (tasks.length === 0) {
+    el.innerHTML = '<div class="empty" style="flex-direction:column;gap:8px"><span style="font-size:40px;opacity:0.5">📋</span>暂无任务<br><small style="color:var(--text-muted)">点击右上角创建并派发任务</small></div>';
+    return;
+  }
+
+  const priorityLabel = { high: '🔴 高', normal: '🟡 中', low: '⚪ 低' };
+  const statusLabel = { pending: '待处理', in_progress: '进行中', done: '已完成' };
+
+  el.innerHTML = `<table class="table">
+    <thead><tr><th>标题</th><th>分配目标</th><th>优先级</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+    <tbody>${tasks.map(t => {
+      // 确定分配目标显示
+      let targetDisplay = '';
+      let targetIcon = '';
+      if (t.assign_type === 'group' && t.group_id) {
+        const group = groupsData.find(g => g.id === t.group_id);
+        targetDisplay = group ? group.name : t.group_id;
+        targetIcon = '💬';
+      } else {
+        targetDisplay = t.target_project || '-';
+        targetIcon = '🤖';
+      }
+
+      return `<tr>
+        <td>
+          <strong style="color:var(--text-primary)">${escapeHtml(t.title)}</strong>
+          ${t.description ? `<br><span style="color:var(--text-muted);font-size:12px">${escapeHtml(t.description).substring(0,80)}</span>` : ''}
+        </td>
+        <td>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span>${targetIcon}</span>
+            <span class="tag">${escapeHtml(targetDisplay)}</span>
+          </div>
+        </td>
+        <td><span class="priority-${t.priority}">${priorityLabel[t.priority] || t.priority}</span></td>
+        <td>
+          <select class="btn btn-sm" style="background:rgba(55,65,81,0.5);color:var(--text-primary);border:1px solid var(--border-color);padding:4px 8px;font-size:11px;border-radius:6px" onchange="updateTaskStatus('${t.id}',this.value)">
+            <option value="pending" ${t.status==='pending'?'selected':''}>待处理</option>
+            <option value="in_progress" ${t.status==='in_progress'?'selected':''}>进行中</option>
+            <option value="done" ${t.status==='done'?'selected':''}>已完成</option>
+          </select>
+        </td>
+        <td style="font-size:12px;color:var(--text-muted)">${new Date(t.created_at).toLocaleString('zh-CN')}</td>
+        <td class="actions">
+          ${t.status === 'pending' ? `<button class="btn btn-primary btn-sm" onclick="addTaskToQueue('${t.id}')" title="加入队列">📥</button>` : ''}
+          <button class="btn btn-outline btn-sm" onclick="showTaskLogs('${t.id}')" title="查看日志">📋</button>
+          <button class="btn btn-outline btn-sm" onclick="resendTask('${t.id}')" title="重新派发">🔄</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteTask('${t.id}')" title="删除">🗑️</button>
+        </td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+// 任务附件
+let taskAttachments = [];
+
+function showCreateTaskModal() {
+  taskAttachments = []; // 重置附件
+  const projectOptions = projects.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+  const groupOptions = groupsData.map(g => `<option value="${g.id}">${g.name}</option>`).join('');
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:550px;max-height:90vh;display:flex;flex-direction:column">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>📋 新建任务</h3>
+
+    <div style="flex:1;overflow-y:auto;margin:16px 0">
+      <div class="form-group">
+        <label>任务标题</label>
+        <input type="text" id="taskTitle" placeholder="简要描述任务">
+      </div>
+
+      <div class="form-group">
+        <label>详细描述</label>
+        <textarea id="taskDesc" rows="3" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-size:13px;resize:vertical;outline:none" placeholder="可选，详细描述任务需求"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>附件文件</label>
+        <div style="border:2px dashed var(--border-color);border-radius:8px;padding:16px;text-align:center;cursor:pointer;transition:all 0.2s" onclick="document.getElementById('taskFileInput').click()" ondragover="event.preventDefault();this.style.borderColor='var(--accent-blue)'" ondragleave="this.style.borderColor='var(--border-color)'" ondrop="event.preventDefault();this.style.borderColor='var(--border-color)';handleTaskFileDrop(event)">
+          <div style="font-size:24px;margin-bottom:8px">📎</div>
+          <div style="font-size:13px;color:var(--text-secondary)">点击或拖拽文件到此处上传</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">支持任意文件类型，最多 5 个文件</div>
+        </div>
+        <input type="file" id="taskFileInput" multiple style="display:none" onchange="handleTaskFileSelect(this.files)">
+        <div id="taskFileList" style="margin-top:8px"></div>
+      </div>
+
+      <div class="form-group">
+        <label>分配方式</label>
+        <select id="taskAssignType" onchange="onTaskAssignTypeChange()">
+          <option value="group">分配给群聊（附件放入群聊共享文件）</option>
+          <option value="project">直接分配给项目 Agent</option>
+        </select>
+      </div>
+
+      <div id="taskGroupSelect" class="form-group">
+        <label>选择群聊</label>
+        <select id="taskGroup">
+          ${groupsData.length === 0 ? '<option value="">暂无群聊，请先创建</option>' : groupOptions}
+        </select>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">附件将添加到群聊共享文件，所有 Agent 都能访问</div>
+      </div>
+
+      <div id="taskProjectSelect" class="form-group" style="display:none">
+        <label>选择项目</label>
+        <select id="taskProject">${projectOptions}</select>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">附件将直接发送给该项目的 Agent</div>
+      </div>
+
+      <div class="form-group">
+        <label>优先级</label>
+        <select id="taskPriority">
+          <option value="high">🔴 高</option>
+          <option value="normal" selected>🟡 中</option>
+          <option value="low">⚪ 低</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="taskAutoExecute" checked style="accent-color:var(--accent-blue)">
+          立即执行（创建后自动发送给 Agent）
+        </label>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitTask()">创建并派发</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+function handleTaskFileSelect(fileList) {
+  for (const file of fileList) {
+    if (taskAttachments.length >= 5) {
+      alert("最多上传 5 个文件");
+      break;
+    }
+    taskAttachments.push(file);
+  }
+  renderTaskFileList();
+}
+
+function handleTaskFileDrop(event) {
+  event.preventDefault();
+  const files = event.dataTransfer.files;
+  handleTaskFileSelect(files);
+}
+
+function removeTaskFile(index) {
+  taskAttachments.splice(index, 1);
+  renderTaskFileList();
+}
+
+function renderTaskFileList() {
+  const el = document.getElementById("taskFileList");
+  if (!el) return;
+
+  if (taskAttachments.length === 0) {
+    el.innerHTML = "";
+    return;
+  }
+
+  el.innerHTML = taskAttachments.map((f, i) => {
+    const isImage = f.type.startsWith("image/");
+    const size = f.size > 1024 * 1024 ? (f.size / 1024 / 1024).toFixed(1) + "MB" : (f.size / 1024).toFixed(1) + "KB";
+    const icon = isImage ? "🖼️" : getFileIcon(f.name);
+
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg-glass);border-radius:6px;margin-bottom:6px;border:1px solid var(--border-color)">
+      ${isImage && f.size < 5 * 1024 * 1024 ? `<img src="${URL.createObjectURL(f)}" style="width:40px;height:40px;object-fit:cover;border-radius:4px">` : `<span style="font-size:20px">${icon}</span>`}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(f.name)}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${size}</div>
+      </div>
+      <span style="cursor:pointer;color:var(--accent-red);font-size:16px" onclick="removeTaskFile(${i})">&times;</span>
+    </div>`;
+  }).join("");
+}
+
+function onTaskAssignTypeChange() {
+  const type = document.getElementById("taskAssignType").value;
+  document.getElementById("taskGroupSelect").style.display = type === "group" ? "block" : "none";
+  document.getElementById("taskProjectSelect").style.display = type === "project" ? "block" : "none";
+}
+
+async function submitTask() {
+  const title = document.getElementById("taskTitle").value.trim();
+  if (!title) { alert("请填写任务标题"); return; }
+
+  const assignType = document.getElementById("taskAssignType").value;
+  const autoExecute = document.getElementById("taskAutoExecute").checked;
+  const description = document.getElementById("taskDesc").value.trim();
+  const priority = document.getElementById("taskPriority").value;
+
+  let targetProject = null;
+  let groupId = null;
+
+  if (assignType === "group") {
+    groupId = document.getElementById("taskGroup").value;
+    if (!groupId) { alert("请选择群聊"); return; }
+    targetProject = "coordinator";
+  } else {
+    targetProject = document.getElementById("taskProject").value;
+    if (!targetProject) { alert("请选择项目"); return; }
+  }
+
+  document.querySelector(".modal-overlay").remove();
+
+  // 创建任务
+  const res = await api("/api/tasks/create", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      title,
+      description,
+      target_project: targetProject,
+      group_id: groupId,
+      priority,
+      assign_type: assignType
+    })
+  });
+
+  if (res.success) {
+    // 上传附件
+    const uploadedFiles = [];
+    if (taskAttachments.length > 0) {
+      for (const file of taskAttachments) {
+        try {
+          const fileContent = await readFileAsText(file);
+          if (assignType === "group" && groupId) {
+            // 群聊模式：添加到群聊共享文件
+            await api("/api/groups/shared/add", {
+              method: "POST",
+              headers: {"Content-Type":"application/json"},
+              body: JSON.stringify({
+                group_id: groupId,
+                name: file.name,
+                content: fileContent
+              })
+            });
+            uploadedFiles.push(file.name);
+          }
+        } catch (e) {
+          console.error("上传文件失败:", e);
+        }
+      }
+    }
+
+    // 如果选择了立即执行
+    if (autoExecute) {
+      if (groupId) {
+        const fileNote = uploadedFiles.length > 0 ? `\n\n附件：${uploadedFiles.join(", ")}（已添加到群聊共享文件）` : "";
+        await sendTaskToGroup(groupId, title, description + fileNote);
+      } else {
+        await sendTaskToProject(targetProject, title, description);
+      }
+    }
+
+    taskAttachments = []; // 清空附件
+    loadTasks();
+    alert("任务已创建并派发！" + (uploadedFiles.length > 0 ? `\n已上传 ${uploadedFiles.length} 个附件到群聊共享文件` : ""));
+  } else {
+    alert("创建失败: " + (res.error || "未知错误"));
+  }
+}
+
+// 读取文件内容
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    // 对于文本文件，读取内容
+    const textExtensions = ['.txt', '.md', '.json', '.js', '.ts', '.html', '.css', '.xml', '.yaml', '.yml', '.csv', '.log', '.py', '.java', '.go', '.rs', '.c', '.cpp', '.h', '.sh', '.bat', '.toml', '.ini', '.conf', '.env'];
+    const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+
+    if (textExtensions.includes(ext)) {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = (e) => reject(e);
+      reader.readAsText(file);
+    } else {
+      // 对于二进制文件，只返回文件名
+      resolve(`[二进制文件: ${file.name}]`);
+    }
+  });
+}
+
+async function sendTaskToGroup(groupId, title, description) {
+  const message = `📋 新任务派发：\n\n标题：${title}\n${description ? `描述：${description}\n` : ''}\n请协调团队完成此任务。`;
+
+  try {
+    await api("/api/groups/send", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        group_id: groupId,
+        target_project: "coordinator",
+        message: message
+      })
+    });
+  } catch (e) {
+    console.error("发送任务到群聊失败:", e);
+  }
+}
+
+async function sendTaskToProject(project, title, description) {
+  const message = `📋 新任务：\n\n标题：${title}\n${description ? `描述：${description}` : ''}\n\n请完成此任务。`;
+
+  try {
+    // 使用流式 API 发送任务
+    const res = await fetch(`/api/groups/send?stream=1`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        group_id: null,
+        target_project: project,
+        message: message
+      })
+    });
+    // 任务发送成功，不需要等待响应
+  } catch (e) {
+    console.error("发送任务到项目失败:", e);
+  }
+}
+
+async function updateTaskStatus(id, status) {
+  await api("/api/tasks/update", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ id, status })
+  });
+}
+
+async function deleteTask(id) {
+  if (!confirm("确定删除此任务？")) return;
+  await api("/api/tasks/delete", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ id })
+  });
+  loadTasks();
+}
+
+async function resendTask(id) {
+  const tasks = (await api("/api/tasks")).tasks || [];
+  const task = tasks.find(t => t.id === id);
+  if (!task) { alert("任务不存在"); return; }
+
+  if (!confirm(`确定重新派发任务 "${task.title}"？`)) return;
+
+  // 更新任务状态为待处理
+  await api("/api/tasks/update", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ id, status: "pending" })
+  });
+
+  // 重新发送任务
+  if (task.assign_type === 'group' && task.group_id) {
+    await sendTaskToGroup(task.group_id, task.title, task.description);
+  } else {
+    await sendTaskToProject(task.target_project, task.title, task.description);
+  }
+
+  loadTasks();
+  alert("任务已重新派发！");
+}
+
+// === 对话模板库 ===
+let templatesData = [];
+
+async function loadTemplates() {
+  const category = document.getElementById("templateCategoryFilter")?.value || "";
+  const url = category ? `/api/templates?category=${category}` : "/api/templates";
+  const data = await api(url);
+  templatesData = data.templates || [];
+  renderTemplates();
+}
+
+function filterTemplates() {
+  const search = document.getElementById("templateSearch")?.value?.toLowerCase() || "";
+  const filtered = templatesData.filter(t =>
+    t.name.toLowerCase().includes(search) ||
+    t.description.toLowerCase().includes(search) ||
+    (t.tags && t.tags.some(tag => tag.toLowerCase().includes(search)))
+  );
+  renderTemplates(filtered);
+}
+
+function renderTemplates(templates) {
+  templates = templates || templatesData;
+  const el = document.getElementById("templatesBody");
+
+  if (templates.length === 0) {
+    el.innerHTML = '<div class="empty" style="flex-direction:column;gap:12px"><span style="font-size:48px;opacity:0.3">📚</span><span style="font-size:16px;color:var(--text-secondary)">暂无模板</span><span style="font-size:13px;color:var(--text-muted)">点击右上角创建新模板</span></div>';
+    return;
+  }
+
+  const categoryColors = {
+    development: 'var(--accent-blue)',
+    maintenance: 'var(--accent-yellow)',
+    review: 'var(--accent-purple)',
+    collaboration: 'var(--accent-green)',
+    planning: 'var(--accent-red)',
+    custom: 'var(--text-muted)'
+  };
+
+  el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px">
+    ${templates.map(t => {
+      const color = categoryColors[t.category] || 'var(--text-muted)';
+      return `<div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:20px;cursor:pointer;transition:all 0.2s" onclick="showTemplateDetail('${t.id}')" onmouseover="this.style.borderColor='${color}'" onmouseout="this.style.borderColor='var(--border-color)'">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+          <span style="font-size:28px">${t.icon || '📝'}</span>
+          <div style="flex:1">
+            <div style="font-size:15px;font-weight:600;color:var(--text-primary)">${escapeHtml(t.name)}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${escapeHtml(t.description)}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+          ${(t.tags || []).map(tag => `<span style="font-size:11px;padding:2px 8px;background:rgba(56,189,248,0.1);color:var(--accent-blue);border-radius:4px">${escapeHtml(tag)}</span>`).join('')}
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);line-height:1.5;max-height:60px;overflow:hidden">${escapeHtml(t.prompt?.substring(0, 150))}...</div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border-color)">
+          <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();useTemplate('${t.id}')">使用模板</button>
+          <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();editTemplate('${t.id}')">编辑</button>
+          ${t.id.startsWith('tpl_') ? '' : `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteTemplate('${t.id}')">删除</button>`}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+function showTemplateDetail(templateId) {
+  const template = templatesData.find(t => t.id === templateId);
+  if (!template) return;
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:600px;max-height:85vh;display:flex;flex-direction:column">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>${template.icon || '📝'} ${escapeHtml(template.name)}</h3>
+    <div style="margin-top:8px;font-size:13px;color:var(--text-muted)">${escapeHtml(template.description)}</div>
+    <div style="display:flex;gap:6px;margin-top:12px">
+      ${(template.tags || []).map(tag => `<span style="font-size:11px;padding:2px 8px;background:rgba(56,189,248,0.1);color:var(--accent-blue);border-radius:4px">${escapeHtml(tag)}</span>`).join('')}
+    </div>
+    <div style="flex:1;overflow-y:auto;margin-top:16px">
+      <div style="font-size:13px;font-weight:500;color:var(--text-secondary);margin-bottom:8px">模板内容：</div>
+      <div style="background:rgba(15,23,42,0.6);border:1px solid var(--border-color);border-radius:8px;padding:16px;font-size:13px;line-height:1.6;white-space:pre-wrap;color:var(--text-primary)">${escapeHtml(template.prompt)}</div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color)">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+      <button class="btn btn-primary" onclick="useTemplate('${template.id}');this.closest('.modal-overlay').remove()">使用此模板</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+// 模板选择器状态管理
+let templateSelectorDropdown = null;
+let templateSelectorCloseHandler = null;
+
+// 关闭模板选择器
+function closeTemplateSelector() {
+  if (templateSelectorDropdown) {
+    templateSelectorDropdown.remove();
+    templateSelectorDropdown = null;
+  }
+  if (templateSelectorCloseHandler) {
+    document.removeEventListener("click", templateSelectorCloseHandler);
+    templateSelectorCloseHandler = null;
+  }
+}
+
+// 显示模板选择器（在聊天输入框中使用）
+async function showTemplateSelector(inputId) {
+  // 先关闭已有的选择器
+  closeTemplateSelector();
+
+  // 确保模板数据已加载
+  if (templatesData.length === 0) {
+    await loadTemplates();
+  }
+
+  const inputEl = document.getElementById(inputId);
+  if (!inputEl) return;
+
+  const rect = inputEl.getBoundingClientRect();
+  const dropdown = document.createElement("div");
+  dropdown.id = "templateSelectorDropdown";
+  dropdown.style.cssText = `position:fixed;bottom:${window.innerHeight - rect.top + 8}px;left:${rect.left}px;width:${rect.width}px;max-height:400px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);z-index:1000;overflow:hidden;display:flex;flex-direction:column`;
+
+  // 分类筛选
+  const categories = [
+    { id: '', name: '全部', icon: '📚' },
+    { id: 'development', name: '开发', icon: '💻' },
+    { id: 'maintenance', name: '维护', icon: '🔧' },
+    { id: 'review', name: '审查', icon: '🔍' },
+    { id: 'collaboration', name: '协作', icon: '🤝' },
+    { id: 'planning', name: '规划', icon: '📋' },
+    { id: 'custom', name: '自定义', icon: '✏️' }
+  ];
+
+  dropdown.innerHTML = `
+    <div style="padding:10px 12px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;gap:8px">
+      <span style="font-size:14px;color:var(--text-secondary)">📚 选择模板</span>
+      <div style="flex:1"></div>
+      <span style="cursor:pointer;color:var(--text-muted);font-size:16px" onclick="closeTemplateSelector()">&times;</span>
+    </div>
+    <div style="padding:8px 12px;border-bottom:1px solid var(--border-color);display:flex;gap:4px;overflow-x:auto">
+      ${categories.map(c => `<button class="btn btn-outline btn-sm" onclick="filterTemplateSelector('${c.id}', '${inputId}')" data-category="${c.id}" style="white-space:nowrap;padding:4px 10px;font-size:11px">${c.icon} ${c.name}</button>`).join('')}
+    </div>
+    <div id="templateSelectorList" style="flex:1;overflow-y:auto;max-height:300px">
+      ${renderTemplateSelectorItems(templatesData, inputId)}
+    </div>
+  `;
+
+  document.body.appendChild(dropdown);
+  templateSelectorDropdown = dropdown;
+
+  // 点击外部关闭（延迟绑定避免立即触发）
+  setTimeout(() => {
+    templateSelectorCloseHandler = function closeDropdown(e) {
+      if (!dropdown.contains(e.target) && e.target !== inputEl && !e.target.closest('[onclick*="showTemplateSelector"]')) {
+        closeTemplateSelector();
+      }
+    };
+    document.addEventListener("click", templateSelectorCloseHandler);
+  }, 100);
+}
+
+function renderTemplateSelectorItems(templates, inputId) {
+  if (templates.length === 0) {
+    return '<div style="padding:30px;text-align:center;color:var(--text-muted)">暂无模板</div>';
+  }
+
+  return templates.map(t => `
+    <div style="padding:10px 14px;cursor:pointer;transition:background 0.15s;border-bottom:1px solid var(--border-color)" onclick="applyTemplate('${t.id}', '${inputId}')" onmouseover="this.style.background='rgba(56,189,248,0.05)'" onmouseout="this.style.background='transparent'">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:20px">${t.icon || '📝'}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:500;color:var(--text-primary)">${escapeHtml(t.name)}</div>
+          <div style="font-size:11px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(t.description)}</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:6px;max-height:30px;overflow:hidden">${escapeHtml(t.prompt?.substring(0, 80))}...</div>
+    </div>
+  `).join('');
+}
+
+function filterTemplateSelector(category, inputId) {
+  const filtered = category ? templatesData.filter(t => t.category === category) : templatesData;
+  const listEl = document.getElementById("templateSelectorList");
+  if (listEl) {
+    listEl.innerHTML = renderTemplateSelectorItems(filtered, inputId);
+  }
+
+  // 更新按钮状态
+  document.querySelectorAll('#templateSelectorDropdown [data-category]').forEach(btn => {
+    if (btn.dataset.category === category) {
+      btn.style.background = 'var(--accent-blue)';
+      btn.style.color = 'white';
+      btn.style.borderColor = 'var(--accent-blue)';
+    } else {
+      btn.style.background = 'transparent';
+      btn.style.color = 'var(--text-secondary)';
+      btn.style.borderColor = 'var(--border-color)';
+    }
+  });
+}
+
+function applyTemplate(templateId, inputId) {
+  const template = templatesData.find(t => t.id === templateId);
+  if (!template) return;
+
+  // 关闭下拉选择器
+  closeTemplateSelector();
+
+  // 获取输入框当前内容
+  const inputEl = document.getElementById(inputId);
+  const existingContent = inputEl ? inputEl.value.trim() : '';
+
+  // 弹出编辑窗口
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:600px;max-height:85vh;display:flex;flex-direction:column">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>${template.icon || '📝'} 使用模板 - ${escapeHtml(template.name)}</h3>
+    <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">${escapeHtml(template.description)}</div>
+    <div style="display:flex;gap:6px;margin-top:8px">
+      ${(template.tags || []).map(tag => `<span style="font-size:11px;padding:2px 8px;background:rgba(56,189,248,0.1);color:var(--accent-blue);border-radius:4px">${escapeHtml(tag)}</span>`).join('')}
+    </div>
+
+    <div style="flex:1;overflow-y:auto;margin:16px 0">
+      <div class="form-group">
+        <label style="display:flex;justify-content:space-between;align-items:center">
+          <span>模板内容（可编辑）</span>
+          <button class="btn btn-outline btn-sm" onclick="resetTemplateContent('${escapeHtml(template.id)}', '${inputId}')" style="font-size:11px">重置为原始模板</button>
+        </label>
+        <textarea id="templateEditContent" rows="12" style="width:100%;padding:14px;border-radius:8px;border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-size:13px;line-height:1.6;resize:vertical;outline:none;font-family:inherit">${escapeHtml(template.prompt)}</textarea>
+      </div>
+
+      ${existingContent ? `
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="templateAppendMode" style="accent-color:var(--accent-blue)">
+          追加到现有内容末尾（当前输入框已有内容）
+        </label>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;padding:8px;background:rgba(15,23,42,0.4);border-radius:6px;max-height:60px;overflow:hidden">${escapeHtml(existingContent.substring(0, 150))}${existingContent.length > 150 ? '...' : ''}</div>
+      </div>
+      ` : ''}
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid var(--border-color)">
+      <div style="font-size:11px;color:var(--text-muted)">提示：修改模板内容后再插入到对话中</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+        <button class="btn btn-primary" onclick="insertTemplateContent('${inputId}')">插入到对话</button>
+      </div>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+
+  // 聚焦到编辑框
+  setTimeout(() => {
+    const editContent = document.getElementById("templateEditContent");
+    if (editContent) editContent.focus();
+  }, 100);
+}
+
+// 重置模板内容为原始值
+function resetTemplateContent(templateId, inputId) {
+  const template = templatesData.find(t => t.id === templateId);
+  if (!template) return;
+
+  const editContent = document.getElementById("templateEditContent");
+  if (editContent) {
+    editContent.value = template.prompt;
+  }
+}
+
+// 插入模板内容到对话输入框
+function insertTemplateContent(inputId) {
+  const editContent = document.getElementById("templateEditContent");
+  const appendMode = document.getElementById("templateAppendMode");
+
+  if (!editContent) return;
+
+  const templateContent = editContent.value.trim();
+  if (!templateContent) {
+    alert("模板内容不能为空");
+    return;
+  }
+
+  const inputEl = document.getElementById(inputId);
+  if (inputEl) {
+    if (appendMode && appendMode.checked) {
+      // 追加到现有内容末尾
+      const existingContent = inputEl.value.trim();
+      if (existingContent) {
+        inputEl.value = existingContent + '\n\n' + templateContent;
+      } else {
+        inputEl.value = templateContent;
+      }
+    } else {
+      // 替换输入框内容
+      inputEl.value = templateContent;
+    }
+
+    inputEl.focus();
+    // 触发 input 事件以调整高度
+    inputEl.dispatchEvent(new Event('input'));
+  }
+
+  // 关闭弹窗
+  document.querySelector(".modal-overlay")?.remove();
+}
+
+function useTemplate(templateId) {
+  const template = templatesData.find(t => t.id === templateId);
+  if (!template) return;
+
+  // 确定使用哪个输入框
+  let inputId = 'chatInput';
+  if (currentGroup) {
+    inputId = 'groupChatInput';
+  }
+
+  applyTemplate(templateId, inputId);
+}
+
+function showCreateTemplateModal() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:600px;max-height:85vh;display:flex;flex-direction:column">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>📚 创建新模板</h3>
+
+    <div style="flex:1;overflow-y:auto;margin:16px 0">
+      <div class="form-group">
+        <label>模板名称</label>
+        <input type="text" id="newTemplateName" placeholder="如：前端组件开发">
+      </div>
+
+      <div class="form-group">
+        <label>模板图标</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${['📝', '💻', '🔧', '🔍', '🤝', '📋', '🐛', '⚡', '🎨', '🔌', '🗄️', '🚀'].map(icon => `
+            <button class="btn btn-outline btn-sm" onclick="document.getElementById('newTemplateIcon').value='${icon}';this.parentElement.querySelectorAll('.btn').forEach(b=>b.style.background='transparent');this.style.background='var(--accent-blue)'" style="font-size:18px;padding:8px">${icon}</button>
+          `).join('')}
+          <input type="hidden" id="newTemplateIcon" value="📝">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>分类</label>
+        <select id="newTemplateCategory">
+          <option value="development">💻 开发</option>
+          <option value="maintenance">🔧 维护</option>
+          <option value="review">🔍 审查</option>
+          <option value="collaboration">🤝 协作</option>
+          <option value="planning">📋 规划</option>
+          <option value="custom" selected>✏️ 自定义</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>描述</label>
+        <input type="text" id="newTemplateDesc" placeholder="简要描述模板用途">
+      </div>
+
+      <div class="form-group">
+        <label>标签（用逗号分隔）</label>
+        <input type="text" id="newTemplateTags" placeholder="如：前端,Vue,组件">
+      </div>
+
+      <div class="form-group">
+        <label>模板内容</label>
+        <textarea id="newTemplatePrompt" rows="12" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-size:13px;line-height:1.6;resize:vertical;outline:none" placeholder="输入模板内容，可以使用变量：&#10;{{feature_name}} - 功能名称&#10;{{description}} - 描述&#10;{{tech_stack}} - 技术栈"></textarea>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitCreateTemplate()">创建模板</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitCreateTemplate() {
+  const name = document.getElementById("newTemplateName").value.trim();
+  const prompt = document.getElementById("newTemplatePrompt").value.trim();
+  if (!name || !prompt) { alert("请填写模板名称和内容"); return; }
+
+  const tags = document.getElementById("newTemplateTags").value.split(",").map(t => t.trim()).filter(t => t);
+
+  const res = await api("/api/templates", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      name,
+      icon: document.getElementById("newTemplateIcon").value,
+      category: document.getElementById("newTemplateCategory").value,
+      description: document.getElementById("newTemplateDesc").value.trim(),
+      tags,
+      prompt
+    })
+  });
+
+  if (res.success) {
+    document.querySelector(".modal-overlay").remove();
+    loadTemplates();
+    alert("模板创建成功！");
+  } else {
+    alert("创建失败: " + (res.error || "未知错误"));
+  }
+}
+
+async function editTemplate(templateId) {
+  const template = templatesData.find(t => t.id === templateId);
+  if (!template) return;
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:600px;max-height:85vh;display:flex;flex-direction:column">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>✏️ 编辑模板</h3>
+
+    <div style="flex:1;overflow-y:auto;margin:16px 0">
+      <div class="form-group">
+        <label>模板名称</label>
+        <input type="text" id="editTemplateName" value="${escapeHtml(template.name)}">
+      </div>
+
+      <div class="form-group">
+        <label>描述</label>
+        <input type="text" id="editTemplateDesc" value="${escapeHtml(template.description || '')}">
+      </div>
+
+      <div class="form-group">
+        <label>标签（用逗号分隔）</label>
+        <input type="text" id="editTemplateTags" value="${(template.tags || []).join(', ')}">
+      </div>
+
+      <div class="form-group">
+        <label>模板内容</label>
+        <textarea id="editTemplatePrompt" rows="12" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-size:13px;line-height:1.6;resize:vertical;outline:none">${escapeHtml(template.prompt)}</textarea>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitEditTemplate('${template.id}')">保存</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitEditTemplate(templateId) {
+  const name = document.getElementById("editTemplateName").value.trim();
+  const prompt = document.getElementById("editTemplatePrompt").value.trim();
+  if (!name || !prompt) { alert("请填写模板名称和内容"); return; }
+
+  const tags = document.getElementById("editTemplateTags").value.split(",").map(t => t.trim()).filter(t => t);
+
+  const res = await api(`/api/templates/${templateId}`, {
+    method: "PUT",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      name,
+      description: document.getElementById("editTemplateDesc").value.trim(),
+      tags,
+      prompt
+    })
+  });
+
+  if (res.success) {
+    document.querySelector(".modal-overlay").remove();
+    loadTemplates();
+    alert("模板更新成功！");
+  } else {
+    alert("更新失败: " + (res.error || "未知错误"));
+  }
+}
+
+async function deleteTemplate(templateId) {
+  if (!confirm("确定删除此模板？")) return;
+
+  const res = await api(`/api/templates/${templateId}`, {
+    method: "DELETE"
+  });
+
+  if (res.success) {
+    loadTemplates();
+    alert("模板已删除");
+  } else {
+    alert("删除失败: " + (res.error || "未知错误"));
+  }
+}
+
+// === 系统设置 ===
+async function loadSettings() {
+  const el = document.getElementById("settingsBody");
+
+  // 加载飞书配置
+  const feishuData = await api("/api/feishu/config");
+  const feishuConfig = feishuData.config || {};
+  const isConfigured = feishuConfig.app_id && feishuConfig.app_id !== "";
+
+  el.innerHTML = `
+    <div style="max-width:700px;margin:0 auto">
+      <!-- 飞书通知配置 -->
+      <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-lg);padding:32px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px">
+          <span style="font-size:32px">🔔</span>
+          <div>
+            <div style="font-size:20px;font-weight:600;color:var(--text-primary)">飞书通知配置</div>
+            <div style="font-size:13px;color:var(--text-muted);margin-top:4px">配置飞书机器人，任务完成时自动发送通知</div>
+          </div>
+        </div>
+
+        <!-- 状态显示 -->
+        <div style="padding:16px;background:${isConfigured ? 'rgba(34,197,94,0.1)' : 'rgba(250,204,21,0.1)'};border:1px solid ${isConfigured ? 'rgba(34,197,94,0.3)' : 'rgba(250,204,21,0.3)'};border-radius:var(--radius-md);margin-bottom:24px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:20px">${isConfigured ? '✅' : '⚠️'}</span>
+            <div>
+              <div style="font-size:14px;font-weight:500;color:${isConfigured ? 'var(--accent-green)' : 'var(--accent-yellow)'}">
+                ${isConfigured ? '已配置' : '未配置'}
+              </div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:2px">
+                ${isConfigured ? 'App ID: ' + feishuConfig.app_id : '请填写 App ID 和 Secret 或扫码配置'}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 手动配置 -->
+        <div class="form-group">
+          <label>飞书 App ID</label>
+          <input type="text" id="feishuAppId" value="${escapeHtml(feishuConfig.app_id || '')}" placeholder="cli_xxxxxxxxxx">
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px">
+            在 <a href="https://open.feishu.cn/app" target="_blank" style="color:var(--accent-blue)">飞书开放平台</a> 创建应用后获取
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>飞书 App Secret</label>
+          <input type="password" id="feishuAppSecret" value="${feishuConfig.app_secret || ''}" placeholder="输入 App Secret">
+          ${feishuConfig.app_secret ? '<div style="font-size:11px;color:var(--accent-green);margin-top:4px">✅ 已配置</div>' : ''}
+        </div>
+
+        <div style="display:flex;gap:12px;margin-top:20px">
+          <button class="btn btn-primary" onclick="saveFeishuConfig()" style="flex:1;padding:12px">
+            💾 保存配置
+          </button>
+        </div>
+
+        <!-- 授权获取用户 ID -->
+        <div style="margin-top:24px;padding:20px;background:rgba(56,189,248,0.05);border:1px solid rgba(56,189,248,0.2);border-radius:var(--radius-md)">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+            <span style="font-size:24px">👤</span>
+            <div>
+              <div style="font-size:15px;font-weight:600;color:var(--text-primary)">授权获取用户 ID</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:2px">扫码授权后自动获取你的用户 ID，用于直接发送通知</div>
+            </div>
+          </div>
+
+          ${feishuConfig.authorized && feishuConfig.authorized_user ? `
+            <div style="padding:12px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:var(--radius-sm);margin-bottom:12px">
+              <div style="font-size:13px;color:var(--accent-green)">✅ 已授权</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
+                用户：${escapeHtml(feishuConfig.authorized_user.name || '')} |
+                ID：${escapeHtml(feishuConfig.authorized_user.open_id || '')}
+              </div>
+            </div>
+            <button class="btn btn-outline" onclick="revokeFeishuAuth()" style="width:100%">撤销授权</button>
+          ` : `
+            <div style="display:flex;gap:16px;align-items:flex-start">
+              <div style="flex:1">
+                <div style="font-size:12px;color:var(--text-muted);line-height:1.6;margin-bottom:12px">
+                  1. 先保存 App ID 和 Secret<br>
+                  2. 点击"扫码授权"<br>
+                  3. 用飞书 App 扫码<br>
+                  4. 自动获取你的用户 ID
+                </div>
+                <button class="btn btn-primary" onclick="startFeishuAuth()" style="width:100%;padding:12px">
+                  📱 扫码授权
+                </button>
+              </div>
+              <div style="width:160px;display:flex;flex-direction:column;align-items:center">
+                <div id="feishuQrArea" style="width:140px;height:140px;border:2px dashed var(--border-color);border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px">
+                  <span style="font-size:36px;opacity:0.3">📱</span>
+                  <span style="font-size:10px;color:var(--text-muted)">等待扫码</span>
+                </div>
+                <div id="feishuQrStatus" style="margin-top:8px;font-size:11px;color:var(--text-muted);text-align:center"></div>
+              </div>
+            </div>
+          `}
+        </div>
+
+        <div style="display:flex;gap:12px;margin-top:16px">
+          <button class="btn btn-outline" onclick="testFeishuNotification()" style="flex:1;padding:12px">
+            🔔 发送测试消息
+          </button>
+        </div>
+
+        <!-- 扫码配置 -->
+        <div style="margin-top:24px;padding-top:24px;border-top:1px solid var(--border-color)">
+          <div style="font-size:14px;font-weight:500;color:var(--text-secondary);margin-bottom:16px">或者扫码配置</div>
+          <div style="display:flex;gap:20px;align-items:flex-start">
+            <div style="flex:1">
+              <button class="btn btn-outline" onclick="startFeishuBotSetup()" style="width:100%;padding:12px">
+                📱 扫码创建飞书机器人
+              </button>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:8px">
+                使用 cc-connect 自动创建飞书机器人并配置
+              </div>
+            </div>
+            <div style="width:160px;display:flex;flex-direction:column;align-items:center">
+              <div id="feishuQrArea" style="width:140px;height:140px;border:2px dashed var(--border-color);border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;cursor:pointer" onclick="startFeishuBotSetup()">
+                <span style="font-size:36px;opacity:0.3">📱</span>
+                <span style="font-size:10px;color:var(--text-muted)">点击扫码</span>
+              </div>
+              <div id="feishuQrStatus" style="margin-top:8px;font-size:11px;color:var(--text-muted);text-align:center"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 系统信息 -->
+      <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-lg);padding:24px;margin-top:20px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+          <span style="font-size:20px">ℹ️</span>
+          <div style="font-size:15px;font-weight:600;color:var(--text-primary)">系统信息</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+          <div style="padding:10px;background:var(--bg-glass);border-radius:var(--radius-sm)">
+            <div style="font-size:11px;color:var(--text-muted)">版本</div>
+            <div style="font-size:13px;color:var(--text-primary);margin-top:4px">v1.0.0</div>
+          </div>
+          <div style="padding:10px;background:var(--bg-glass);border-radius:var(--radius-sm)">
+            <div style="font-size:11px;color:var(--text-muted)">项目</div>
+            <div style="font-size:13px;color:var(--text-primary);margin-top:4px">${projects.length}</div>
+          </div>
+          <div style="padding:10px;background:var(--bg-glass);border-radius:var(--radius-sm)">
+            <div style="font-size:11px;color:var(--text-muted)">群聊</div>
+            <div style="font-size:13px;color:var(--text-primary);margin-top:4px">${groupsData.length}</div>
+          </div>
+          <div style="padding:10px;background:var(--bg-glass);border-radius:var(--radius-sm)">
+            <div style="font-size:11px;color:var(--text-muted)">状态</div>
+            <div style="font-size:13px;color:var(--accent-green);margin-top:4px">运行中</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function saveFeishuConfig() {
+  const appId = document.getElementById("feishuAppId")?.value?.trim() || "";
+  const appSecret = document.getElementById("feishuAppSecret")?.value?.trim() || "";
+
+  const config = {
+    enabled: true,
+    app_id: appId,
+    app_secret: appSecret,
+  };
+
+  const res = await api("/api/feishu/config", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(config)
+  });
+
+  if (res.success) {
+    alert("✅ 飞书配置已保存！");
+  } else {
+    alert("❌ 保存失败: " + (res.error || "未知错误"));
+  }
+}
+
+function showWebhookHelp() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:500px">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>📱 如何获取飞书 Webhook 地址</h3>
+    <div style="margin-top:16px;line-height:1.8;font-size:13px">
+      <div style="margin-bottom:16px">
+        <div style="font-weight:500;color:var(--text-primary);margin-bottom:8px">步骤：</div>
+        <ol style="padding-left:20px;color:var(--text-secondary)">
+          <li>打开飞书，进入要接收通知的群聊</li>
+          <li>点击群设置（右上角 ⚙️）</li>
+          <li>选择"群机器人"</li>
+          <li>点击"添加机器人"</li>
+          <li>选择"自定义机器人"</li>
+          <li>设置机器人名称（如：任务通知助手）</li>
+          <li>点击"添加"</li>
+          <li>复制"Webhook 地址"</li>
+          <li>粘贴到配置页面</li>
+        </ol>
+      </div>
+      <div style="padding:12px;background:rgba(56,189,248,0.05);border:1px solid rgba(56,189,248,0.2);border-radius:8px">
+        <div style="font-size:12px;color:var(--accent-blue)">💡 提示</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px">
+          Webhook 地址格式：https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:20px">
+      <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()">我知道了</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function testFeishuNotification() {
+  const res = await api("/api/feishu/test", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"}
+  });
+
+  if (res.success) {
+    alert("测试消息已发送！请检查飞书群聊。");
+  } else {
+    alert("发送失败: " + (res.error || "未知错误"));
+  }
+}
+
+// 开始飞书 OAuth 授权
+async function startFeishuAuth() {
+  // 先保存配置
+  await saveFeishuConfig();
+
+  const qrArea = document.getElementById("feishuQrArea");
+  const qrStatus = document.getElementById("feishuQrStatus");
+
+  const res = await api("/api/feishu/auth-url");
+  if (res.success && res.auth_url) {
+    // 显示二维码
+    qrArea.innerHTML = `
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(res.auth_url)}" style="width:140px;height:140px;border-radius:8px" alt="飞书扫码">
+    `;
+    qrStatus.innerHTML = '<span style="color:var(--accent-yellow)">⏳ 请用飞书扫码</span>';
+
+    // 在新窗口打开授权页面（备用）
+    window.open(res.auth_url, "feishu_auth", "width=600,height=700");
+
+    // 轮询检查授权状态
+    let checks = 0;
+    const checkAuth = setInterval(async () => {
+      checks++;
+      if (checks > 120) {
+        clearInterval(checkAuth);
+        qrStatus.innerHTML = '<span style="color:var(--accent-red)">❌ 授权超时</span>';
+        return;
+      }
+
+      try {
+        const configRes = await api("/api/feishu/config");
+        if (configRes.config?.authorized && configRes.config?.authorized_user) {
+          clearInterval(checkAuth);
+          qrArea.innerHTML = `
+            <span style="font-size:48px">✅</span>
+          `;
+          qrStatus.innerHTML = `<span style="color:var(--accent-green)">授权成功！${configRes.config.authorized_user.name || ''}</span>`;
+          // 刷新页面显示授权状态
+          setTimeout(() => loadSettings(), 1000);
+        }
+      } catch {}
+    }, 2000);
+  } else {
+    alert("获取授权链接失败: " + (res.error || "请先配置 App ID 和 Secret"));
+  }
+}
+
+// 撤销飞书授权
+async function revokeFeishuAuth() {
+  if (!confirm("确定撤销飞书授权？撤销后将无法发送通知。")) return;
+
+  const res = await api("/api/feishu/revoke", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"}
+  });
+
+  if (res.success) {
+    alert("授权已撤销");
+    loadSettings();
+  } else {
+    alert("撤销失败: " + (res.error || "未知错误"));
+  }
+}
+
+// 加载飞书群聊列表
+async function loadFeishuChats() {
+  const select = document.getElementById("feishuChatSelect");
+  select.innerHTML = '<option value="">加载中...</option>';
+
+  const res = await api("/api/feishu/chats");
+  if (res.success && res.chats) {
+    select.innerHTML = '<option value="">选择群聊...</option>' +
+      res.chats.map(chat => `
+        <option value="${chat.chat_id}" ${chat.chat_id === document.getElementById("feishuChatId")?.value ? 'selected' : ''}>
+          ${escapeHtml(chat.name || chat.chat_id)}
+        </option>
+      `).join('');
+
+    // 选择时自动填入 ID
+    select.onchange = () => {
+      document.getElementById("feishuChatId").value = select.value;
+    };
+  } else {
+    select.innerHTML = '<option value="">获取群聊失败</option>';
+    alert("获取群聊列表失败: " + (res.error || "请先完成授权"));
+  }
+}
+
+// 渲染已配置的飞书机器人列表
+function renderFeishuBotList() {
+  const configs = projects.filter(p => {
+    // 检查项目是否有飞书配置
+    return true; // 简化处理，显示所有项目
+  });
+
+  if (configs.length === 0) {
+    return '<div style="text-align:center;padding:20px;color:var(--text-muted)">暂无配置的飞书机器人</div>';
+  }
+
+  return configs.map(p => `
+    <div style="padding:12px;background:var(--bg-glass);border:1px solid var(--border-color);border-radius:8px;display:flex;align-items:center;gap:12px">
+      <span style="font-size:24px">🤖</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:500;color:var(--text-primary)">${escapeHtml(p.name)}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${p.platform || '飞书'} · ${p.running ? '🟢 运行中' : '⚪ 未运行'}</div>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="startFeishuBotSetupForProject('${escapeHtml(p.name)}')">重新配置</button>
+    </div>
+  `).join('');
+}
+
+// 开始飞书机器人扫码配置
+async function startFeishuBotSetup() {
+  const qrArea = document.getElementById("feishuQrArea");
+  const qrStatus = document.getElementById("feishuQrStatus");
+
+  if (!qrArea || !qrStatus) return;
+
+  // 显示加载状态
+  qrArea.innerHTML = `
+    <div style="width:40px;height:40px;border:3px solid var(--border-color);border-top-color:var(--accent-blue);border-radius:50%;animation:spin 1s linear infinite"></div>
+    <span style="font-size:12px;color:var(--text-muted)">正在调用 cc-connect 创建机器人...</span>
+  `;
+  qrStatus.textContent = "";
+
+  try {
+    // 调用后端 API 创建飞书机器人（使用默认名称）
+    const res = await api("/api/projects/feishu-setup", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ name: "feishu-notify" })
+    });
+
+    if (res.success) {
+      // 优先使用生成的二维码图片
+      if (res.qr_image) {
+        console.log("[飞书配置] 显示二维码图片:", res.qr_image);
+        const imgUrl = `${res.qr_image}?t=${Date.now()}`;
+        qrArea.innerHTML = `
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">请用飞书 App 扫描</div>
+          <img src="${imgUrl}" style="width:200px;height:200px;border-radius:8px;border:1px solid var(--border-color)" alt="飞书扫码"
+               onerror="console.log('图片加载失败，使用备用方案');this.onerror=null;this.src='https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(res.scan_url || 'https://open.feishu.cn')}'">
+        `;
+        qrStatus.innerHTML = '<span style="color:var(--accent-yellow)">⏳ 请用飞书 App 扫码创建机器人</span>';
+      } else if (res.scan_url) {
+        qrArea.innerHTML = `
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">请用飞书 App 扫描</div>
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(res.scan_url)}" style="width:200px;height:200px;border-radius:8px" alt="飞书扫码">
+          <a href="${res.scan_url}" target="_blank" style="font-size:11px;color:var(--accent-blue);margin-top:8px;text-decoration:none">🔗 点击打开</a>
+        `;
+        qrStatus.innerHTML = '<span style="color:var(--accent-yellow)">⏳ 请用飞书 App 扫码创建机器人</span>';
+      } else {
+        qrArea.innerHTML = `
+          <div style="padding:10px;text-align:center">
+            <span style="font-size:32px;display:block;margin-bottom:8px">📋</span>
+            <div style="font-size:12px;color:var(--text-muted)">cc-connect 正在处理中</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">请查看终端输出完成扫码</div>
+          </div>
+        `;
+        qrStatus.innerHTML = '<span style="color:var(--text-muted)">请在终端中完成扫码操作</span>';
+      }
+
+      // 轮询检查配置状态
+      let checks = 0;
+      const poll = setInterval(async () => {
+        checks++;
+        if (checks > 60) {
+          clearInterval(poll);
+          qrStatus.innerHTML = '<span style="color:var(--accent-red)">❌ 扫码超时，请重试</span>';
+          return;
+        }
+
+        // 检查配置是否已更新
+        const configRes = await api("/api/feishu/config");
+        if (configRes.config?.app_id && configRes.config.app_id !== "") {
+          clearInterval(poll);
+          qrArea.innerHTML = `
+            <span style="font-size:48px">✅</span>
+            <span style="font-size:14px;color:var(--accent-green);font-weight:500">配置完成！</span>
+          `;
+          qrStatus.innerHTML = '<span style="color:var(--accent-green)">✅ 飞书机器人配置成功</span>';
+
+          // 自动填入 App ID 和 Secret
+          if (configRes.config.app_id) {
+            document.getElementById("feishuAppId").value = configRes.config.app_id;
+          }
+
+          loadSettings();
+        }
+      }, 3000);
+    } else {
+      qrArea.innerHTML = `
+        <div style="padding:10px;text-align:center">
+          <span style="font-size:32px;display:block;margin-bottom:8px">❌</span>
+          <div style="font-size:12px;color:var(--accent-red)">创建失败</div>
+        </div>
+      `;
+      qrStatus.innerHTML = `<span style="color:var(--accent-red)">${escapeHtml(res.error || '未知错误')}</span>`;
+    }
+  } catch (e) {
+    qrArea.innerHTML = `
+      <span style="font-size:36px;opacity:0.5">❌</span>
+      <span style="font-size:12px;color:var(--accent-red)">请求失败</span>
+    `;
+    qrStatus.innerHTML = `<span style="color:var(--accent-red)">${escapeHtml(e.message)}</span>`;
+  }
+}
+
+// 手动配置飞书机器人
+function showManualFeishuConfig() {
+  const projectName = document.getElementById("feishuBotProject")?.value;
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:600px;max-height:85vh;display:flex;flex-direction:column">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>🔧 手动配置飞书机器人</h3>
+
+    <div style="flex:1;overflow-y:auto;margin:16px 0">
+      <div style="padding:16px;background:rgba(56,189,248,0.05);border:1px solid rgba(56,189,248,0.2);border-radius:8px;margin-bottom:16px">
+        <div style="font-size:13px;color:var(--accent-blue);margin-bottom:8px">📋 配置步骤</div>
+        <ol style="font-size:12px;color:var(--text-secondary);line-height:2;padding-left:20px">
+          <li>登录 <a href="https://open.feishu.cn" target="_blank" style="color:var(--accent-blue)">飞书开放平台</a></li>
+          <li>创建企业自建应用</li>
+          <li>获取 App ID 和 App Secret</li>
+          <li>在"权限管理"中添加所需权限</li>
+          <li>在"事件订阅"中配置回调地址</li>
+          <li>发布应用版本</li>
+        </ol>
+      </div>
+
+      <div class="form-group">
+        <label>项目名称</label>
+        <input type="text" id="manualFeishuProject" value="${escapeHtml(projectName || '')}" placeholder="项目名称">
+      </div>
+
+      <div class="form-group">
+        <label>飞书 App ID</label>
+        <input type="text" id="manualFeishuAppId" placeholder="cli_xxxxxxxxxx">
+      </div>
+
+      <div class="form-group">
+        <label>飞书 App Secret</label>
+        <input type="password" id="manualFeishuAppSecret" placeholder="输入 App Secret">
+      </div>
+
+      <div class="form-group">
+        <label>需要的权限</label>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+          ${['im:message', 'im:message.group_at_msg', 'im:chat', 'im:chat:readonly', 'contact:user.id:readonly'].map(scope => `
+            <span style="font-size:11px;padding:3px 8px;background:rgba(56,189,248,0.1);color:var(--accent-blue);border-radius:4px">${scope}</span>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>回调地址（用于事件订阅）</label>
+        <input type="text" value="http://localhost:3080/api/feishu/callback" readonly style="background:rgba(15,23,42,0.4)">
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;padding-top:12px;border-top:1px solid var(--border-color)">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="saveManualFeishuConfig()">保存配置</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function saveManualFeishuConfig() {
+  const projectName = document.getElementById("manualFeishuProject")?.value?.trim();
+  const appId = document.getElementById("manualFeishuAppId")?.value?.trim();
+  const appSecret = document.getElementById("manualFeishuAppSecret")?.value?.trim();
+
+  if (!projectName || !appId || !appSecret) {
+    alert("请填写完整信息");
+    return;
+  }
+
+  // 保存到飞书配置
+  const res = await api("/api/feishu/config", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      app_id: appId,
+      app_secret: appSecret
+    })
+  });
+
+  if (res.success) {
+    document.querySelector(".modal-overlay")?.remove();
+    alert("飞书配置已保存！");
+    loadSettings();
+  } else {
+    alert("保存失败: " + (res.error || "未知错误"));
+  }
+}
+
+// 检查飞书机器人配置状态
+async function checkFeishuBotStatus() {
+  const projectName = document.getElementById("feishuProject")?.value;
+  if (!projectName) {
+    alert("请先选择一个项目");
+    return;
+  }
+
+  const qrArea = document.getElementById("feishuQrArea");
+  const qrStatus = document.getElementById("feishuQrStatus");
+
+  // 检查飞书配置
+  const configRes = await api("/api/feishu/config");
+  const config = configRes.config || {};
+
+  if (config.app_id) {
+    qrArea.innerHTML = `
+      <span style="font-size:48px">✅</span>
+      <span style="font-size:14px;color:var(--accent-green);font-weight:500">已配置</span>
+      <span style="font-size:11px;color:var(--text-muted)">App ID: ${config.app_id.substring(0, 10)}...</span>
+    `;
+    qrStatus.innerHTML = '<span style="color:var(--accent-green)">飞书机器人已配置</span>';
+
+    // 自动填入
+    document.getElementById("feishuAppId").value = config.app_id;
+  } else {
+    qrArea.innerHTML = `
+      <span style="font-size:48px;opacity:0.3">⚠️</span>
+      <span style="font-size:12px;color:var(--text-muted)">未配置</span>
+    `;
+    qrStatus.innerHTML = '<span style="color:var(--accent-yellow)">请点击"创建飞书机器人"开始配置</span>';
+  }
+}
+
+// 添加 CSS 动画
+const style = document.createElement('style');
+style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+document.head.appendChild(style);
+
+// 扫码获取用户 Open ID
+async function showScanQrCode() {
+  const qrArea = document.getElementById("feishuQrArea");
+  const qrStatus = document.getElementById("feishuQrStatus");
+  if (!qrArea || !qrStatus) return;
+
+  // 先保存当前配置
+  await saveFeishuConfig();
+
+  const appId = document.getElementById("feishuAppId")?.value?.trim();
+
+  if (!appId) {
+    qrStatus.innerHTML = '<span style="color:var(--accent-yellow)">请先填写 App ID</span>';
+    return;
+  }
+
+  // 生成 OAuth 授权链接（用于获取用户 open_id）
+  const redirectUri = "http://localhost:3080/api/feishu/callback";
+  const scopes = "contact:user.id:readonly";
+  const authUrl = `https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scopes)}&state=get_user_id`;
+
+  // 显示二维码
+  qrArea.innerHTML = `
+    <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(authUrl)}" style="width:180px;height:180px;border-radius:8px" alt="飞书扫码">
+    <a href="${authUrl}" target="_blank" style="font-size:10px;color:var(--accent-blue);margin-top:6px">🔗 点击打开授权页面</a>
+  `;
+  qrStatus.innerHTML = '<span style="color:var(--accent-yellow)">⏳ 扫码后自动获取您的 Open ID</span>';
+
+  // 轮询检查授权结果
+  startUserIdPolling();
+}
+
+// 轮询获取用户 ID
+let userIdPollTimer = null;
+
+function startUserIdPolling() {
+  if (userIdPollTimer) clearInterval(userIdPollTimer);
+
+  let checks = 0;
+  userIdPollTimer = setInterval(async () => {
+    checks++;
+    if (checks > 60) {
+      clearInterval(userIdPollTimer);
+      const qrStatus = document.getElementById("feishuQrStatus");
+      if (qrStatus) qrStatus.innerHTML = '<span style="color:var(--accent-red)">❌ 授权超时，请重试</span>';
+      return;
+    }
+
+    try {
+      const res = await api("/api/feishu/config");
+      if (res.config?.authorized && res.config?.authorized_user?.open_id) {
+        clearInterval(userIdPollTimer);
+
+        // 自动填入用户 ID
+        const userIdInput = document.getElementById("feishuUserId");
+        if (userIdInput) {
+          userIdInput.value = res.config.authorized_user.open_id;
+        }
+
+        // 更新扫码区域显示
+        const qrArea = document.getElementById("feishuQrArea");
+        const qrStatus = document.getElementById("feishuQrStatus");
+
+        if (qrArea) {
+          qrArea.innerHTML = `
+            <span style="font-size:48px">✅</span>
+            <span style="font-size:14px;color:var(--accent-green);font-weight:500">获取成功！</span>
+            <span style="font-size:12px;color:var(--text-muted)">${escapeHtml(res.config.authorized_user.name || '')}</span>
+            <span style="font-size:10px;color:var(--text-muted)">${escapeHtml(res.config.authorized_user.open_id)}</span>
+          `;
+        }
+        if (qrStatus) {
+          qrStatus.innerHTML = '<span style="color:var(--accent-green)">✅ 已获取用户 Open ID，点击"保存配置"</span>';
+        }
+      }
+    } catch {}
+  }, 3000);
+}
+
+// 启动飞书机器人扫码
+async function startFeishuBotScan() {
+  const qrArea = document.getElementById("feishuQrArea");
+  const qrStatus = document.getElementById("feishuQrStatus");
+
+  // 获取第一个项目用于配置
+  const projectName = projects[0]?.name || "default";
+
+  qrArea.innerHTML = `
+    <div style="width:36px;height:36px;border:3px solid var(--border-color);border-top-color:var(--accent-blue);border-radius:50%;animation:spin 1s linear infinite"></div>
+    <span style="font-size:11px;color:var(--text-muted)">正在生成扫码链接...</span>
+  `;
+
+  try {
+    const res = await api("/api/projects/feishu-setup", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ name: projectName })
+    });
+
+    if (res.success && res.scan_url) {
+      if (res.type === "oauth") {
+        // OAuth 授权模式 - 显示二维码
+        qrArea.innerHTML = `
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(res.scan_url)}" style="width:180px;height:180px;border-radius:8px" alt="飞书扫码授权">
+          <a href="${res.scan_url}" target="_blank" style="font-size:10px;color:var(--accent-blue);margin-top:6px">🔗 点击打开授权页面</a>
+        `;
+        qrStatus.innerHTML = '<span style="color:var(--accent-yellow)">⏳ 请用飞书 App 扫码授权</span>';
+
+        // 轮询检查授权状态
+        startAuthPolling();
+      } else {
+        // 手动模式 - 显示链接
+        qrArea.innerHTML = `
+          <div style="padding:10px;text-align:center">
+            <span style="font-size:36px;display:block;margin-bottom:10px">🔗</span>
+            <a href="${res.scan_url}" target="_blank" style="display:inline-block;padding:10px 20px;background:var(--gradient-blue);color:white;border-radius:8px;font-size:13px;text-decoration:none;font-weight:500">打开飞书开放平台</a>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:10px">创建应用后填写 App ID 和 Secret</div>
+          </div>
+        `;
+        qrStatus.innerHTML = '<span style="color:var(--text-muted)">创建应用后即可扫码授权</span>';
+      }
+    } else {
+      qrArea.innerHTML = `
+        <div style="padding:10px;text-align:center">
+          <span style="font-size:36px;display:block;margin-bottom:10px">⚠️</span>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${escapeHtml(res.error || '请先配置 App ID')}</div>
+          <a href="https://open.feishu.cn/app" target="_blank" style="display:inline-block;padding:10px 20px;background:var(--gradient-blue);color:white;border-radius:8px;font-size:13px;text-decoration:none">打开飞书开放平台</a>
+        </div>
+      `;
+      qrStatus.innerHTML = '<span style="color:var(--text-muted)">请先创建飞书应用</span>';
+    }
+  } catch (e) {
+    qrArea.innerHTML = `
+      <div style="padding:10px;text-align:center">
+        <span style="font-size:36px;display:block;margin-bottom:10px">❌</span>
+        <div style="font-size:12px;color:var(--accent-red);margin-bottom:10px">请求失败</div>
+        <a href="https://open.feishu.cn/app" target="_blank" style="display:inline-block;padding:10px 20px;background:var(--gradient-blue);color:white;border-radius:8px;font-size:13px;text-decoration:none">打开飞书开放平台</a>
+      </div>
+    `;
+    qrStatus.innerHTML = `<span style="color:var(--accent-red)">${escapeHtml(e.message)}</span>`;
+  }
+}
+
+// 轮询检查授权状态
+let authPollTimer = null;
+
+function startAuthPolling() {
+  if (authPollTimer) clearInterval(authPollTimer);
+
+  let checks = 0;
+  authPollTimer = setInterval(async () => {
+    checks++;
+    if (checks > 60) { // 5 分钟超时
+      clearInterval(authPollTimer);
+      const qrStatus = document.getElementById("feishuQrStatus");
+      if (qrStatus) qrStatus.innerHTML = '<span style="color:var(--accent-red)">❌ 授权超时，请重试</span>';
+      return;
+    }
+
+    try {
+      const res = await api("/api/feishu/config");
+      if (res.config?.authorized) {
+        clearInterval(authPollTimer);
+        const qrArea = document.getElementById("feishuQrArea");
+        const qrStatus = document.getElementById("feishuQrStatus");
+
+        if (qrArea) {
+          qrArea.innerHTML = `
+            <span style="font-size:48px">✅</span>
+            <span style="font-size:14px;color:var(--accent-green);font-weight:500">授权成功！</span>
+            <span style="font-size:12px;color:var(--text-muted)">${escapeHtml(res.config.authorized_user?.name || '')}</span>
+          `;
+        }
+        if (qrStatus) {
+          qrStatus.innerHTML = '<span style="color:var(--accent-green)">✅ 飞书授权已完成，可以发送通知</span>';
+        }
+
+        // 刷新群聊列表
+        loadFeishuChats();
+      }
+    } catch {}
+  }, 5000);
+}
+
+function showHowToGetChatId() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:500px">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>📱 如何获取飞书群聊 ID</h3>
+    <div style="margin-top:16px;line-height:1.8;font-size:13px">
+      <div style="margin-bottom:16px">
+        <div style="font-weight:500;color:var(--text-primary);margin-bottom:8px">方法一：通过飞书开放平台</div>
+        <ol style="padding-left:20px;color:var(--text-secondary)">
+          <li>打开飞书开放平台 <a href="https://open.feishu.cn" target="_blank" style="color:var(--accent-blue)">open.feishu.cn</a></li>
+          <li>进入你的应用 → 事件订阅</li>
+          <li>添加机器人进群后，在群设置中可以看到群聊 ID</li>
+        </ol>
+      </div>
+      <div style="margin-bottom:16px">
+        <div style="font-weight:500;color:var(--text-primary);margin-bottom:8px">方法二：通过 cc-connect</div>
+        <ol style="padding-left:20px;color:var(--text-secondary)">
+          <li>在飞书群中 @ 你的机器人发送消息</li>
+          <li>查看 cc-connect 日志，会显示 chat_id</li>
+          <li>格式类似：oc_xxxxxxxxxx</li>
+        </ol>
+      </div>
+      <div>
+        <div style="font-weight:500;color:var(--text-primary);margin-bottom:8px">方法三：通过飞书 API</div>
+        <ol style="padding-left:20px;color:var(--text-secondary)">
+          <li>使用 GET /im/v1/chats 接口获取机器人所在的群聊列表</li>
+          <li>返回结果中的 chat_id 即为群聊 ID</li>
+        </ol>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:20px">
+      <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()">我知道了</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+// === 内置终端 ===
+let terminalCwd = '';
+let terminalHistory = [];
+let terminalHistoryIndex = -1;
+
+async function initTerminal() {
+  const info = await api("/api/terminal/info");
+  if (info.success) {
+    terminalCwd = info.home;
+    appendTerminalOutput(`[系统: ${info.platform} | 用户: ${info.user} | Shell: ${info.shell}]\n`, 'system');
+    appendTerminalOutput(`[工作目录: ${terminalCwd}]\n\n`, 'system');
+  }
+
+  // 填充项目选择下拉框
+  const select = document.getElementById("terminalProject");
+  if (select) {
+    select.innerHTML = '<option value="">选择项目工作目录</option>' +
+      projects.map(p => `<option value="${p.work_dir || ''}">${p.name}</option>`).join("");
+  }
+}
+
+function switchTerminalProject() {
+  const select = document.getElementById("terminalProject");
+  const workDir = select.value;
+  if (workDir) {
+    terminalCwd = workDir;
+    appendTerminalOutput(`\n[切换工作目录: ${terminalCwd}]\n`, 'system');
+  }
+}
+
+function appendTerminalOutput(text, type = 'output') {
+  const el = document.getElementById("terminalOutput");
+  if (!el) return;
+
+  const span = document.createElement("span");
+  if (type === 'command') {
+    span.style.color = '#22c55e';
+  } else if (type === 'error') {
+    span.style.color = '#ef4444';
+  } else if (type === 'system') {
+    span.style.color = '#64748b';
+  }
+  span.textContent = text;
+  el.appendChild(span);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function handleTerminalInput(event) {
+  if (event.key !== 'Enter') {
+    // 上下箭头翻阅历史
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (terminalHistoryIndex < terminalHistory.length - 1) {
+        terminalHistoryIndex++;
+        document.getElementById("terminalInput").value = terminalHistory[terminalHistory.length - 1 - terminalHistoryIndex] || '';
+      }
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      if (terminalHistoryIndex > 0) {
+        terminalHistoryIndex--;
+        document.getElementById("terminalInput").value = terminalHistory[terminalHistory.length - 1 - terminalHistoryIndex] || '';
+      } else {
+        terminalHistoryIndex = -1;
+        document.getElementById("terminalInput").value = '';
+      }
+      return;
+    }
+    return;
+  }
+
+  const input = document.getElementById("terminalInput");
+  const command = input.value.trim();
+  if (!command) return;
+
+  input.value = '';
+  terminalHistoryIndex = -1;
+  terminalHistory.push(command);
+
+  // 显示命令
+  appendTerminalOutput(`$ ${command}\n`, 'command');
+
+  // 特殊命令处理
+  if (command === 'clear' || command === 'cls') {
+    document.getElementById("terminalOutput").innerHTML = '';
+    return;
+  }
+
+  if (command.startsWith('cd ')) {
+    const dir = command.substring(3).trim();
+    try {
+      // 先尝试切换目录
+      const res = await api("/api/terminal/exec", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ command: `cd ${dir} && pwd`, cwd: terminalCwd })
+      });
+      if (res.success && res.output) {
+        terminalCwd = res.output.trim();
+        appendTerminalOutput(`[切换到: ${terminalCwd}]\n`, 'system');
+      }
+    } catch (e) {
+      appendTerminalOutput(`错误: 无法切换到 ${dir}\n`, 'error');
+    }
+    return;
+  }
+
+  // 执行命令
+  try {
+    const res = await api("/api/terminal/exec", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ command, cwd: terminalCwd })
+    });
+
+    if (res.success) {
+      if (res.output) {
+        appendTerminalOutput(res.output + '\n');
+      }
+      if (res.cwd) {
+        terminalCwd = res.cwd;
+      }
+    } else {
+      appendTerminalOutput(`错误: ${res.error}\n`, 'error');
+    }
+  } catch (e) {
+    appendTerminalOutput(`错误: ${e.message}\n`, 'error');
+  }
+}
+
+function clearTerminal() {
+  document.getElementById("terminalOutput").innerHTML = '';
+  appendTerminalOutput('[已清屏]\n', 'system');
+}
+
+function newTerminalSession() {
+  clearTerminal();
+  terminalCwd = '';
+  initTerminal();
+}
+
+// 初始化终端（当切换到终端标签时）
+function loadTerminal() {
+  initTerminal();
+}
+
+// === 任务队列管理 ===
+async function addTaskToQueue(taskId) {
+  const res = await api("/api/tasks/queue", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ task_id: taskId })
+  });
+
+  if (res.success) {
+    alert("任务已加入队列！");
+    loadTasks();
+  } else {
+    alert("加入队列失败: " + (res.error || "未知错误"));
+  }
+}
+
+async function addAllPendingToQueue() {
+  const tasks = (await api("/api/tasks")).tasks || [];
+  const pendingTasks = tasks.filter(t => t.status === 'pending');
+
+  if (pendingTasks.length === 0) {
+    alert("没有待处理的任务");
+    return;
+  }
+
+  if (!confirm(`确定将 ${pendingTasks.length} 个待处理任务加入队列？`)) return;
+
+  const res = await api("/api/tasks/queue-batch", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ task_ids: pendingTasks.map(t => t.id) })
+  });
+
+  if (res.success) {
+    alert(`${pendingTasks.length} 个任务已加入队列！`);
+    loadTasks();
+  } else {
+    alert("加入队列失败: " + (res.error || "未知错误"));
+  }
+}
+
+async function clearTaskQueue() {
+  if (!confirm("确定清空任务队列？")) return;
+
+  const res = await api("/api/tasks/queue/clear", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"}
+  });
+
+  if (res.success) {
+    alert("队列已清空");
+  }
+}
+
+async function showQueueStatus() {
+  const res = await api("/api/tasks/queue/status");
+
+  // 构建目标状态列表
+  let targetStatusHtml = '';
+  if (res.target_status && Object.keys(res.target_status).length > 0) {
+    targetStatusHtml = `
+      <div style="margin-top:16px">
+        <div style="font-size:13px;font-weight:500;color:var(--text-secondary);margin-bottom:10px">各目标执行状态</div>
+        ${Object.entries(res.target_status).map(([key, status]) => {
+          const isRunning = status.running;
+          const icon = key.startsWith('group:') ? '💬' : '🤖';
+          const name = key.split(':')[1];
+          return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg-glass);border-radius:6px;margin-bottom:6px;border-left:3px solid ${isRunning ? 'var(--accent-green)' : 'var(--border-color)'}">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span>${icon}</span>
+              <span style="font-size:13px;color:var(--text-primary)">${escapeHtml(name)}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <span style="font-size:11px;color:var(--text-muted)">队列: ${status.queued}</span>
+              <span style="font-size:11px;color:${isRunning ? 'var(--accent-green)' : 'var(--text-muted)'}">${isRunning ? '🟢 运行中' : '⚪ 空闲'}</span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:500px;max-height:80vh;display:flex;flex-direction:column">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>📊 任务队列状态</h3>
+
+    <div style="margin-top:16px">
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+        <div style="padding:12px;background:var(--bg-glass);border-radius:8px;text-align:center">
+          <div style="font-size:24px;font-weight:600;color:var(--accent-blue)">${res.total_queued || 0}</div>
+          <div style="font-size:11px;color:var(--text-muted)">队列中</div>
+        </div>
+        <div style="padding:12px;background:var(--bg-glass);border-radius:8px;text-align:center">
+          <div style="font-size:24px;font-weight:600;color:var(--accent-green)">${res.running_targets || 0}</div>
+          <div style="font-size:11px;color:var(--text-muted)">并行执行</div>
+        </div>
+        <div style="padding:12px;background:var(--bg-glass);border-radius:8px;text-align:center">
+          <div style="font-size:24px;font-weight:600;color:var(--accent-yellow)">${res.pending_tasks || 0}</div>
+          <div style="font-size:11px;color:var(--text-muted)">待处理</div>
+        </div>
+        <div style="padding:12px;background:var(--bg-glass);border-radius:8px;text-align:center">
+          <div style="font-size:24px;font-weight:600;color:var(--accent-purple)">${res.in_progress_tasks || 0}</div>
+          <div style="font-size:11px;color:var(--text-muted)">执行中</div>
+        </div>
+      </div>
+    </div>
+
+    ${targetStatusHtml}
+
+    <div style="margin-top:16px;padding:12px;background:rgba(56,189,248,0.05);border:1px solid rgba(56,189,248,0.2);border-radius:8px">
+      <div style="font-size:12px;color:var(--accent-blue)">💡 执行规则</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6">
+        <div>• <strong>优先级排序</strong>：🔴高 → 🟡中 → ⚪低</div>
+        <div>• <strong>并行执行</strong>：不同群聊/项目同时执行</div>
+        <div>• <strong>顺序执行</strong>：同一目标按优先级排队</div>
+        <div>• <strong>自动完成</strong>：Agent 回复"✅ 完成"自动标记</div>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color)">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+      <button class="btn btn-danger" onclick="clearTaskQueue();this.closest('.modal-overlay').remove()">清空所有队列</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+// === 任务日志查看 ===
+async function showTaskLogs(taskId) {
+  const res = await api(`/api/tasks/logs?task_id=${taskId}&limit=100`);
+
+  if (!res.success) {
+    alert("获取日志失败: " + (res.error || "未知错误"));
+    return;
+  }
+
+  const logs = res.logs || [];
+  const levelColors = {
+    info: 'var(--accent-blue)',
+    success: 'var(--accent-green)',
+    warning: 'var(--accent-yellow)',
+    error: 'var(--accent-red)',
+    response: 'var(--accent-purple)'
+  };
+  const levelIcons = {
+    info: 'ℹ️',
+    success: '✅',
+    warning: '⚠️',
+    error: '❌',
+    response: '💬'
+  };
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:600px;max-height:85vh;display:flex;flex-direction:column">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>📋 任务日志</h3>
+    <div style="margin-bottom:12px;font-size:12px;color:var(--text-muted)">共 ${logs.length} 条日志</div>
+
+    <div style="flex:1;overflow-y:auto;background:rgba(15,23,42,0.6);border-radius:8px;border:1px solid var(--border-color);padding:12px;font-family:monospace;font-size:12px;line-height:1.6">
+      ${logs.length === 0
+        ? '<div style="text-align:center;padding:40px;color:var(--text-muted)">暂无日志</div>'
+        : logs.map(log => {
+            const time = new Date(log.timestamp).toLocaleString("zh-CN");
+            const color = levelColors[log.level] || 'var(--text-secondary)';
+            const icon = levelIcons[log.level] || '📝';
+            const isResponse = log.level === 'response';
+
+            return `<div style="margin-bottom:8px;padding:8px;background:${isResponse ? 'rgba(167,139,250,0.05)' : 'transparent'};border-radius:4px;border-left:3px solid ${color}">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                <span>${icon}</span>
+                <span style="color:${color};font-weight:500">${log.level.toUpperCase()}</span>
+                <span style="color:var(--text-muted);margin-left:auto">${time}</span>
+              </div>
+              <div style="color:var(--text-secondary);white-space:pre-wrap;word-break:break-all">${escapeHtml(log.message)}</div>
+            </div>`;
+          }).join("")
+      }
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color)">
+      <button class="btn btn-danger btn-sm" onclick="clearTaskLogs('${taskId}');this.closest('.modal-overlay').remove()">清空日志</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline btn-sm" onclick="showTaskLogs('${taskId}')">刷新</button>
+        <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+      </div>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function clearTaskLogs(taskId) {
+  if (!confirm("确定清空此任务的日志？")) return;
+
+  await api("/api/tasks/logs/clear", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ task_id: taskId })
+  });
+}
+
+// === 共享上下文 ===
+let currentSharedFile = null;
+
+async function loadSharedFiles() {
+  const data = await api("/api/shared");
+  const files = data.files || [];
+  const el = document.getElementById("sharedFileList");
+  const statsEl = document.getElementById("sharedStats");
+
+  // 更新统计
+  if (statsEl) {
+    statsEl.textContent = `${files.length} 个文件`;
+  }
+
+  if (files.length === 0) {
+    el.innerHTML = '<div class="empty" style="height:auto;padding:40px 20px;flex-direction:column;gap:8px"><span style="font-size:32px;opacity:0.5">📁</span><span>暂无共享文件</span></div>';
+    return;
+  }
+
+  el.innerHTML = files.map(f => {
+    const icon = f.type === 'text' ? '📄' : f.type === 'image' ? '🖼️' : '📎';
+    const size = f.size > 1024*1024 ? (f.size/1024/1024).toFixed(1)+'MB' : f.size > 1024 ? (f.size/1024).toFixed(1)+'KB' : f.size+'B';
+    return `
+    <div class="file-item ${currentSharedFile === f.name ? 'active' : ''}" onclick="openSharedFile('${f.name}')">
+      <span>${icon} ${f.name}</span>
+      <span style="font-size:11px;color:var(--text-muted)">${size}</span>
+    </div>`;
+  }).join('');
+}
+
+async function openSharedFile(name) {
+  currentSharedFile = name;
+  const data = await api(`/api/shared/read?name=${encodeURIComponent(name)}`);
+  document.getElementById("sharedTitle").textContent = name;
+  document.getElementById("sharedActions").style.display = "flex";
+
+  if (data.type === "text") {
+    document.getElementById("sharedEditor").innerHTML =
+      `<textarea id="sharedContent">${escapeHtml(data.content)}</textarea>`;
+  } else if (data.type === "image") {
+    document.getElementById("sharedEditor").innerHTML =
+      `<div style="text-align:center;padding:20px"><img src="/api/shared/download?name=${encodeURIComponent(name)}" style="max-width:100%;max-height:600px;border-radius:8px;border:1px solid #334155"></div>`;
+  } else {
+    const size = data.size ? (data.size / 1024).toFixed(1) + " KB" : "";
+    document.getElementById("sharedEditor").innerHTML =
+      `<div class="empty"><div style="text-align:center"><div style="font-size:48px;margin-bottom:12px">📎</div><div>${name}</div><div style="color:#64748b;font-size:12px;margin-top:4px">${size}</div><br><button class="btn btn-primary" onclick="downloadSharedFile()">下载文件</button></div></div>`;
+  }
+  loadSharedFiles();
+}
+
+function showNewFileModal() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>新建共享文件</h3>
+    <div class="form-group"><label>文件名</label><input type="text" id="newFileName" placeholder="如 api-docs.md"></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="createSharedFile()">创建</button>
+    </div></div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function createSharedFile() {
+  const name = document.getElementById("newFileName").value.trim();
+  if (!name) { alert("请填写文件名"); return; }
+  await api("/api/shared/write", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ name, content: "" })
+  });
+  document.querySelector(".modal-overlay").remove();
+  openSharedFile(name);
+}
+
+async function saveSharedFile() {
+  if (!currentSharedFile) return;
+  const content = document.getElementById("sharedContent").value;
+  await api("/api/shared/write", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ name: currentSharedFile, content })
+  });
+  alert("已保存");
+}
+
+async function deleteCurrentSharedFile() {
+  if (!currentSharedFile || !confirm(`确定删除 ${currentSharedFile}？`)) return;
+  await api("/api/shared/delete", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ name: currentSharedFile })
+  });
+  currentSharedFile = null;
+  document.getElementById("sharedTitle").textContent = "选择文件查看";
+  document.getElementById("sharedActions").style.display = "none";
+  document.getElementById("sharedEditor").innerHTML = '<div class="empty">选择、创建或上传共享文件</div>';
+  loadSharedFiles();
+}
+
+async function uploadSharedFiles(fileList) {
+  if (!fileList || fileList.length === 0) return;
+  const formData = new FormData();
+  for (const file of fileList) {
+    formData.append("files", file, file.name);
+  }
+  const res = await fetch("/api/shared/upload", { method: "POST", body: formData });
+  const data = await res.json();
+  if (data.success) {
+    loadSharedFiles();
+    if (data.files && data.files.length === 1) {
+      openSharedFile(data.files[0]);
+    }
+  } else {
+    alert("上传失败: " + (data.error || "未知错误"));
+  }
+  document.getElementById("sharedUploadInput").value = "";
+}
+
+function downloadSharedFile() {
+  if (!currentSharedFile) return;
+  window.open(`/api/shared/download?name=${encodeURIComponent(currentSharedFile)}`, "_blank");
+}
+
+// === 定时任务 ===
+async function loadCronJobs() {
+  const data = await api("/api/cron");
+  const jobs = data.jobs || [];
+  const el = document.getElementById("cronBody");
+
+  // 更新统计
+  const enabled = jobs.filter(j => j.enabled).length;
+  const disabled = jobs.filter(j => !j.enabled).length;
+  document.getElementById('cronTotal').textContent = jobs.length;
+  document.getElementById('cronEnabled').textContent = enabled;
+  document.getElementById('cronDisabled').textContent = disabled;
+
+  if (jobs.length === 0) {
+    el.innerHTML = '<div class="empty" style="flex-direction:column;gap:8px"><span style="font-size:40px;opacity:0.5">⏰</span>暂无定时任务</div>';
+    return;
+  }
+
+  el.innerHTML = `<table class="table">
+    <thead><tr><th>名称</th><th>项目</th><th>调度</th><th>提示词</th><th>状态</th><th>上次执行</th><th>操作</th></tr></thead>
+    <tbody>${jobs.map(j => `<tr>
+      <td><strong style="color:var(--text-primary)">${escapeHtml(j.name)}</strong></td>
+      <td><span class="tag">${j.project}</span></td>
+      <td><code style="color:var(--accent-yellow);font-size:12px;background:rgba(250,204,21,0.1);padding:2px 6px;border-radius:4px">${escapeHtml(j.schedule)}</code></td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary)">${escapeHtml(j.prompt)}</td>
+      <td>
+        <label style="cursor:pointer;display:flex;align-items:center;gap:6px">
+          <input type="checkbox" ${j.enabled?'checked':''} onchange="toggleCronJob('${j.id}',this.checked)" style="accent-color:var(--accent-blue)">
+          <span style="font-size:12px">${j.enabled?'✅ 启用':'⏸ 禁用'}</span>
+        </label>
+      </td>
+      <td style="font-size:12px;color:var(--text-muted)">${j.last_run ? new Date(j.last_run).toLocaleString('zh-CN') : '未执行'}</td>
+      <td class="actions">
+        <button class="btn btn-danger btn-sm" onclick="deleteCronJob('${j.id}')">🗑️ 删除</button>
+      </td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+function showCreateCronModal() {
+  const projectOptions = projects.map(p => `<option value="${p.name}">${p.name}</option>`).join('');
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:480px">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>新建定时任务</h3>
+    <div class="form-group"><label>任务名称</label><input type="text" id="cronName" placeholder="如 每日代码检查"></div>
+    <div class="form-group"><label>目标项目</label><select id="cronProject">${projectOptions}</select></div>
+    <div class="form-group"><label>Cron 表达式</label><input type="text" id="cronSchedule" placeholder="如 0 9 * * 1-5 (工作日9点)">
+      <div style="font-size:11px;color:#64748b;margin-top:4px">格式: 分 时 日 月 周  |  示例: */30 * * * * (每30分钟)  0 9 * * 1-5 (工作日9点)</div>
+    </div>
+    <div class="form-group"><label>执行提示词</label><textarea id="cronPrompt" rows="3" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:13px;resize:vertical;outline:none" placeholder="告诉 Agent 做什么，如：检查代码质量并修复问题"></textarea></div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitCronJob()">创建</button>
+    </div></div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitCronJob() {
+  const name = document.getElementById("cronName").value.trim();
+  const schedule = document.getElementById("cronSchedule").value.trim();
+  const prompt = document.getElementById("cronPrompt").value.trim();
+  if (!name || !schedule || !prompt) { alert("请填写完整信息"); return; }
+  await api("/api/cron/create", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      name, schedule, prompt,
+      project: document.getElementById("cronProject").value
+    })
+  });
+  document.querySelector(".modal-overlay").remove();
+  loadCronJobs();
+}
+
+async function toggleCronJob(id, enabled) {
+  await api("/api/cron/update", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ id, enabled })
+  });
+  loadCronJobs();
+}
+
+async function deleteCronJob(id) {
+  if (!confirm("确定删除此定时任务？")) return;
+  await api("/api/cron/delete", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ id })
+  });
+  loadCronJobs();
+}
+
+// === 协作仪表盘 ===
+async function loadDashboard() {
+  const el = document.getElementById("dashboardBody");
+  el.innerHTML = '<div class="empty">加载中...</div>';
+
+  try {
+    const stats = await api("/api/collaboration/stats");
+    const tasks = await api("/api/tasks");
+    const groups = await api("/api/groups");
+
+    const completionRate = stats.completion_rate || 0;
+    const pendingCount = stats.pending_tasks || 0;
+    const inProgressCount = stats.in_progress_tasks || 0;
+    const doneCount = stats.done_tasks || 0;
+
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
+        <div style="background:var(--bg-glass);backdrop-filter:blur(10px);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:20px">
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">总任务数</div>
+          <div style="font-size:32px;font-weight:700;background:var(--gradient-blue);-webkit-background-clip:text;-webkit-text-fill-color:transparent">${stats.total_tasks || 0}</div>
+        </div>
+        <div style="background:var(--bg-glass);backdrop-filter:blur(10px);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:20px">
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">待处理</div>
+          <div style="font-size:32px;font-weight:700;color:var(--accent-yellow)">${pendingCount}</div>
+        </div>
+        <div style="background:var(--bg-glass);backdrop-filter:blur(10px);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:20px">
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">进行中</div>
+          <div style="font-size:32px;font-weight:700;color:var(--accent-blue)">${inProgressCount}</div>
+        </div>
+        <div style="background:var(--bg-glass);backdrop-filter:blur(10px);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:20px">
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">已完成</div>
+          <div style="font-size:32px;font-weight:700;color:var(--accent-green)">${doneCount}</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div style="background:var(--bg-glass);backdrop-filter:blur(10px);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:20px">
+          <h4 style="color:var(--text-primary);margin-bottom:16px;font-size:14px">📈 完成进度</h4>
+          <div style="background:rgba(55,65,81,0.3);border-radius:20px;height:24px;overflow:hidden;margin-bottom:12px">
+            <div style="background:var(--gradient-green);height:100%;width:${completionRate}%;border-radius:20px;transition:width 0.5s;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:white">${completionRate}%</div>
+          </div>
+          <div style="font-size:12px;color:var(--text-muted)">${doneCount}/${stats.total_tasks || 0} 个任务已完成</div>
+        </div>
+
+        <div style="background:var(--bg-glass);backdrop-filter:blur(10px);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:20px">
+          <h4 style="color:var(--text-primary);margin-bottom:16px;font-size:14px">💬 群聊协作</h4>
+          <div style="font-size:12px;color:var(--text-muted)">
+            活跃群聊: ${stats.groups_count || 0} 个
+          </div>
+          <div style="margin-top:12px">
+            ${(groups.groups || []).map(g => `
+              <div style="display:flex;align-items:center;gap:8px;padding:8px;background:rgba(55,65,81,0.2);border-radius:8px;margin-bottom:6px">
+                <span>💬</span>
+                <span style="color:var(--text-primary);font-size:13px">${escapeHtml(g.name)}</span>
+                <span style="color:var(--text-muted);font-size:11px;margin-left:auto">${g.members?.length || 0} 成员</span>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:20px;background:var(--bg-glass);backdrop-filter:blur(10px);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:20px">
+        <h4 style="color:var(--text-primary);margin-bottom:16px;font-size:14px">📝 最近活动</h4>
+        ${(stats.recent_activities || []).length === 0 ?
+          '<div style="color:var(--text-muted);font-size:13px">暂无活动记录</div>' :
+          `<div style="max-height:300px;overflow-y:auto">
+            ${(stats.recent_activities || []).map(a => `
+              <div style="display:flex;gap:12px;padding:10px;border-bottom:1px solid var(--border-color)">
+                <div style="color:var(--accent-blue);font-size:12px;min-width:80px">${escapeHtml(a.agent || "user")}</div>
+                <div style="flex:1;font-size:13px;color:var(--text-secondary)">${escapeHtml(a.content || "").substring(0, 100)}</div>
+                <div style="font-size:11px;color:var(--text-muted);white-space:nowrap">${new Date(a.timestamp).toLocaleString("zh-CN")}</div>
+              </div>
+            `).join("")}
+          </div>`
+        }
+      </div>
+
+      <div style="margin-top:20px;display:flex;gap:12px">
+        <button class="btn btn-primary" onclick="executeAllTasks()">🚀 执行所有待处理任务</button>
+        <button class="btn btn-outline" onclick="showDecomposeModal()">📋 智能任务分解</button>
+        <button class="btn btn-outline" onclick="showCodeReviewModal()">🔍 代码审查</button>
+      </div>
+    `;
+  } catch (e) {
+    el.innerHTML = `<div class="empty" style="color:var(--accent-red)">加载失败: ${e.message}</div>`;
+  }
+}
+
+// 智能任务分解弹窗
+function showDecomposeModal() {
+  if (!currentGroup) {
+    alert("请先在群聊协作中选择一个群聊");
+    return;
+  }
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:500px">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>📋 智能任务分解</h3>
+    <div class="form-group"><label>描述你的需求</label>
+      <textarea id="decomposeRequirement" rows="4" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-size:13px;resize:vertical;outline:none" placeholder="例如：实现用户头像上传功能，包括后端接口和前端页面"></textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitDecompose()">开始分解</button>
+    </div></div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitDecompose() {
+  const requirement = document.getElementById("decomposeRequirement").value.trim();
+  if (!requirement) { alert("请描述需求"); return; }
+  document.querySelector(".modal-overlay").remove();
+
+  const el = document.getElementById("dashboardBody");
+  el.innerHTML = '<div class="sending-indicator" style="display:block;text-align:center;padding:40px">🧠 正在分解任务，请稍候...</div>';
+
+  try {
+    const res = await api("/api/groups/decompose", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ group_id: currentGroup.id, requirement })
+    });
+
+    if (res.success) {
+      alert(`✅ 任务分解完成！共创建 ${res.tasks?.length || 0} 个任务`);
+      loadDashboard();
+    } else {
+      alert("分解失败: " + (res.error || "未知错误"));
+      loadDashboard();
+    }
+  } catch (e) {
+    alert("分解失败: " + e.message);
+    loadDashboard();
+  }
+}
+
+// 执行所有待处理任务
+async function executeAllTasks() {
+  if (!confirm("确定要执行所有待处理任务？这可能需要较长时间")) return;
+
+  const el = document.getElementById("dashboardBody");
+  el.innerHTML = '<div class="sending-indicator" style="display:block;text-align:center;padding:40px">🚀 正在执行任务，请稍候...</div>';
+
+  try {
+    const res = await api("/api/tasks/auto-execute-all", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ group_id: currentGroup?.id })
+    });
+
+    if (res.success) {
+      const completed = res.results?.filter(r => r.completed).length || 0;
+      alert(`✅ 任务执行完成！${completed}/${res.results?.length || 0} 个任务已完成`);
+    }
+    loadDashboard();
+  } catch (e) {
+    alert("执行失败: " + e.message);
+    loadDashboard();
+  }
+}
+
+// 代码审查弹窗
+function showCodeReviewModal() {
+  if (!currentGroup) {
+    alert("请先在群聊协作中选择一个群聊");
+    return;
+  }
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:500px">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>🔍 多 Agent 代码审查</h3>
+    <div class="form-group"><label>选择项目</label>
+      <select id="reviewProject">${projects.map(p => `<option value="${p.name}">${p.name}</option>`).join("")}</select>
+    </div>
+    <div class="form-group"><label>代码变更（git diff 或粘贴代码）</label>
+      <textarea id="reviewDiff" rows="6" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-family:monospace;font-size:12px;resize:vertical;outline:none" placeholder="粘贴 git diff 输出或代码变更"></textarea>
+    </div>
+    <div class="form-group"><label>选择审查者</label>
+      <div style="max-height:150px;overflow-y:auto">
+        ${currentGroup.members.filter(m => m.project !== "coordinator").map(m => `
+          <label style="display:flex;align-items:center;gap:8px;padding:6px;cursor:pointer">
+            <input type="checkbox" value="${m.project}" class="reviewer-check" checked>
+            <span>${m.project}</span>
+          </label>
+        `).join("")}
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitCodeReview()">开始审查</button>
+    </div></div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitCodeReview() {
+  const project = document.getElementById("reviewProject").value;
+  const diff = document.getElementById("reviewDiff").value.trim();
+  if (!diff) { alert("请提供代码变更"); return; }
+
+  const reviewers = [];
+  document.querySelectorAll(".reviewer-check:checked").forEach(cb => reviewers.push(cb.value));
+
+  document.querySelector(".modal-overlay").remove();
+
+  const el = document.getElementById("dashboardBody");
+  el.innerHTML = '<div class="sending-indicator" style="display:block;text-align:center;padding:40px">🔍 正在进行代码审查，请稍候...</div>';
+
+  try {
+    const res = await api("/api/review", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ group_id: currentGroup.id, project, diff, reviewers })
+    });
+
+    if (res.success) {
+      el.innerHTML = `
+        <div style="background:var(--bg-glass);backdrop-filter:blur(10px);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:24px">
+          <h4 style="color:var(--text-primary);margin-bottom:16px">🔍 代码审查结果 - ${project}</h4>
+          ${(res.reviews || []).map(r => `
+            <div style="margin-bottom:16px;padding:16px;background:rgba(55,65,81,0.2);border-radius:8px">
+              <div style="font-weight:600;color:var(--accent-blue);margin-bottom:8px">🤖 ${r.reviewer}</div>
+              <div style="font-size:13px;color:var(--text-secondary);white-space:pre-wrap">${escapeHtml(r.result || r.error || "无结果")}</div>
+            </div>
+          `).join("")}
+          <button class="btn btn-outline" onclick="loadDashboard()" style="margin-top:16px">返回仪表盘</button>
+        </div>
+      `;
+    } else {
+      alert("审查失败: " + (res.error || "未知错误"));
+      loadDashboard();
+    }
+  } catch (e) {
+    alert("审查失败: " + e.message);
+    loadDashboard();
+  }
+}
+
+// === 文件上传 ===
+let pendingFiles = [];
+
+function onFilesSelected(fileList) {
+  for (const file of fileList) {
+    if (pendingFiles.length >= 5) { alert("最多上传5个文件"); break; }
+    pendingFiles.push(file);
+  }
+  renderFilePreview();
+  document.getElementById("fileUpload").value = "";
+}
+
+function onDrop(e) {
+  e.preventDefault();
+  e.target.style.borderColor = "#334155";
+  if (e.dataTransfer.files.length) {
+    onFilesSelected(e.dataTransfer.files);
+  }
+}
+
+function removeFile(index) {
+  pendingFiles.splice(index, 1);
+  renderFilePreview();
+}
+
+function renderFilePreview() {
+  const el = document.getElementById("filePreview");
+  if (pendingFiles.length === 0) { el.innerHTML = ""; return; }
+
+  el.innerHTML = pendingFiles.map((f, i) => {
+    const isImage = f.type.startsWith("image/");
+    const icon = isImage ? "" : getFileIcon(f.name);
+    const size = (f.size / 1024).toFixed(1) + "KB";
+    return `<div class="file-chip">
+      ${isImage ? `<img src="${URL.createObjectURL(f)}">` : `<span>${icon}</span>`}
+      <span>${f.name.length > 20 ? f.name.slice(0,17)+'...' : f.name}</span>
+      <span style="color:#64748b;font-size:11px">${size}</span>
+      <span class="remove" onclick="removeFile(${i})">&times;</span>
+    </div>`;
+  }).join("");
+}
+
+function getFileIcon(name) {
+  const ext = name.split(".").pop().toLowerCase();
+  const icons = { pdf:"📄", doc:"📝", doc:"📝", xls:"📊", xlsx:"📊", zip:"📦", json:"📋", txt:"📃", csv:"📊" };
+  return icons[ext] || "📎";
+}
+
+// === 发送消息 ===
+function appendMessage(role, content) {
+  const el = document.getElementById("contentBody");
+  // 移除空状态提示
+  const empty = el.querySelector(".empty");
+  if (empty) empty.remove();
+
+  const time = new Date().toLocaleString("zh-CN");
+  const agentLabel = role === "assistant" ? `<span style="color:var(--accent-blue);font-size:11px;display:block;margin-bottom:6px;font-weight:500">🤖 Agent</span>` : "";
+  const div = document.createElement("div");
+  div.className = `message ${role}`;
+  div.innerHTML = `
+    <div class="bubble">${agentLabel}${escapeHtml(content)}</div>
+    <div class="msg-meta">${time}</div>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+function appendStreamBubble() {
+  const el = document.getElementById("contentBody");
+  const empty = el.querySelector(".empty");
+  if (empty) empty.remove();
+
+  const div = document.createElement("div");
+  div.className = "message assistant";
+  div.innerHTML = `
+    <div class="bubble"><span style="color:var(--accent-blue);font-size:11px;display:block;margin-bottom:6px;font-weight:500">🤖 Agent</span><span class="stream-content"></span><span class="stream-cursor" style="animation:blink 1s infinite;color:var(--accent-blue)">▌</span></div>
+    <div class="msg-meta">${new Date().toLocaleString("zh-CN")}</div>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+  return div.querySelector(".stream-content");
+}
+
+async function sendMessage() {
+  const input = document.getElementById("chatInput");
+  const message = input.value.trim();
+
+  if (!currentProject) { alert("请先选择一个项目"); return; }
+  if (!message && pendingFiles.length === 0) return;
+
+  const btn = document.getElementById("chatSendBtn");
+  const indicator = document.getElementById("sendingIndicator");
+
+  // 显示用户消息
+  appendMessage("user", message);
+
+  btn.disabled = true;
+  btn.textContent = "发送中...";
+  input.value = "";
+  input.style.height = "auto";
+
+  try {
+    if (pendingFiles.length > 0) {
+      // 有文件：用普通 API
+      indicator.textContent = "📎 上传文件中...";
+      indicator.style.display = "block";
+      const formData = new FormData();
+      formData.append("project", currentProject);
+      formData.append("message", message);
+      for (const file of pendingFiles) formData.append("files", file, file.name);
+      const res = await fetch("/api/send", { method: "POST", body: formData });
+      const data = await res.json();
+      indicator.style.display = "none";
+      if (data.success) {
+        appendMessage("assistant", data.output || "(无回复)");
+        pendingFiles = [];
+        renderFilePreview();
+      } else {
+        appendMessage("assistant", "错误: " + (data.error || "未知错误"));
+      }
+    } else {
+      // 流式输出
+      indicator.textContent = "🧠 Agent 正在思考...";
+      indicator.style.display = "block";
+
+      const streamEl = appendStreamBubble();
+      let fullText = "";
+
+      const res = await fetch("/api/send-stream", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({ project: currentProject, message })
+      });
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === "status") {
+              indicator.textContent = "🧠 " + event.text;
+            } else if (event.type === "chunk") {
+              indicator.textContent = "✍️ Agent 正在回复...";
+              fullText += event.text;
+              streamEl.textContent = fullText;
+              const body = document.getElementById("contentBody");
+              body.scrollTop = body.scrollHeight;
+            } else if (event.type === "done") {
+              // 移除光标
+              const cursor = streamEl.parentElement.querySelector(".stream-cursor");
+              if (cursor) cursor.remove();
+            } else if (event.type === "error") {
+              streamEl.textContent = "错误: " + event.text;
+              const cursor = streamEl.parentElement.querySelector(".stream-cursor");
+              if (cursor) cursor.remove();
+            }
+          } catch {}
+        }
+      }
+
+      indicator.style.display = "none";
+
+      // 新会话自动命名
+      if (currentSessionNew && currentSession && fullText) {
+        currentSessionNew = false;
+        autoNameSession(currentProject, currentSession, message);
+      }
+    }
+  } catch (e) {
+    appendMessage("assistant", "发送失败: " + e.message);
+  }
+
+  btn.disabled = false;
+  btn.textContent = "发送";
+  indicator.style.display = "none";
+}
+
+// 自动调整 textarea 高度
+document.getElementById("chatInput").addEventListener("input", function() {
+  this.style.height = "auto";
+  this.style.height = Math.min(this.scrollHeight, 120) + "px";
+});
+
+// 更新聊天目标提示
+function updateChatTarget() {
+  const el = document.getElementById("chatTarget");
+  if (currentProject) {
+    el.textContent = `发送到: ${currentProject}`;
+    el.style.color = "#38bdf8";
+  } else {
+    el.textContent = "未选择项目";
+    el.style.color = "#64748b";
+  }
+}
+
+// 覆盖 selectProject 以更新聊天目标
+const _origSelectProject = selectProject;
+selectProject = function(name) {
+  _origSelectProject(name);
+  updateChatTarget();
+};
+
+// === AI 自动命名 ===
+async function autoNameSession(project, sessionId, message) {
+  try {
+    const proj = projects.find(p => p.name === project);
+    const res = await api("/api/sessions/auto-name", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ project, sessionId, message, workDir: proj?.work_dir })
+    });
+    if (res.success && res.name) {
+      // 更新标题和会话列表
+      document.getElementById("contentTitle").textContent = `${project} - ${res.name}`;
+      loadSessions(project);
+    }
+  } catch (e) {
+    // 静默失败，不影响正常使用
+    console.log("自动命名失败:", e);
+  }
+}
+
+// === 群聊重命名和删除 ===
+function showRenameGroupModal() {
+  if (!currentGroup) return;
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>✏️ 重命名群聊</h3>
+    <div class="form-group">
+      <label>群聊名称</label>
+      <input type="text" id="renameGroupInput" value="${escapeHtml(currentGroup.name)}" placeholder="输入新的群聊名称">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitRenameGroup()">确定</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+  document.getElementById("renameGroupInput").focus();
+  document.getElementById("renameGroupInput").select();
+}
+
+async function submitRenameGroup() {
+  if (!currentGroup) return;
+  const name = document.getElementById("renameGroupInput").value.trim();
+  if (!name) { alert("请输入群聊名称"); return; }
+  document.querySelector(".modal-overlay").remove();
+
+  const res = await api("/api/groups/rename", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ id: currentGroup.id, name })
+  });
+
+  if (res.success) {
+    currentGroup.name = name;
+    document.getElementById("groupTitle").textContent = `💬 ${name}`;
+    loadGroups();
+  } else {
+    alert("重命名失败: " + (res.error || "未知错误"));
+  }
+}
+
+async function deleteCurrentGroup() {
+  if (!currentGroup) return;
+  if (!confirm(`确定删除群聊 "${currentGroup.name}"？\n\n删除后将无法恢复，所有消息记录也会被删除。`)) return;
+
+  const res = await api("/api/groups/delete", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ id: currentGroup.id })
+  });
+
+  if (res.success) {
+    currentGroup = null;
+    document.getElementById("groupTitle").textContent = "选择或创建一个群聊";
+    document.getElementById("groupActions").style.display = "none";
+    document.getElementById("groupChatBar").style.display = "none";
+    document.getElementById("groupBody").innerHTML = '<div class="empty" style="flex-direction:column;gap:12px"><span style="font-size:48px;opacity:0.3">💬</span><span style="font-size:16px;color:var(--text-secondary)">开始群聊协作</span><span style="font-size:13px;color:var(--text-muted)">创建群聊并添加 Agent 成员</span></div>';
+    loadGroups();
+  } else {
+    alert("删除失败: " + (res.error || "未知错误"));
+  }
+}
+
+// === 群聊成员管理 ===
+function showManageMembersModal() {
+  if (!currentGroup) return;
+  const currentMembers = currentGroup.members.filter(m => m.project !== "coordinator");
+  const currentNames = new Set(currentMembers.map(m => m.project));
+  const available = projects.filter(p => !currentNames.has(p.name));
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:420px">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>成员管理 - ${escapeHtml(currentGroup.name)}</h3>
+
+    <div style="margin-bottom:16px">
+      <div style="font-size:13px;color:#94a3b8;margin-bottom:8px">当前成员</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        <span class="tag" style="background:#38bdf820;color:#38bdf8;padding:4px 10px">🎯 协调者（不可移除）</span>
+        ${currentMembers.map(m => `
+          <span class="tag" style="padding:4px 10px;display:flex;align-items:center;gap:4px">
+            ${escapeHtml(m.project)}
+            <span style="cursor:pointer;color:#ef4444;margin-left:4px" onclick="removeGroupMember('${m.project}')">&times;</span>
+          </span>`).join("")}
+      </div>
+    </div>
+
+    ${available.length > 0 ? `
+    <div style="margin-bottom:16px">
+      <div style="font-size:13px;color:#94a3b8;margin-bottom:8px">添加成员</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${available.map(p => `
+          <button class="btn btn-outline btn-sm" onclick="addGroupMember('${p.name}','${p.agent||'claudecode'}')">
+            + ${escapeHtml(p.name)}
+          </button>`).join("")}
+      </div>
+    </div>` : '<div style="color:#64748b;font-size:13px">所有项目都已加入群聊</div>'}
+
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+    </div></div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function addGroupMember(project, agent) {
+  const res = await api("/api/groups/members", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ id: currentGroup.id, add: [{ project, agent }] })
+  });
+  if (res.success) {
+    currentGroup = res.group;
+    const idx = groupsData.findIndex(g => g.id === currentGroup.id);
+    if (idx >= 0) groupsData[idx] = currentGroup;
+    renderGroupList();
+    selectGroup(currentGroup.id);
+    document.querySelector(".modal-overlay")?.remove();
+    showManageMembersModal();
+  }
+}
+
+async function removeGroupMember(project) {
+  if (!confirm(`确定移除 ${project}？`)) return;
+  const res = await api("/api/groups/members", {
+    method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ id: currentGroup.id, remove: [project] })
+  });
+  if (res.success) {
+    currentGroup = res.group;
+    const idx = groupsData.findIndex(g => g.id === currentGroup.id);
+    if (idx >= 0) groupsData[idx] = currentGroup;
+    renderGroupList();
+    selectGroup(currentGroup.id);
+    document.querySelector(".modal-overlay")?.remove();
+    showManageMembersModal();
+  }
+}
+
+// === 群聊文件上传 ===
+let groupPendingFiles = [];
+
+function onGroupFilesSelected(fileList) {
+  for (const file of fileList) {
+    if (groupPendingFiles.length >= 5) { alert("最多上传5个文件"); break; }
+    groupPendingFiles.push(file);
+  }
+  renderGroupFilePreview();
+  document.getElementById("groupFileUpload").value = "";
+}
+
+function onGroupFileDrop(e) {
+  e.preventDefault();
+  e.target.style.borderColor = "#334155";
+  if (e.dataTransfer.files.length) onGroupFilesSelected(e.dataTransfer.files);
+}
+
+function removeGroupFile(index) {
+  groupPendingFiles.splice(index, 1);
+  renderGroupFilePreview();
+}
+
+function renderGroupFilePreview() {
+  const el = document.getElementById("groupFilePreview");
+  if (groupPendingFiles.length === 0) { el.innerHTML = ""; return; }
+  el.innerHTML = groupPendingFiles.map((f, i) => {
+    const isImage = f.type.startsWith("image/");
+    const size = (f.size / 1024).toFixed(1) + "KB";
+    return `<div class="file-chip">
+      ${isImage ? `<img src="${URL.createObjectURL(f)}">` : `<span>📎</span>`}
+      <span>${f.name.length > 18 ? f.name.slice(0,15)+'...' : f.name}</span>
+      <span style="color:#64748b;font-size:11px">${size}</span>
+      <span class="remove" onclick="removeGroupFile(${i})">&times;</span>
+    </div>`;
+  }).join("");
+}
+
+// === 工具配置管理 ===
+let toolsData = { mcp: [], skill: [], shared: [] };
+let currentToolFilter = 'all';
+
+async function loadTools() {
+  try {
+    // 并行加载所有工具数据
+    const [sharedData, mcpData, skillData] = await Promise.all([
+      api("/api/shared"),
+      api("/api/mcp"),
+      api("/api/skills")
+    ]);
+
+    toolsData.shared = (sharedData.files || []).map(f => ({
+      name: f.name,
+      type: 'shared',
+      description: `${f.type === 'text' ? '📄' : f.type === 'image' ? '🖼️' : '📎'} ${f.name}`,
+      size: f.size,
+      modified: f.modified
+    }));
+
+    toolsData.mcp = (mcpData.tools || []).map(t => ({
+      ...t,
+      type: 'mcp',
+      enabled: t.enabled !== false
+    }));
+
+    toolsData.skill = (skillData.skills || []).map(s => ({
+      ...s,
+      type: 'skill',
+      enabled: s.enabled !== false
+    }));
+
+    renderTools();
+    updateToolsStats();
+  } catch (e) {
+    console.error("加载工具失败:", e);
+  }
+}
+
+function renderTools() {
+  const el = document.getElementById("toolsBody");
+  let tools = [];
+
+  if (currentToolFilter === 'all') {
+    tools = [...toolsData.mcp, ...toolsData.skill, ...toolsData.shared];
+  } else {
+    tools = toolsData[currentToolFilter] || [];
+  }
+
+  if (tools.length === 0) {
+    el.innerHTML = '<div class="empty" style="flex-direction:column;gap:12px"><span style="font-size:40px;opacity:0.3">🔧</span>暂无工具<br><small style="color:var(--text-muted)">点击上方按钮添加</small></div>';
+    return;
+  }
+
+  el.innerHTML = tools.map(tool => {
+    const icon = tool.type === 'mcp' ? '🔌' : tool.type === 'skill' ? '⚡' : '📁';
+    const badge = tool.type === 'mcp' ? 'MCP' : tool.type === 'skill' ? 'Skill' : '文件';
+    const badgeColor = tool.type === 'mcp' ? 'var(--accent-purple)' : tool.type === 'skill' ? 'var(--accent-yellow)' : 'var(--accent-blue)';
+
+    return `<div style="padding:14px 16px;border:1px solid var(--border-color);border-radius:8px;margin-bottom:10px;background:var(--bg-card)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:20px">${icon}</span>
+          <div>
+            <div style="font-size:14px;font-weight:500;color:var(--text-primary)">${escapeHtml(tool.name)}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${escapeHtml(tool.description || '')}</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:10px;padding:2px 8px;border-radius:10px;background:${badgeColor}20;color:${badgeColor}">${badge}</span>
+          ${tool.type !== 'shared' ? `
+            <label style="cursor:pointer;display:flex;align-items:center;gap:4px">
+              <input type="checkbox" ${tool.enabled ? 'checked' : ''} onchange="toggleTool('${tool.type}', '${escapeHtml(tool.name)}', this.checked)" style="accent-color:var(--accent-blue)">
+              <span style="font-size:11px;color:var(--text-muted)">${tool.enabled ? '启用' : '禁用'}</span>
+            </label>
+          ` : ''}
+          <button class="btn btn-danger btn-sm" onclick="deleteTool('${tool.type}', '${escapeHtml(tool.name)}')" style="padding:3px 8px;font-size:11px">删除</button>
+        </div>
+      </div>
+      ${tool.command ? `<div style="font-size:11px;color:var(--text-muted);font-family:monospace;background:rgba(15,23,42,0.6);padding:6px 10px;border-radius:4px;margin-top:8px">${escapeHtml(tool.command)}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function updateToolsStats() {
+  const total = toolsData.mcp.length + toolsData.skill.length + toolsData.shared.length;
+  document.getElementById("toolsStats").textContent = `${total} 个工具`;
+  document.getElementById("count-all").textContent = total;
+  document.getElementById("count-mcp").textContent = toolsData.mcp.length;
+  document.getElementById("count-skill").textContent = toolsData.skill.length;
+  document.getElementById("count-shared").textContent = toolsData.shared.length;
+}
+
+function filterTools(type) {
+  currentToolFilter = type;
+  // 更新选中状态
+  document.querySelectorAll('[id^="filter-"]').forEach(el => el.classList.remove('active'));
+  document.getElementById(`filter-${type}`).classList.add('active');
+
+  // 更新标题
+  const titles = { all: '全部工具', mcp: 'MCP 服务器', skill: 'Skills', shared: '共享文件' };
+  document.getElementById("toolsTitle").textContent = titles[type] || '全部工具';
+
+  renderTools();
+}
+
+async function toggleTool(type, name, enabled) {
+  const tool = type === 'mcp'
+    ? toolsData.mcp.find(t => t.name === name)
+    : toolsData.skill.find(t => t.name === name);
+
+  if (!tool) return;
+  tool.enabled = enabled;
+
+  const endpoint = type === 'mcp' ? '/api/mcp' : '/api/skills';
+  await api(endpoint, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(tool)
+  });
+}
+
+async function deleteTool(type, name) {
+  if (!confirm(`确定删除 ${name}？`)) return;
+
+  const endpoint = type === 'mcp' ? '/api/mcp/delete' : '/api/skills/delete';
+  await api(endpoint, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ name })
+  });
+
+  // 更新本地数据
+  if (type === 'mcp') {
+    toolsData.mcp = toolsData.mcp.filter(t => t.name !== name);
+  } else if (type === 'skill') {
+    toolsData.skill = toolsData.skill.filter(t => t.name !== name);
+  } else if (type === 'shared') {
+    await api("/api/shared/delete", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ name })
+    });
+    return;
+  }
+  renderTools();
+  updateToolsStats();
+}
+
+function showAddToolModal(type) {
+  const titles = { mcp: 'MCP 服务器', skill: 'Skill', shared: '共享文件' };
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+
+  if (type === 'shared') {
+    showNewFileModal();
+    return;
+  }
+
+  overlay.innerHTML = `<div class="modal" style="min-width:500px">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>添加 ${titles[type]}</h3>
+    <div class="form-group">
+      <label>名称</label>
+      <input type="text" id="newToolName" placeholder="如 my-mcp-server">
+    </div>
+    <div class="form-group">
+      <label>描述</label>
+      <input type="text" id="newToolDesc" placeholder="简要描述功能">
+    </div>
+    ${type === 'mcp' ? `
+      <div class="form-group">
+        <label>启动命令</label>
+        <input type="text" id="newToolCommand" placeholder="如 npx @anthropic-ai/mcp-server">
+      </div>
+      <div class="form-group">
+        <label>环境变量 (JSON格式，可选)</label>
+        <input type="text" id="newToolEnv" placeholder='{"API_KEY": "xxx"}'>
+      </div>
+    ` : ''}
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitAddTool('${type}')">添加</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitAddTool(type) {
+  const name = document.getElementById("newToolName").value.trim();
+  const desc = document.getElementById("newToolDesc").value.trim();
+  if (!name) { alert("请输入名称"); return; }
+
+  const tool = {
+    name,
+    type,
+    description: desc,
+    enabled: true
+  };
+
+  if (type === 'mcp') {
+    tool.command = document.getElementById("newToolCommand")?.value?.trim() || '';
+    const envStr = document.getElementById("newToolEnv")?.value?.trim();
+    if (envStr) {
+      try { tool.env = JSON.parse(envStr); } catch { alert("环境变量格式错误"); return; }
+    }
+    await api("/api/mcp", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(tool)
+    });
+  } else if (type === 'skill') {
+    await api("/api/skills", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(tool)
+    });
+  }
+
+  document.querySelector(".modal-overlay").remove();
+  loadTools();
+}
+
+// 群聊工具配置
+async function showGroupToolsModal() {
+  if (!currentGroup) return;
+
+  // 加载群聊的工具配置
+  const groupToolsData = await api(`/api/groups/tools?id=${currentGroup.id}`);
+  const groupTools = groupToolsData.tools || { mcp: [], skill: [] };
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:600px;max-height:85vh;display:flex;flex-direction:column">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>🔧 群聊工具配置 - ${escapeHtml(currentGroup.name)}</h3>
+    <div style="margin-bottom:16px;font-size:12px;color:var(--text-muted)">配置此群聊可用的工具，Agent 将能使用这些工具</div>
+
+    <div style="flex:1;overflow-y:auto;margin-bottom:16px">
+      <div style="margin-bottom:20px">
+        <div style="font-size:13px;font-weight:500;color:var(--text-secondary);margin-bottom:10px">🔌 MCP 服务器</div>
+        ${toolsData.mcp.length === 0 ? '<div style="font-size:12px;color:var(--text-muted);padding:8px">暂无 MCP 服务器配置</div>' :
+          toolsData.mcp.map(tool => {
+            const isEnabled = groupTools.mcp.includes(tool.name);
+            return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;border-radius:6px;margin-bottom:4px;border:1px solid ${isEnabled ? 'var(--accent-blue)' : 'var(--border-color)'};background:${isEnabled ? 'rgba(56,189,248,0.05)' : 'transparent'};transition:all 0.2s">
+              <input type="checkbox" ${isEnabled ? 'checked' : ''} data-type="mcp" data-name="${escapeHtml(tool.name)}" onchange="updateGroupTool(this)" style="accent-color:var(--accent-blue)">
+              <span style="font-size:16px">🔌</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;color:var(--text-primary)">${escapeHtml(tool.name)}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${escapeHtml(tool.description || '')}</div>
+              </div>
+            </label>`;
+          }).join('')
+        }
+      </div>
+
+      <div style="margin-bottom:20px">
+        <div style="font-size:13px;font-weight:500;color:var(--text-secondary);margin-bottom:10px">⚡ Skills</div>
+        ${toolsData.skill.length === 0 ? '<div style="font-size:12px;color:var(--text-muted);padding:8px">暂无 Skill 配置</div>' :
+          toolsData.skill.map(tool => {
+            const isEnabled = groupTools.skill.includes(tool.name);
+            return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;border-radius:6px;margin-bottom:4px;border:1px solid ${isEnabled ? 'var(--accent-blue)' : 'var(--border-color)'};background:${isEnabled ? 'rgba(56,189,248,0.05)' : 'transparent'};transition:all 0.2s">
+              <input type="checkbox" ${isEnabled ? 'checked' : ''} data-type="skill" data-name="${escapeHtml(tool.name)}" onchange="updateGroupTool(this)" style="accent-color:var(--accent-blue)">
+              <span style="font-size:16px">⚡</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;color:var(--text-primary)">${escapeHtml(tool.name)}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${escapeHtml(tool.description || '')}</div>
+              </div>
+            </label>`;
+          }).join('')
+        }
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid var(--border-color)">
+      <div style="font-size:12px;color:var(--text-muted)">已选择 ${(groupTools.mcp?.length || 0) + (groupTools.skill?.length || 0)} 个工具</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+        <button class="btn btn-primary" onclick="saveGroupTools()">保存配置</button>
+      </div>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+function updateGroupTool(checkbox) {
+  // 更新 UI 显示
+  const label = checkbox.closest('label');
+  if (checkbox.checked) {
+    label.style.borderColor = 'var(--accent-blue)';
+    label.style.background = 'rgba(56,189,248,0.05)';
+  } else {
+    label.style.borderColor = 'var(--border-color)';
+    label.style.background = 'transparent';
+  }
+
+  // 更新计数
+  const allCheckboxes = document.querySelectorAll('.modal-overlay input[type="checkbox"]:checked');
+  const countEl = document.querySelector('.modal-overlay [style*="已选择"]');
+  if (countEl) {
+    countEl.textContent = `已选择 ${allCheckboxes.length} 个工具`;
+  }
+}
+
+async function saveGroupTools() {
+  if (!currentGroup) return;
+
+  const mcpTools = [];
+  const skillTools = [];
+
+  document.querySelectorAll('.modal-overlay input[type="checkbox"]').forEach(cb => {
+    if (cb.checked) {
+      if (cb.dataset.type === 'mcp') mcpTools.push(cb.dataset.name);
+      if (cb.dataset.type === 'skill') skillTools.push(cb.dataset.name);
+    }
+  });
+
+  console.log("保存群聊工具配置:", { group_id: currentGroup.id, tools: { mcp: mcpTools, skill: skillTools } });
+
+  try {
+    const res = await api("/api/groups/tools", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        group_id: currentGroup.id,
+        tools: { mcp: mcpTools, skill: skillTools }
+      })
+    });
+
+    console.log("保存结果:", res);
+
+    if (res.success) {
+      document.querySelector(".modal-overlay").remove();
+      alert("工具配置已保存");
+    } else {
+      alert("保存失败: " + (res.error || "未知错误"));
+    }
+  } catch (e) {
+    console.error("保存错误:", e);
+    alert("保存失败: " + e.message);
+  }
+}
+
+// === 内联代码变更显示 ===
+async function showInlineCodeChanges(groupBody, project, bubbleDiv) {
+  try {
+    const statusData = await api(`/api/git/status?project=${encodeURIComponent(project)}`);
+
+    if (!statusData.success || !statusData.files || statusData.files.length === 0) {
+      return;
+    }
+
+    // 获取所有文件的 diff
+    const filesToShow = statusData.files; // 显示所有文件
+    const diffs = [];
+
+    for (const file of filesToShow) {
+      try {
+        const diffData = await api(`/api/git/diff?project=${encodeURIComponent(project)}&file=${encodeURIComponent(file.path)}`);
+        if (diffData.success && diffData.hunks && diffData.hunks.length > 0) {
+          diffs.push({
+            path: file.path,
+            status: file.statusText,
+            statusColor: file.statusColor,
+            hunks: diffData.hunks
+          });
+        }
+      } catch (e) {
+        // 忽略单个文件的错误
+      }
+    }
+
+    if (diffs.length === 0) return;
+
+    // 创建代码变更显示区域
+    const changesDiv = document.createElement("div");
+    changesDiv.style.cssText = "margin-top:12px;border:1px solid var(--border-color);border-radius:8px;overflow:hidden";
+
+    let html = `
+      <div style="background:var(--bg-glass);padding:10px 14px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border-color)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:14px">📝</span>
+          <span style="font-size:13px;font-weight:500;color:var(--text-primary)">代码变更</span>
+          <span style="font-size:11px;color:var(--text-muted)">${statusData.files.length} 个文件</span>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="switchTab('changes');document.getElementById('changeProjectSelect').value='${project}';loadGitStatus()" style="font-size:11px">查看全部 →</button>
+      </div>
+      <div style="max-height:600px;overflow-y:auto">
+    `;
+
+    for (const diff of diffs) {
+      // 计算所有 hunk 的总行数
+      let totalLines = 0;
+      for (const hunk of diff.hunks) {
+        totalLines += hunk.changes.length;
+      }
+
+      html += `
+        <div style="border-bottom:1px solid var(--border-color)">
+          <div style="padding:8px 14px;background:rgba(15,23,42,0.4);display:flex;align-items:center;gap:8px;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+            <span style="width:8px;height:8px;border-radius:50%;background:${diff.statusColor}"></span>
+            <span style="font-size:12px;font-family:monospace;color:var(--text-primary);flex:1">${escapeHtml(diff.path)}</span>
+            <span style="font-size:11px;color:var(--text-muted)">${totalLines} 行</span>
+            <span style="font-size:11px;color:${diff.statusColor}">${diff.status}</span>
+          </div>
+          <div style="font-family:monospace;font-size:11px;line-height:1.4">
+      `;
+
+      // 显示所有 hunk 的所有行
+      for (const hunk of diff.hunks) {
+        html += `<div style="background:rgba(56,189,248,0.05);color:var(--accent-blue);padding:2px 14px;font-size:10px;border-top:1px solid var(--border-color);border-bottom:1px solid var(--border-color)">${escapeHtml(hunk.header)}</div>`;
+
+        const changes = hunk.changes;
+        for (const change of changes) {
+          let bgColor = "transparent";
+          let textColor = "var(--text-secondary)";
+          let prefix = " ";
+
+          if (change.type === "add") {
+            bgColor = "rgba(34,197,94,0.1)";
+            textColor = "#22c55e";
+            prefix = "+";
+          } else if (change.type === "remove") {
+            bgColor = "rgba(239,68,68,0.1)";
+            textColor = "#ef4444";
+            prefix = "-";
+          }
+
+          html += `<div style="background:${bgColor};padding:1px 14px;display:flex">
+            <span style="color:${textColor};min-width:16px;text-align:center">${prefix}</span>
+            <span style="color:${textColor};margin-left:8px;white-space:pre;overflow:hidden;text-overflow:ellipsis">${escapeHtml(change.content)}</span>
+          </div>`;
+        }
+      }
+
+      html += `</div></div>`;
+    }
+
+    html += '</div>';
+    changesDiv.innerHTML = html;
+
+    // 插入到气泡后面
+    bubbleDiv.querySelector(".bubble").appendChild(changesDiv);
+
+  } catch (e) {
+    console.error("获取代码变更失败:", e);
+  }
+}
+
+// === 代码变更查看器 ===
+let currentChangeProject = null;
+let currentChangeFile = null;
+let gitStatusData = null;
+
+function initChangeViewer() {
+  // 填充项目选择下拉框
+  const select = document.getElementById("changeProjectSelect");
+  select.innerHTML = '<option value="">选择项目</option>' +
+    projects.map(p => `<option value="${p.name}">${p.name}</option>`).join("");
+}
+
+// 文件夹折叠状态
+let folderCollapseState = {};
+
+async function loadGitStatus() {
+  const project = document.getElementById("changeProjectSelect").value;
+  if (!project) return;
+
+  currentChangeProject = project;
+  const fileListEl = document.getElementById("changesFileList");
+  fileListEl.innerHTML = '<div class="empty" style="height:auto;padding:40px"><span style="color:var(--text-muted)">加载中...</span></div>';
+
+  try {
+    const data = await api(`/api/git/status?project=${encodeURIComponent(project)}`);
+
+    if (!data.success) {
+      fileListEl.innerHTML = `<div class="empty" style="flex-direction:column;gap:12px;padding:40px 20px"><span style="font-size:32px;opacity:0.5">⚠️</span><span style="color:var(--accent-red)">${data.error || "获取状态失败"}</span></div>`;
+      return;
+    }
+
+    gitStatusData = data;
+    document.getElementById("changesCount").textContent = `${data.total} 个文件`;
+
+    if (data.files.length === 0) {
+      fileListEl.innerHTML = `<div class="empty" style="flex-direction:column;gap:12px;padding:40px 20px"><span style="font-size:32px;opacity:0.5">✅</span><span style="color:var(--accent-green)">没有变更</span><span style="font-size:12px;color:var(--text-muted)">分支: ${data.branch}</span></div>`;
+      return;
+    }
+
+    // 构建文件夹树结构
+    const folderTree = buildFolderTree(data.files);
+
+    fileListEl.innerHTML = `
+      <div style="padding:10px 16px;font-size:12px;color:var(--text-muted);border-bottom:1px solid var(--border-color)">
+        分支: <span style="color:var(--accent-blue)">${data.branch}</span>
+      </div>
+      <div style="padding:4px 0;overflow-y:auto">
+        ${renderFolderTree(folderTree, '')}
+      </div>
+    `;
+  } catch (e) {
+    fileListEl.innerHTML = `<div class="empty" style="flex-direction:column;gap:12px;padding:40px 20px"><span style="font-size:32px;opacity:0.5">❌</span><span style="color:var(--accent-red)">请求失败: ${e.message}</span></div>`;
+  }
+}
+
+// 构建文件夹树结构
+function buildFolderTree(files) {
+  const tree = { files: [], folders: {} };
+
+  for (const file of files) {
+    const parts = file.path.split(/[/\\]/);
+    let current = tree;
+
+    // 遍历路径中的文件夹
+    for (let i = 0; i < parts.length - 1; i++) {
+      const folder = parts[i];
+      if (!current.folders[folder]) {
+        current.folders[folder] = { files: [], folders: {} };
+      }
+      current = current.folders[folder];
+    }
+
+    // 添加文件到最后一个文件夹
+    current.files.push(file);
+  }
+
+  return tree;
+}
+
+// 渲染文件夹树
+function renderFolderTree(tree, parentPath, depth = 0) {
+  let html = '';
+  const indent = depth * 16;
+
+  // 渲染文件夹
+  for (const [folderName, folderData] of Object.entries(tree.folders)) {
+    const folderPath = parentPath ? `${parentPath}/${folderName}` : folderName;
+    const isCollapsed = folderCollapseState[folderPath] !== false; // 默认展开
+    const fileCount = countFiles(folderData);
+    const hasChanges = fileCount > 0;
+
+    if (!hasChanges) continue; // 跳过没有变更的文件夹
+
+    html += `
+      <div class="folder-item" style="padding:6px 8px 6px ${8 + indent}px;cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none" onclick="toggleFolder('${escapeHtml(folderPath)}')">
+        <span style="font-size:10px;color:var(--text-muted);transition:transform 0.2s;transform:rotate(${isCollapsed ? '-90' : '0'}deg)">▼</span>
+        <span style="font-size:14px">📁</span>
+        <span style="font-size:12px;font-weight:500;color:var(--text-primary);flex:1">${escapeHtml(folderName)}</span>
+        <span style="font-size:10px;color:var(--text-muted)">${fileCount}</span>
+      </div>
+      <div class="folder-children" style="display:${isCollapsed ? 'none' : 'block'}">
+        ${renderFolderTree(folderData, folderPath, depth + 1)}
+      </div>
+    `;
+  }
+
+  // 渲染文件
+  for (const file of tree.files) {
+    const fileName = file.path.split(/[/\\]/).pop();
+    html += `
+      <div class="file-item ${currentChangeFile === file.path ? 'active' : ''}" style="padding:6px 8px 6px ${24 + indent}px" onclick="loadFileDiff('${escapeHtml(file.path)}')">
+        <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0">
+          <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${file.statusColor};flex-shrink:0"></span>
+          <span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(fileName)}</span>
+        </div>
+        <span style="font-size:10px;color:${file.statusColor};white-space:nowrap;margin-left:4px">${file.statusText}</span>
+      </div>
+    `;
+  }
+
+  return html;
+}
+
+// 计算文件夹中的文件数量
+function countFiles(folder) {
+  let count = folder.files.length;
+  for (const subFolder of Object.values(folder.folders)) {
+    count += countFiles(subFolder);
+  }
+  return count;
+}
+
+// 切换文件夹折叠状态
+function toggleFolder(folderPath) {
+  folderCollapseState[folderPath] = folderCollapseState[folderPath] === false ? true : false;
+
+  // 重新渲染文件列表
+  if (gitStatusData) {
+    const fileListEl = document.getElementById("changesFileList");
+    const folderTree = buildFolderTree(gitStatusData.files);
+
+    fileListEl.innerHTML = `
+      <div style="padding:10px 16px;font-size:12px;color:var(--text-muted);border-bottom:1px solid var(--border-color)">
+        分支: <span style="color:var(--accent-blue)">${gitStatusData.branch}</span>
+      </div>
+      <div style="padding:4px 0;overflow-y:auto">
+        ${renderFolderTree(folderTree, '')}
+      </div>
+    `;
+  }
+}
+
+async function loadFileDiff(filePath) {
+  if (!currentChangeProject) return;
+
+  currentChangeFile = filePath;
+  const bodyEl = document.getElementById("changesBody");
+  const titleEl = document.getElementById("changesTitle");
+  const actionsEl = document.getElementById("changesActions");
+
+  titleEl.textContent = filePath;
+  actionsEl.style.display = "flex";
+  bodyEl.innerHTML = '<div class="empty" style="padding:40px"><span style="color:var(--text-muted)">加载 diff...</span></div>';
+
+  // 更新文件列表选中状态
+  document.querySelectorAll("#changesFileList .file-item").forEach(el => el.classList.remove("active"));
+  document.querySelector(`#changesFileList .file-item[onclick*="${filePath}"]`)?.classList.add("active");
+
+  try {
+    const data = await api(`/api/git/diff?project=${encodeURIComponent(currentChangeProject)}&file=${encodeURIComponent(filePath)}`);
+
+    if (!data.success) {
+      bodyEl.innerHTML = `<div class="empty" style="padding:40px"><span style="color:var(--accent-red)">${data.error}</span></div>`;
+      return;
+    }
+
+    if (data.hunks.length === 0) {
+      bodyEl.innerHTML = '<div class="empty" style="padding:40px"><span style="color:var(--text-muted)">没有差异（可能是新增的二进制文件）</span></div>';
+      return;
+    }
+
+    let html = '<div style="font-family:monospace;font-size:13px;line-height:1.6;overflow-x:auto">';
+    let lineNumOld = 0;
+    let lineNumNew = 0;
+
+    for (const hunk of data.hunks) {
+      html += `<div style="background:rgba(56,189,248,0.1);color:var(--accent-blue);padding:6px 16px;font-size:12px;border-bottom:1px solid var(--border-color)">${escapeHtml(hunk.header)}</div>`;
+
+      lineNumOld = hunk.oldStart;
+      lineNumNew = hunk.newStart;
+
+      for (const change of hunk.changes) {
+        let bgColor = "transparent";
+        let textColor = "var(--text-secondary)";
+        let prefix = " ";
+        let numColor = "var(--text-muted)";
+
+        if (change.type === "add") {
+          bgColor = "rgba(34,197,94,0.1)";
+          textColor = "var(--accent-green)";
+          prefix = "+";
+          numColor = "var(--accent-green)";
+          lineNumNew++;
+        } else if (change.type === "remove") {
+          bgColor = "rgba(239,68,68,0.1)";
+          textColor = "var(--accent-red)";
+          prefix = "-";
+          numColor = "var(--accent-red)";
+          lineNumOld++;
+        } else {
+          lineNumOld++;
+          lineNumNew++;
+        }
+
+        html += `<div style="background:${bgColor};display:flex">
+          <span style="color:${numColor};padding:0 12px;text-align:right;min-width:50px;user-select:none;border-right:1px solid var(--border-color)">${change.type === "add" ? lineNumNew - 1 : change.type === "remove" ? lineNumOld - 1 : lineNumOld - 1}</span>
+          <span style="color:${numColor};padding:0 4px;min-width:20px;text-align:center;user-select:none">${prefix}</span>
+          <span style="color:${textColor};padding:0 16px 0 4px;flex:1;white-space:pre">${escapeHtml(change.content)}</span>
+        </div>`;
+      }
+    }
+
+    html += '</div>';
+    bodyEl.innerHTML = html;
+  } catch (e) {
+    bodyEl.innerHTML = `<div class="empty" style="padding:40px"><span style="color:var(--accent-red)">请求失败: ${e.message}</span></div>`;
+  }
+}
+
+function showCommitModal() {
+  if (!currentChangeProject) {
+    alert("请先选择项目");
+    return;
+  }
+  if (!gitStatusData || gitStatusData.files.length === 0) {
+    alert("没有需要提交的更改");
+    return;
+  }
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:500px">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>💾 提交更改 - ${escapeHtml(currentChangeProject)}</h3>
+    <div style="margin-bottom:16px;font-size:12px;color:var(--text-muted)">分支: ${gitStatusData.branch} · ${gitStatusData.total} 个文件变更</div>
+    <div class="form-group">
+      <label>提交信息</label>
+      <textarea id="commitMessage" rows="3" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-size:13px;resize:vertical;outline:none" placeholder="描述本次更改..."></textarea>
+    </div>
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">变更文件:</div>
+      <div style="max-height:200px;overflow-y:auto;padding:8px;background:rgba(15,23,42,0.4);border-radius:8px;border:1px solid var(--border-color)">
+        ${gitStatusData.files.map(f => `
+          <div style="display:flex;align-items:center;gap:8px;padding:4px 8px;font-size:12px">
+            <input type="checkbox" checked value="${escapeHtml(f.path)}" class="commit-file-check" style="accent-color:var(--accent-blue)">
+            <span style="width:8px;height:8px;border-radius:50%;background:${f.statusColor}"></span>
+            <span style="color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(f.path)}</span>
+            <span style="margin-left:auto;color:${f.statusColor};font-size:11px">${f.statusText}</span>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitCommit()">提交</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitCommit() {
+  const message = document.getElementById("commitMessage").value.trim();
+  if (!message) {
+    alert("请输入提交信息");
+    return;
+  }
+
+  const files = Array.from(document.querySelectorAll(".commit-file-check:checked")).map(cb => cb.value);
+
+  document.querySelector(".modal-overlay").remove();
+
+  const res = await api("/api/git/commit", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ project: currentChangeProject, message, files })
+  });
+
+  if (res.success) {
+    alert("提交成功！");
+    loadGitStatus(); // 刷新状态
+  } else {
+    alert("提交失败: " + (res.error || "未知错误"));
+  }
+}
+
+async function rollbackFile() {
+  if (!currentChangeProject || !currentChangeFile) return;
+
+  if (!confirm(`确定要回滚文件 "${currentChangeFile}" 的更改？`)) return;
+
+  const res = await api("/api/git/rollback", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ project: currentChangeProject, file: currentChangeFile })
+  });
+
+  if (res.success) {
+    alert("回滚成功！");
+    loadGitStatus(); // 刷新状态
+    document.getElementById("changesBody").innerHTML = '<div class="empty" style="flex-direction:column;gap:12px"><span style="font-size:48px;opacity:0.3">📝</span><span style="font-size:16px;color:var(--text-secondary)">已回滚</span></div>';
+    document.getElementById("changesActions").style.display = "none";
+  } else {
+    alert("回滚失败: " + (res.error || "未知错误"));
+  }
+}
+
+function showGitLogModal() {
+  if (!currentChangeProject) {
+    alert("请先选择项目");
+    return;
+  }
+
+  api(`/api/git/log?project=${encodeURIComponent(currentChangeProject)}&limit=20`).then(data => {
+    if (!data.success) {
+      alert("获取提交历史失败: " + (data.error || "未知错误"));
+      return;
+    }
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `<div class="modal" style="min-width:600px;max-height:80vh;display:flex;flex-direction:column">
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+      <h3>📋 提交历史 - ${escapeHtml(currentChangeProject)}</h3>
+      <div style="flex:1;overflow-y:auto;margin-top:16px">
+        ${data.commits.length === 0
+          ? '<div style="text-align:center;padding:40px;color:var(--text-muted)">暂无提交历史</div>'
+          : data.commits.map(c => `
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border-color)">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+                <span style="font-size:13px;color:var(--text-primary);font-weight:500">${escapeHtml(c.message)}</span>
+                <span style="font-size:11px;color:var(--accent-blue);font-family:monospace">${c.shortHash}</span>
+              </div>
+              <div style="font-size:11px;color:var(--text-muted)">
+                ${escapeHtml(c.author)} · ${new Date(c.timestamp).toLocaleString("zh-CN")}
+              </div>
+            </div>
+          `).join("")
+        }
+      </div>
+      <div style="display:flex;justify-content:flex-end;padding-top:16px;border-top:1px solid var(--border-color);margin-top:16px">
+        <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+      </div>
+    </div>`;
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    document.body.appendChild(overlay);
+  });
+}
+
+// === 项目工具配置 ===
+async function showProjectToolsModal() {
+  if (!currentProject) return;
+
+  // 加载项目的工具配置
+  const projectToolsData = await api(`/api/projects/tools?project=${encodeURIComponent(currentProject)}`);
+  const projectTools = projectToolsData.tools || { mcp: [], skill: [] };
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:600px;max-height:85vh;display:flex;flex-direction:column">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>🔧 项目工具配置 - ${escapeHtml(currentProject)}</h3>
+    <div style="margin-bottom:16px;font-size:12px;color:var(--text-muted)">配置此项目可用的工具，Agent 将能使用这些工具</div>
+
+    <div style="flex:1;overflow-y:auto;margin-bottom:16px">
+      <div style="margin-bottom:20px">
+        <div style="font-size:13px;font-weight:500;color:var(--text-secondary);margin-bottom:10px">🔌 MCP 服务器</div>
+        ${toolsData.mcp.length === 0 ? '<div style="font-size:12px;color:var(--text-muted);padding:8px">暂无 MCP 服务器配置</div>' :
+          toolsData.mcp.map(tool => {
+            const isEnabled = projectTools.mcp.includes(tool.name);
+            return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;border-radius:6px;margin-bottom:4px;border:1px solid ${isEnabled ? 'var(--accent-blue)' : 'var(--border-color)'};background:${isEnabled ? 'rgba(56,189,248,0.05)' : 'transparent'};transition:all 0.2s">
+              <input type="checkbox" ${isEnabled ? 'checked' : ''} data-type="mcp" data-name="${escapeHtml(tool.name)}" onchange="updateProjectTool(this)" style="accent-color:var(--accent-blue)">
+              <span style="font-size:16px">🔌</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;color:var(--text-primary)">${escapeHtml(tool.name)}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${escapeHtml(tool.description || '')}</div>
+              </div>
+            </label>`;
+          }).join('')
+        }
+      </div>
+
+      <div style="margin-bottom:20px">
+        <div style="font-size:13px;font-weight:500;color:var(--text-secondary);margin-bottom:10px">⚡ Skills</div>
+        ${toolsData.skill.length === 0 ? '<div style="font-size:12px;color:var(--text-muted);padding:8px">暂无 Skill 配置</div>' :
+          toolsData.skill.map(tool => {
+            const isEnabled = projectTools.skill.includes(tool.name);
+            return `<label style="display:flex;align-items:center;gap:10px;padding:10px 12px;cursor:pointer;border-radius:6px;margin-bottom:4px;border:1px solid ${isEnabled ? 'var(--accent-blue)' : 'var(--border-color)'};background:${isEnabled ? 'rgba(56,189,248,0.05)' : 'transparent'};transition:all 0.2s">
+              <input type="checkbox" ${isEnabled ? 'checked' : ''} data-type="skill" data-name="${escapeHtml(tool.name)}" onchange="updateProjectTool(this)" style="accent-color:var(--accent-blue)">
+              <span style="font-size:16px">⚡</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;color:var(--text-primary)">${escapeHtml(tool.name)}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${escapeHtml(tool.description || '')}</div>
+              </div>
+            </label>`;
+          }).join('')
+        }
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid var(--border-color)">
+      <div style="font-size:12px;color:var(--text-muted)">已选择 ${(projectTools.mcp?.length || 0) + (projectTools.skill?.length || 0)} 个工具</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+        <button class="btn btn-primary" onclick="saveProjectTools()">保存配置</button>
+      </div>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+function updateProjectTool(checkbox) {
+  const label = checkbox.closest('label');
+  if (checkbox.checked) {
+    label.style.borderColor = 'var(--accent-blue)';
+    label.style.background = 'rgba(56,189,248,0.05)';
+  } else {
+    label.style.borderColor = 'var(--border-color)';
+    label.style.background = 'transparent';
+  }
+
+  const allCheckboxes = document.querySelectorAll('.modal-overlay input[type="checkbox"]:checked');
+  const countEl = document.querySelector('.modal-overlay [style*="已选择"]');
+  if (countEl) {
+    countEl.textContent = `已选择 ${allCheckboxes.length} 个工具`;
+  }
+}
+
+async function saveProjectTools() {
+  if (!currentProject) return;
+
+  const mcpTools = [];
+  const skillTools = [];
+
+  document.querySelectorAll('.modal-overlay input[type="checkbox"]').forEach(cb => {
+    if (cb.checked) {
+      if (cb.dataset.type === 'mcp') mcpTools.push(cb.dataset.name);
+      if (cb.dataset.type === 'skill') skillTools.push(cb.dataset.name);
+    }
+  });
+
+  const res = await api("/api/projects/tools", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      project: currentProject,
+      tools: { mcp: mcpTools, skill: skillTools }
+    })
+  });
+
+  if (res.success) {
+    document.querySelector(".modal-overlay").remove();
+    alert("工具配置已保存");
+  } else {
+    alert("保存失败: " + (res.error || "未知错误"));
+  }
+}
+
+// === 项目共享文件管理 ===
+async function showProjectSharedFilesModal() {
+  if (!currentProject) return;
+
+  const projectFilesData = await api(`/api/projects/shared?project=${encodeURIComponent(currentProject)}`);
+  const projectFiles = projectFilesData.files || [];
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:600px;max-height:85vh;display:flex;flex-direction:column">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>📁 项目共享文件 - ${escapeHtml(currentProject)}</h3>
+    <div style="margin-bottom:16px;font-size:12px;color:var(--text-muted)">项目共享文件，Agent 可以直接读取这些文件内容</div>
+
+    <div style="display:flex;gap:12px;margin-bottom:16px">
+      <button class="btn btn-primary btn-sm" onclick="showAddProjectSharedFileModal()">+ 新建文件</button>
+    </div>
+
+    <div style="flex:1;overflow-y:auto;margin-bottom:16px" id="projectSharedFilesList">
+      ${projectFiles.length === 0
+        ? '<div style="text-align:center;padding:60px;color:var(--text-muted)">暂无共享文件<br><small>点击上方按钮添加</small></div>'
+        : projectFiles.map(f => {
+            const preview = f.content ? f.content.substring(0, 100) + (f.content.length > 100 ? '...' : '') : '';
+            return `<div style="padding:12px 14px;border:1px solid var(--border-color);border-radius:8px;margin-bottom:8px">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-size:16px">📄</span>
+                  <span style="font-size:14px;font-weight:500;color:var(--text-primary)">${escapeHtml(f.name)}</span>
+                </div>
+                <div style="display:flex;gap:4px">
+                  <button class="btn btn-outline btn-sm" onclick="editProjectSharedFile('${escapeHtml(f.name)}')">编辑</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteProjectSharedFile('${escapeHtml(f.name)}')">删除</button>
+                </div>
+              </div>
+              <div style="font-size:12px;color:var(--text-muted);white-space:pre-wrap;max-height:60px;overflow:hidden">${escapeHtml(preview)}</div>
+            </div>`;
+          }).join("")
+      }
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;padding-top:12px;border-top:1px solid var(--border-color)">
+      <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+function showAddProjectSharedFileModal() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:500px">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>新建项目共享文件</h3>
+    <div class="form-group">
+      <label>文件名</label>
+      <input type="text" id="newProjectSharedFileName" placeholder="如 api-docs.md">
+    </div>
+    <div class="form-group">
+      <label>文件内容</label>
+      <textarea id="newProjectSharedFileContent" rows="10" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-family:monospace;font-size:13px;resize:vertical;outline:none" placeholder="输入文件内容..."></textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitAddProjectSharedFile()">创建</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitAddProjectSharedFile() {
+  const name = document.getElementById("newProjectSharedFileName").value.trim();
+  const content = document.getElementById("newProjectSharedFileContent").value;
+  if (!name) { alert("请输入文件名"); return; }
+
+  const res = await api("/api/projects/shared/add", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ project: currentProject, name, content })
+  });
+
+  if (res.success) {
+    document.querySelector(".modal-overlay").remove();
+    showProjectSharedFilesModal();
+  } else {
+    alert("添加失败: " + (res.error || "未知错误"));
+  }
+}
+
+async function editProjectSharedFile(fileName) {
+  const data = await api(`/api/projects/shared?project=${encodeURIComponent(currentProject)}`);
+  const file = (data.files || []).find(f => f.name === fileName);
+  if (!file) return;
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:500px">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>编辑文件 - ${escapeHtml(fileName)}</h3>
+    <div class="form-group">
+      <label>文件内容</label>
+      <textarea id="editProjectSharedFileContent" rows="15" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-family:monospace;font-size:13px;resize:vertical;outline:none">${escapeHtml(file.content || '')}</textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitEditProjectSharedFile('${escapeHtml(fileName)}')">保存</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitEditProjectSharedFile(fileName) {
+  const content = document.getElementById("editProjectSharedFileContent").value;
+
+  const res = await api("/api/projects/shared/add", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ project: currentProject, name: fileName, content })
+  });
+
+  if (res.success) {
+    document.querySelector(".modal-overlay").remove();
+    showProjectSharedFilesModal();
+  } else {
+    alert("保存失败: " + (res.error || "未知错误"));
+  }
+}
+
+async function deleteProjectSharedFile(fileName) {
+  if (!confirm(`确定删除文件 "${fileName}"？`)) return;
+
+  const res = await api("/api/projects/shared/delete", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ project: currentProject, name: fileName })
+  });
+
+  if (res.success) {
+    showProjectSharedFilesModal();
+  } else {
+    alert("删除失败: " + (res.error || "未知错误"));
+  }
+}
+
+// === 群聊日志查看 ===
+let groupLogEventSource = null;
+
+const levelColors = {
+  info: 'var(--accent-blue)',
+  success: 'var(--accent-green)',
+  warning: 'var(--accent-yellow)',
+  error: 'var(--accent-red)'
+};
+const levelIcons = {
+  info: 'ℹ️',
+  success: '✅',
+  warning: '⚠️',
+  error: '❌'
+};
+const categoryLabels = {
+  message: '💬 消息',
+  response: '🤖 响应',
+  forward: '📤 转发',
+  error: '❌ 错误',
+  system: '⚙️ 系统'
+};
+
+function createLogElement(log) {
+  const time = new Date(log.timestamp).toLocaleString("zh-CN");
+  const color = levelColors[log.level] || 'var(--text-secondary)';
+  const icon = levelIcons[log.level] || '📝';
+  const categoryLabel = categoryLabels[log.category] || log.category;
+
+  const div = document.createElement("div");
+  div.style.cssText = "margin-bottom:12px;padding:10px;background:rgba(30,41,59,0.3);border-radius:6px;border-left:3px solid " + color;
+  div.dataset.category = log.category;
+  div.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+      <span>${icon}</span>
+      <span style="color:${color};font-weight:500">${categoryLabel}</span>
+      <span style="color:var(--text-muted);margin-left:auto">${time}</span>
+    </div>
+    <div style="color:var(--text-primary);margin-bottom:4px">${escapeHtml(log.message)}</div>
+    ${log.details ? `<div style="color:var(--text-muted);font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:100px;overflow:hidden;cursor:pointer" onclick="this.style.maxHeight=this.style.maxHeight==='none'?'100px':'none'">${escapeHtml(typeof log.details === 'string' ? log.details : JSON.stringify(log.details, null, 2))}</div>` : ''}
+  `;
+  return div;
+}
+
+async function showGroupLogsModal() {
+  if (!currentGroup) return;
+
+  // 关闭之前的 SSE 连接
+  if (groupLogEventSource) {
+    groupLogEventSource.close();
+    groupLogEventSource = null;
+  }
+
+  const res = await api(`/api/groups/logs?id=${currentGroup.id}&limit=200`);
+  const logs = res.logs || [];
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:700px;max-height:85vh;display:flex;flex-direction:column">
+    <button class="modal-close" onclick="closeGroupLogsModal()">&times;</button>
+    <h3>📋 群聊日志 - ${escapeHtml(currentGroup.name)}</h3>
+
+    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+      <select id="logCategoryFilter" onchange="filterGroupLogs()" style="padding:6px 12px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-primary);font-size:12px">
+        <option value="">全部类别</option>
+        <option value="message">💬 消息</option>
+        <option value="response">🤖 响应</option>
+        <option value="forward">📤 转发</option>
+        <option value="error">❌ 错误</option>
+      </select>
+      <div style="flex:1"></div>
+      <span id="logStreamStatus" style="font-size:11px;color:var(--accent-green)">🟢 实时更新中</span>
+      <span id="logCount" style="font-size:12px;color:var(--text-muted)">共 ${logs.length} 条日志</span>
+    </div>
+
+    <div style="flex:1;overflow-y:auto;background:rgba(15,23,42,0.6);border-radius:8px;border:1px solid var(--border-color);padding:12px;font-family:monospace;font-size:12px;line-height:1.6" id="groupLogsContent">
+      ${logs.length === 0
+        ? '<div id="noLogsMessage" style="text-align:center;padding:40px;color:var(--text-muted)">暂无日志</div>'
+        : logs.map(log => {
+            const time = new Date(log.timestamp).toLocaleString("zh-CN");
+            const color = levelColors[log.level] || 'var(--text-secondary)';
+            const icon = levelIcons[log.level] || '📝';
+            const categoryLabel = categoryLabels[log.category] || log.category;
+
+            return `<div style="margin-bottom:12px;padding:10px;background:rgba(30,41,59,0.3);border-radius:6px;border-left:3px solid ${color}" data-category="${log.category}">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                <span>${icon}</span>
+                <span style="color:${color};font-weight:500">${categoryLabel}</span>
+                <span style="color:var(--text-muted);margin-left:auto">${time}</span>
+              </div>
+              <div style="color:var(--text-primary);margin-bottom:4px">${escapeHtml(log.message)}</div>
+              ${log.details ? `<div style="color:var(--text-muted);font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:100px;overflow:hidden;cursor:pointer" onclick="this.style.maxHeight=this.style.maxHeight==='none'?'100px':'none'">${escapeHtml(typeof log.details === 'string' ? log.details : JSON.stringify(log.details, null, 2))}</div>` : ''}
+            </div>`;
+          }).join("")
+      }
+    </div>
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--border-color)">
+      <button class="btn btn-danger btn-sm" onclick="clearGroupLogs()">清空日志</button>
+      <button class="btn btn-outline btn-sm" onclick="showGroupLogsModal()">刷新</button>
+      <button class="btn btn-primary" onclick="closeGroupLogsModal()">关闭</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) closeGroupLogsModal(); };
+  document.body.appendChild(overlay);
+
+  // 启动实时日志流
+  startGroupLogStream(currentGroup.id);
+}
+
+function startGroupLogStream(groupId) {
+  // 关闭之前的连接
+  if (groupLogEventSource) {
+    groupLogEventSource.close();
+  }
+
+  groupLogEventSource = new EventSource(`/api/groups/logs/stream?id=${groupId}`);
+
+  groupLogEventSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+
+      if (data.type === "connected") {
+        console.log("日志流已连接");
+        return;
+      }
+
+      if (data.type === "log") {
+        const logsContent = document.getElementById("groupLogsContent");
+        const noLogsMessage = document.getElementById("noLogsMessage");
+
+        if (noLogsMessage) {
+          noLogsMessage.remove();
+        }
+
+        // 添加新日志
+        const logElement = createLogElement(data.log);
+        logsContent.appendChild(logElement);
+
+        // 更新计数
+        const logCount = document.getElementById("logCount");
+        if (logCount) {
+          const currentCount = parseInt(logCount.textContent.replace(/\D/g, '')) || 0;
+          logCount.textContent = `共 ${currentCount + 1} 条日志`;
+        }
+
+        // 滚动到底部
+        logsContent.scrollTop = logsContent.scrollHeight;
+
+        // 应用过滤
+        const filter = document.getElementById("logCategoryFilter")?.value;
+        if (filter && data.log.category !== filter) {
+          logElement.style.display = "none";
+        }
+      }
+
+      if (data.type === "error") {
+        console.error("日志流错误:", data.message);
+      }
+    } catch (e) {
+      console.error("解析日志失败:", e);
+    }
+  };
+
+  groupLogEventSource.onerror = () => {
+    console.log("日志流连接断开");
+    const statusEl = document.getElementById("logStreamStatus");
+    if (statusEl) {
+      statusEl.textContent = "🔴 连接断开";
+      statusEl.style.color = "var(--accent-red)";
+    }
+  };
+}
+
+function closeGroupLogsModal() {
+  if (groupLogEventSource) {
+    groupLogEventSource.close();
+    groupLogEventSource = null;
+  }
+  document.querySelector(".modal-overlay")?.remove();
+}
+
+function filterGroupLogs() {
+  const category = document.getElementById("logCategoryFilter").value;
+  const logs = document.querySelectorAll("#groupLogsContent > div[data-category]");
+
+  logs.forEach(log => {
+    if (!category || log.dataset.category === category) {
+      log.style.display = "block";
+    } else {
+      log.style.display = "none";
+    }
+  });
+}
+
+async function clearGroupLogs() {
+  if (!confirm("确定清空群聊日志？")) return;
+
+  await api("/api/groups/logs/clear", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ group_id: currentGroup.id })
+  });
+
+  showGroupLogsModal();
+}
+
+// === 群聊共享文件管理 ===
+function showGroupSharedFilesModal() {
+  if (!currentGroup) return;
+
+  // 加载群聊共享文件和全局共享文件
+  Promise.all([
+    api(`/api/groups/shared?id=${currentGroup.id}`),
+    api("/api/shared")
+  ]).then(([groupData, globalData]) => {
+    const groupFiles = groupData.files || [];
+    const globalFiles = globalData.files || [];
+
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `<div class="modal" style="min-width:600px;max-height:85vh;display:flex;flex-direction:column">
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+      <h3>📁 群聊共享文件 - ${escapeHtml(currentGroup.name)}</h3>
+      <div style="margin-bottom:16px;font-size:12px;color:var(--text-muted)">群聊中的共享文件，Agent 可以直接读取这些文件内容</div>
+
+      <div style="display:flex;gap:12px;margin-bottom:16px">
+        <button class="btn btn-primary btn-sm" onclick="showAddGroupSharedFileModal()">+ 新建文件</button>
+        <button class="btn btn-outline btn-sm" onclick="showImportSharedFilesModal()">📥 从全局导入</button>
+      </div>
+
+      <div style="flex:1;overflow-y:auto;margin-bottom:16px" id="groupSharedFilesList">
+        ${groupFiles.length === 0
+          ? '<div style="text-align:center;padding:60px;color:var(--text-muted)">暂无共享文件<br><small>点击上方按钮添加</small></div>'
+          : groupFiles.map(f => {
+              const preview = f.content ? f.content.substring(0, 100) + (f.content.length > 100 ? '...' : '') : '';
+              return `<div style="padding:12px 14px;border:1px solid var(--border-color);border-radius:8px;margin-bottom:8px">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span style="font-size:16px">📄</span>
+                    <span style="font-size:14px;font-weight:500;color:var(--text-primary)">${escapeHtml(f.name)}</span>
+                  </div>
+                  <div style="display:flex;gap:4px">
+                    <button class="btn btn-outline btn-sm" onclick="editGroupSharedFile('${escapeHtml(f.name)}')">编辑</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteGroupSharedFile('${escapeHtml(f.name)}')">删除</button>
+                  </div>
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);white-space:pre-wrap;max-height:60px;overflow:hidden">${escapeHtml(preview)}</div>
+              </div>`;
+            }).join("")
+        }
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;padding-top:12px;border-top:1px solid var(--border-color)">
+        <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()">关闭</button>
+      </div>
+    </div>`;
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    document.body.appendChild(overlay);
+  });
+}
+
+function showAddGroupSharedFileModal() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:500px">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>新建群聊共享文件</h3>
+    <div class="form-group">
+      <label>文件名</label>
+      <input type="text" id="newGroupSharedFileName" placeholder="如 api-docs.md">
+    </div>
+    <div class="form-group">
+      <label>文件内容</label>
+      <textarea id="newGroupSharedFileContent" rows="10" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-family:monospace;font-size:13px;resize:vertical;outline:none" placeholder="输入文件内容..."></textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitAddGroupSharedFile()">创建</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitAddGroupSharedFile() {
+  const name = document.getElementById("newGroupSharedFileName").value.trim();
+  const content = document.getElementById("newGroupSharedFileContent").value;
+  if (!name) { alert("请输入文件名"); return; }
+
+  const res = await api("/api/groups/shared/add", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ group_id: currentGroup.id, name, content })
+  });
+
+  if (res.success) {
+    document.querySelector(".modal-overlay").remove();
+    showGroupSharedFilesModal(); // 刷新列表
+  } else {
+    alert("添加失败: " + (res.error || "未知错误"));
+  }
+}
+
+async function editGroupSharedFile(fileName) {
+  // 获取文件内容
+  const data = await api(`/api/groups/shared?id=${currentGroup.id}`);
+  const file = (data.files || []).find(f => f.name === fileName);
+  if (!file) return;
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML = `<div class="modal" style="min-width:500px">
+    <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+    <h3>编辑文件 - ${escapeHtml(fileName)}</h3>
+    <div class="form-group">
+      <label>文件内容</label>
+      <textarea id="editGroupSharedFileContent" rows="15" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-family:monospace;font-size:13px;resize:vertical;outline:none">${escapeHtml(file.content || '')}</textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+      <button class="btn btn-primary" onclick="submitEditGroupSharedFile('${escapeHtml(fileName)}')">保存</button>
+    </div>
+  </div>`;
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function submitEditGroupSharedFile(fileName) {
+  const content = document.getElementById("editGroupSharedFileContent").value;
+
+  const res = await api("/api/groups/shared/add", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ group_id: currentGroup.id, name: fileName, content })
+  });
+
+  if (res.success) {
+    document.querySelector(".modal-overlay").remove();
+    showGroupSharedFilesModal(); // 刷新列表
+  } else {
+    alert("保存失败: " + (res.error || "未知错误"));
+  }
+}
+
+async function deleteGroupSharedFile(fileName) {
+  if (!confirm(`确定删除文件 "${fileName}"？`)) return;
+
+  const res = await api("/api/groups/shared/delete", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ group_id: currentGroup.id, name: fileName })
+  });
+
+  if (res.success) {
+    showGroupSharedFilesModal(); // 刷新列表
+  } else {
+    alert("删除失败: " + (res.error || "未知错误"));
+  }
+}
+
+function showImportSharedFilesModal() {
+  // 加载全局共享文件
+  api("/api/shared").then(data => {
+    const files = data.files || [];
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay";
+    overlay.innerHTML = `<div class="modal" style="min-width:500px;max-height:80vh;display:flex;flex-direction:column">
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+      <h3>📥 从全局共享文件导入</h3>
+      <div style="margin-bottom:12px;font-size:12px;color:var(--text-muted)">选择要导入到群聊的共享文件</div>
+      <div style="flex:1;overflow-y:auto;margin-bottom:16px">
+        ${files.length === 0
+          ? '<div style="text-align:center;padding:40px;color:var(--text-muted)">暂无全局共享文件</div>'
+          : files.map(f => {
+              const icon = f.type === 'text' ? '📄' : f.type === 'image' ? '🖼️' : '📎';
+              return `<label style="display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;border-radius:8px;margin-bottom:4px;border:1px solid var(--border-color);transition:all 0.2s">
+                <input type="checkbox" value="${escapeHtml(f.name)}" class="import-file-check" style="accent-color:var(--accent-blue)">
+                <span style="font-size:16px">${icon}</span>
+                <span style="font-size:13px;color:var(--text-primary)">${escapeHtml(f.name)}</span>
+              </label>`;
+            }).join("")
+        }
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-cancel" onclick="this.closest('.modal-overlay').remove()">取消</button>
+        <button class="btn btn-primary" onclick="submitImportSharedFiles()">导入选中</button>
+      </div>
+    </div>`;
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    document.body.appendChild(overlay);
+  });
+}
+
+async function submitImportSharedFiles() {
+  const checkboxes = document.querySelectorAll(".import-file-check:checked");
+  const fileNames = Array.from(checkboxes).map(cb => cb.value);
+  if (fileNames.length === 0) { alert("请选择要导入的文件"); return; }
+
+  const res = await api("/api/groups/shared/import", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ group_id: currentGroup.id, file_names: fileNames })
+  });
+
+  if (res.success) {
+    alert(`成功导入 ${res.imported} 个文件`);
+    document.querySelector(".modal-overlay").remove();
+    showGroupSharedFilesModal(); // 刷新列表
+  } else {
+    alert("导入失败: " + (res.error || "未知错误"));
+  }
+}
+
+// === 轮询跨 Agent 回复 ===
+async function pollCrossReplies(groupBody, baseCount) {
+  const pendingDiv = document.createElement("div");
+  pendingDiv.className = "sending-indicator";
+  pendingDiv.textContent = "🔗 Agent 协作中，请稍候...";
+  pendingDiv.style.display = "block";
+  pendingDiv.style.padding = "8px 22px";
+  groupBody.appendChild(pendingDiv);
+  groupBody.scrollTop = groupBody.scrollHeight;
+
+  if (!baseCount) {
+    const initData = await api(`/api/groups/messages?id=${currentGroup.id}&limit=100`);
+    baseCount = (initData.messages || []).length;
+  }
+
+  let polls = 0;
+  let lastCount = baseCount;
+
+  const poll = setInterval(async () => {
+    polls++;
+    if (polls > 60) { // 最多轮询 60 次（3分钟）
+      clearInterval(poll);
+      pendingDiv.remove();
+      return;
+    }
+
+    try {
+      const msgData = await api(`/api/groups/messages?id=${currentGroup.id}&limit=100`);
+      const msgs = msgData.messages || [];
+
+      if (msgs.length > lastCount) {
+        const newMsgs = msgs.slice(lastCount);
+        lastCount = msgs.length;
+
+        for (const m of newMsgs) {
+          // 跳过转发消息
+          if (m.content && m.content.startsWith("📤")) continue;
+
+          if (m.role === "assistant") {
+            const isSystem = m.agent === "system";
+            let color, label;
+
+            if (isSystem) {
+              color = "var(--accent-red)";
+              label = "⚠️ 系统";
+            } else {
+              color = "var(--accent-purple)";
+              label = `🔗 ${escapeHtml(m.agent || "Agent")}`;
+            }
+
+            groupBody.innerHTML += `<div class="message assistant">
+              <div class="bubble"><span style="color:${color};font-size:11px;font-weight:500">${label}</span><br>${escapeHtml(m.content)}</div>
+              <div class="msg-meta">${new Date(m.timestamp).toLocaleString("zh-CN")}</div></div>`;
+          }
+        }
+
+        groupBody.scrollTop = groupBody.scrollHeight;
+
+        // 如果没有更多的 @mentions，停止轮询
+        const lastMsg = msgs[msgs.length - 1];
+        if (lastMsg && lastMsg.role === "assistant" && !lastMsg.content?.includes("@")) {
+          clearInterval(poll);
+          pendingDiv.remove();
+        }
+      }
+    } catch (e) {
+      console.error("轮询消息失败:", e);
+    }
+  }, 3000); // 每 3 秒轮询一次
+}
+
+// === 初始化 ===
+loadProjects();
+loadTools(); // 初始化工具配置
+loadTemplates(); // 初始化模板库
+setInterval(loadProjects, 10000);
+
+// 全局消息轮询 - 自动刷新群聊消息
+let lastGroupMsgCount = 0;
+let groupPollTimer = null;
+
+function startGroupPolling() {
+  if (groupPollTimer) clearInterval(groupPollTimer);
+  if (!currentGroup) return;
+
+  groupPollTimer = setInterval(async () => {
+    if (!currentGroup) {
+      clearInterval(groupPollTimer);
+      return;
+    }
+
+    try {
+      const data = await api(`/api/groups/messages?id=${currentGroup.id}&limit=100`);
+      const messages = data.messages || [];
+      const el = document.getElementById("groupBody");
+
+      // 如果消息数量有变化，更新显示
+      if (messages.length > lastGroupMsgCount && lastGroupMsgCount > 0) {
+        const newMessages = messages.slice(lastGroupMsgCount);
+        for (const m of newMessages) {
+          const time = new Date(m.timestamp).toLocaleString("zh-CN");
+          const highlightMentions = (text) => {
+            return escapeHtml(text).replace(/@([\w-]+)/g, '<span style="color:var(--accent-blue);font-weight:600">@$1</span>');
+          };
+
+          // 跳过转发消息
+          const isForward = m.content && m.content.startsWith("📤");
+          if (isForward) continue;
+
+          if (m.role === "user") {
+            const target = m.target === "all" ? "所有人" : m.target;
+            el.innerHTML += `<div class="message user">
+              <div class="bubble"><span style="opacity:0.8;font-size:11px;font-weight:500">👤 → @${escapeHtml(target)}</span><br>${highlightMentions(m.content)}</div>
+              <div class="msg-meta">${time}</div></div>`;
+          } else {
+            const isSystem = m.agent === "system";
+            let agentLabel, labelColor;
+
+            if (isSystem) {
+              agentLabel = "⚠️ 系统";
+              labelColor = "var(--accent-red)";
+            } else {
+              agentLabel = `🤖 ${escapeHtml(m.agent || "Agent")}`;
+              labelColor = "var(--accent-blue)";
+            }
+
+            el.innerHTML += `<div class="message assistant">
+              <div class="bubble"><span style="color:${labelColor};font-size:11px;font-weight:500">${agentLabel}</span><br>${highlightMentions(m.content)}</div>
+              <div class="msg-meta">${time}</div></div>`;
+          }
+        }
+        el.scrollTop = el.scrollHeight;
+      }
+
+      lastGroupMsgCount = messages.length;
+    } catch (e) {
+      console.error("轮询群聊消息失败:", e);
+    }
+  }, 5000); // 每 5 秒检查一次
+}
+
+// 在选择群聊时启动轮询
+const _origSelectGroup = selectGroup;
+selectGroup = async function(groupId) {
+  await _origSelectGroup(groupId);
+  lastGroupMsgCount = 0; // 重置计数
+  startGroupPolling();
+};

@@ -165,7 +165,8 @@ function processCrossAgents(groupId, group, sourceProject, output, atMentions, c
 
   for (const mention of uniqueMentions) {
     // 确保 mention 是 @ 开头的格式
-    const targetName = mention.startsWith("@") ? mention.slice(1) : mention;
+    const mentionStr = String(mention);
+    const targetName = mentionStr.startsWith("@") ? mentionStr.slice(1) : mentionStr;
     console.log(`[跨Agent协作] 处理 @${targetName}`);
 
     const targetMember = group.members.find(m => m.project === targetName && m.project !== sourceProject);
@@ -205,13 +206,6 @@ function processCrossAgents(groupId, group, sourceProject, output, atMentions, c
       role: "assistant", agent: sourceProject,
       content: `📤 → @${targetName}\n${atMessage}`,
       timestamp: new Date().toISOString(),
-    });
-
-    // 记录日志
-    addGroupLog(groupId, "info", "forward", `${sourceProject} 转发消息给 ${targetName}`, {
-      source: sourceProject,
-      target: targetName,
-      message: atMessage.substring(0, 200)
     });
 
     // 调用目标 Agent
@@ -410,6 +404,10 @@ function getPid(name) {
 // === 会话同步层：文件夹格式 ↔ cc-connect 单文件格式 ===
 const WEB_SESSIONS_DIR = path.join(CCM_DIR, "web-sessions");
 
+function getProjectSessionDir(projectName: string): string {
+  return path.join(WEB_SESSIONS_DIR, projectName);
+}
+
 function ensureWebSessionDir(projectName) {
   const dir = path.join(WEB_SESSIONS_DIR, projectName);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -434,10 +432,11 @@ function syncFromCcToFilesystem(projectName) {
     const data = JSON.parse(fs.readFileSync(ccFile, "utf-8"));
     const dir = ensureWebSessionDir(projectName);
     for (const [sid, session] of Object.entries(data.sessions || {})) {
+      const sessionData = session as any;
       const filePath = path.join(dir, `${sid}.json`);
       // 只更新有变化的
-      if (!fs.existsSync(filePath) || JSON.parse(fs.readFileSync(filePath, "utf-8")).updated_at !== session.updated_at) {
-        fs.writeFileSync(filePath, JSON.stringify(session, null, 2));
+      if (!fs.existsSync(filePath) || JSON.parse(fs.readFileSync(filePath, "utf-8")).updated_at !== sessionData.updated_at) {
+        fs.writeFileSync(filePath, JSON.stringify(sessionData, null, 2));
       }
     }
     // 删除文件夹中已不存在的会话
@@ -496,7 +495,7 @@ function getSessions(projectName) {
       } catch { return null; }
     })
     .filter(Boolean)
-    .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+    .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime());
 }
 
 // 获取会话详情
@@ -588,9 +587,16 @@ function sendJson(res, data, status = 200) {
 }
 
 function sendFile(res, filePath) {
-  const ext = path.extname(filePath);
-  const types = { ".html": "text/html", ".js": "application/javascript", ".css": "text/css", ".json": "application/json" };
-  const contentType = types[ext] || "text/plain";
+  const ext = path.extname(filePath).toLowerCase();
+  const types = {
+    ".html": "text/html", ".js": "application/javascript", ".css": "text/css",
+    ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png",
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+    ".ico": "image/x-icon", ".woff": "font/woff", ".woff2": "font/woff2",
+    ".ttf": "font/ttf", ".eot": "application/vnd.ms-fontobject",
+    ".map": "application/json",
+  };
+  const contentType = types[ext] || "application/octet-stream";
 
   if (!fs.existsSync(filePath)) {
     res.writeHead(404);
@@ -598,7 +604,10 @@ function sendFile(res, filePath) {
     return;
   }
 
-  res.writeHead(200, { "Content-Type": `${contentType}; charset=utf-8` });
+  const headers = { "Content-Type": contentType };
+  if (ext === ".html") headers["Content-Type"] = "text/html; charset=utf-8";
+  if (ext === ".js" || ext === ".css") headers["Cache-Control"] = "public, max-age=31536000, immutable";
+  res.writeHead(200, headers);
   fs.createReadStream(filePath).pipe(res);
 }
 
@@ -618,7 +627,7 @@ function listSharedFiles() {
       const isImage = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"].includes(ext);
       return { name: f, size: stat.size, modified: stat.mtime.toISOString(), type: isText ? "text" : isImage ? "image" : "file" };
     })
-    .sort((a, b) => new Date(b.modified) - new Date(a.modified));
+    .sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
 }
 
 function readSharedFile(name) {
@@ -833,7 +842,7 @@ async function processTargetQueue(targetKey) {
 // 获取队列状态
 function getQueueStatus() {
   let totalQueued = 0;
-  const targetStatus = {};
+  const targetStatus: any = {};
 
   for (const [targetKey, queue] of taskQueues.entries()) {
     totalQueued += queue.length;
@@ -867,15 +876,15 @@ function loadTaskLogs() {
   return {};
 }
 
-function saveTaskLogs(logs) {
+function saveTaskLogs(logs: any): void {
   try {
     fs.writeFileSync(TASK_LOGS_FILE, JSON.stringify(logs, null, 2));
-  } catch (e) {
+  } catch (e: any) {
     console.error("保存任务日志失败:", e.message);
   }
 }
 
-function addTaskLog(taskId, level, message) {
+function addTaskLog(taskId: string, level: string, message: string): void {
   const logs = loadTaskLogs();
 
   if (!logs[taskId]) {
@@ -1007,23 +1016,23 @@ function saveFeishuConfig(config) {
 }
 
 // 获取飞书 tenant_access_token（应用级别）
-async function getFeishuTenantToken(appId, appSecret) {
+async function getFeishuTenantToken(appId: string, appSecret: string): Promise<string | null> {
   try {
     const response = await fetch("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ app_id: appId, app_secret: appSecret })
     });
-    const data = await response.json();
+    const data = await response.json() as any;
     return data.tenant_access_token;
-  } catch (e) {
+  } catch (e: any) {
     console.error("获取飞书 tenant_access_token 失败:", e.message);
     return null;
   }
 }
 
 // 获取飞书 user_access_token（用户级别，通过 OAuth）
-async function getFeishuUserToken(appId, appSecret, code) {
+async function getFeishuUserToken(appId: string, appSecret: string, code: string): Promise<any> {
   try {
     const response = await fetch("https://open.feishu.cn/open-apis/authen/v1/oidc/access_token", {
       method: "POST",
@@ -1036,20 +1045,20 @@ async function getFeishuUserToken(appId, appSecret, code) {
         redirect_uri: "http://localhost:3080/api/feishu/callback"
       })
     });
-    const data = await response.json();
+    const data = await response.json() as any;
     if (data.code === 0) {
       return data.data;
     }
     console.error("获取 user_access_token 失败:", data.msg);
     return null;
-  } catch (e) {
+  } catch (e: any) {
     console.error("获取 user_access_token 失败:", e.message);
     return null;
   }
 }
 
 // 刷新 user_access_token
-async function refreshFeishuUserToken(appId, appSecret, refreshToken) {
+async function refreshFeishuUserToken(appId: string, appSecret: string, refreshToken: string): Promise<any> {
   try {
     const response = await fetch("https://open.feishu.cn/open-apis/authen/v1/oidc/refresh_access_token", {
       method: "POST",
@@ -1061,12 +1070,12 @@ async function refreshFeishuUserToken(appId, appSecret, refreshToken) {
         refresh_token: refreshToken
       })
     });
-    const data = await response.json();
+    const data = await response.json() as any;
     if (data.code === 0) {
       return data.data;
     }
     return null;
-  } catch (e) {
+  } catch (e: any) {
     console.error("刷新 user_access_token 失败:", e.message);
     return null;
   }
@@ -1105,41 +1114,41 @@ async function getValidFeishuToken() {
 }
 
 // 获取用户信息
-async function getFeishuUserInfo(accessToken) {
+async function getFeishuUserInfo(accessToken: string): Promise<any> {
   try {
     const response = await fetch("https://open.feishu.cn/open-apis/authen/v1/user_info", {
       headers: { "Authorization": `Bearer ${accessToken}` }
     });
-    const data = await response.json();
+    const data = await response.json() as any;
     if (data.code === 0) {
       return data.data;
     }
     return null;
-  } catch (e) {
+  } catch (e: any) {
     console.error("获取用户信息失败:", e.message);
     return null;
   }
 }
 
 // 获取群聊列表
-async function getFeishuChatList(accessToken) {
+async function getFeishuChatList(accessToken: string): Promise<any[]> {
   try {
     const response = await fetch("https://open.feishu.cn/open-apis/im/v1/chats?page_size=50", {
       headers: { "Authorization": `Bearer ${accessToken}` }
     });
-    const data = await response.json();
+    const data = await response.json() as any;
     if (data.code === 0) {
       return data.data.items || [];
     }
     return [];
-  } catch (e) {
+  } catch (e: any) {
     console.error("获取群聊列表失败:", e.message);
     return [];
   }
 }
 
 // 通过 Webhook 发送飞书消息
-async function sendFeishuWebhook(content, msgType = "interactive") {
+async function sendFeishuWebhook(content: string, msgType: string = "interactive"): Promise<boolean> {
   const config = loadFeishuConfig();
   const webhookUrl = config.webhook_url;
 
@@ -1149,7 +1158,7 @@ async function sendFeishuWebhook(content, msgType = "interactive") {
   }
 
   try {
-    let body;
+    let body: any;
 
     if (msgType === "interactive") {
       // 卡片消息
@@ -1181,7 +1190,7 @@ async function sendFeishuWebhook(content, msgType = "interactive") {
       body: JSON.stringify(body)
     });
 
-    const result = await response.json();
+    const result = await response.json() as any;
     if (result.code === 0 || result.StatusCode === 0) {
       console.log("[飞书通知] Webhook 消息发送成功");
       return true;
@@ -1189,14 +1198,14 @@ async function sendFeishuWebhook(content, msgType = "interactive") {
       console.error("[飞书通知] Webhook 消息发送失败:", result.msg || result.StatusMessage);
       return false;
     }
-  } catch (e) {
+  } catch (e: any) {
     console.error("[飞书通知] Webhook 发送失败:", e.message);
     return false;
   }
 }
 
 // 发送飞书消息给用户（通过 API）
-async function sendFeishuMessageToUser(userId, content, msgType = "interactive") {
+async function sendFeishuMessageToUser(userId: string, content: string, msgType: string = "interactive"): Promise<boolean> {
   const config = loadFeishuConfig();
 
   // 如果没有 userId，尝试从配置中获取
@@ -1230,7 +1239,7 @@ async function sendFeishuMessageToUser(userId, content, msgType = "interactive")
       })
     });
 
-    const result = await response.json();
+    const result = await response.json() as any;
     if (result.code === 0) {
       console.log("[飞书通知] 消息发送成功");
       return true;
@@ -1390,16 +1399,6 @@ function checkTaskCompletion(response) {
 
   const lowerResponse = response.toLowerCase();
   return completionMarkers.some(marker => lowerResponse.includes(marker.toLowerCase()));
-}
-
-// 获取队列状态
-function getQueueStatus() {
-  return {
-    queue_length: taskQueue.length,
-    is_processing: isProcessingQueue,
-    pending_tasks: loadTasks().filter(t => t.status === "pending").length,
-    in_progress_tasks: loadTasks().filter(t => t.status === "in_progress").length
-  };
 }
 
 // === 对话模板库 ===
@@ -1588,19 +1587,25 @@ function handleRequest(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
 
-  // 静态文件
+  // 静态文件（Vue 构建产物 + 旧 HTML 资源）
   if (pathname === "/" || pathname === "/index.html") {
     return sendFile(res, path.join(PUBLIC_DIR, "index.html"));
   }
-  if (pathname.startsWith("/public/")) {
-    return sendFile(res, path.join(PUBLIC_DIR, pathname.replace("/public/", "")));
-  }
-  // CSS 和 JS 文件
-  if (pathname.startsWith("/css/") || pathname.startsWith("/js/")) {
-    const filePath = path.join(PUBLIC_DIR, pathname);
+  if (pathname.startsWith("/assets/") || pathname.startsWith("/public/") ||
+      pathname.startsWith("/css/") || pathname.startsWith("/js/") ||
+      pathname === "/favicon.svg" || pathname === "/icons.svg" || pathname === "/favicon.ico") {
+    const filePath = path.join(PUBLIC_DIR, pathname.startsWith("/public/") ? pathname.replace("/public/", "") : pathname);
     if (fs.existsSync(filePath)) {
       return sendFile(res, filePath);
     }
+  }
+  // SPA fallback: 非 API 路径且文件存在则返回 index.html
+  if (!pathname.startsWith("/api/") && req.method === "GET") {
+    const filePath = path.join(PUBLIC_DIR, pathname);
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      return sendFile(res, filePath);
+    }
+    return sendFile(res, path.join(PUBLIC_DIR, "index.html"));
   }
 
   // API 路由
@@ -2395,12 +2400,12 @@ command = "/projects"
 
   // 获取群聊列表（需要授权）
   if (pathname === "/api/feishu/chats" && req.method === "GET") {
-    getValidFeishuToken().then(token => {
+    getValidFeishuToken().then(async (token) => {
       if (!token) {
-        return sendJson(res, { error: "未授权或 Token 无效，请先完成飞书授权" }, 401);
+        sendJson(res, { error: "未授权或 Token 无效，请先完成飞书授权" }, 401);
+        return;
       }
-      return getFeishuChatList(token);
-    }).then(chats => {
+      const chats = await getFeishuChatList(token);
       if (!res.headersSent) {
         sendJson(res, { success: true, chats: chats || [] });
       }
@@ -2900,7 +2905,7 @@ function generateTitle(message) {
           const boundaryMatch = contentType.match(/boundary=(.+)/);
           if (!boundaryMatch) return sendJson(res, { error: "无效请求" }, 400);
           const { files, fields } = parseMultipart(buffer, boundaryMatch[1]);
-          await handleSend(fields.project, fields.message, files);
+          await handleSend((fields as any).project, (fields as any).message, files);
         } catch (e) { sendJson(res, { error: e.message }, 400); }
       });
       return;
@@ -3786,7 +3791,7 @@ function generateTitle(message) {
 
         // 非流式：普通调用
         console.log(`[群聊] 非流式调用 Agent ${target_project_actual}...`);
-        const output = callAgent(target_project_actual, fullPrompt, workDir, agentType);
+        const output = callAgent(target_project_actual, fullPrompt, workDir, agentType, 300000);
         console.log(`[群聊] Agent ${target_project_actual} 回复: ${output.substring(0, 200)}...`);
 
         appendGroupMessage(group_id, {
@@ -3812,12 +3817,7 @@ function generateTitle(message) {
         }
 
         sendJson(res, { success: true, reply: output });
-      } catch (e) {
-        // 记录错误日志
-        addGroupLog(group_id, "error", "error", `消息发送失败: ${e.message}`, {
-          error: e.message,
-          stack: e.stack?.substring(0, 500)
-        });
+      } catch (e: any) {
         sendJson(res, { error: e.message }, 500);
       }
     });
@@ -3902,7 +3902,7 @@ function generateTitle(message) {
 
           const fullPrompt = `你是群聊中的 ${member.project} Agent。${toolsContext}${sharedFilesContext}\n群聊记录：\n${context}\n\n请回复：${message}`;
 
-          const output = callAgent(member.project, fullPrompt, workDir, agentType);
+          const output = callAgent(member.project, fullPrompt, workDir, agentType, 300000);
 
           appendGroupMessage(group_id, {
             id: "m" + Date.now().toString(36) + member.project,
@@ -4456,7 +4456,7 @@ ${diff}
       }
     }
 
-    stats.recent_activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    stats.recent_activities.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     stats.recent_activities = stats.recent_activities.slice(0, 10);
 
     return sendJson(res, stats);

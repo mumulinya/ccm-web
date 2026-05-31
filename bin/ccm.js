@@ -640,6 +640,17 @@ if (args.includes("--list") || args.includes("-l")) {
   const port = args.includes("--port") ? parseInt(args[args.indexOf("--port") + 1]) : 3080;
   const { startServer } = require("./server.js");
   startServer(port);
+} else if (args[0] === "start" && !args[1]) {
+  // ccm start → 启动 Web 控制台（前端 + 后端，前端由 server.js 从 public/ 目录直接 serve）
+  const port = args.includes("--port") ? parseInt(args[args.indexOf("--port") + 1]) : 3080;
+
+  console.log("\n╔══════════════════════════════════════╗");
+  console.log("║     cc-web 控制台                     ║");
+  console.log("╚══════════════════════════════════════╝\n");
+  console.log(`访问: http://localhost:${port}\n`);
+
+  const { startServer } = require("./server.js");
+  startServer(port);
 } else if (args[0] === "start" && args[1]) {
   const configs = getConfigs();
   if (args[1] === "all") {
@@ -673,8 +684,18 @@ if (args.includes("--list") || args.includes("-l")) {
   if (config) startProject(config, args[1]);
   else console.log(`项目 "${args[0]}" 不存在，用 cc-web --list 查看`);
 } else {
-  // 默认启动 Web 控制台
-  const port = 3080;
-  const { startServer } = require("./server.js");
-  startServer(port);
+  console.log("\n╔══════════════════════════════════════╗");
+  console.log("║     cc-web - cc-connect 管理工具      ║");
+  console.log("╚══════════════════════════════════════╝\n");
+  console.log("用法:");
+  console.log("  ccm start              启动 Web 控制台（前端 + 后端）");
+  console.log("  ccm start <项目名>      启动指定项目");
+  console.log("  ccm start all           启动所有项目");
+  console.log("  ccm stop  <项目名>      停止指定项目");
+  console.log("  ccm stop  all           停止所有项目");
+  console.log("  ccm web                 仅启动后端 API 服务");
+  console.log("  ccm status              查看运行状态");
+  console.log("  ccm --list              列出所有配置");
+  console.log("  ccm --init              初始化新项目");
+  console.log("  ccm agents              查看支持的 Agent\n");
 }

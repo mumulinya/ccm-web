@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ccm 控制台</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<!-- 左侧导航栏 -->
+<div class="nav-sidebar">
+  <div class="nav-logo">
+    <h1>ccm</h1>
+    <div class="info" id="headerInfo">加载中...</div>
+  </div>
+  <div class="nav-menu">
+    <div class="nav-item active" onclick="switchTab('projects')">
+      <span class="nav-icon">📂</span>
+      <span>项目管理</span>
+    </div>
+    <div class="nav-item" onclick="switchTab('groups')">
+      <span class="nav-icon">💬</span>
+      <span>群聊协作</span>
+    </div>
+    <div class="nav-item" onclick="switchTab('tools')">
+      <span class="nav-icon">🔧</span>
+      <span>工具配置</span>
+    </div>
+    <div class="nav-item" onclick="switchTab('changes')">
+      <span class="nav-icon">📝</span>
+      <span>代码变更</span>
+    </div>
+    <div class="nav-item" onclick="switchTab('tasks')">
+      <span class="nav-icon">📋</span>
+      <span>任务派发</span>
+    </div>
+    <div class="nav-item" onclick="switchTab('cron')">
+      <span class="nav-icon">⏰</span>
+      <span>定时任务</span>
+    </div>
+    <div class="nav-item" onclick="switchTab('terminal')">
+      <span class="nav-icon">💻</span>
+      <span>内置终端</span>
+    </div>
+    <div class="nav-item" onclick="switchTab('templates')">
+      <span class="nav-icon">📚</span>
+      <span>对话模板</span>
+    </div>
+    <div class="nav-item" onclick="switchTab('dashboard')">
+      <span class="nav-icon">📊</span>
+      <span>协作仪表盘</span>
+    </div>
+    <div class="nav-item" onclick="switchTab('settings')">
+      <span class="nav-icon">⚙️</span>
+      <span>系统设置</span>
+    </div>
+  </div>
+  <div class="nav-footer">
+    <button class="btn btn-outline" onclick="refreshAll()">↻ 刷新全部</button>
+  </div>
+</div>
+
+<!-- 右侧主内容区 -->
+<div class="main-wrapper">
+  <div class="header">
+    <h2 id="pageTitle">📂 项目管理</h2>
+    <div style="display:flex;align-items:center;gap:16px">
+      <span class="info" id="pageInfo"></span>
+    </div>
+  </div>
+
+<!-- 项目管理 -->
+<div class="tab-panel active" id="panel-projects">
+  <!-- 顶部项目选择栏 -->
+  <div class="project-toolbar" style="overflow:visible">
+    <div style="display:flex;align-items:center;gap:12px;flex:1;overflow:visible">
+      <div style="font-size:13px;color:var(--text-muted);white-space:nowrap">项目：</div>
+      <div id="projectSelect" style="flex:1;max-width:400px;position:relative;z-index:1001"></div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span id="pageInfo" style="font-size:12px;color:var(--text-muted)"></span>
+      <button class="btn btn-primary btn-sm" onclick="showCreateModal()">+ 新建项目</button>
+    </div>
+  </div>
+  <!-- 主内容区 -->
+  <div class="main">
+    <div class="sidebar" style="width:280px;min-width:280px">
+      <div class="sidebar-header" style="display:flex;justify-content:space-between;align-items:center">
+        <span>💬 会话列表</span>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-primary btn-sm" onclick="createNewSession()">+ 新建</button>
+          <button class="btn btn-outline btn-sm" onclick="if(currentProject)loadSessions(currentProject)">↻</button>
+        </div>
+      </div>
+      <div class="session-list" id="sessionList">
+        <div class="empty" style="flex-direction:column;gap:8px;padding:40px 20px"><span style="font-size:32px;opacity:0.5">💬</span><span style="color:var(--text-muted)">选择项目查看会话</span></div>
+      </div>
+    </div>
+    <div class="content">
+      <div class="content-header">
+        <span id="contentTitle">消息记录</span>
+        <div id="projectActions" style="display:none;gap:6px">
+          <button class="btn btn-outline btn-sm" onclick="showProjectToolsModal()">🔧 工具</button>
+          <button class="btn btn-outline btn-sm" onclick="showProjectSharedFilesModal()">📁 共享文件</button>
+          <button class="btn btn-outline btn-sm" onclick="toggleLogs()">📋 日志</button>
+          <button class="btn btn-outline btn-sm" onclick="refreshAll()">↻ 刷新</button>
+        </div>
+      </div>
+      <div class="content-body" id="contentBody">
+        <div class="empty" style="flex-direction:column;gap:12px"><span style="font-size:48px;opacity:0.3">💬</span><span style="font-size:16px;color:var(--text-secondary)">选择一个会话开始对话</span><span style="font-size:13px;color:var(--text-muted)">在左侧选择或创建新会话</span></div>
+      </div>
+      <div style="padding:0 22px 4px;display:flex;justify-content:space-between;align-items:center">
+        <div class="chat-target" id="chatTarget" style="padding:0">未选择项目</div>
+        <div class="sending-indicator" id="sendingIndicator" style="display:none;padding:0">Agent 正在处理...</div>
+      </div>
+      <div class="file-preview" id="filePreview"></div>
+      <div class="chat-bar">
+        <input type="file" id="fileUpload" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.json,.csv" style="display:none" onchange="onFilesSelected(this.files)">
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('fileUpload').click()" title="上传文件" style="padding:8px 12px;font-size:16px">📎</button>
+        <button class="btn btn-outline btn-sm" onclick="showTemplateSelector('chatInput')" title="使用模板" style="padding:8px 12px;font-size:16px">📚</button>
+        <textarea id="chatInput" placeholder="输入消息发送给 Agent... (Enter 发送)" rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}" ondrop="onDrop(event)" ondragover="event.preventDefault();this.style.borderColor='#38bdf8'" ondragleave="this.style.borderColor='#334155'"></textarea>
+        <button class="chat-send" id="chatSendBtn" onclick="sendMessage()">发送 ➤</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 群聊协作 -->
+<div class="tab-panel" id="panel-groups">
+  <!-- 顶部群聊选择栏 -->
+  <div class="project-toolbar" id="groupToolbar">
+    <div style="font-size:13px;color:var(--text-muted);white-space:nowrap">群聊：</div>
+    <div id="groupList" style="display:flex;gap:10px;overflow-x:auto"></div>
+    <button class="btn btn-primary btn-sm" onclick="showCreateGroupModal()" style="white-space:nowrap">+ 新建群聊</button>
+  </div>
+  <!-- 主内容区 -->
+  <div class="main">
+    <div class="content">
+      <div class="content-header">
+        <span id="groupTitle">选择或创建一个群聊</span>
+        <div id="groupActions" style="display:none;gap:6px">
+          <button class="btn btn-outline btn-sm" onclick="showGroupToolsModal()">🔧 工具</button>
+          <button class="btn btn-outline btn-sm" onclick="showGroupSharedFilesModal()">📁 共享文件</button>
+          <button class="btn btn-outline btn-sm" onclick="showGroupLogsModal()">📋 日志</button>
+          <button class="btn btn-outline btn-sm" onclick="showManageMembersModal()">👥 成员</button>
+          <button class="btn btn-outline btn-sm" onclick="loadGroupMessages()">↻ 刷新</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteCurrentGroup()">🗑️ 删除</button>
+        </div>
+      </div>
+      <div class="content-body" id="groupBody" style="padding:16px">
+        <div class="empty" style="flex-direction:column;gap:12px"><span style="font-size:48px;opacity:0.3">💬</span><span style="font-size:16px;color:var(--text-secondary)">开始群聊协作</span><span style="font-size:13px;color:var(--text-muted)">创建群聊并添加 Agent 成员</span></div>
+      </div>
+      <div id="groupChatBar" style="display:none">
+        <div style="padding:0 22px 4px;display:flex;justify-content:space-between;align-items:center">
+          <div class="chat-target" id="groupChatTarget" style="padding:0">选择要发送给的 Agent</div>
+        </div>
+        <div class="file-preview" id="groupFilePreview"></div>
+        <div style="position:relative">
+          <div id="mentionDropdown" style="display:none;position:absolute;bottom:100%;left:60px;right:80px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-md);max-height:200px;overflow-y:auto;z-index:50;box-shadow:var(--shadow-lg)"></div>
+          <div class="chat-bar">
+            <input type="file" id="groupFileUpload" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.json,.csv" style="display:none" onchange="onGroupFilesSelected(this.files)">
+            <button class="btn btn-outline btn-sm" onclick="document.getElementById('groupFileUpload').click()" title="上传文件" style="padding:8px 12px;font-size:16px">📎</button>
+            <button class="btn btn-outline btn-sm" onclick="showTemplateSelector('groupChatInput')" title="使用模板" style="padding:8px 12px;font-size:16px">📚</button>
+            <select id="groupTargetAgent" style="padding:10px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-size:13px;min-width:130px;outline:none;transition:all 0.3s">
+              <option value="all">📢 群发</option>
+            </select>
+            <textarea id="groupChatInput" placeholder="输入消息... (@ 提及其他Agent)" rows="1" onkeydown="handleGroupInputKeydown(event)" oninput="handleGroupInput()" ondrop="onGroupFileDrop(event)" ondragover="event.preventDefault();this.style.borderColor='#38bdf8'" ondragleave="this.style.borderColor='#334155'"></textarea>
+            <button class="chat-send" onclick="sendGroupMessage()">发送 ➤</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 任务派发 -->
+<div class="tab-panel" id="panel-tasks">
+  <!-- 顶部任务统计栏 -->
+  <div class="project-toolbar" id="taskToolbar">
+    <div style="display:flex;align-items:center;gap:16px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--text-muted)">总计</span>
+        <span id="taskTotal" style="font-size:14px;font-weight:600;color:var(--text-primary)">0</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--accent-yellow)">待处理</span>
+        <span id="taskPending" style="font-size:14px;font-weight:600;color:var(--accent-yellow)">0</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--accent-blue)">进行中</span>
+        <span id="taskInProgress" style="font-size:14px;font-weight:600;color:var(--accent-blue)">0</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--accent-green)">已完成</span>
+        <span id="taskDone" style="font-size:14px;font-weight:600;color:var(--accent-green)">0</span>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-outline btn-sm" onclick="showQueueStatus()">📊 队列状态</button>
+      <button class="btn btn-outline btn-sm" onclick="addAllPendingToQueue()">📥 全部加入队列</button>
+      <button class="btn btn-primary btn-sm" onclick="showCreateTaskModal()">+ 新建任务</button>
+    </div>
+  </div>
+  <div class="content-body" id="tasksBody"></div>
+</div>
+
+<!-- 工具配置 -->
+<div class="tab-panel" id="panel-tools">
+  <!-- 顶部工具栏 -->
+  <div class="project-toolbar">
+    <div style="display:flex;align-items:center;gap:12px">
+      <button class="btn btn-primary btn-sm" onclick="showAddToolModal('mcp')">+ MCP 服务器</button>
+      <button class="btn btn-outline btn-sm" onclick="showAddToolModal('skill')">+ Skill</button>
+      <button class="btn btn-outline btn-sm" onclick="showAddToolModal('shared')">+ 共享文件</button>
+    </div>
+    <div id="toolsStats" style="font-size:12px;color:var(--text-muted)">0 个工具</div>
+  </div>
+  <!-- 主内容区 -->
+  <div class="main">
+    <div class="sidebar" style="width:260px;min-width:260px">
+      <div class="sidebar-header">
+        <span>🔧 工具分类</span>
+      </div>
+      <div class="session-list">
+        <div class="session-item active" onclick="filterTools('all')" id="filter-all">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:16px">🔧</span>
+            <span>全部工具</span>
+            <span id="count-all" style="margin-left:auto;font-size:11px;color:var(--text-muted)">0</span>
+          </div>
+        </div>
+        <div class="session-item" onclick="filterTools('mcp')" id="filter-mcp">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:16px">🔌</span>
+            <span>MCP 服务器</span>
+            <span id="count-mcp" style="margin-left:auto;font-size:11px;color:var(--text-muted)">0</span>
+          </div>
+        </div>
+        <div class="session-item" onclick="filterTools('skill')" id="filter-skill">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:16px">⚡</span>
+            <span>Skills</span>
+            <span id="count-skill" style="margin-left:auto;font-size:11px;color:var(--text-muted)">0</span>
+          </div>
+        </div>
+        <div class="session-item" onclick="filterTools('shared')" id="filter-shared">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:16px">📁</span>
+            <span>共享文件</span>
+            <span id="count-shared" style="margin-left:auto;font-size:11px;color:var(--text-muted)">0</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="content">
+      <div class="content-header">
+        <span id="toolsTitle">全部工具</span>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-outline btn-sm" onclick="loadTools()">↻ 刷新</button>
+        </div>
+      </div>
+      <div class="content-body" id="toolsBody" style="padding:16px">
+        <div class="empty" style="flex-direction:column;gap:12px"><span style="font-size:48px;opacity:0.3">🔧</span><span style="font-size:16px;color:var(--text-secondary)">工具配置中心</span><span style="font-size:13px;color:var(--text-muted)">配置 MCP、Skill 和共享文件</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 代码变更 -->
+<div class="tab-panel" id="panel-changes">
+  <!-- 顶部工具栏 -->
+  <div class="project-toolbar">
+    <div style="display:flex;align-items:center;gap:12px">
+      <select id="changeProjectSelect" onchange="loadGitStatus()" style="padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-size:13px;min-width:180px;outline:none">
+        <option value="">选择项目</option>
+      </select>
+      <button class="btn btn-outline btn-sm" onclick="loadGitStatus()">↻ 刷新</button>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-outline btn-sm" onclick="showGitLogModal()">📋 提交历史</button>
+      <button class="btn btn-primary btn-sm" onclick="showCommitModal()">💾 提交更改</button>
+    </div>
+  </div>
+  <!-- 主内容区 -->
+  <div class="main">
+    <div class="sidebar" style="width:300px;min-width:300px">
+      <div class="sidebar-header">
+        <span>📁 变更文件列表</span>
+        <span id="changesCount" style="font-size:11px;color:var(--text-muted)">0 个文件</span>
+      </div>
+      <div class="session-list" id="changesFileList">
+        <div class="empty" style="flex-direction:column;gap:12px;padding:40px 20px"><span style="font-size:32px;opacity:0.5">📝</span><span style="color:var(--text-muted)">选择项目查看变更</span></div>
+      </div>
+    </div>
+    <div class="content">
+      <div class="content-header">
+        <span id="changesTitle">代码变更查看器</span>
+        <div id="changesActions" style="display:none;gap:6px">
+          <button class="btn btn-outline btn-sm" onclick="rollbackFile()">↩ 回滚</button>
+        </div>
+      </div>
+      <div class="content-body" id="changesBody" style="padding:0">
+        <div class="empty" style="flex-direction:column;gap:12px"><span style="font-size:48px;opacity:0.3">📝</span><span style="font-size:16px;color:var(--text-secondary)">代码变更查看器</span><span style="font-size:13px;color:var(--text-muted)">查看 Agent 修改了哪些文件，支持 diff 可视化和回滚</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 共享上下文 -->
+<div class="tab-panel" id="panel-shared">
+  <!-- 顶部文件操作栏 -->
+  <div class="project-toolbar">
+    <div style="display:flex;align-items:center;gap:12px">
+      <button class="btn btn-primary btn-sm" onclick="showNewFileModal()">+ 新建文本</button>
+      <button class="btn btn-outline btn-sm" onclick="document.getElementById('sharedUploadInput').click()">📎 上传文件</button>
+      <input type="file" id="sharedUploadInput" multiple style="display:none" onchange="uploadSharedFiles(this.files)">
+    </div>
+    <div id="sharedStats" style="font-size:12px;color:var(--text-muted)">0 个文件</div>
+  </div>
+  <!-- 主内容区 -->
+  <div class="main">
+    <div class="sidebar" style="width:260px;min-width:260px">
+      <div class="sidebar-header">
+        <span>📁 文件列表</span>
+      </div>
+      <div class="session-list" id="sharedFileList"
+        ondrop="event.preventDefault();uploadSharedFiles(event.dataTransfer.files)"
+        ondragover="event.preventDefault();this.style.background='rgba(56,189,248,0.05)'"
+        ondragleave="this.style.background=''">
+      </div>
+      <div style="padding:10px 16px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border-color);text-align:center">
+        📎 拖拽文件到此处上传
+      </div>
+    </div>
+    <div class="content">
+      <div class="content-header">
+        <span id="sharedTitle">选择文件查看</span>
+        <div id="sharedActions" style="display:none;gap:6px">
+          <button class="btn btn-success btn-sm" onclick="saveSharedFile()">💾 保存</button>
+          <button class="btn btn-outline btn-sm" onclick="downloadSharedFile()">⬇ 下载</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteCurrentSharedFile()">🗑️ 删除</button>
+        </div>
+      </div>
+      <div class="editor-area" id="sharedEditor">
+        <div class="empty" style="flex-direction:column;gap:12px"><span style="font-size:48px;opacity:0.3">📁</span><span style="font-size:16px;color:var(--text-secondary)">共享文件管理</span><span style="font-size:13px;color:var(--text-muted)">选择、创建或上传共享文件</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 定时任务 -->
+<div class="tab-panel" id="panel-cron">
+  <!-- 顶部定时任务统计栏 -->
+  <div class="project-toolbar">
+    <div style="display:flex;align-items:center;gap:16px">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--text-muted)">总计</span>
+        <span id="cronTotal" style="font-size:14px;font-weight:600;color:var(--text-primary)">0</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--accent-green)">启用</span>
+        <span id="cronEnabled" style="font-size:14px;font-weight:600;color:var(--accent-green)">0</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:11px;color:var(--text-muted)">禁用</span>
+        <span id="cronDisabled" style="font-size:14px;font-weight:600;color:var(--text-muted)">0</span>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="showCreateCronModal()">+ 新建定时任务</button>
+  </div>
+  <div class="content-body" id="cronBody"></div>
+</div>
+
+<!-- 对话模板 -->
+<div class="tab-panel" id="panel-templates">
+  <!-- 顶部操作栏 -->
+  <div class="project-toolbar">
+    <div style="display:flex;align-items:center;gap:12px">
+      <select id="templateCategoryFilter" onchange="loadTemplates()" style="padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-size:13px;min-width:120px;outline:none">
+        <option value="">全部分类</option>
+        <option value="development">💻 开发</option>
+        <option value="maintenance">🔧 维护</option>
+        <option value="review">🔍 审查</option>
+        <option value="collaboration">🤝 协作</option>
+        <option value="planning">📋 规划</option>
+        <option value="custom">✏️ 自定义</option>
+      </select>
+      <input type="text" id="templateSearch" placeholder="搜索模板..." oninput="filterTemplates()" style="padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-size:13px;min-width:200px;outline:none">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-outline btn-sm" onclick="loadTemplates()">↻ 刷新</button>
+      <button class="btn btn-primary btn-sm" onclick="showCreateTemplateModal()">+ 新建模板</button>
+    </div>
+  </div>
+  <!-- 主内容区 -->
+  <div class="content-body" id="templatesBody" style="padding:24px">
+    <div class="empty">加载中...</div>
+  </div>
+</div>
+
+<!-- 协作仪表盘 -->
+<div class="tab-panel" id="panel-dashboard">
+  <!-- 顶部操作栏 -->
+  <div class="project-toolbar">
+    <div style="display:flex;align-items:center;gap:12px">
+      <button class="btn btn-primary btn-sm" onclick="showDecomposeModal()">📋 智能分解</button>
+      <button class="btn btn-outline btn-sm" onclick="executeAllTasks()">🚀 执行任务</button>
+      <button class="btn btn-outline btn-sm" onclick="showCodeReviewModal()">🔍 代码审查</button>
+    </div>
+    <button class="btn btn-outline btn-sm" onclick="loadDashboard()">↻ 刷新</button>
+  </div>
+  <div class="content-body" id="dashboardBody" style="padding:24px">
+    <div class="empty">加载中...</div>
+  </div>
+</div>
+
+<!-- 内置终端 -->
+<div class="tab-panel" id="panel-terminal">
+  <!-- 顶部操作栏 -->
+  <div class="project-toolbar">
+    <div style="display:flex;align-items:center;gap:12px">
+      <span style="font-size:13px;color:var(--text-muted)">终端会话</span>
+      <select id="terminalProject" onchange="switchTerminalProject()" style="padding:8px 12px;border-radius:var(--radius-sm);border:1px solid var(--border-color);background:rgba(15,23,42,0.6);color:var(--text-primary);font-size:13px;min-width:180px;outline:none">
+        <option value="">选择项目工作目录</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-outline btn-sm" onclick="clearTerminal()">🗑️ 清屏</button>
+      <button class="btn btn-primary btn-sm" onclick="newTerminalSession()">+ 新建终端</button>
+    </div>
+  </div>
+  <!-- 终端主体 -->
+  <div style="flex:1;display:flex;flex-direction:column;padding:16px">
+    <div id="terminalContainer" style="flex:1;background:#1a1a2e;border-radius:var(--radius-md);border:1px solid var(--border-color);overflow:hidden;display:flex;flex-direction:column">
+      <div id="terminalOutput" style="flex:1;padding:16px;font-family:'JetBrains Mono','Fira Code',monospace;font-size:13px;line-height:1.6;color:#e2e8f0;overflow-y:auto;white-space:pre-wrap;word-break:break-all"></div>
+      <div style="display:flex;align-items:center;padding:12px 16px;border-top:1px solid rgba(255,255,255,0.1);background:rgba(0,0,0,0.2)">
+        <span style="color:#22c55e;font-family:monospace;font-size:13px;margin-right:8px">$</span>
+        <input type="text" id="terminalInput" style="flex:1;background:transparent;border:none;color:#e2e8f0;font-family:monospace;font-size:13px;outline:none" placeholder="输入命令..." onkeydown="handleTerminalInput(event)">
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 系统设置 -->
+<div class="tab-panel" id="panel-settings">
+  <!-- 顶部操作栏 -->
+  <div class="project-toolbar">
+    <div style="font-size:13px;color:var(--text-muted)">系统配置</div>
+    <button class="btn btn-outline btn-sm" onclick="loadSettings()">↻ 刷新</button>
+  </div>
+  <!-- 主内容区 -->
+  <div class="content-body" id="settingsBody" style="padding:24px;max-width:800px">
+    <div class="empty">加载中...</div>
+  </div>
+</div>
+
+</div> <!-- end main-wrapper -->
+
+<div class="logs" id="logsPanel">
+  <div class="logs-header" onclick="toggleLogs()">
+    <span>运行日志</span>
+    <span id="logProject" style="color:#64748b;font-size:12px"></span>
+  </div>
+  <div class="logs-content" id="logsContent"></div>
+</div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

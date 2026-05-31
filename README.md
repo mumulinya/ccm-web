@@ -18,7 +18,7 @@ cc-connect 的 Web 管理界面，支持多 Agent 协作、任务派发、代码
 ## 安装
 
 ```bash
-npm install -g git+https://github.com/mumulinya/ccm-web.git
+npm install -g @mumulinya167/cc-web
 ```
 
 ## 使用
