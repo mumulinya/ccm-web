@@ -1,0 +1,165 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.McpClient = void 0;
+const child_process_1 = require("child_process");
+class McpClient {
+    command;
+    env;
+    process = null;
+    messageId = 0;
+    pending = new Map();
+    buffer = "";
+    connected = false;
+    serverName = "";
+    tools = [];
+    constructor(command, env = {}) {
+        this.command = command;
+        this.env = env;
+    }
+    async connect() {
+        try {
+            const parts = this.command.split(/\s+/);
+            const cmd = parts[0];
+            const args = parts.slice(1);
+            const envVars = { ...process.env, ...this.env };
+            this.process = (0, child_process_1.spawn)(cmd, args, {
+                stdio: ["pipe", "pipe", "pipe"],
+                shell: true,
+                env: envVars,
+                windowsHide: true,
+            });
+            this.process.stdout?.on("data", (chunk) => {
+                this.buffer += chunk.toString();
+                this.processBuffer();
+            });
+            this.process.stderr?.on("data", (chunk) => {
+                // MCP 服务器的 stderr 通常是日志，忽略
+            });
+            this.process.on("exit", () => {
+                this.connected = false;
+                for (const [id, pending] of this.pending) {
+                    clearTimeout(pending.timer);
+                    pending.reject(new Error("MCP process exited"));
+                }
+                this.pending.clear();
+            });
+            // 发送 initialize
+            const initResult = await this.sendRequest("initialize", {
+                protocolVersion: "2024-11-05",
+                capabilities: {},
+                clientInfo: { name: "cc-connect", version: "1.0.0" },
+            });
+            this.serverName = initResult?.serverInfo?.name || "unknown";
+            this.connected = true;
+            // 发送 initialized 通知
+            this.sendNotification("notifications/initialized", {});
+            // 获取工具列表
+            const toolsResult = await this.sendRequest("tools/list", {});
+            this.tools = toolsResult?.tools || [];
+            return true;
+        }
+        catch (e) {
+            console.error(`[MCP] 连接失败: ${this.command}`, e.message);
+            this.connected = false;
+            return false;
+        }
+    }
+    processBuffer() {
+        while (true) {
+            // 找到 Content-Length header
+            const headerEnd = this.buffer.indexOf("\r\n\r\n");
+            if (headerEnd === -1)
+                break;
+            const header = this.buffer.substring(0, headerEnd);
+            const lengthMatch = header.match(/Content-Length:\s*(\d+)/i);
+            if (!lengthMatch) {
+                this.buffer = this.buffer.substring(headerEnd + 4);
+                continue;
+            }
+            const contentLength = parseInt(lengthMatch[1]);
+            const bodyStart = headerEnd + 4;
+            if (this.buffer.length < bodyStart + contentLength)
+                break;
+            const body = this.buffer.substring(bodyStart, bodyStart + contentLength);
+            this.buffer = this.buffer.substring(bodyStart + contentLength);
+            try {
+                const message = JSON.parse(body);
+                this.handleMessage(message);
+            }
+            catch { }
+        }
+    }
+    handleMessage(message) {
+        if (message.id !== undefined && this.pending.has(message.id)) {
+            const p = this.pending.get(message.id);
+            this.pending.delete(message.id);
+            clearTimeout(p.timer);
+            if (message.error) {
+                p.reject(new Error(message.error.message || "MCP error"));
+            }
+            else {
+                p.resolve(message.result);
+            }
+        }
+    }
+    sendRequest(method, params) {
+        return new Promise((resolve, reject) => {
+            if (!this.process?.stdin?.writable) {
+                return reject(new Error("MCP process not running"));
+            }
+            const id = ++this.messageId;
+            const message = JSON.stringify({ jsonrpc: "2.0", id, method, params });
+            const data = `Content-Length: ${Buffer.byteLength(message)}\r\n\r\n${message}`;
+            const timer = setTimeout(() => {
+                this.pending.delete(id);
+                reject(new Error(`MCP request timeout: ${method}`));
+            }, 30000);
+            this.pending.set(id, { resolve, reject, timer });
+            this.process.stdin.write(data);
+        });
+    }
+    sendNotification(method, params) {
+        if (!this.process?.stdin?.writable)
+            return;
+        const message = JSON.stringify({ jsonrpc: "2.0", method, params });
+        const data = `Content-Length: ${Buffer.byteLength(message)}\r\n\r\n${message}`;
+        this.process.stdin.write(data);
+    }
+    async listTools() {
+        if (!this.connected)
+            return [];
+        return this.tools;
+    }
+    async callTool(name, args) {
+        if (!this.connected) {
+            return { content: [{ type: "text", text: "MCP 服务器未连接" }], isError: true };
+        }
+        try {
+            const result = await this.sendRequest("tools/call", { name, arguments: args });
+            return result || { content: [{ type: "text", text: "无返回结果" }] };
+        }
+        catch (e) {
+            return { content: [{ type: "text", text: `工具调用失败: ${e.message}` }], isError: true };
+        }
+    }
+    isConnected() {
+        return this.connected;
+    }
+    getServerName() {
+        return this.serverName;
+    }
+    disconnect() {
+        if (this.process) {
+            this.process.kill();
+            this.process = null;
+        }
+        this.connected = false;
+        for (const [, p] of this.pending) {
+            clearTimeout(p.timer);
+            p.reject(new Error("Disconnected"));
+        }
+        this.pending.clear();
+    }
+}
+exports.McpClient = McpClient;
+//# sourceMappingURL=mcp-client.js.map

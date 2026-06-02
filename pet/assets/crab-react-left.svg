@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-15 -25 45 45" width="500" height="500">
+<defs>
+  <style>
+    .bounce{transform-box:fill-box;transform-origin:50% 100%;animation:bounce 1s infinite ease-in-out}
+    .shadow-a{transform-box:fill-box;transform-origin:50% 50%;animation:sh 1s infinite ease-in-out}
+    .arm-l{transform-box:fill-box;transform-origin:100% 50%;animation:wl 0.15s infinite alternate ease-in-out}
+    .arm-r{transform-box:fill-box;transform-origin:0% 50%;animation:wr 0.15s infinite alternate ease-in-out}
+    .eyes-blink{transform-box:fill-box;transform-origin:50% 50%;animation:bl 2s infinite linear}
+    .spark-center{opacity:0;animation:sc 1.5s infinite step-end;animation-delay:var(--d,0s)}
+    .spark-outer{opacity:0;animation:so 1.5s infinite step-end;animation-delay:var(--d,0s)}
+    @keyframes bounce{0%,15%,100%{transform:translateY(0) scaleY(1)} 20%{transform:translateY(0) scaleY(0.85)} 40%{transform:translateY(-10px) scaleY(1.05)} 50%{transform:translateY(-12px) scaleY(1)} 60%{transform:translateY(-10px) scaleY(1.05)} 80%{transform:translateY(0) scaleY(0.85)} 85%{transform:translateY(0) scaleY(1)}}
+    @keyframes sh{0%,15%,100%{transform:scale(1);opacity:0.5} 20%{transform:scale(1.1);opacity:0.6} 40%{transform:scale(0.6);opacity:0.2} 50%{transform:scale(0.5);opacity:0.15} 60%{transform:scale(0.6);opacity:0.2} 80%{transform:scale(1.1);opacity:0.6} 85%{transform:scale(1);opacity:0.5}}
+    @keyframes wl{0%{transform:rotate(45deg)} 100%{transform:rotate(85deg)}}
+    @keyframes wr{0%{transform:rotate(-45deg)} 100%{transform:rotate(-85deg)}}
+    @keyframes bl{0%,46%,54%,100%{transform:scaleY(1)} 50%{transform:scaleY(0.1)}}
+    @keyframes sc{0%{opacity:0} 10%{opacity:1} 30%{opacity:0} 100%{opacity:0}}
+    @keyframes so{0%{opacity:0} 20%{opacity:1} 40%{opacity:0} 100%{opacity:0}}
+  </style>
+  <g id="pxs"><rect class="spark-center" x="-0.5" y="-0.5" width="1" height="1"/><path class="spark-outer" d="M-0.5,-1.5h1v1h-1zM-0.5,.5h1v1h-1zM-1.5,-.5h1v1h-1zM.5,-.5h1v1h-1z"/></g>
+</defs>
+<rect class="shadow-a" x="3" y="15" width="9" height="1" fill="#000"/>
+<g><use href="#pxs" x="-4" y="-2" fill="#FFD700" style="--d:0s"/><use href="#pxs" x="18" y="-4" fill="#FFA000" style="--d:0.3s"/><use href="#pxs" x="20" y="10" fill="#FFF59D" style="--d:0.6s"/><use href="#pxs" x="-6" y="12" fill="#FFC107" style="--d:0.9s"/></g>
+<g class="bounce"><g fill="#E8614D"><rect x="3" y="13" width="1" height="2"/><rect x="5" y="13" width="1" height="2"/><rect x="9" y="13" width="1" height="2"/><rect x="11" y="13" width="1" height="2"/><rect x="2" y="6" width="11" height="7"/><g class="arm-l"><rect x="0" y="9" width="2" height="2"/></g><g class="arm-r"><rect x="13" y="9" width="2" height="2"/></g></g><g class="eyes-blink" fill="#000"><rect x="4" y="8" width="1" height="2"/><rect x="10" y="8" width="1" height="2"/></g></g>
+
+<g><path d="M15 18 L7 14 L15 10" fill="none" stroke="#f472b6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="10" cy="28" r="3" fill="#f472b6" opacity="0.75"/></g>
+</svg>

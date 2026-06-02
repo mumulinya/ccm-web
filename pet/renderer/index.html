@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      background: transparent;
+      overflow: hidden;
+      user-select: none;
+      -webkit-app-region: no-drag;
+      pointer-events: none;
+      outline: none;
+      border: none;
+      box-shadow: none;
+    }
+    *:focus { outline: none !important; border: none !important; box-shadow: none !important; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    ::-webkit-scrollbar { display: none; }
+  </style>
+  <link rel="stylesheet" href="pet.css">
+</head>
+<body>
+  <div id="pet-container">
+    <div id="pet-group">
+      <div id="pet-bubble" class="bubble hidden"><span id="bubble-text"></span><div class="bubble-arrow"></div></div>
+      <div id="pet-name"></div>
+      <div id="pet-speech" class="speech hidden">
+        <div id="speech-label"></div>
+        <div id="speech-text"></div>
+      </div>
+      <div id="pet-sprite">
+        <div id="pet-svg"></div>
+        <div id="state-badge"></div>
+        <button id="resize-handle" title="拖拽调整大小" aria-label="拖拽调整大小">↘</button>
+      </div>
+      <div id="size-hint" class="hidden"></div>
+    </div>
+    <div id="context-menu" class="menu hidden">
+      <div class="menu-header" id="menu-agent-name"></div>
+      <div class="menu-state" id="menu-state">状态: idle</div>
+      <hr>
+      <div class="menu-label">更换宠物</div>
+      <div class="menu-types">
+        <button data-type="cat">🐱 猫</button>
+        <button data-type="crab">🦀 蟹</button>
+        <button data-type="clawd">🦀 Clawd</button>
+        <button data-type="robot">🤖 机器人</button>
+        <button data-type="ghost">👻 幽灵</button>
+      </div>
+      <hr>
+      <button id="menu-console">🌐 打开控制台</button>
+      <button id="menu-hide">❌ 隐藏宠物</button>
+    </div>
+  </div>
+  <script src="pet.js"></script>
+</body>
+</html>

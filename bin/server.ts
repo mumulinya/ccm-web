@@ -8,6 +8,7 @@ const path = require("path");
 const { execSync, spawn } = require("child_process");
 const os = require("os");
 const url = require("url");
+const { toolManager } = require("./tool-manager");
 
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
@@ -3506,6 +3507,7 @@ function generateTitle(message) {
                 }
               }
             }
+            toolsContext += toolManager.buildToolPrompt();
 
             const fullPrompt = `你是一个在群聊中协作的开发 Agent，项目: ${member.project}。${atInstructions}${toolsContext}${sharedFilesContext}\n以下是群聊最近的消息记录：\n${context}\n\n请回复用户刚才发给你的消息：${message}`;
 
@@ -3638,6 +3640,7 @@ function generateTitle(message) {
             }
           }
         }
+        toolsContext += toolManager.buildToolPrompt();
 
         // 获取项目级别的工具和共享文件
         const PROJECT_CONFIGS_FILE = path.join(CCM_DIR, "project-configs.json");
@@ -3664,6 +3667,7 @@ function generateTitle(message) {
             }
           }
         }
+        toolsContext += toolManager.buildToolPrompt();
 
         // 项目共享文件
         if (projectConfig.shared_files && projectConfig.shared_files.length > 0) {
@@ -3757,9 +3761,9 @@ function generateTitle(message) {
             console.log(`[群聊] 输出内容 (前500字符): ${fullOutput.substring(0, 500)}`);
 
             // 使用更宽松的正则匹配 @mentions
-            const atMentions = fullOutput.match(/@[\w-]+/g) || [];
+            const atMentions: string[] = fullOutput.match(/@[\w-]+/g) as string[] || [];
             // 过滤掉不是群聊成员的 mentions
-            const validMentions = atMentions.filter(m => {
+            const validMentions = atMentions.filter((m: string) => {
               const name = m.slice(1);
               return group.members.some(member => member.project === name);
             });
@@ -3899,6 +3903,7 @@ function generateTitle(message) {
               }
             }
           }
+          toolsContext += toolManager.buildToolPrompt();
 
           const fullPrompt = `你是群聊中的 ${member.project} Agent。${toolsContext}${sharedFilesContext}\n群聊记录：\n${context}\n\n请回复：${message}`;
 
@@ -4507,12 +4512,34 @@ ${diff}
     return;
   }
 
+  // === MCP/Skills API ===
+  if (pathname === "/api/tools/status" && req.method === "GET") {
+    return sendJson(res, { success: true, ...toolManager.getToolList() });
+  }
+  if (pathname === "/api/tools/test" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const { command, env } = JSON.parse(body);
+        toolManager.testConnection(command, env || "").then(result => sendJson(res, result));
+      } catch (e) { sendJson(res, { error: e.message }, 400); }
+    });
+    return;
+  }
+  if (pathname === "/api/tools/reload" && req.method === "POST") {
+    toolManager.disconnect();
+    toolManager.loadTools().then(() => sendJson(res, { success: true, ...toolManager.getToolList() }));
+    return;
+  }
   // 404
   sendJson(res, { error: "Not Found" }, 404);
 }
 
 // 启动服务器
 function startServer(port) {
+  PORT = port;
+  toolManager.loadTools().catch((e: any) => console.error("[ToolManager]", e.message));
   const server = http.createServer(handleRequest);
   server.listen(port, () => {
     console.log(`\n╔══════════════════════════════════════╗`);
@@ -4525,8 +4552,9 @@ function startServer(port) {
 }
 
 // 直接运行或被 require
+let PORT = 3080;
 if (require.main === module) {
-  const PORT = parseInt(process.argv[2]) || 3080;
+  PORT = parseInt(process.argv[2]) || 3080;
   startServer(PORT);
 }
 

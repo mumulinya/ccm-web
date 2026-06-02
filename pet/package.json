@@ -1,0 +1,12 @@
+{
+  "name": "ccm-pet",
+  "version": "1.0.0",
+  "description": "ccm 桌面宠物 - 全局悬浮宠物，实时响应 Agent 状态",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^35.0.0"
+  }
+}

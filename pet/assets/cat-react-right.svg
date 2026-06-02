@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="500" height="500">
+<defs>
+  <style>
+    .float { transform-origin: 32px 32px; animation: float 2s infinite ease-in-out; }
+    .bubble1{opacity:0;animation:think-bub 2.5s infinite ease-in-out 0s}
+    .bubble2{opacity:0;animation:think-bub 2.5s infinite ease-in-out 0.8s}
+    .bubble3{opacity:0;animation:think-bub 2.5s infinite ease-in-out 1.6s}
+    @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+    @keyframes think-bub { 0%{opacity:0;transform:translateY(4px) scale(0.5)} 30%{opacity:1;transform:translateY(0) scale(1)} 80%{opacity:1;transform:translateY(-6px) scale(1)} 100%{opacity:0;transform:translateY(-10px) scale(0.5)} }
+    .tail-slow { transform-origin: 50px 48px; animation: tail 3s infinite ease-in-out; }
+    @keyframes tail { 0%,100%{transform:rotate(-3deg)} 50%{transform:rotate(5deg)} }
+  </style>
+</defs>
+<ellipse cx="32" cy="58" rx="14" ry="3" fill="#000" opacity="0.1"/>
+<!-- Thinking bubbles -->
+<circle class="bubble1" cx="48" cy="14" r="2" fill="#B39DDB" opacity="0.6"/>
+<circle class="bubble2" cx="52" cy="8" r="3" fill="#B39DDB" opacity="0.5"/>
+<circle class="bubble3" cx="56" cy="2" r="4" fill="#B39DDB" opacity="0.4"/>
+<!-- Tail -->
+<g class="tail-slow"><path d="M46,46 Q58,40 54,50" fill="none" stroke="#FF9800" stroke-width="4" stroke-linecap="round"/></g>
+<!-- Body -->
+<g class="float">
+  <ellipse cx="32" cy="42" rx="16" ry="12" fill="#FF9800"/>
+  <ellipse cx="32" cy="40" rx="14" ry="10" fill="#FFB74D"/>
+  <ellipse cx="32" cy="24" rx="14" ry="12" fill="#FF9800"/>
+  <polygon points="18,16 22,4 28,16" fill="#FF9800"/><polygon points="20,16 23,8 26,16" fill="#FFB74D"/>
+  <polygon points="36,16 42,4 46,16" fill="#FF9800"/><polygon points="38,16 41,8 44,16" fill="#FFB74D"/>
+  <!-- Eyes: looking up -->
+  <ellipse cx="26" cy="22" rx="3.5" ry="4.5" fill="white"/>
+  <ellipse cx="38" cy="22" rx="3.5" ry="4.5" fill="white"/>
+  <ellipse cx="26" cy="20" rx="2" ry="3" fill="#1a1a2e"/>
+  <ellipse cx="38" cy="20" rx="2" ry="3" fill="#1a1a2e"/>
+  <circle cx="27" cy="19" r="1" fill="white"/>
+  <circle cx="39" cy="19" r="1" fill="white"/>
+  <polygon points="32,27 30,29 34,29" fill="#E91E63"/>
+  <!-- Paw on chin -->
+  <ellipse cx="26" cy="32" rx="4" ry="3" fill="#FFB74D" transform="rotate(-20,26,32)"/>
+  <ellipse cx="22" cy="52" rx="5" ry="3" fill="#FF9800"/>
+  <ellipse cx="42" cy="52" rx="5" ry="3" fill="#FF9800"/>
+</g>
+
+<g><path d="M49 18 L57 14 L49 10" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="54" cy="28" r="3" fill="#f59e0b" opacity="0.75"/></g>
+</svg>

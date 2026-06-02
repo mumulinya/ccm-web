@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- 小螃蟹 - 像素风格 -->
+  <!-- 钳子 左 -->
+  <ellipse cx="10" cy="32" rx="7" ry="5" fill="#FF5722" stroke="#BF360C" stroke-width="1"/>
+  <ellipse cx="6" cy="30" rx="4" ry="3" fill="#FF7043"/>
+  <!-- 钳子 右 -->
+  <ellipse cx="54" cy="32" rx="7" ry="5" fill="#FF5722" stroke="#BF360C" stroke-width="1"/>
+  <ellipse cx="58" cy="30" rx="4" ry="3" fill="#FF7043"/>
+  <!-- 腿 -->
+  <line x1="18" y1="42" x2="12" y2="50" stroke="#FF5722" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="22" y1="44" x2="16" y2="52" stroke="#FF5722" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="46" y1="42" x2="52" y2="50" stroke="#FF5722" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="42" y1="44" x2="48" y2="52" stroke="#FF5722" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- 身体 -->
+  <ellipse cx="32" cy="34" rx="16" ry="14" fill="#FF5722" stroke="#BF360C" stroke-width="1"/>
+  <ellipse cx="32" cy="32" rx="14" ry="12" fill="#FF7043"/>
+  <!-- 眼睛柄 -->
+  <line x1="24" y1="24" x2="22" y2="16" stroke="#FF5722" stroke-width="3" stroke-linecap="round"/>
+  <line x1="40" y1="24" x2="42" y2="16" stroke="#FF5722" stroke-width="3" stroke-linecap="round"/>
+  <!-- 眼睛 -->
+  <circle cx="22" cy="14" r="5" fill="white" stroke="#BF360C" stroke-width="1"/>
+  <circle cx="42" cy="14" r="5" fill="white" stroke="#BF360C" stroke-width="1"/>
+  <circle cx="23" cy="14" r="2.5" fill="#1a1a2e"/>
+  <circle cx="43" cy="14" r="2.5" fill="#1a1a2e"/>
+  <circle cx="24" cy="13" r="1" fill="white"/>
+  <circle cx="44" cy="13" r="1" fill="white"/>
+  <!-- 嘴巴 -->
+  <path d="M28,38 Q32,42 36,38" fill="none" stroke="#BF360C" stroke-width="1.2" stroke-linecap="round"/>
+</svg>
