@@ -30,7 +30,7 @@ export declare class ToolManager {
             toolsCount: number;
         }[];
     };
-    testConnection(command: string, env: string): Promise<{
+    testConnection(command: string, env: string, args?: any): Promise<{
         success: boolean;
         tools: string[];
         error?: string;
@@ -39,6 +39,7 @@ export declare class ToolManager {
     private loadMcpConfigs;
     private loadSkillConfigs;
     private parseEnv;
+    private parseArgs;
 }
 export declare const toolManager: ToolManager;
 export {};

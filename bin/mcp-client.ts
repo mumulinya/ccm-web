@@ -19,14 +19,24 @@ export class McpClient {
   private connected = false;
   private serverName = "";
   private tools: McpTool[] = [];
+  private stderrBuffer = "";
 
-  constructor(private command: string, private env: Record<string, string> = {}) {}
+  constructor(private command: string, private args: string[] = [], private env: Record<string, string> = {}) {}
+
+  private parseCommand() {
+    if (this.args.length > 0) {
+      return { cmd: this.command, args: this.args };
+    }
+
+    const parts = this.command.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+    const cmd = (parts[0] || this.command).replace(/^"|"$/g, "");
+    const args = parts.slice(1).map(p => p.replace(/^"|"$/g, ""));
+    return { cmd, args };
+  }
 
   async connect(): Promise<boolean> {
     try {
-      const parts = this.command.split(/\s+/);
-      const cmd = parts[0];
-      const args = parts.slice(1);
+      const { cmd, args } = this.parseCommand();
 
       const envVars = { ...process.env, ...this.env };
 
@@ -43,7 +53,7 @@ export class McpClient {
       });
 
       this.process.stderr?.on("data", (chunk: Buffer) => {
-        // MCP 服务器的 stderr 通常是日志，忽略
+        this.stderrBuffer = (this.stderrBuffer + chunk.toString()).slice(-2000);
       });
 
       this.process.on("exit", () => {
@@ -74,34 +84,24 @@ export class McpClient {
 
       return true;
     } catch (e) {
-      console.error(`[MCP] 连接失败: ${this.command}`, (e as Error).message);
+      console.error(`[MCP] 连接失败: ${this.command}`, (e as Error).message, this.stderrBuffer);
       this.connected = false;
+      this.disconnect();
       return false;
     }
   }
 
   private processBuffer() {
     while (true) {
-      // 找到 Content-Length header
-      const headerEnd = this.buffer.indexOf("\r\n\r\n");
-      if (headerEnd === -1) break;
+      const lineEnd = this.buffer.indexOf("\n");
+      if (lineEnd === -1) break;
 
-      const header = this.buffer.substring(0, headerEnd);
-      const lengthMatch = header.match(/Content-Length:\s*(\d+)/i);
-      if (!lengthMatch) {
-        this.buffer = this.buffer.substring(headerEnd + 4);
-        continue;
-      }
-
-      const contentLength = parseInt(lengthMatch[1]);
-      const bodyStart = headerEnd + 4;
-      if (this.buffer.length < bodyStart + contentLength) break;
-
-      const body = this.buffer.substring(bodyStart, bodyStart + contentLength);
-      this.buffer = this.buffer.substring(bodyStart + contentLength);
+      const line = this.buffer.substring(0, lineEnd).replace(/\r$/, "").trim();
+      this.buffer = this.buffer.substring(lineEnd + 1);
+      if (!line) continue;
 
       try {
-        const message = JSON.parse(body);
+        const message = JSON.parse(line);
         this.handleMessage(message);
       } catch {}
     }
@@ -127,7 +127,6 @@ export class McpClient {
       }
       const id = ++this.messageId;
       const message = JSON.stringify({ jsonrpc: "2.0", id, method, params });
-      const data = `Content-Length: ${Buffer.byteLength(message)}\r\n\r\n${message}`;
 
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -135,15 +134,14 @@ export class McpClient {
       }, 30000);
 
       this.pending.set(id, { resolve, reject, timer });
-      this.process.stdin.write(data);
+      this.process.stdin.write(message + "\n");
     });
   }
 
   private sendNotification(method: string, params: any) {
     if (!this.process?.stdin?.writable) return;
     const message = JSON.stringify({ jsonrpc: "2.0", method, params });
-    const data = `Content-Length: ${Buffer.byteLength(message)}\r\n\r\n${message}`;
-    this.process.stdin.write(data);
+    this.process.stdin.write(message + "\n");
   }
 
   async listTools(): Promise<McpTool[]> {

@@ -636,9 +636,50 @@ if (args.includes("--list") || args.includes("-l")) {
     console.log(`  [${i + 1}] ${a.name.padEnd(15)} ${a.type.padEnd(14)} 模式: ${a.modes.join(", ")}`);
   });
   console.log();
+} else if (args[0] === "pet") {
+  const petDir = path.join(__dirname, "..", "pet");
+  const petPidFile = path.join(CCM_DIR, "pids", "pet.pid");
+  const ccmPort = args.includes("--port") ? parseInt(args[args.indexOf("--port") + 1]) : 3080;
+  if (args[1] === "stop") {
+    if (!fs.existsSync(petPidFile)) { console.log("桌面宠物未在运行"); process.exit(0); }
+    const pid = fs.readFileSync(petPidFile, "utf-8").trim();
+    try {
+      if (process.platform === "win32") execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" });
+      else process.kill(parseInt(pid), "SIGTERM");
+    } catch {}
+    try { fs.unlinkSync(petPidFile); } catch {}
+    console.log("桌面宠物已关闭");
+  } else {
+    if (fs.existsSync(petPidFile)) {
+      const pid = fs.readFileSync(petPidFile, "utf-8").trim();
+      try { process.kill(parseInt(pid), 0); console.log("桌面宠物已在运行"); process.exit(0); } catch {}
+    }
+    if (!fs.existsSync(path.join(petDir, "main.js"))) {
+      console.log("宠物应用未安装，请先运行: cd pet && npm install");
+      process.exit(1);
+    }
+    const petExe = path.join(petDir, "node_modules", "electron", "dist", "electron.exe");
+    const mainExe = path.join(__dirname, "..", "node_modules", "electron", "dist", "electron.exe");
+    const petBin = path.join(petDir, "node_modules", ".bin", "electron");
+    const mainBin = path.join(__dirname, "..", "node_modules", ".bin", "electron");
+    const electronBin = fs.existsSync(petExe) ? petExe : fs.existsSync(mainExe) ? mainExe : fs.existsSync(petBin) ? petBin : fs.existsSync(mainBin) ? mainBin : null;
+    const cmd = electronBin || "npx";
+    const args2 = electronBin ? [petDir] : ["electron", petDir];
+    const child = spawn(cmd, args2, {
+      detached: true,
+      stdio: "ignore",
+      shell: !electronBin,
+      windowsHide: true,
+      env: { ...process.env, CCM_PORT: String(ccmPort) }
+    });
+    child.unref();
+    if (!fs.existsSync(path.dirname(petPidFile))) fs.mkdirSync(path.dirname(petPidFile), { recursive: true });
+    fs.writeFileSync(petPidFile, String(child.pid));
+    console.log("桌面宠物已启动！");
+  }
 } else if (args[0] === "web") {
   const port = args.includes("--port") ? parseInt(args[args.indexOf("--port") + 1]) : 3080;
-  const { startServer } = require("./server.js");
+  const { startServer } = require("../dist/server.js");
   startServer(port);
 } else if (args[0] === "start" && !args[1]) {
   // ccm start → 启动 Web 控制台（前端 + 后端，前端由 server.js 从 public/ 目录直接 serve）
@@ -649,7 +690,7 @@ if (args.includes("--list") || args.includes("-l")) {
   console.log("╚══════════════════════════════════════╝\n");
   console.log(`访问: http://localhost:${port}\n`);
 
-  const { startServer } = require("./server.js");
+  const { startServer } = require("../dist/server.js");
   startServer(port);
 } else if (args[0] === "start" && args[1]) {
   const configs = getConfigs();
@@ -694,6 +735,8 @@ if (args.includes("--list") || args.includes("-l")) {
   console.log("  ccm stop  <项目名>      停止指定项目");
   console.log("  ccm stop  all           停止所有项目");
   console.log("  ccm web                 仅启动后端 API 服务");
+  console.log("  ccm pet                 启动桌面宠物");
+  console.log("  ccm pet stop            关闭桌面宠物");
   console.log("  ccm status              查看运行状态");
   console.log("  ccm --list              列出所有配置");
   console.log("  ccm --init              初始化新项目");

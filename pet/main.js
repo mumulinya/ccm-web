@@ -9,12 +9,7 @@ const CCM_PORT = parseInt(process.env.CCM_PORT) || 3080;
 process.on('uncaughtException', (err) => { console.error('[pet] uncaughtException:', err.message); });
 process.on('unhandledRejection', (err) => { console.error('[pet] unhandledRejection:', err); });
 
-// 注册自定义协议，用于加载本地资源文件
 const PET_DIR = path.join(__dirname);
-protocol.registerSchemesAsPrivileged([{
-  scheme: 'pet',
-  privileges: { standard: true, supportFetchAPI: true, corsEnabled: true }
-}]);
 const API_BASE = `http://localhost:${CCM_PORT}`;
 const CCM_DIR = path.join(require('os').homedir(), '.cc-connect');
 const PETS_FILE = path.join(CCM_DIR, 'pets.json');
@@ -403,13 +398,6 @@ ipcMain.on('hide-pet', async (_, agent) => {
 
 // === 应用生命周期 ===
 app.whenReady().then(async () => {
-  // 注册 pet:// 协议处理
-  protocol.handle('pet', (request) => {
-    const url = new URL(request.url);
-    const filePath = path.join(PET_DIR, url.pathname);
-    return new Response(fs.readFileSync(filePath));
-  });
-
   console.log('[pet] Electron 已启动，正在连接 ccm 服务...');
   // 写入 PID 文件
   if (!fs.existsSync(path.dirname(PID_FILE))) fs.mkdirSync(path.dirname(PID_FILE), { recursive: true });

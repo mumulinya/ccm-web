@@ -542,9 +542,14 @@ sprite.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 // 拖拽
+const DRAG_THRESHOLD = 12;
+let dragPending = false;
 let isDragging = false;
 let hasMoved = false;
+let dragReady = false;
 let dragStartX = 0, dragStartY = 0;
+let lastDragX = 0, lastDragY = 0;
+let dragTravel = 0;
 let winStartX = 0, winStartY = 0;
 
 // 获取窗口初始位置（通过 IPC）
@@ -552,44 +557,85 @@ async function getWindowPosition() {
   return window.petBridge.getWindowPosition();
 }
 
+function finishDrag(event, savePosition = true) {
+  if (!dragPending && !isDragging) return;
+  if (event && typeof event.screenX === 'number') {
+    lastDragX = event.screenX;
+    lastDragY = event.screenY;
+  }
+
+  const shouldSavePosition = savePosition && isDragging && hasMoved && dragReady;
+  dragPending = false;
+  isDragging = false;
+  dragReady = false;
+  dragTravel = 0;
+
+  if (shouldSavePosition) {
+    const dx = lastDragX - dragStartX;
+    const dy = lastDragY - dragStartY;
+    window.petBridge.endDrag(agentName, winStartX + dx, winStartY + dy);
+    loadSVG(petType, currentState);
+  } else {
+    hasMoved = false;
+  }
+}
+
 sprite.addEventListener('mousedown', async (e) => {
   if (e.button === 2) return;
   if (!isPetBodyPoint(e.clientX, e.clientY)) return;
   if (menu.contains(e.target) || bubble.contains(e.target) || resizeHandle.contains(e.target)) return;
 
-  isDragging = true;
+  dragPending = true;
+  isDragging = false;
   hasMoved = false;
+  dragReady = false;
+  dragTravel = 0;
   dragStartX = e.screenX;
   dragStartY = e.screenY;
+  lastDragX = e.screenX;
+  lastDragY = e.screenY;
   const pos = await getWindowPosition();
+  if (!dragPending) return;
   winStartX = pos.x;
   winStartY = pos.y;
-  window.petBridge.startDrag();
+  dragReady = true;
   window.petBridge.notifyMouseEnter();
 });
 
 document.addEventListener('mousemove', (e) => {
-  if (!isDragging) return;
+  if (!dragPending && !isDragging) return;
+  if ((e.buttons & 1) !== 1) {
+    finishDrag(e, true);
+    return;
+  }
+  if (!dragReady) return;
   const dx = e.screenX - dragStartX;
   const dy = e.screenY - dragStartY;
-  if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-    if (!hasMoved) showPetReaction('drag');
+  const movementX = Number.isFinite(e.movementX) ? e.movementX : e.screenX - lastDragX;
+  const movementY = Number.isFinite(e.movementY) ? e.movementY : e.screenY - lastDragY;
+  dragTravel += Math.hypot(movementX, movementY);
+  lastDragX = e.screenX;
+  lastDragY = e.screenY;
+
+  if (!isDragging) {
+    if (Math.hypot(dx, dy) < DRAG_THRESHOLD || dragTravel < DRAG_THRESHOLD) return;
+    dragPending = false;
+    isDragging = true;
+    showPetReaction('drag');
     hasMoved = true;
+    window.petBridge.startDrag();
   }
+
   // 通过 IPC 移动窗口
   window.petBridge.moveWindow(winStartX + dx, winStartY + dy);
 });
 
 document.addEventListener('mouseup', (e) => {
-  if (!isDragging) return;
-  isDragging = false;
-  if (hasMoved) {
-    const dx = e.screenX - dragStartX;
-    const dy = e.screenY - dragStartY;
-    window.petBridge.endDrag(agentName, winStartX + dx, winStartY + dy);
-    loadSVG(petType, currentState);
-  }
+  finishDrag(e, true);
 });
+
+window.addEventListener('blur', () => finishDrag(null, true));
+document.addEventListener('mouseleave', () => finishDrag(null, true));
 
 document.addEventListener('mousemove', (e) => {
   setMouseInteractive(isInteractiveTarget(e.target, e.clientX, e.clientY));

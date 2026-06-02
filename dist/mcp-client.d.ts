@@ -12,6 +12,7 @@ interface McpToolResult {
 }
 export declare class McpClient {
     private command;
+    private args;
     private env;
     private process;
     private messageId;
@@ -20,7 +21,9 @@ export declare class McpClient {
     private connected;
     private serverName;
     private tools;
-    constructor(command: string, env?: Record<string, string>);
+    private stderrBuffer;
+    constructor(command: string, args?: string[], env?: Record<string, string>);
+    private parseCommand;
     connect(): Promise<boolean>;
     private processBuffer;
     private handleMessage;

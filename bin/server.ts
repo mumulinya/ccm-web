@@ -5,7 +5,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const { execSync, spawn } = require("child_process");
+const { execFileSync, execSync, spawn, spawnSync } = require("child_process");
 const os = require("os");
 const url = require("url");
 const { toolManager } = require("./tool-manager");
@@ -21,6 +21,7 @@ const CRON_FILE = path.join(CCM_DIR, "cron-jobs.json");
 const UPLOAD_DIR = path.join(CCM_DIR, "uploads");
 const GROUPS_FILE = path.join(CCM_DIR, "groups.json");
 const GROUP_MESSAGES_DIR = path.join(CCM_DIR, "group-messages");
+const GROUP_LOGS_FILE_SHARED = path.join(CCM_DIR, "group-logs.json");
 const PUBLIC_DIR = path.resolve(__dirname, "..", "public");
 
 // 确保上传目录存在
@@ -49,7 +50,266 @@ function appendGroupMessage(groupId, msg) {
   fs.writeFileSync(path.join(GROUP_MESSAGES_DIR, `${groupId}.json`), JSON.stringify(messages, null, 2));
 }
 
+function safeAddGroupLog(groupId, level, category, message, details = null) {
+  try {
+    const logs = fs.existsSync(GROUP_LOGS_FILE_SHARED)
+      ? JSON.parse(fs.readFileSync(GROUP_LOGS_FILE_SHARED, "utf-8"))
+      : {};
+    if (!logs[groupId]) logs[groupId] = [];
+    logs[groupId].push({
+      timestamp: new Date().toISOString(),
+      level,
+      category,
+      message,
+      details
+    });
+    if (logs[groupId].length > 500) logs[groupId] = logs[groupId].slice(-500);
+    fs.writeFileSync(GROUP_LOGS_FILE_SHARED, JSON.stringify(logs, null, 2));
+  } catch (e: any) {
+    console.error("保存群聊日志失败:", e.message);
+  }
+}
+
+const petStatusClients = new Set<any>();
+const stateCache = new Map();
+const agentActivity = new Map();
+
+function broadcastPetSpeech(agent, payload: any = {}) {
+  const text = payload.text == null ? "" : String(payload.text);
+  if (!agent || (!text.trim() && !payload.final)) return;
+  const event = {
+    type: "speech",
+    agent,
+    role: payload.role || "assistant",
+    text,
+    mode: payload.mode || "replace",
+    final: !!payload.final,
+    source: payload.source || "project",
+    timestamp: new Date().toISOString(),
+  };
+  for (const client of petStatusClients) writeSse(client, event);
+}
+
+function setAgentActivity(name, state, detail = "") {
+  agentActivity.set(name, { state, timestamp: Date.now(), detail });
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [name, activity] of agentActivity) {
+    if (activity.state === "working" && now - activity.timestamp > 30000) {
+      agentActivity.set(name, { state: "idle", timestamp: now, detail: "空闲" });
+    }
+  }
+}, 5000);
+
+function readLogTail(logFile, bytes = 500) {
+  try {
+    if (!fs.existsSync(logFile)) return "";
+    const stat = fs.statSync(logFile);
+    if (stat.size === 0) return "";
+    const fd = fs.openSync(logFile, "r");
+    const start = Math.max(0, stat.size - bytes);
+    const buf = Buffer.alloc(Math.min(bytes, stat.size));
+    fs.readSync(fd, buf, 0, buf.length, start);
+    fs.closeSync(fd);
+    return buf.toString("utf-8");
+  } catch { return ""; }
+}
+
+function getAgentState(name) {
+  const now = Date.now();
+  const activity = agentActivity.get(name);
+  if (activity && now - activity.timestamp < 60000) {
+    return { state: activity.state, lastActivity: new Date(activity.timestamp).toISOString(), detail: activity.detail, cachedAt: now };
+  }
+
+  const cached = stateCache.get(name);
+  if (cached && now - cached.cachedAt < 2000) return cached;
+
+  const pidFile = path.join(PID_DIR, `${name}.pid`);
+  const logFile = path.join(LOG_DIR, `${name}.log`);
+  let state = "sleeping";
+  let lastActivity = null;
+  let detail = "";
+
+  try {
+    if (!fs.existsSync(pidFile)) {
+      const result = { state: "sleeping", lastActivity: null, detail: "进程未运行", cachedAt: now };
+      stateCache.set(name, result);
+      return result;
+    }
+
+    const pid = fs.readFileSync(pidFile, "utf-8").trim();
+    try { process.kill(parseInt(pid), 0); } catch {
+      const result = { state: "sleeping", lastActivity: null, detail: "进程已退出", cachedAt: now };
+      stateCache.set(name, result);
+      return result;
+    }
+
+    if (fs.existsSync(logFile)) {
+      const stat = fs.statSync(logFile);
+      const ageSec = (now - stat.mtimeMs) / 1000;
+      lastActivity = stat.mtime.toISOString();
+      if (ageSec < 5) {
+        state = "working";
+        detail = "活跃输出中";
+      } else if (ageSec < 30) {
+        state = "thinking";
+        detail = "缓慢处理中";
+      } else {
+        state = "idle";
+        detail = "等待输入";
+      }
+
+      const tail = readLogTail(logFile);
+      if (tail) {
+        const lower = tail.toLowerCase();
+        if (/error|failed|traceback|exception|panic|❌/.test(lower)) {
+          state = "error";
+          detail = "检测到错误";
+        } else if (/done|completed|finished|success|✅|任务完成/.test(lower)) {
+          state = "happy";
+          detail = "任务完成";
+        }
+      }
+    } else {
+      state = "working";
+      detail = "运行中（无日志）";
+    }
+  } catch {
+    state = "idle";
+    detail = "状态未知";
+  }
+
+  const result = { state, lastActivity, detail, cachedAt: now };
+  stateCache.set(name, result);
+  return result;
+}
+
+function getWorkDirForProject(projectName) {
+  const configs = getConfigs();
+  const config = configs.find(c => c.name === projectName);
+  if (!config) return null;
+  const info = getConfigInfo(config.path);
+  return info[0]?.workDir || null;
+}
+
+function parseGitStatus(workDir) {
+  const status = execFileSync("git", ["-c", "core.quotepath=false", "status", "--porcelain"], {
+    encoding: "utf-8", cwd: workDir, timeout: 5000,
+    stdio: ["pipe", "pipe", "pipe"]
+  }).trim();
+  if (!status) return [];
+  return status.split("\n").filter(Boolean).map(line => {
+    const statusCode = line.substring(0, 2);
+    const rawPath = line.substring(3).trim();
+    const filePath = rawPath.includes(" -> ") ? rawPath.split(" -> ").pop() : rawPath;
+    let stat = null;
+    try {
+      const absPath = path.join(workDir, filePath);
+      if (fs.existsSync(absPath)) {
+        const s = fs.statSync(absPath);
+        stat = { mtimeMs: s.mtimeMs, size: s.size };
+      }
+    } catch {}
+    return { path: filePath, statusCode, stat };
+  });
+}
+
+function createFileChangeSnapshot(workDir) {
+  try {
+    const files = {};
+    for (const entry of parseGitStatus(workDir)) {
+      files[entry.path] = {
+        statusCode: entry.statusCode,
+        mtimeMs: entry.stat?.mtimeMs || 0,
+        size: entry.stat?.size || 0,
+      };
+    }
+    return { workDir, files };
+  } catch {
+    return { workDir, files: {} };
+  }
+}
+
+function describeFileStatus(statusCode) {
+  const code = String(statusCode || "").trim();
+  if (code.includes("A") || code === "??") return { statusText: "新增", statusColor: "#22c55e" };
+  if (code.includes("D")) return { statusText: "删除", statusColor: "#ef4444" };
+  if (code.includes("R")) return { statusText: "重命名", statusColor: "#38bdf8" };
+  if (code.includes("C")) return { statusText: "复制", statusColor: "#a78bfa" };
+  return { statusText: "修改", statusColor: "#facc15" };
+}
+
+// 检测项目文件变更。传入 beforeSnapshot 时，只返回 Agent 本次工作后新增/变化的文件。
+function getFileChanges(projectName, beforeSnapshot: any = null) {
+  try {
+    const workDir = beforeSnapshot?.workDir || getWorkDirForProject(projectName);
+    if (!workDir) return null;
+    const beforeFiles = beforeSnapshot?.files || null;
+    const files = parseGitStatus(workDir)
+      .filter(entry => {
+        if (!beforeFiles) return true;
+        const before = beforeFiles[entry.path];
+        if (!before) return true;
+        return before.statusCode !== entry.statusCode
+          || before.mtimeMs !== (entry.stat?.mtimeMs || 0)
+          || before.size !== (entry.stat?.size || 0);
+      })
+      .map(entry => ({ path: entry.path, ...describeFileStatus(entry.statusCode) }));
+    return { files, count: files.length };
+  } catch (e) { console.warn('[getFileChanges]', (e as Error).message); return null; }
+}
+
+// 性能监控
+const METRICS_FILE = path.join(CCM_DIR, "metrics.json");
+
+function loadMetrics() {
+  try { if (fs.existsSync(METRICS_FILE)) return JSON.parse(fs.readFileSync(METRICS_FILE, "utf-8")); } catch {}
+  return { agents: {}, daily: {} };
+}
+function saveMetrics(metrics) {
+  try { fs.writeFileSync(METRICS_FILE, JSON.stringify(metrics, null, 2)); } catch {}
+}
+function recordMetric(agent, data) {
+  const metrics = loadMetrics();
+  const today = new Date().toISOString().slice(0, 10);
+  if (!metrics.agents[agent]) metrics.agents[agent] = { calls: 0, successes: 0, failures: 0, totalMs: 0, avgMs: 0, totalFileChanges: 0, lastFileChangeCount: 0, lastCall: null };
+  const a = metrics.agents[agent];
+  a.calls++;
+  if (data.success) a.successes++; else a.failures++;
+  if (data.durationMs) { a.totalMs += data.durationMs; a.avgMs = Math.round(a.totalMs / a.calls); }
+  a.totalFileChanges = (a.totalFileChanges || 0) + (data.fileChangeCount || 0);
+  a.lastFileChangeCount = data.fileChangeCount || 0;
+  a.lastCall = new Date().toISOString();
+  if (!metrics.daily[today]) metrics.daily[today] = {};
+  if (!metrics.daily[today][agent]) metrics.daily[today][agent] = { calls: 0, successes: 0, failures: 0, totalMs: 0, totalFileChanges: 0 };
+  const d = metrics.daily[today][agent];
+  d.calls++;
+  if (data.success) d.successes++; else d.failures++;
+  if (data.durationMs) d.totalMs += data.durationMs;
+  d.totalFileChanges = (d.totalFileChanges || 0) + (data.fileChangeCount || 0);
+  const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  for (const key of Object.keys(metrics.daily)) { if (key < cutoff) delete metrics.daily[key]; }
+  saveMetrics(metrics);
+}
+
+async function appendToolResults(output) {
+  const calls = toolManager.parseToolCalls(output);
+  if (calls.length === 0) return output;
+  const results = [];
+  for (const call of calls) {
+    const result = await toolManager.executeToolCall(call.name, call.arguments || {});
+    results.push(`### ${call.name}\n${result}`);
+  }
+  return `${output}\n\n[工具执行结果]\n${results.join("\n\n")}`;
+}
+
 function callAgent(projectName, message, workDir, agentType, timeoutMs) {
+  setAgentActivity(projectName, "working", "Agent 调用中");
+  const startedAt = Date.now();
+  const changeSnapshot = workDir ? createFileChangeSnapshot(workDir) : null;
   const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
   const tmpMsg = path.join(UPLOAD_DIR, `_msg_${Date.now()}_${Math.random().toString(36).slice(2,6)}.txt`);
   fs.writeFileSync(tmpMsg, message, "utf-8");
@@ -71,16 +331,37 @@ function callAgent(projectName, message, workDir, agentType, timeoutMs) {
       maxBuffer: 10 * 1024 * 1024,
     });
     try { fs.unlinkSync(tmpMsg); } catch {}
-    return result.trim();
+    const output = result.trim();
+    const fileChanges = getFileChanges(projectName, changeSnapshot);
+    recordMetric(projectName, {
+      success: true,
+      durationMs: Date.now() - startedAt,
+      fileChangeCount: fileChanges?.count || 0
+    });
+    broadcastPetSpeech(projectName, { role: "assistant", text: output, final: true, source: "project" });
+    setAgentActivity(projectName, "happy", "任务完成");
+    setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
+    return output;
   } catch (e) {
     try { fs.unlinkSync(tmpMsg); } catch {}
-    if (e.killed || e.signal === "SIGTERM") return `[${projectName}] Agent 响应超时，请稍后重试`;
-    return `[${projectName}] Agent 错误: ${(e.stderr || e.message || "").substring(0, 200)}`;
+    const output = e.killed || e.signal === "SIGTERM"
+      ? `[${projectName}] Agent 响应超时，请稍后重试`
+      : `[${projectName}] Agent 错误: ${(e.stderr || e.message || "").substring(0, 200)}`;
+    recordMetric(projectName, {
+      success: false,
+      durationMs: Date.now() - startedAt,
+      fileChangeCount: getFileChanges(projectName, changeSnapshot)?.count || 0
+    });
+    broadcastPetSpeech(projectName, { role: "error", text: output, final: true, source: "project" });
+    setAgentActivity(projectName, "error", "错误");
+    return output;
   }
 }
 
 // 流式调用 Agent（SSE）
 function callAgentStream(projectName, message, workDir, agentType, res) {
+  const startedAt = Date.now();
+  const changeSnapshot = workDir ? createFileChangeSnapshot(workDir) : null;
   const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
   const tmpMsg = path.join(UPLOAD_DIR, `_msg_${Date.now()}_${Math.random().toString(36).slice(2,6)}.txt`);
   fs.writeFileSync(tmpMsg, message, "utf-8");
@@ -103,6 +384,8 @@ function callAgentStream(projectName, message, workDir, agentType, res) {
 
   // 发送状态事件
   res.write(`data: ${JSON.stringify({ type: "status", text: "Agent 正在思考..." })}\n\n`);
+  broadcastPetSpeech(projectName, { role: "status", text: "Agent 正在思考...", source: "project" });
+  setAgentActivity(projectName, "working", "正在处理消息");
 
   const child = spawn(cmd, [], { shell: true, cwd: safeCwd, stdio: ["pipe", "pipe", "pipe"] });
 
@@ -111,15 +394,20 @@ function callAgentStream(projectName, message, workDir, agentType, res) {
 
   let buffer = "";
   let charCount = 0;
+  let fullOutput = "";
+  let finished = false;
+  let timeoutTimer: any = null;
 
   child.stdout.on("data", (chunk) => {
     const text = chunk.toString("utf-8");
+    fullOutput += text;
     buffer += text;
     charCount += text.length;
 
     // 每收到数据就发送
     if (charCount > 10) {
       res.write(`data: ${JSON.stringify({ type: "chunk", text: buffer })}\n\n`);
+      broadcastPetSpeech(projectName, { role: "assistant", text: buffer, mode: "append", source: "project" });
       buffer = "";
       charCount = 0;
     }
@@ -129,35 +417,168 @@ function callAgentStream(projectName, message, workDir, agentType, res) {
     const text = chunk.toString("utf-8");
     if (text.trim()) {
       res.write(`data: ${JSON.stringify({ type: "status", text: "Agent 处理中..." })}\n\n`);
+      broadcastPetSpeech(projectName, { role: "status", text: "Agent 处理中...", source: "project" });
     }
   });
 
   child.on("close", () => {
-    try { fs.unlinkSync(tmpMsg); } catch {}
-    if (buffer) {
-      res.write(`data: ${JSON.stringify({ type: "chunk", text: buffer })}\n\n`);
-    }
-    res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
-    res.end();
+    if (finished) return;
+    finished = true;
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+    (async () => {
+      try { fs.unlinkSync(tmpMsg); } catch {}
+      if (buffer) {
+        res.write(`data: ${JSON.stringify({ type: "chunk", text: buffer })}\n\n`);
+        broadcastPetSpeech(projectName, { role: "assistant", text: buffer, mode: "append", source: "project" });
+      }
+      const outputWithTools = await appendToolResults(fullOutput.trim());
+      const toolAppend = outputWithTools.slice(fullOutput.trim().length);
+      if (toolAppend) {
+        res.write(`data: ${JSON.stringify({ type: "chunk", text: toolAppend })}\n\n`);
+        broadcastPetSpeech(projectName, { role: "assistant", text: toolAppend, mode: "append", source: "project" });
+      }
+      broadcastPetSpeech(projectName, { role: "assistant", text: "", mode: "append", final: true, source: "project" });
+      const fileChanges = getFileChanges(projectName, changeSnapshot);
+      recordMetric(projectName, {
+        success: true,
+        durationMs: Date.now() - startedAt,
+        fileChangeCount: fileChanges?.count || 0
+      });
+      setAgentActivity(projectName, "happy", "任务完成");
+      setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
+      res.write(`data: ${JSON.stringify({ type: "done", fileChanges })}\n\n`);
+      res.end();
+    })().catch((err) => {
+      res.write(`data: ${JSON.stringify({ type: "error", text: err.message })}\n\n`);
+      try { res.end(); } catch {}
+    });
   });
 
   child.on("error", (err) => {
+    if (finished) return;
+    finished = true;
+    if (timeoutTimer) clearTimeout(timeoutTimer);
     try { fs.unlinkSync(tmpMsg); } catch {}
     res.write(`data: ${JSON.stringify({ type: "error", text: err.message })}\n\n`);
+    recordMetric(projectName, {
+      success: false,
+      durationMs: Date.now() - startedAt,
+      fileChangeCount: getFileChanges(projectName, changeSnapshot)?.count || 0
+    });
+    broadcastPetSpeech(projectName, { role: "error", text: err.message, final: true, source: "project" });
+    setAgentActivity(projectName, "error", "错误");
     res.end();
   });
 
   // 超时处理
-  setTimeout(() => {
+  timeoutTimer = setTimeout(() => {
+    if (finished) return;
+    finished = true;
     try { child.kill(); } catch {}
     try { fs.unlinkSync(tmpMsg); } catch {}
     res.write(`data: ${JSON.stringify({ type: "error", text: "Agent 响应超时" })}\n\n`);
+    recordMetric(projectName, {
+      success: false,
+      durationMs: Date.now() - startedAt,
+      fileChangeCount: getFileChanges(projectName, changeSnapshot)?.count || 0
+    });
+    broadcastPetSpeech(projectName, { role: "error", text: "Agent 响应超时", final: true, source: "project" });
+    setAgentActivity(projectName, "error", "超时");
     res.end();
   }, 300000);
 }
 
+function buildAgentCommand(agentType, tmpMsg) {
+  switch (agentType) {
+    case "cursor": return `type "${tmpMsg}" | agent -p`;
+    case "gemini": return `type "${tmpMsg}" | gemini -p`;
+    case "codex":  return `type "${tmpMsg}" | codex -q`;
+    default:       return `type "${tmpMsg}" | claude -p`;
+  }
+}
+
+function writeSse(res, data) {
+  if (!res || res.writableEnded || res.destroyed) return;
+  try { res.write(`data: ${JSON.stringify(data)}\n\n`); } catch {}
+}
+
+function callAgentForGroupStream(projectName, message, workDir, agentType, options: any = {}) {
+  setAgentActivity(projectName, "working", options.detail || "群聊协作中");
+  const startedAt = Date.now();
+  const changeSnapshot = workDir ? createFileChangeSnapshot(workDir) : null;
+  const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
+  const tmpMsg = path.join(UPLOAD_DIR, `_msg_${Date.now()}_${Math.random().toString(36).slice(2,6)}.txt`);
+  fs.writeFileSync(tmpMsg, message, "utf-8");
+  const cmd = buildAgentCommand(agentType, tmpMsg);
+  const streamRes = options.res;
+  const groupId = options.groupId;
+
+  writeSse(streamRes, { type: "status", text: `🧠 ${projectName} 正在思考...`, agent: projectName });
+  broadcastPetSpeech(projectName, { role: "status", text: `${projectName} 正在思考...`, source: "group" });
+
+  return new Promise<string>((resolve) => {
+    const child = spawn(cmd, [], { shell: true, cwd: safeCwd, stdio: ["pipe", "pipe", "pipe"] });
+    child.stdin.end();
+
+    let output = "";
+    let settled = false;
+    const timeoutId = setTimeout(() => { finish("⏰ 响应超时", true).catch(() => {}); }, options.timeoutMs || 300000);
+
+    const finish = async (text: string, isError = false) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      try { child.kill(); } catch {}
+      try { fs.unlinkSync(tmpMsg); } catch {}
+      let finalText = text || output.trim();
+      if (!isError) finalText = await appendToolResults(finalText);
+      const fileChanges = getFileChanges(projectName, changeSnapshot);
+      recordMetric(projectName, {
+        success: !isError,
+        durationMs: Date.now() - startedAt,
+        fileChangeCount: fileChanges?.count || 0
+      });
+      writeSse(streamRes, { type: "agent_done", agent: projectName, text: finalText, fileChanges });
+      broadcastPetSpeech(projectName, { role: isError ? "error" : "assistant", text: finalText, final: true, source: "group" });
+      setAgentActivity(projectName, isError ? "error" : "happy", isError ? "错误" : "群聊回复完成");
+      setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
+      if (groupId) {
+        safeAddGroupLog(groupId, isError ? "error" : "success", "response", `Agent ${projectName} ${isError ? "失败" : "回复完成"}`, {
+          agent: projectName,
+          response_length: finalText.length,
+          response_preview: finalText.substring(0, 300)
+        });
+      }
+      resolve(finalText);
+    };
+
+    child.stdout.on("data", (chunk) => {
+      const text = chunk.toString("utf-8");
+      if (!text) return;
+      output += text;
+      writeSse(streamRes, { type: "chunk", agent: projectName, text });
+      broadcastPetSpeech(projectName, { role: "assistant", text, mode: "append", source: "group" });
+    });
+
+    child.stderr.on("data", (chunk) => {
+      const text = chunk.toString("utf-8");
+      if (text.trim() && !output.trim()) {
+        writeSse(streamRes, { type: "status", text: `🧠 ${projectName} 运行中...`, agent: projectName });
+        broadcastPetSpeech(projectName, { role: "status", text: `${projectName} 运行中...`, source: "group" });
+      }
+    });
+
+    child.on("close", () => { finish(output.trim()).catch((err) => finish(`❌ 错误: ${err.message}`, true)); });
+    child.on("error", (err) => { finish(`❌ 错误: ${err.message}`, true).catch(() => {}); });
+  });
+}
+
 // 异步处理跨 Agent 协作调用
-function processCrossAgents(groupId, group, sourceProject, output, atMentions, configs) {
+async function processCrossAgents(groupId, group, sourceProject, output, atMentions, configs, streamRes: any = null, depth = 0) {
+  if (depth > 3) {
+    console.log("[跨Agent协作] 达到最大递归深度，停止继续转发");
+    return;
+  }
   console.log(`[跨Agent协作] 源: ${sourceProject}, 检测到 @mentions: ${atMentions.join(", ")}`);
 
   // 去重 mentions
@@ -245,7 +666,11 @@ ${atMessage}
 
     console.log(`[跨Agent协作] 调用 Agent ${targetName}...`);
     try {
-      const tOutput = callAgent(targetName, tPrompt, tWorkDir, tAgentType, 300000);
+      const tOutput = await callAgentForGroupStream(targetName, tPrompt, tWorkDir, tAgentType, {
+        res: streamRes,
+        groupId,
+        timeoutMs: 300000
+      });
       console.log(`[跨Agent协作] Agent ${targetName} 回复: ${tOutput.substring(0, 100)}...`);
 
       appendGroupMessage(groupId, {
@@ -253,16 +678,17 @@ ${atMessage}
         role: "assistant", agent: targetName,
         content: tOutput,
         timestamp: new Date().toISOString(),
+        fileChanges: getFileChanges(targetName),
       });
 
       // 检查目标 Agent 的回复是否也包含 @mention，递归处理
-      const nestedMentions = tOutput.match(/@[\w-]+/g) || [];
+      const nestedMentions: string[] = tOutput.match(/@[\w-]+/g) || [];
       if (nestedMentions.length > 0) {
         // 避免无限递归：只处理不是来源项目的 mention
         const newMentions = nestedMentions.filter(m => m.slice(1) !== sourceProject && m.slice(1) !== targetName);
         if (newMentions.length > 0) {
           console.log(`[跨Agent协作] Agent ${targetName} 的回复包含 @mentions: ${newMentions.join(", ")}，递归处理`);
-          setTimeout(() => processCrossAgents(groupId, group, targetName, tOutput, newMentions, configs), 1000);
+          await processCrossAgents(groupId, group, targetName, tOutput, newMentions, configs, streamRes, depth + 1);
         }
       }
     } catch (error) {
@@ -610,6 +1036,70 @@ function sendFile(res, filePath) {
   if (ext === ".js" || ext === ".css") headers["Cache-Control"] = "public, max-age=31536000, immutable";
   res.writeHead(200, headers);
   fs.createReadStream(filePath).pipe(res);
+}
+
+function normalizeTerminalCwd(cwd) {
+  const candidate = cwd && typeof cwd === "string" ? cwd : os.homedir();
+  try {
+    const stat = fs.statSync(candidate);
+    if (stat.isDirectory()) return candidate;
+  } catch {}
+  return os.homedir();
+}
+
+function splitTerminalCwd(output, marker) {
+  const text = output || "";
+  const markerIndex = text.lastIndexOf(marker);
+  if (markerIndex < 0) return { output: text, cwd: null };
+
+  const before = text.slice(0, markerIndex).replace(/(?:\r?\n)+$/, "");
+  const after = text.slice(markerIndex + marker.length).trim();
+  const firstLine = after.split(/\r?\n/)[0]?.trim() || null;
+  return { output: before ? before + os.EOL : "", cwd: firstLine };
+}
+
+function runTerminalCommand(command, cwd) {
+  const workDir = normalizeTerminalCwd(cwd);
+  const marker = `__CCM_TERMINAL_CWD_${Date.now()}_${Math.random().toString(36).slice(2)}__`;
+  const commonOptions = {
+    encoding: "utf-8",
+    cwd: workDir,
+    timeout: 30000,
+    maxBuffer: 5 * 1024 * 1024,
+    windowsHide: true
+  };
+
+  const parseResult = (stdout, stderr = "", status = 0, error = null) => {
+    const parsed = splitTerminalCwd(stdout, marker);
+    const stderrText = String(stderr || "").trim();
+    return {
+      output: parsed.output,
+      cwd: parsed.cwd && fs.existsSync(parsed.cwd) ? parsed.cwd : workDir,
+      error: error?.message || (status ? `Exit code: ${status}` : "") || (stderrText ? stderrText : "")
+    };
+  };
+
+  if (process.platform === "win32") {
+    const script = [
+      "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new();",
+      "$OutputEncoding = [System.Text.UTF8Encoding]::new();",
+      command,
+      `Write-Output "${marker}$((Get-Location).ProviderPath)"`
+    ].join("\n");
+    const result = spawnSync("powershell.exe", [
+      "-NoLogo",
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-Command",
+      script
+    ], commonOptions);
+    return parseResult(result.stdout, result.stderr, result.status, result.error);
+  }
+
+  const script = `${command}\nprintf '\\n${marker}%s\\n' "$PWD"`;
+  const result = spawnSync("bash", ["-lc", script], commonOptions);
+  return parseResult(result.stdout, result.stderr, result.status, result.error);
 }
 
 // === 共享上下文 ===
@@ -1617,6 +2107,7 @@ function handleRequest(req, res) {
       const projects = configs.map((config) => {
         const info = getConfigInfo(config.path);
         const running = isRunning(config.name);
+        const agentState = getAgentState(config.name);
         return {
           name: config.name,
           running,
@@ -1625,6 +2116,9 @@ function handleRequest(req, res) {
           platform: info[0]?.platform || "未知",
           work_dir: info[0]?.workDir || "",
           session_count: getSessions(config.name).length,
+          state: agentState.state,
+          lastActivity: agentState.lastActivity,
+          stateDetail: agentState.detail,
         };
       });
       sendJson(res, { projects });
@@ -2109,18 +2603,13 @@ command = "/projects"
         console.log(`[终端] 执行命令: ${command} (目录: ${workDir})`);
 
         try {
-          const output = execSync(command, {
-            encoding: "utf-8",
-            cwd: workDir,
-            timeout: 30000,
-            maxBuffer: 5 * 1024 * 1024,
-            shell: true
-          });
-          sendJson(res, { success: true, output: output, cwd: workDir });
+          const result = runTerminalCommand(command, workDir);
+          sendJson(res, { success: true, output: result.output, cwd: result.cwd, error: result.error || undefined });
         } catch (e) {
+          const text = (e.stdout || "") + (e.stderr || e.message);
           sendJson(res, {
             success: true,
-            output: (e.stdout || "") + (e.stderr || e.message),
+            output: text,
             cwd: workDir,
             error: e.status ? `Exit code: ${e.status}` : e.message
           });
@@ -2717,6 +3206,33 @@ function generateTitle(message) {
         fs.writeFileSync(path.join(dir, `${sid}.json`), JSON.stringify(sessionData, null, 2));
         syncToFilesystemToCc(project);
         sendJson(res, { success: true, sessionId: sid, name: sessionName });
+      } catch (e) { sendJson(res, { error: e.message }, 400); }
+    });
+    return;
+  }
+
+  // 保存消息到会话历史
+  if (pathname === "/api/sessions/message" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const { project, sessionId, message } = JSON.parse(body);
+        if (!project || !sessionId || !message) return sendJson(res, { error: "缺少参数" }, 400);
+        const filePath = path.join(WEB_SESSIONS_DIR, project, `${sessionId}.json`);
+        if (!fs.existsSync(filePath)) return sendJson(res, { error: "会话不存在" }, 404);
+        const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+        if (!data.history) data.history = [];
+        data.history.push({
+          role: message.role,
+          content: message.content,
+          agent: message.agent || null,
+          timestamp: message.timestamp || new Date().toISOString(),
+        });
+        data.updated_at = new Date().toISOString();
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+        syncToFilesystemToCc(project);
+        sendJson(res, { success: true, count: data.history.length });
       } catch (e) { sendJson(res, { error: e.message }, 400); }
     });
     return;
@@ -3423,6 +3939,9 @@ function generateTitle(message) {
           timestamp: new Date().toISOString(),
         };
         appendGroupMessage(group_id, userMsg);
+        for (const member of targetMembers) {
+          broadcastPetSpeech(member.project, { role: "user", text: message, final: true, source: "group" });
+        }
 
         // 记录日志
         addGroupLog(group_id, "info", "message", `用户发送消息给 ${isBroadcast ? '所有人' : target_project}`, {
@@ -3444,19 +3963,13 @@ function generateTitle(message) {
             "Access-Control-Allow-Origin": "*",
           });
 
-          res.write(`data: ${JSON.stringify({ type: "status", text: "🧠 群发中，所有 Agent 处理中..." })}\n\n`);
-
-          let allOutputs = [];
-
+          res.write(`data: ${JSON.stringify({ type: "status", text: `🧠 并行处理中，${targetMembers.length} 个 Agent 同时工作...` })}\n\n`);
           for (const member of targetMembers) {
-            const config = configs.find(c => c.name === member.project);
-            if (!config) continue;
+            setAgentActivity(member.project, "working", "群聊协作中");
+            broadcastPetSpeech(member.project, { role: "status", text: "群聊协作中，正在思考...", source: "group" });
+          }
 
-            const info = getConfigInfo(config.path);
-            const workDir = info[0]?.workDir;
-            const agentType = info[0]?.agent || "claudecode";
-
-            // 构建 prompt
+          const getAgentPrompt = (member) => {
             const recentMsgs = getGroupMessages(group_id).slice(-10);
             const context = recentMsgs.map(m => {
               const who = m.role === "user" ? `[用户 → ${m.target}]` : `[${m.agent || "Agent"}]`;
@@ -3509,64 +4022,50 @@ function generateTitle(message) {
             }
             toolsContext += toolManager.buildToolPrompt();
 
-            const fullPrompt = `你是一个在群聊中协作的开发 Agent，项目: ${member.project}。${atInstructions}${toolsContext}${sharedFilesContext}\n以下是群聊最近的消息记录：\n${context}\n\n请回复用户刚才发给你的消息：${message}`;
+            return `你是一个在群聊中协作的开发 Agent，项目: ${member.project}。${atInstructions}${toolsContext}${sharedFilesContext}\n以下是群聊最近的消息记录：\n${context}\n\n请回复用户刚才发给你的消息：${message}`;
+          };
 
-            res.write(`data: ${JSON.stringify({ type: "status", text: `🧠 ${member.project} 处理中...` })}\n\n`);
+          const agentPromises = targetMembers.map(member => {
+            return new Promise<void>(async (resolve) => {
+              const config = configs.find(c => c.name === member.project);
+              if (!config) { resolve(); return; }
 
-            const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
-            const tmpMsg = path.join(UPLOAD_DIR, `_msg_${Date.now()}_${Math.random().toString(36).slice(2,6)}.txt`);
-            fs.writeFileSync(tmpMsg, fullPrompt, "utf-8");
+              const info = getConfigInfo(config.path);
+              const workDir = info[0]?.workDir;
+              const agentType = info[0]?.agent || "claudecode";
+              const fullPrompt = getAgentPrompt(member);
 
-            let cmd;
-            switch (agentType) {
-              case "cursor": cmd = `type "${tmpMsg}" | agent -p`; break;
-              case "gemini": cmd = `type "${tmpMsg}" | gemini -p`; break;
-              case "codex":  cmd = `type "${tmpMsg}" | codex -q`; break;
-              default:       cmd = `type "${tmpMsg}" | claude -p`; break;
-            }
-
-            try {
-              const output = execSync(cmd, {
-                encoding: "utf-8",
-                timeout: 300000,
-                cwd: safeCwd,
-                shell: true,
-                maxBuffer: 10 * 1024 * 1024,
-              });
-              try { fs.unlinkSync(tmpMsg); } catch {}
-
-              const trimmedOutput = output.trim();
-              allOutputs.push({ project: member.project, output: trimmedOutput });
-
-              // 发送每个 Agent 的回复
-              res.write(`data: ${JSON.stringify({ type: "chunk", text: `\n\n【${member.project}】\n${trimmedOutput}` })}\n\n`);
-
-              // 记录到群聊消息
-              appendGroupMessage(group_id, {
-                id: "m" + Date.now().toString(36) + member.project,
-                role: "assistant", agent: member.project,
-                content: trimmedOutput,
-                timestamp: new Date().toISOString(),
-              });
-
-              // 检查 @mentions
-              const atMentions = trimmedOutput.match(/@[\w-]+/g) || [];
-              const validMentions = atMentions.filter(m => {
-                const name = m.slice(1);
-                return group.members.some(mem => mem.project === name);
-              });
-              if (validMentions.length > 0) {
-                console.log(`[群聊] Agent ${member.project} 的回复包含 @mentions: ${validMentions.join(", ")}`);
-                setTimeout(() => processCrossAgents(group_id, group, member.project, trimmedOutput, validMentions, configs), 1000);
+              try {
+                const text = await callAgentForGroupStream(member.project, fullPrompt, workDir, agentType, {
+                  res,
+                  groupId: group_id,
+                  timeoutMs: 300000
+                });
+                appendGroupMessage(group_id, {
+                  id: "m" + Date.now().toString(36) + member.project,
+                  role: "assistant", agent: member.project,
+                  content: text,
+                  timestamp: new Date().toISOString(),
+                  fileChanges: getFileChanges(member.project),
+                });
+                const atMentions: string[] = text.match(/@[\w-]+/g) || [];
+                const validMentions = atMentions.filter(m => group.members.some(mem => mem.project === m.slice(1)));
+                if (validMentions.length > 0) {
+                  writeSse(res, { type: "status", text: `🧩 ${member.project} 正在分配协作任务...` });
+                  await processCrossAgents(group_id, group, member.project, text, validMentions, configs, res);
+                }
+              } catch (e: any) {
+                writeSse(res, { type: "agent_done", agent: member.project, text: `❌ 错误: ${e.message}` });
+              } finally {
+                resolve();
               }
-            } catch (e) {
-              try { fs.unlinkSync(tmpMsg); } catch {}
-              res.write(`data: ${JSON.stringify({ type: "chunk", text: `\n\n【${member.project}】\n错误: ${e.message}` })}\n\n`);
-            }
-          }
+            });
+          });
 
-          res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
-          res.end();
+          Promise.all(agentPromises).then(() => {
+            writeSse(res, { type: "done" });
+            try { res.end(); } catch {}
+          });
           return;
         }
 
@@ -3698,6 +4197,8 @@ function generateTitle(message) {
 
         if (useStream) {
           // 流式输出
+          const startedAt = Date.now();
+          const changeSnapshot = workDir ? createFileChangeSnapshot(workDir) : null;
           const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
           const tmpMsg = path.join(UPLOAD_DIR, `_msg_${Date.now()}_${Math.random().toString(36).slice(2,6)}.txt`);
           fs.writeFileSync(tmpMsg, fullPrompt, "utf-8");
@@ -3718,12 +4219,16 @@ function generateTitle(message) {
           });
 
           res.write(`data: ${JSON.stringify({ type: "status", text: "🧠 Agent 正在思考..." })}\n\n`);
+          setAgentActivity(target_project_actual, "working", "群聊协作中");
+          broadcastPetSpeech(target_project_actual, { role: "status", text: "Agent 正在思考...", source: "group" });
 
           const child = spawn(cmd, [], { shell: true, cwd: safeCwd, stdio: ["pipe", "pipe", "pipe"] });
           child.stdin.end();
 
           let fullOutput = "";
           let buffer = "";
+          let finished = false;
+          let timeoutTimer: any = null;
 
           child.stdout.on("data", (chunk) => {
             const text = chunk.toString("utf-8");
@@ -3731,15 +4236,37 @@ function generateTitle(message) {
             buffer += text;
             if (buffer.length > 10) {
               res.write(`data: ${JSON.stringify({ type: "chunk", text: buffer })}\n\n`);
+              broadcastPetSpeech(target_project_actual, { role: "assistant", text: buffer, mode: "append", source: "group" });
               buffer = "";
             }
           });
 
           child.on("close", () => {
+            if (finished) return;
+            finished = true;
+            if (timeoutTimer) clearTimeout(timeoutTimer);
+            (async () => {
             try { fs.unlinkSync(tmpMsg); } catch {}
-            if (buffer) res.write(`data: ${JSON.stringify({ type: "chunk", text: buffer })}\n\n`);
-            res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
-            res.end();
+            if (buffer) {
+              res.write(`data: ${JSON.stringify({ type: "chunk", text: buffer })}\n\n`);
+              broadcastPetSpeech(target_project_actual, { role: "assistant", text: buffer, mode: "append", source: "group" });
+            }
+            const outputWithTools = await appendToolResults(fullOutput.trim());
+            const toolAppend = outputWithTools.slice(fullOutput.trim().length);
+            if (toolAppend) {
+              res.write(`data: ${JSON.stringify({ type: "chunk", text: toolAppend })}\n\n`);
+              broadcastPetSpeech(target_project_actual, { role: "assistant", text: toolAppend, mode: "append", source: "group" });
+            }
+            fullOutput = outputWithTools;
+            broadcastPetSpeech(target_project_actual, { role: "assistant", text: fullOutput.trim(), final: true, source: "group" });
+            const fileChanges = getFileChanges(target_project_actual, changeSnapshot);
+            recordMetric(target_project_actual, {
+              success: true,
+              durationMs: Date.now() - startedAt,
+              fileChangeCount: fileChanges?.count || 0
+            });
+            setAgentActivity(target_project_actual, "happy", "群聊回复完成");
+            setTimeout(() => setAgentActivity(target_project_actual, "idle", "空闲"), 10000);
 
             // 记录到群聊消息
             appendGroupMessage(group_id, {
@@ -3747,6 +4274,7 @@ function generateTitle(message) {
               role: "assistant", agent: target_project_actual,
               content: fullOutput.trim(),
               timestamp: new Date().toISOString(),
+              fileChanges,
             });
 
             // 记录日志
@@ -3772,22 +4300,48 @@ function generateTitle(message) {
 
             if (validMentions.length > 0) {
               console.log(`[群聊] 触发跨 Agent 协作处理`);
-              setImmediate(() => processCrossAgents(group_id, group, target_project_actual, fullOutput, validMentions, configs));
+              writeSse(res, { type: "status", text: "🧩 主 Agent 正在分配任务..." });
+              try {
+                await processCrossAgents(group_id, group, target_project_actual, fullOutput, validMentions, configs, res);
+              } catch (err: any) {
+                writeSse(res, { type: "error", text: `跨 Agent 协作失败: ${err.message}` });
+              }
             } else {
               console.log(`[群聊] 未检测到有效的 @mentions，跳过跨 Agent 协作`);
             }
+            writeSse(res, { type: "done", fileChanges });
+            res.end();
+            })().catch((err) => {
+              writeSse(res, { type: "error", text: err.message });
+              try { res.end(); } catch {}
+            });
           });
 
           child.on("error", (err) => {
+            if (finished) return;
+            finished = true;
+            if (timeoutTimer) clearTimeout(timeoutTimer);
             try { fs.unlinkSync(tmpMsg); } catch {}
             res.write(`data: ${JSON.stringify({ type: "error", text: err.message })}\n\n`);
+            recordMetric(target_project_actual, {
+              success: false,
+              durationMs: Date.now() - startedAt,
+              fileChangeCount: getFileChanges(target_project_actual, changeSnapshot)?.count || 0
+            });
             res.end();
           });
 
-          setTimeout(() => {
+          timeoutTimer = setTimeout(() => {
+            if (finished) return;
+            finished = true;
             try { child.kill(); } catch {}
             try { fs.unlinkSync(tmpMsg); } catch {}
             res.write(`data: ${JSON.stringify({ type: "error", text: "Agent 响应超时" })}\n\n`);
+            recordMetric(target_project_actual, {
+              success: false,
+              durationMs: Date.now() - startedAt,
+              fileChangeCount: getFileChanges(target_project_actual, changeSnapshot)?.count || 0
+            });
             res.end();
           }, 300000);
           return;
@@ -4208,7 +4762,7 @@ ${diff}
       execSync("git rev-parse --is-inside-work-tree", { cwd: workDir, stdio: "pipe" });
 
       // 获取 git 状态
-      const status = execSync("git status --porcelain", {
+      const status = execFileSync("git", ["-c", "core.quotepath=false", "status", "--porcelain"], {
         encoding: "utf-8",
         cwd: workDir,
         stdio: ["pipe", "pipe", "pipe"]
@@ -4274,8 +4828,8 @@ ${diff}
     const workDir = info[0]?.workDir;
 
     try {
-      const stagedFlag = staged ? "--staged" : "";
-      const diff = execSync(`git diff ${stagedFlag} "${filePath}"`, {
+      const diffArgs = staged ? ["diff", "--staged", "--", filePath] : ["diff", "--", filePath];
+      const diff = execFileSync("git", diffArgs, {
         encoding: "utf-8",
         cwd: workDir,
         stdio: ["pipe", "pipe", "pipe"],
@@ -4338,15 +4892,14 @@ ${diff}
         // 添加文件到暂存区
         if (files && files.length > 0) {
           for (const file of files) {
-            execSync(`git add "${file}"`, { cwd: workDir, stdio: "pipe" });
+            execFileSync("git", ["add", "--", file], { cwd: workDir, stdio: "pipe" });
           }
         } else {
-          execSync("git add -A", { cwd: workDir, stdio: "pipe" });
+          execFileSync("git", ["add", "-A"], { cwd: workDir, stdio: "pipe" });
         }
 
         // 提交
-        const commitMsg = message.replace(/"/g, '\\"');
-        execSync(`git commit -m "${commitMsg}"`, {
+        execFileSync("git", ["commit", "-m", message], {
           encoding: "utf-8",
           cwd: workDir,
           stdio: ["pipe", "pipe", "pipe"]
@@ -4378,10 +4931,10 @@ ${diff}
 
         if (staged) {
           // 取消暂存
-          execSync(`git restore --staged "${file}"`, { cwd: workDir, stdio: "pipe" });
+          execFileSync("git", ["restore", "--staged", "--", file], { cwd: workDir, stdio: "pipe" });
         } else {
           // 回滚工作区更改
-          execSync(`git restore "${file}"`, { cwd: workDir, stdio: "pipe" });
+          execFileSync("git", ["restore", "--", file], { cwd: workDir, stdio: "pipe" });
         }
 
         sendJson(res, { success: true, message: "回滚成功" });
@@ -4407,8 +4960,9 @@ ${diff}
     const workDir = info[0]?.workDir;
 
     try {
-      const log = execSync(
-        `git log --pretty=format:"%H|%h|%an|%ae|%at|%s" -n ${limit}`,
+      const log = execFileSync(
+        "git",
+        ["log", "--pretty=format:%H|%h|%an|%ae|%at|%s", "-n", String(limit)],
         { encoding: "utf-8", cwd: workDir, stdio: ["pipe", "pipe", "pipe"] }
       );
 
@@ -4521,8 +5075,8 @@ ${diff}
     req.on("data", (chunk) => body += chunk);
     req.on("end", () => {
       try {
-        const { command, env } = JSON.parse(body);
-        toolManager.testConnection(command, env || "").then(result => sendJson(res, result));
+        const { command, args, env } = JSON.parse(body);
+        toolManager.testConnection(command, env || "", args || []).then(result => sendJson(res, result));
       } catch (e) { sendJson(res, { error: e.message }, 400); }
     });
     return;
@@ -4532,8 +5086,142 @@ ${diff}
     toolManager.loadTools().then(() => sendJson(res, { success: true, ...toolManager.getToolList() }));
     return;
   }
+
+  // 性能监控指标
+  if (pathname === "/api/metrics" && req.method === "GET") {
+    return sendJson(res, loadMetrics());
+  }
+  if (pathname === "/api/metrics/reset" && req.method === "POST") {
+    saveMetrics({ agents: {}, daily: {} });
+    return sendJson(res, { success: true });
+  }
+
+  // Agent 状态与宠物语音 SSE 流
+  if (pathname === "/api/status/stream" && req.method === "GET") {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+    });
+    petStatusClients.add(res);
+
+    const configs = getConfigs();
+    const snapshot = configs.map(c => {
+      const s = getAgentState(c.name);
+      return { agent: c.name, state: s.state, lastActivity: s.lastActivity, detail: s.detail };
+    });
+    writeSse(res, { type: "snapshot", agents: snapshot });
+
+    const prevStates = {};
+    snapshot.forEach(s => { prevStates[s.agent] = s.state; });
+    const interval = setInterval(() => {
+      try {
+        const currentConfigs = getConfigs();
+        for (const c of currentConfigs) {
+          const s = getAgentState(c.name);
+          if (prevStates[c.name] !== s.state) {
+            prevStates[c.name] = s.state;
+            writeSse(res, { type: "state", agent: c.name, state: s.state, lastActivity: s.lastActivity, detail: s.detail });
+          }
+        }
+      } catch {}
+    }, 1000);
+
+    req.on("close", () => {
+      clearInterval(interval);
+      petStatusClients.delete(res);
+    });
+    return;
+  }
+
+  // === 桌面宠物 API ===
+  const PETS_FILE = path.join(CCM_DIR, "pets.json");
+
+  if (pathname === "/api/pets/config" && req.method === "GET") {
+    try {
+      if (fs.existsSync(PETS_FILE)) return sendJson(res, JSON.parse(fs.readFileSync(PETS_FILE, "utf-8")));
+    } catch {}
+    return sendJson(res, { configs: {}, positions: {} });
+  }
+  if (pathname === "/api/pets/config" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try { fs.writeFileSync(PETS_FILE, JSON.stringify(JSON.parse(body), null, 2)); sendJson(res, { success: true }); }
+      catch (e) { sendJson(res, { error: e.message }, 400); }
+    });
+    return;
+  }
+  if (pathname === "/api/pets/launch" && req.method === "POST") {
+    return sendJson(res, launchPet());
+  }
+  if (pathname === "/api/pets/close" && req.method === "POST") {
+    return sendJson(res, stopPet());
+  }
+  if (pathname === "/api/pets/status" && req.method === "GET") {
+    return sendJson(res, { running: isPetRunning() });
+  }
+
   // 404
   sendJson(res, { error: "Not Found" }, 404);
+}
+
+// === 桌面宠物进程管理 ===
+const PET_PID_FILE_GLOBAL = path.join(PID_DIR, "pet.pid");
+
+function isPetRunning() {
+  if (!fs.existsSync(PET_PID_FILE_GLOBAL)) return false;
+  const pid = fs.readFileSync(PET_PID_FILE_GLOBAL, "utf-8").trim();
+  try { process.kill(parseInt(pid), 0); return true; }
+  catch { try { fs.unlinkSync(PET_PID_FILE_GLOBAL); } catch {} return false; }
+}
+
+function findElectronBin() {
+  // 优先查找真正的 electron 可执行文件
+  const petExe = path.resolve(__dirname, "..", "pet", "node_modules", "electron", "dist", "electron.exe");
+  if (fs.existsSync(petExe)) return petExe;
+  const mainExe = path.resolve(__dirname, "..", "node_modules", "electron", "dist", "electron.exe");
+  if (fs.existsSync(mainExe)) return mainExe;
+  // Linux/Mac
+  const petBin = path.resolve(__dirname, "..", "pet", "node_modules", ".bin", "electron");
+  if (fs.existsSync(petBin)) return petBin;
+  const mainBin = path.resolve(__dirname, "..", "node_modules", ".bin", "electron");
+  if (fs.existsSync(mainBin)) return mainBin;
+  return null;
+}
+
+function launchPet() {
+  try {
+    if (isPetRunning()) return { success: false, error: "桌面宠物已在运行" };
+    const petDir = path.resolve(__dirname, "..", "pet");
+    if (!fs.existsSync(path.join(petDir, "main.js"))) return { success: false, error: "宠物应用未安装" };
+    const electronBin = findElectronBin();
+    const cmd = electronBin || "npx";
+    const args = electronBin ? [petDir] : ["electron", petDir];
+    const child = spawn(cmd, args, {
+      detached: true,
+      stdio: "ignore",
+      shell: !electronBin,
+      windowsHide: true,
+      env: { ...process.env, CCM_PORT: String(PORT) }
+    });
+    child.on("error", (err: any) => console.error("[pet]", err.message));
+    child.unref();
+    fs.writeFileSync(PET_PID_FILE_GLOBAL, String(child.pid));
+    return { success: true, pid: child.pid };
+  } catch (e) { return { success: false, error: (e as Error).message }; }
+}
+
+function stopPet() {
+  if (!fs.existsSync(PET_PID_FILE_GLOBAL)) return { success: false, error: "桌面宠物未在运行" };
+  const pid = fs.readFileSync(PET_PID_FILE_GLOBAL, "utf-8").trim();
+  try {
+    if (process.platform === "win32") execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" });
+    else process.kill(parseInt(pid), "SIGTERM");
+  } catch {}
+  try { fs.unlinkSync(PET_PID_FILE_GLOBAL); } catch {}
+  return { success: true };
 }
 
 // 启动服务器

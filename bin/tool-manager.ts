@@ -29,13 +29,14 @@ export class ToolManager {
 
   // 加载所有启用的 MCP 服务器和 Skills
   async loadTools() {
+    this.tools = [];
     // 加载 MCP 工具配置
     const mcpConfigs = this.loadMcpConfigs();
     for (const config of mcpConfigs) {
       if (!config.enabled || !config.command) continue;
       if (this.clients.has(config.name)) continue;
 
-      const client = new McpClient(config.command, this.parseEnv(config.env));
+      const client = new McpClient(config.command, this.parseArgs(config.args), this.parseEnv(config.env));
       const connected = await client.connect();
       if (connected) {
         this.clients.set(config.name, client);
@@ -162,8 +163,8 @@ export class ToolManager {
   }
 
   // 测试 MCP 连接
-  async testConnection(command: string, env: string): Promise<{ success: boolean; tools: string[]; error?: string }> {
-    const client = new McpClient(command, this.parseEnv(env));
+  async testConnection(command: string, env: string, args: any = []): Promise<{ success: boolean; tools: string[]; error?: string }> {
+    const client = new McpClient(command, this.parseArgs(args), this.parseEnv(env));
     const connected = await client.connect();
     if (!connected) {
       return { success: false, tools: [], error: "连接失败" };
@@ -215,6 +216,12 @@ export class ToolManager {
       }
     }
     return env;
+  }
+
+  private parseArgs(args: any): string[] {
+    if (Array.isArray(args)) return args.map(String).filter(Boolean);
+    if (typeof args !== "string" || !args.trim()) return [];
+    return args.match(/(?:[^\s"]+|"[^"]*")+/g)?.map(p => p.replace(/^"|"$/g, "")) || [];
   }
 }
 

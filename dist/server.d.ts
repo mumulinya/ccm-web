@@ -2,7 +2,7 @@
 declare const http: any;
 declare const fs: any;
 declare const path: any;
-declare const execSync: any, spawn: any;
+declare const execFileSync: any, execSync: any, spawn: any, spawnSync: any;
 declare const os: any;
 declare const url: any;
 declare const toolManager: any;
@@ -17,14 +17,45 @@ declare const CRON_FILE: any;
 declare const UPLOAD_DIR: any;
 declare const GROUPS_FILE: any;
 declare const GROUP_MESSAGES_DIR: any;
+declare const GROUP_LOGS_FILE_SHARED: any;
 declare const PUBLIC_DIR: any;
 declare function loadGroups(): any;
 declare function saveGroups(groups: any): void;
 declare function getGroupMessages(groupId: any): any;
 declare function appendGroupMessage(groupId: any, msg: any): void;
+declare function safeAddGroupLog(groupId: any, level: any, category: any, message: any, details?: any): void;
+declare const petStatusClients: Set<any>;
+declare const stateCache: Map<any, any>;
+declare const agentActivity: Map<any, any>;
+declare function broadcastPetSpeech(agent: any, payload?: any): void;
+declare function setAgentActivity(name: any, state: any, detail?: string): void;
+declare function readLogTail(logFile: any, bytes?: number): string;
+declare function getAgentState(name: any): any;
+declare function getWorkDirForProject(projectName: any): any;
+declare function parseGitStatus(workDir: any): any;
+declare function createFileChangeSnapshot(workDir: any): {
+    workDir: any;
+    files: {};
+};
+declare function describeFileStatus(statusCode: any): {
+    statusText: string;
+    statusColor: string;
+};
+declare function getFileChanges(projectName: any, beforeSnapshot?: any): {
+    files: any;
+    count: any;
+};
+declare const METRICS_FILE: any;
+declare function loadMetrics(): any;
+declare function saveMetrics(metrics: any): void;
+declare function recordMetric(agent: any, data: any): void;
+declare function appendToolResults(output: any): Promise<any>;
 declare function callAgent(projectName: any, message: any, workDir: any, agentType: any, timeoutMs: any): any;
 declare function callAgentStream(projectName: any, message: any, workDir: any, agentType: any, res: any): void;
-declare function processCrossAgents(groupId: any, group: any, sourceProject: any, output: any, atMentions: any, configs: any): void;
+declare function buildAgentCommand(agentType: any, tmpMsg: any): string;
+declare function writeSse(res: any, data: any): void;
+declare function callAgentForGroupStream(projectName: any, message: any, workDir: any, agentType: any, options?: any): Promise<string>;
+declare function processCrossAgents(groupId: any, group: any, sourceProject: any, output: any, atMentions: any, configs: any, streamRes?: any, depth?: number): Promise<void>;
 declare function parseMultipart(buffer: any, boundary: any): {
     files: any[];
     fields: {};
@@ -65,6 +96,16 @@ declare function stopProject(projectName: any): {
 };
 declare function sendJson(res: any, data: any, status?: number): void;
 declare function sendFile(res: any, filePath: any): void;
+declare function normalizeTerminalCwd(cwd: any): any;
+declare function splitTerminalCwd(output: any, marker: any): {
+    output: any;
+    cwd: any;
+};
+declare function runTerminalCommand(command: any, cwd: any): {
+    output: any;
+    cwd: any;
+    error: any;
+};
 declare function ensureSharedDir(): void;
 declare function listSharedFiles(): any;
 declare function readSharedFile(name: any): {
@@ -184,5 +225,24 @@ declare function createCronJob(job: any): {
 declare function updateCronJob(id: any, updates: any): any;
 declare function deleteCronJob(id: any): void;
 declare function handleRequest(req: any, res: any): any;
+declare const PET_PID_FILE_GLOBAL: any;
+declare function isPetRunning(): boolean;
+declare function findElectronBin(): any;
+declare function launchPet(): {
+    success: boolean;
+    error: string;
+    pid?: undefined;
+} | {
+    success: boolean;
+    pid: any;
+    error?: undefined;
+};
+declare function stopPet(): {
+    success: boolean;
+    error: string;
+} | {
+    success: boolean;
+    error?: undefined;
+};
 declare function startServer(port: any): any;
 declare let PORT: number;
