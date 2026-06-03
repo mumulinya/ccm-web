@@ -1,6 +1,6 @@
 {
   "name": "@mumulinya167/cc-web",
-  "version": "1.0.1",
+  "version": "1.0.4",
   "description": "cc-web - cc-connect 的 Web 管理界面，支持多 Agent 协作、任务派发、代码变更查看等",
   "main": "dist/server.js",
   "bin": {
@@ -10,13 +10,21 @@
     "bin/",
     "dist/",
     "public/",
+    "pet/main.js",
+    "pet/preload.js",
+    "pet/package.json",
+    "pet/renderer/",
+    "pet/assets/",
+    "mcp-feishu/dist/",
+    "mcp-feishu/package.json",
+    "mcp-feishu/.env.example",
     "configs/",
     "templates/",
     "README.md"
   ],
   "scripts": {
     "build": "tsc",
-    "build:vue": "cd ../ccm-web-vue && npm run build && xcopy /E /Y /I dist ..\\ccm-package\\public",
+    "build:vue": "node -e \"require('fs').rmSync('public',{recursive:true,force:true})\" && cd ../ccm-web-vue && npm run build && xcopy /E /Y /I dist ..\\ccm-package\\public",
     "build:all": "npm run build:vue && npm run build",
     "start": "node dist/server.js",
     "dev": "node bin/server.js",
@@ -39,5 +47,10 @@
   "devDependencies": {
     "@types/node": "^25.9.1",
     "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "electron": "^35.7.5",
+    "zod": "^3.25.76"
   }
 }

@@ -5,6 +5,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const zlib = require("zlib");
 const { execFileSync, execSync, spawn, spawnSync } = require("child_process");
 const os = require("os");
 const url = require("url");
@@ -230,6 +231,134 @@ function parseGitStatus(workDir) {
         return { path: filePath, statusCode, stat };
     });
 }
+const MAX_FILE_SNAPSHOT_BYTES = 512 * 1024;
+const MAX_DIFF_CHARS = 60000;
+function isLikelyTextBuffer(buffer) {
+    if (!Buffer.isBuffer(buffer))
+        return false;
+    if (buffer.length === 0)
+        return true;
+    const sample = buffer.slice(0, Math.min(buffer.length, 4096));
+    return sample.indexOf(0) === -1;
+}
+function readWorkingFileText(workDir, filePath) {
+    try {
+        const absPath = path.join(workDir, filePath);
+        if (!fs.existsSync(absPath))
+            return { exists: false, text: "", binary: false, tooLarge: false };
+        const stat = fs.statSync(absPath);
+        if (stat.size > MAX_FILE_SNAPSHOT_BYTES)
+            return { exists: true, text: "", binary: false, tooLarge: true };
+        const buffer = fs.readFileSync(absPath);
+        if (!isLikelyTextBuffer(buffer))
+            return { exists: true, text: "", binary: true, tooLarge: false };
+        return { exists: true, text: buffer.toString("utf-8"), binary: false, tooLarge: false };
+    }
+    catch {
+        return { exists: false, text: "", binary: false, tooLarge: false };
+    }
+}
+function readHeadFileText(workDir, filePath) {
+    try {
+        const buffer = execFileSync("git", ["show", `HEAD:${filePath}`], {
+            cwd: workDir,
+            timeout: 5000,
+            maxBuffer: MAX_FILE_SNAPSHOT_BYTES + 1024,
+            stdio: ["pipe", "pipe", "pipe"]
+        });
+        if (buffer.length > MAX_FILE_SNAPSHOT_BYTES)
+            return { exists: true, text: "", binary: false, tooLarge: true };
+        if (!isLikelyTextBuffer(buffer))
+            return { exists: true, text: "", binary: true, tooLarge: false };
+        return { exists: true, text: buffer.toString("utf-8"), binary: false, tooLarge: false };
+    }
+    catch {
+        return { exists: false, text: "", binary: false, tooLarge: false };
+    }
+}
+function createUnifiedDiff(oldText, newText, filePath, contextSize = 3) {
+    if (oldText === newText)
+        return "";
+    const oldLines = String(oldText || "").replace(/\r\n/g, "\n").split("\n");
+    const newLines = String(newText || "").replace(/\r\n/g, "\n").split("\n");
+    if (oldLines.length && oldLines[oldLines.length - 1] === "")
+        oldLines.pop();
+    if (newLines.length && newLines[newLines.length - 1] === "")
+        newLines.pop();
+    const n = oldLines.length;
+    const m = newLines.length;
+    const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) {
+        for (let j = m - 1; j >= 0; j--) {
+            dp[i][j] = oldLines[i] === newLines[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+    }
+    const ops = [];
+    let i = 0, j = 0;
+    while (i < n || j < m) {
+        if (i < n && j < m && oldLines[i] === newLines[j]) {
+            ops.push({ type: "context", text: oldLines[i], oldLine: i + 1, newLine: j + 1 });
+            i++;
+            j++;
+        }
+        else if (j < m && (i >= n || dp[i][j + 1] >= dp[i + 1][j])) {
+            ops.push({ type: "add", text: newLines[j], oldLine: null, newLine: j + 1 });
+            j++;
+        }
+        else {
+            ops.push({ type: "remove", text: oldLines[i], oldLine: i + 1, newLine: null });
+            i++;
+        }
+    }
+    const keep = new Set();
+    ops.forEach((op, idx) => {
+        if (op.type !== "context") {
+            for (let k = Math.max(0, idx - contextSize); k <= Math.min(ops.length - 1, idx + contextSize); k++)
+                keep.add(k);
+        }
+    });
+    const lines = [`--- a/${filePath}`, `+++ b/${filePath}`];
+    let skipped = false;
+    for (let idx = 0; idx < ops.length; idx++) {
+        if (!keep.has(idx)) {
+            if (!skipped) {
+                lines.push("@@ ... @@");
+                skipped = true;
+            }
+            continue;
+        }
+        skipped = false;
+        const op = ops[idx];
+        const prefix = op.type === "add" ? "+" : op.type === "remove" ? "-" : " ";
+        lines.push(`${prefix}${op.text}`);
+    }
+    let diff = lines.join("\n");
+    if (diff.length > MAX_DIFF_CHARS) {
+        diff = `${diff.slice(0, MAX_DIFF_CHARS)}\n\n[diff 过长，已截断]`;
+    }
+    return diff;
+}
+function buildFileDiff(workDir, filePath, before) {
+    const beforeState = before?.contentSnapshot || readHeadFileText(workDir, filePath);
+    const afterState = readWorkingFileText(workDir, filePath);
+    if (beforeState?.tooLarge || afterState?.tooLarge) {
+        return { available: false, reason: "文件过大，已跳过文本对比" };
+    }
+    if (beforeState?.binary || afterState?.binary) {
+        return { available: false, reason: "二进制文件无法做文本对比" };
+    }
+    const beforeText = beforeState?.exists ? beforeState.text : "";
+    const afterText = afterState.exists ? afterState.text : "";
+    const diff = createUnifiedDiff(beforeText, afterText, filePath);
+    return {
+        available: !!diff,
+        beforeExists: !!beforeState?.exists,
+        afterExists: !!afterState.exists,
+        diff,
+        additions: diff.split("\n").filter(line => line.startsWith("+") && !line.startsWith("+++")).length,
+        deletions: diff.split("\n").filter(line => line.startsWith("-") && !line.startsWith("---")).length,
+    };
+}
 function createFileChangeSnapshot(workDir) {
     try {
         const files = {};
@@ -238,6 +367,7 @@ function createFileChangeSnapshot(workDir) {
                 statusCode: entry.statusCode,
                 mtimeMs: entry.stat?.mtimeMs || 0,
                 size: entry.stat?.size || 0,
+                contentSnapshot: readWorkingFileText(workDir, entry.path),
             };
         }
         return { workDir, files };
@@ -277,6 +407,10 @@ function getFileChanges(projectName, beforeSnapshot = null) {
                 || before.size !== (entry.stat?.size || 0);
         })
             .map(entry => ({ path: entry.path, ...describeFileStatus(entry.statusCode) }));
+        for (const file of files) {
+            const before = beforeFiles ? beforeFiles[file.path] : null;
+            file.diff = buildFileDiff(workDir, file.path, before);
+        }
         return { files, count: files.length };
     }
     catch (e) {
@@ -614,7 +748,13 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
                 durationMs: Date.now() - startedAt,
                 fileChangeCount: fileChanges?.count || 0
             });
-            writeSse(streamRes, { type: "agent_done", agent: projectName, text: finalText, fileChanges });
+            try {
+                if (typeof options.onDone === "function") {
+                    options.onDone({ text: finalText, fileChanges, isError });
+                }
+            }
+            catch { }
+            writeSse(streamRes, { type: "agent_done", agent: projectName, text: finalText, fileChanges, messageId: options.messageId });
             broadcastPetSpeech(projectName, { role: isError ? "error" : "assistant", text: finalText, final: true, source: "group" });
             setAgentActivity(projectName, isError ? "error" : "happy", isError ? "错误" : "群聊回复完成");
             setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
@@ -646,20 +786,66 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
         child.on("error", (err) => { finish(`❌ 错误: ${err.message}`, true).catch(() => { }); });
     });
 }
+function buildGroupCollaborationRules(memberList = "") {
+    const members = memberList || "无";
+    return `\n\n群聊协作规则：
+- 当前群聊成员：${members}
+- 如需其他 Agent 协助，只能在本 CCM 群聊里用独立一行 "@项目名 具体任务" 派发，系统会自动转发；不要调用飞书、微信、外部机器人或 MCP 通知工具来联系其他 Agent。
+- 只有确实需要对方执行、确认、补充或适配时才 @ 对方；普通总结、技术介绍、成员列表、分类标题里不要 @。
+- @ 后面必须写清楚可执行任务或明确问题，例如：@smart-live-app 请根据后端新增字段适配用户头像展示。
+- 如果你只是回答用户或汇总信息，不需要其他 Agent 干活，就不要 @。
+- 被 @ 的 Agent 只有在 @ 行明确要求自己处理任务或回答问题时才回复。`;
+}
+function isActionableMentionText(text) {
+    const value = String(text || "").trim();
+    if (value.length < 4)
+        return false;
+    if (/^(收到|好的|了解|谢谢|辛苦了|已完成|完成了|确认收到|ok|OK)[。！!,.，\s]*$/.test(value))
+        return false;
+    return true;
+}
+function extractActionableMentions(text, group, sourceProject = "") {
+    const members = new Set((group.members || []).map(m => m.project));
+    const results = [];
+    const seen = new Set();
+    for (const line of String(text || "").split(/\r?\n/)) {
+        const normalized = line.trim().replace(/^([>*-]|\d+[.)、]|[（(]\d+[）)])\s*/, "").trim();
+        const match = normalized.match(/^@([\w-]+)(?:\s+|[：:，,、-]+)([\s\S]+)$/);
+        if (!match)
+            continue;
+        const targetName = match[1];
+        const message = match[2].trim();
+        if (!members.has(targetName) || targetName === sourceProject)
+            continue;
+        if (!isActionableMentionText(message))
+            continue;
+        const key = `${targetName}\n${message}`;
+        if (seen.has(key))
+            continue;
+        seen.add(key);
+        results.push({ mention: `@${targetName}`, targetName, message });
+    }
+    return results;
+}
 // 异步处理跨 Agent 协作调用
 async function processCrossAgents(groupId, group, sourceProject, output, atMentions, configs, streamRes = null, depth = 0) {
+    const collectedOutputs = [];
     if (depth > 3) {
         console.log("[跨Agent协作] 达到最大递归深度，停止继续转发");
-        return;
+        return collectedOutputs;
     }
-    console.log(`[跨Agent协作] 源: ${sourceProject}, 检测到 @mentions: ${atMentions.join(", ")}`);
+    const mentionLabels = atMentions.map(m => typeof m === "string" ? m : m.mention).filter(Boolean);
+    console.log(`[跨Agent协作] 源: ${sourceProject}, 检测到 @mentions: ${mentionLabels.join(", ")}`);
     // 去重 mentions
-    const uniqueMentions = [...new Set(atMentions)];
-    console.log(`[跨Agent协作] 去重后 mentions: ${uniqueMentions.join(", ")}`);
+    const uniqueMentions = atMentions.filter((m, idx, arr) => {
+        const key = typeof m === "string" ? m : `${m.targetName}:${m.message}`;
+        return arr.findIndex(item => (typeof item === "string" ? item : `${item.targetName}:${item.message}`) === key) === idx;
+    });
+    console.log(`[跨Agent协作] 去重后 mentions: ${uniqueMentions.map(m => typeof m === "string" ? m : m.mention).join(", ")}`);
     for (const mention of uniqueMentions) {
         // 确保 mention 是 @ 开头的格式
-        const mentionStr = String(mention);
-        const targetName = mentionStr.startsWith("@") ? mentionStr.slice(1) : mentionStr;
+        const mentionStr = typeof mention === "string" ? String(mention) : mention.mention;
+        const targetName = typeof mention === "string" ? (mentionStr.startsWith("@") ? mentionStr.slice(1) : mentionStr) : mention.targetName;
         console.log(`[跨Agent协作] 处理 @${targetName}`);
         const targetMember = group.members.find(m => m.project === targetName && m.project !== sourceProject);
         if (!targetMember) {
@@ -669,7 +855,7 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
         // 提取 @mention 后面的消息（支持多行）
         const atRegex = new RegExp(`@${targetName}\\s+([^@]+?)(?=\\s*@|$)`, "is");
         const atMatch = output.match(atRegex);
-        let atMessage = atMatch ? atMatch[1].trim() : "";
+        let atMessage = typeof mention === "string" ? (atMatch ? atMatch[1].trim() : "") : mention.message;
         // 如果没有提取到具体消息，尝试提取 @mention 所在段落
         if (!atMessage || atMessage.length < 5) {
             const lines = output.split("\n");
@@ -715,9 +901,9 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
         }).join("\n");
         // 构建详细的 prompt
         const memberList = group.members.map(m => m.project).filter(p => p !== targetName && p !== "coordinator").join(", ");
+        const collaborationRules = buildGroupCollaborationRules(memberList);
         const tPrompt = `你是一个在群聊中协作的开发 Agent，项目: ${targetName}。
-
-${memberList ? `群聊中还有其他 Agent：${memberList}。如果你需要其他 Agent 协助，在回复中用 @项目名 的格式提出请求。` : ""}
+${collaborationRules}
 
 以下是群聊最近的消息记录：
 ${tContext}
@@ -728,32 +914,39 @@ ${atMessage}
 请直接回复，不要重复上下文内容。`;
         console.log(`[跨Agent协作] 调用 Agent ${targetName}...`);
         try {
+            const responseMessageId = "m" + Date.now().toString(36) + "cross" + Math.random().toString(36).slice(2, 5);
+            let targetFileChanges = null;
             const tOutput = await callAgentForGroupStream(targetName, tPrompt, tWorkDir, tAgentType, {
                 res: streamRes,
                 groupId,
-                timeoutMs: 300000
+                timeoutMs: 300000,
+                messageId: responseMessageId,
+                onDone: ({ fileChanges }) => { targetFileChanges = fileChanges; }
             });
+            collectedOutputs.push(tOutput);
             console.log(`[跨Agent协作] Agent ${targetName} 回复: ${tOutput.substring(0, 100)}...`);
             appendGroupMessage(groupId, {
-                id: "m" + Date.now().toString(36) + "cross",
+                id: responseMessageId,
                 role: "assistant", agent: targetName,
                 content: tOutput,
                 timestamp: new Date().toISOString(),
-                fileChanges: getFileChanges(targetName),
+                fileChanges: targetFileChanges,
             });
             // 检查目标 Agent 的回复是否也包含 @mention，递归处理
-            const nestedMentions = tOutput.match(/@[\w-]+/g) || [];
+            const nestedMentions = extractActionableMentions(tOutput, group, targetName);
             if (nestedMentions.length > 0) {
                 // 避免无限递归：只处理不是来源项目的 mention
-                const newMentions = nestedMentions.filter(m => m.slice(1) !== sourceProject && m.slice(1) !== targetName);
+                const newMentions = nestedMentions.filter(m => m.targetName !== sourceProject && m.targetName !== targetName);
                 if (newMentions.length > 0) {
-                    console.log(`[跨Agent协作] Agent ${targetName} 的回复包含 @mentions: ${newMentions.join(", ")}，递归处理`);
-                    await processCrossAgents(groupId, group, targetName, tOutput, newMentions, configs, streamRes, depth + 1);
+                    console.log(`[跨Agent协作] Agent ${targetName} 的回复包含 @mentions: ${newMentions.map(m => m.mention).join(", ")}，递归处理`);
+                    const nestedOutputs = await processCrossAgents(groupId, group, targetName, tOutput, newMentions, configs, streamRes, depth + 1);
+                    collectedOutputs.push(...nestedOutputs);
                 }
             }
         }
         catch (error) {
             console.error(`[跨Agent协作] 调用 Agent ${targetName} 失败:`, error.message);
+            collectedOutputs.push(`❌ 转发给 @${targetName} 失败: ${error.message}`);
             // 记录错误消息
             appendGroupMessage(groupId, {
                 id: "m" + Date.now().toString(36) + "err",
@@ -763,6 +956,7 @@ ${atMessage}
             });
         }
     }
+    return collectedOutputs;
 }
 // === Multipart 解析 ===
 function parseMultipart(buffer, boundary) {
@@ -1158,9 +1352,262 @@ function runTerminalCommand(command, cwd) {
     return parseResult(result.stdout, result.stderr, result.status, result.error);
 }
 // === 共享上下文 ===
+const TEXT_FILE_EXTENSIONS = [
+    ".md", ".txt", ".json", ".csv", ".yaml", ".yml", ".toml", ".xml", ".html",
+    ".css", ".js", ".jsx", ".ts", ".tsx", ".vue", ".log", ".py", ".java", ".go",
+    ".rs", ".c", ".cpp", ".h", ".hpp", ".sh", ".bat", ".ps1", ".ini", ".conf",
+    ".env", ".sql", ".php", ".rb", ".swift", ".kt"
+];
+const IMAGE_FILE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"];
+const OOXML_FILE_EXTENSIONS = [".docx", ".pptx", ".xlsx"];
+const MAX_INLINE_FILE_CHARS = 20000;
 function ensureSharedDir() {
     if (!fs.existsSync(SHARED_DIR))
         fs.mkdirSync(SHARED_DIR, { recursive: true });
+}
+function isTextFileName(name) {
+    return TEXT_FILE_EXTENSIONS.includes(path.extname(String(name || "")).toLowerCase());
+}
+function isImageFileName(name) {
+    return IMAGE_FILE_EXTENSIONS.includes(path.extname(String(name || "")).toLowerCase());
+}
+function isOoxmlFileName(name) {
+    return OOXML_FILE_EXTENSIONS.includes(path.extname(String(name || "")).toLowerCase());
+}
+function getSharedFilePath(name) {
+    if (!name)
+        return null;
+    const safeName = path.basename(String(name));
+    return path.join(SHARED_DIR, safeName);
+}
+function truncateInlineContent(content, maxChars = MAX_INLINE_FILE_CHARS) {
+    const text = String(content || "");
+    if (text.length <= maxChars)
+        return text;
+    return `${text.slice(0, maxChars)}\n\n[内容过长，已截断，原始文件可按路径继续读取]`;
+}
+function decodeXmlEntities(text) {
+    return String(text || "")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'");
+}
+function xmlToPlainText(xml) {
+    return decodeXmlEntities(String(xml || "")
+        .replace(/<w:tab\/>/g, "\t")
+        .replace(/<w:br\/>/g, "\n")
+        .replace(/<\/w:p>/g, "\n")
+        .replace(/<\/a:p>/g, "\n")
+        .replace(/<[^>]+>/g, ""))
+        .replace(/\r/g, "")
+        .replace(/[ \t]+\n/g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+}
+function getZipEntries(buffer) {
+    const entries = [];
+    if (!Buffer.isBuffer(buffer) || buffer.length < 22)
+        return entries;
+    let eocd = -1;
+    const min = Math.max(0, buffer.length - 65557);
+    for (let i = buffer.length - 22; i >= min; i--) {
+        if (buffer.readUInt32LE(i) === 0x06054b50) {
+            eocd = i;
+            break;
+        }
+    }
+    if (eocd < 0)
+        return entries;
+    const totalEntries = buffer.readUInt16LE(eocd + 10);
+    const centralDirOffset = buffer.readUInt32LE(eocd + 16);
+    let offset = centralDirOffset;
+    for (let i = 0; i < totalEntries && offset + 46 <= buffer.length; i++) {
+        if (buffer.readUInt32LE(offset) !== 0x02014b50)
+            break;
+        const method = buffer.readUInt16LE(offset + 10);
+        const compressedSize = buffer.readUInt32LE(offset + 20);
+        const fileNameLength = buffer.readUInt16LE(offset + 28);
+        const extraLength = buffer.readUInt16LE(offset + 30);
+        const commentLength = buffer.readUInt16LE(offset + 32);
+        const localHeaderOffset = buffer.readUInt32LE(offset + 42);
+        const nameStart = offset + 46;
+        const name = buffer.slice(nameStart, nameStart + fileNameLength).toString("utf-8");
+        entries.push({ name, method, compressedSize, localHeaderOffset });
+        offset = nameStart + fileNameLength + extraLength + commentLength;
+    }
+    return entries;
+}
+function readZipEntry(buffer, entry) {
+    const offset = entry.localHeaderOffset;
+    if (offset < 0 || offset + 30 > buffer.length || buffer.readUInt32LE(offset) !== 0x04034b50)
+        return null;
+    const fileNameLength = buffer.readUInt16LE(offset + 26);
+    const extraLength = buffer.readUInt16LE(offset + 28);
+    const dataStart = offset + 30 + fileNameLength + extraLength;
+    const dataEnd = dataStart + entry.compressedSize;
+    if (dataStart < 0 || dataEnd > buffer.length)
+        return null;
+    const data = buffer.slice(dataStart, dataEnd);
+    if (entry.method === 0)
+        return data;
+    if (entry.method === 8)
+        return zlib.inflateRawSync(data);
+    return null;
+}
+function extractOoxmlText(filePath, name) {
+    try {
+        const buffer = fs.readFileSync(filePath);
+        const entries = getZipEntries(buffer);
+        const ext = path.extname(name).toLowerCase();
+        let targets = [];
+        if (ext === ".docx") {
+            targets = entries.filter(e => e.name === "word/document.xml");
+        }
+        else if (ext === ".pptx") {
+            targets = entries.filter(e => /^ppt\/slides\/slide\d+\.xml$/i.test(e.name));
+        }
+        else if (ext === ".xlsx") {
+            targets = entries.filter(e => e.name === "xl/sharedStrings.xml" || /^xl\/worksheets\/sheet\d+\.xml$/i.test(e.name));
+        }
+        const parts = [];
+        for (const entry of targets) {
+            const content = readZipEntry(buffer, entry);
+            if (!content)
+                continue;
+            const text = xmlToPlainText(content.toString("utf-8"));
+            if (text)
+                parts.push(text);
+        }
+        return parts.join("\n\n").trim();
+    }
+    catch {
+        return "";
+    }
+}
+function looksBinaryString(content) {
+    const text = String(content || "");
+    return text.startsWith("PK\u0003\u0004") || /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(text.slice(0, 2000));
+}
+function describeFileFromPath(filePath, name, maxChars = MAX_INLINE_FILE_CHARS) {
+    if (!filePath || !fs.existsSync(filePath))
+        return null;
+    const stat = fs.statSync(filePath);
+    const ext = path.extname(name).toLowerCase();
+    if (isTextFileName(name)) {
+        return {
+            name,
+            type: "text",
+            readable: true,
+            size: stat.size,
+            path: filePath,
+            content: truncateInlineContent(fs.readFileSync(filePath, "utf-8"), maxChars),
+        };
+    }
+    if (isOoxmlFileName(name)) {
+        const content = extractOoxmlText(filePath, name);
+        return {
+            name,
+            type: ext.slice(1) || "document",
+            readable: !!content,
+            size: stat.size,
+            path: filePath,
+            content: content ? truncateInlineContent(content, maxChars) : "",
+        };
+    }
+    if (isImageFileName(name)) {
+        return { name, type: "image", readable: false, size: stat.size, path: filePath };
+    }
+    return { name, type: ext ? ext.slice(1) : "file", readable: false, size: stat.size, path: filePath };
+}
+function createSharedFileRecord(name, source = "global") {
+    const filePath = getSharedFilePath(name);
+    const described = describeFileFromPath(filePath, path.basename(String(name || "")));
+    if (!described)
+        return null;
+    const now = new Date().toISOString();
+    return {
+        ...described,
+        source,
+        created_at: now,
+        updated_at: now,
+    };
+}
+function normalizeSharedFileRecord(file) {
+    if (!file || !file.name)
+        return file;
+    const existingPath = file.path && fs.existsSync(file.path) ? file.path : getSharedFilePath(file.name);
+    const hasDiskFile = existingPath && fs.existsSync(existingPath);
+    const shouldReload = hasDiskFile && (!file.content || looksBinaryString(file.content) || !isTextFileName(file.name));
+    if (shouldReload) {
+        const described = describeFileFromPath(existingPath, file.name);
+        if (described) {
+            return {
+                ...file,
+                ...described,
+                created_at: file.created_at || new Date().toISOString(),
+                updated_at: file.updated_at || new Date().toISOString(),
+            };
+        }
+    }
+    if (file.content && isTextFileName(file.name)) {
+        return { ...file, type: file.type || "text", readable: true };
+    }
+    return file;
+}
+function normalizeSharedFileList(files) {
+    return (files || []).map(normalizeSharedFileRecord).filter(Boolean);
+}
+function buildFilesContext(files, title = "以下是共享文件：") {
+    const normalized = normalizeSharedFileList(files);
+    if (!normalized.length)
+        return "";
+    const readable = normalized.filter(f => f.content && f.readable !== false);
+    const pathOnly = normalized.filter(f => !f.content || f.readable === false);
+    const sections = [`\n\n${title}`];
+    if (readable.length > 0) {
+        sections.push("[可直接读取的文件内容]");
+        sections.push(readable.map(f => {
+            const meta = [f.type ? `类型: ${f.type}` : "", f.path ? `路径: ${f.path}` : ""].filter(Boolean).join("；");
+            return `\n--- ${f.name}${meta ? `（${meta}）` : ""} ---\n${truncateInlineContent(f.content)}`;
+        }).join("\n"));
+    }
+    if (pathOnly.length > 0) {
+        sections.push("[需按路径读取或分析的文件]");
+        sections.push(pathOnly.map(f => {
+            const bits = [`- ${f.name}`];
+            if (f.type)
+                bits.push(`类型: ${f.type}`);
+            if (typeof f.size === "number")
+                bits.push(`大小: ${f.size} bytes`);
+            if (f.path)
+                bits.push(`路径: ${f.path}`);
+            return `${bits.join("；")}。如需分析，请直接读取这个绝对路径，不要只根据文件名猜测内容。`;
+        }).join("\n"));
+    }
+    return sections.join("\n");
+}
+function buildUploadedFilesContext(files, title = "本次消息附件") {
+    const records = (files || []).map(f => describeFileFromPath(f.savedPath || f.path, f.filename || f.name)).filter(Boolean);
+    return buildFilesContext(records, title);
+}
+function summarizeUploadedFiles(files) {
+    if (!files || files.length === 0)
+        return "";
+    return files.map(f => `- ${f.filename || f.name}（${f.size || 0} bytes）`).join("\n");
+}
+function getMultipartBoundary(contentType) {
+    const match = String(contentType || "").match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+    return match ? (match[1] || match[2]).trim() : "";
+}
+function collectRequestBuffer(req) {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        req.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        req.on("end", () => resolve(Buffer.concat(chunks)));
+        req.on("error", reject);
+    });
 }
 function listSharedFiles() {
     ensureSharedDir();
@@ -1169,26 +1616,22 @@ function listSharedFiles() {
         .map(f => {
         const stat = fs.statSync(path.join(SHARED_DIR, f));
         const ext = path.extname(f).toLowerCase();
-        const isText = [".md", ".txt", ".json", ".csv", ".yaml", ".yml", ".toml", ".xml", ".html", ".css", ".js", ".ts"].includes(ext);
-        const isImage = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"].includes(ext);
-        return { name: f, size: stat.size, modified: stat.mtime.toISOString(), type: isText ? "text" : isImage ? "image" : "file" };
+        const type = isTextFileName(f) ? "text" : isImageFileName(f) ? "image" : isOoxmlFileName(f) ? ext.slice(1) : "file";
+        return { name: f, size: stat.size, modified: stat.mtime.toISOString(), type, path: path.join(SHARED_DIR, f) };
     })
         .sort((a, b) => new Date(b.modified).getTime() - new Date(a.modified).getTime());
 }
 function readSharedFile(name) {
-    const filePath = path.join(SHARED_DIR, name);
+    const filePath = getSharedFilePath(name);
+    if (!filePath)
+        return null;
     if (!fs.existsSync(filePath))
         return null;
-    const ext = path.extname(name).toLowerCase();
-    const isText = [".md", ".txt", ".json", ".csv", ".yaml", ".yml", ".toml", ".xml", ".html", ".css", ".js", ".ts"].includes(ext);
-    if (isText) {
-        return { type: "text", content: fs.readFileSync(filePath, "utf-8") };
-    }
-    return { type: "binary", size: fs.statSync(filePath).size };
+    return describeFileFromPath(filePath, path.basename(String(name)));
 }
 function writeSharedFile(name, content) {
     ensureSharedDir();
-    fs.writeFileSync(path.join(SHARED_DIR, name), content);
+    fs.writeFileSync(getSharedFilePath(name), content);
 }
 function saveSharedUpload(filename, buffer) {
     ensureSharedDir();
@@ -1227,6 +1670,7 @@ function createTask(task) {
         assign_type: task.assign_type || "project",
         status: "pending",
         priority: task.priority || "normal",
+        auto_execute: !!(task.auto_execute || task.autoExecute),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
     };
@@ -1252,6 +1696,7 @@ function deleteTask(id) {
 // === 任务队列系统（支持并行执行）===
 const taskQueues = new Map(); // 每个目标（群聊/Agent）独立队列
 const runningTasks = new Map(); // 正在运行的任务
+const runningTaskIds = new Set(); // 正在运行的任务 ID
 // 获取任务的目标键
 function getTaskTargetKey(task) {
     if (task.assign_type === "group" && task.group_id) {
@@ -1267,13 +1712,21 @@ function enqueueTask(taskId) {
     const task = tasks.find(t => t.id === taskId);
     if (!task) {
         console.log(`[任务队列] 任务 ${taskId} 不存在`);
-        return;
+        return { queued: false, message: "任务不存在" };
+    }
+    if (task.status === "done") {
+        addTaskLog(taskId, "info", "任务已完成，跳过入队");
+        return { queued: false, message: "任务已完成，跳过入队" };
     }
     const targetKey = getTaskTargetKey(task);
     if (!taskQueues.has(targetKey)) {
         taskQueues.set(targetKey, []);
     }
     const queue = taskQueues.get(targetKey);
+    if (queue.includes(taskId) || runningTaskIds.has(taskId)) {
+        addTaskLog(taskId, "info", "任务已在队列中或正在执行，跳过重复入队");
+        return { queued: false, message: "任务已在队列中或正在执行" };
+    }
     // 按优先级插入到正确位置
     const newPriority = PRIORITY_WEIGHT[task.priority] || 2;
     let insertIndex = queue.length; // 默认插入到末尾
@@ -1290,8 +1743,11 @@ function enqueueTask(taskId) {
     }
     queue.splice(insertIndex, 0, taskId);
     console.log(`[任务队列] 任务 ${taskId} (${task.priority}) 已加入队列 [${targetKey}]，位置: ${insertIndex + 1}/${queue.length}`);
+    updateTask(taskId, { queued_at: new Date().toISOString() });
+    addTaskLog(taskId, "info", `任务已加入队列 [${targetKey}]，位置 ${insertIndex + 1}/${queue.length}`);
     // 触发该目标的队列处理
     processTargetQueue(targetKey);
+    return { queued: true, message: "任务已加入队列", targetKey, position: insertIndex + 1 };
 }
 // 处理特定目标的队列
 async function processTargetQueue(targetKey) {
@@ -1317,6 +1773,7 @@ async function processTargetQueue(targetKey) {
         }
         addTaskLog(taskId, "info", `开始执行任务: ${task.title}`);
         try {
+            runningTaskIds.add(taskId);
             // 更新状态为进行中
             updateTask(taskId, { status: "in_progress" });
             addTaskLog(taskId, "info", `任务状态更新为: 进行中`);
@@ -1325,6 +1782,9 @@ async function processTargetQueue(targetKey) {
             const result = await executeTask(task);
             // 记录 Agent 响应
             addTaskLog(taskId, "response", `Agent 响应:\n${result.substring(0, 1000)}`);
+            if (checkTaskFailure(result)) {
+                throw new Error(result.substring(0, 500));
+            }
             // 检查是否完成
             const isCompleted = checkTaskCompletion(result);
             if (isCompleted) {
@@ -1355,6 +1815,9 @@ async function processTargetQueue(targetKey) {
             // 发送失败通知
             await sendTaskFailureNotification(task, error.message);
         }
+        finally {
+            runningTaskIds.delete(taskId);
+        }
         // 等待一下再执行下一个任务
         await new Promise(resolve => setTimeout(resolve, 500));
     }
@@ -1378,7 +1841,8 @@ function getQueueStatus() {
         running_targets: runningTasks.size,
         target_status: targetStatus,
         pending_tasks: loadTasks().filter(t => t.status === "pending").length,
-        in_progress_tasks: loadTasks().filter(t => t.status === "in_progress").length
+        in_progress_tasks: loadTasks().filter(t => t.status === "in_progress").length,
+        running_task_ids: Array.from(runningTaskIds)
     };
 }
 // === 任务日志系统 ===
@@ -1839,23 +2303,64 @@ async function sendTaskFailureNotification(task, errorMsg) {
 async function executeTask(task) {
     const configs = getConfigs();
     if (task.assign_type === "group" && task.group_id) {
-        // 群聊模式：发送给群聊主 Agent
+        // 群聊模式：进入群聊记录，由 coordinator 负责拆分并 @ 对应 Agent。
         const groups = loadGroups();
         const group = groups.find(g => g.id === task.group_id);
         if (!group)
             throw new Error("群聊不存在");
         const message = `📋 执行任务：${task.title}\n${task.description || ""}\n\n请完成此任务并回复 "✅ 任务完成"。`;
-        // 发送给主 Agent
+        appendGroupMessage(task.group_id, {
+            id: "m" + Date.now().toString(36) + "task",
+            role: "user",
+            target: "coordinator",
+            content: message,
+            timestamp: new Date().toISOString(),
+            task_id: task.id,
+        });
+        safeAddGroupLog(task.group_id, "info", "task", `任务派发到群聊: ${task.title}`, {
+            task_id: task.id,
+            priority: task.priority
+        });
         const firstMember = group.members.find(m => m.project !== "coordinator");
         const firstConfig = firstMember ? configs.find(c => c.name === firstMember.project) : configs[0];
         const workDir = firstConfig ? getConfigInfo(firstConfig.path)[0]?.workDir : process.cwd();
-        const recentMsgs = getGroupMessages(task.group_id).slice(-5);
+        const recentMsgs = getGroupMessages(task.group_id).slice(-10);
         const context = recentMsgs.map(m => {
             const who = m.role === "user" ? `[用户 → ${m.target}]` : `[${m.agent || "Agent"}]`;
             return `${who} ${m.content}`;
         }).join("\n");
-        const fullPrompt = `你是群聊的主 Agent（协调者）。\n\n群聊记录：\n${context}\n\n${message}`;
-        return callAgent("coordinator", fullPrompt, workDir, "claudecode", 300000);
+        const memberList = group.members.map(m => m.project).filter(p => p !== "coordinator").join(", ");
+        const collaborationRules = buildGroupCollaborationRules(memberList);
+        const fullPrompt = `你是群聊的主 Agent（协调者），负责把任务拆给合适的开发 Agent。
+
+${collaborationRules}
+
+你的职责：
+1. 理解任务目标
+2. 只有需要开发 Agent 协作时，才用独立一行 @项目名 派发清晰、可执行的子任务
+3. 结合 Agent 回复判断进度
+4. 如果任务已经完成或无需再等待，请在回复中包含 "✅ 任务完成"
+
+以下是群聊最近记录：
+${context}
+
+请处理刚刚派发的任务。`;
+        const coordinatorOutput = callAgent("coordinator", fullPrompt, workDir, "claudecode", 300000);
+        appendGroupMessage(task.group_id, {
+            id: "m" + Date.now().toString(36) + "coord",
+            role: "assistant",
+            agent: "coordinator",
+            content: coordinatorOutput,
+            timestamp: new Date().toISOString(),
+            task_id: task.id,
+        });
+        const validMentions = extractActionableMentions(coordinatorOutput, group, "coordinator");
+        let crossOutputs = [];
+        if (validMentions.length > 0) {
+            addTaskLog(task.id, "info", `检测到群聊派发目标: ${validMentions.map(m => m.mention).join(", ")}`);
+            crossOutputs = await processCrossAgents(task.group_id, group, "coordinator", coordinatorOutput, validMentions, configs);
+        }
+        return [coordinatorOutput, ...crossOutputs].filter(Boolean).join("\n\n---\n\n");
     }
     else {
         // 项目模式：直接发送给项目 Agent
@@ -1886,6 +2391,11 @@ function checkTaskCompletion(response) {
     ];
     const lowerResponse = response.toLowerCase();
     return completionMarkers.some(marker => lowerResponse.includes(marker.toLowerCase()));
+}
+function checkTaskFailure(response) {
+    if (!response)
+        return false;
+    return /\bAgent 错误:|响应超时|^❌\s*错误|转发给 @.+ 失败/i.test(response);
 }
 // === 对话模板库 ===
 const TEMPLATES_FILE = path.join(CCM_DIR, "templates.json");
@@ -2438,8 +2948,8 @@ command = "/projects"
     // 下载文件
     if (pathname === "/api/shared/download" && req.method === "GET") {
         const name = parsed.query.name;
-        const filePath = path.join(SHARED_DIR, name);
-        if (!fs.existsSync(filePath)) {
+        const filePath = getSharedFilePath(name);
+        if (!filePath || !fs.existsSync(filePath)) {
             res.writeHead(404);
             res.end("Not Found");
             return;
@@ -2462,10 +2972,10 @@ command = "/projects"
             req.on("end", () => {
                 try {
                     const buffer = Buffer.concat(chunks);
-                    const boundaryMatch = ct.match(/boundary=(.+)/);
-                    if (!boundaryMatch)
+                    const boundary = getMultipartBoundary(ct);
+                    if (!boundary)
                         return sendJson(res, { error: "无效请求" }, 400);
-                    const { files } = parseMultipart(buffer, boundaryMatch[1]);
+                    const { files } = parseMultipart(buffer, boundary);
                     const uploaded = files.map(f => saveSharedUpload(f.filename, fs.readFileSync(f.savedPath)));
                     try {
                         files.forEach(f => fs.unlinkSync(f.savedPath));
@@ -2618,8 +3128,13 @@ command = "/projects"
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
-                const task = createTask(JSON.parse(body));
-                sendJson(res, { success: true, task });
+                const payload = JSON.parse(body);
+                const task = createTask(payload);
+                let queueResult = null;
+                if (payload.auto_execute || payload.autoExecute) {
+                    queueResult = enqueueTask(task.id);
+                }
+                sendJson(res, { success: true, task, queued: !!queueResult?.queued, queue_result: queueResult, queue_status: getQueueStatus() });
             }
             catch (e) {
                 sendJson(res, { error: e.message }, 400);
@@ -2672,8 +3187,8 @@ command = "/projects"
                 const task = tasks.find(t => t.id === task_id);
                 if (!task)
                     return sendJson(res, { error: "任务不存在" }, 404);
-                enqueueTask(task_id);
-                sendJson(res, { success: true, message: "任务已加入队列", queue_status: getQueueStatus() });
+                const queueResult = enqueueTask(task_id);
+                sendJson(res, { success: true, message: queueResult.message, queued: queueResult.queued, queue_result: queueResult, queue_status: getQueueStatus() });
             }
             catch (e) {
                 sendJson(res, { error: e.message }, 400);
@@ -2690,10 +3205,9 @@ command = "/projects"
                 const { task_ids } = JSON.parse(body);
                 if (!task_ids || !Array.isArray(task_ids))
                     return sendJson(res, { error: "缺少任务 ID 列表" }, 400);
-                for (const id of task_ids) {
-                    enqueueTask(id);
-                }
-                sendJson(res, { success: true, message: `${task_ids.length} 个任务已加入队列`, queue_status: getQueueStatus() });
+                const results = task_ids.map(id => ({ task_id: id, ...enqueueTask(id) }));
+                const queuedCount = results.filter(r => r.queued).length;
+                sendJson(res, { success: true, message: `${queuedCount}/${task_ids.length} 个任务已加入队列`, results, queue_status: getQueueStatus() });
             }
             catch (e) {
                 sendJson(res, { error: e.message }, 400);
@@ -3349,21 +3863,43 @@ command = "/projects"
     }
     // === 流式发送消息给 Agent（SSE）===
     if (pathname === "/api/send-stream" && req.method === "POST") {
+        const contentType = req.headers["content-type"] || "";
+        const handleStreamSend = (project, message, files = []) => {
+            const finalMessage = files && files.length > 0
+                ? `${message || ""}${buildUploadedFilesContext(files, "本次消息附件")}`
+                : (message || "");
+            if (!project || !finalMessage.trim())
+                return sendJson(res, { error: "参数不足" }, 400);
+            const configs = getConfigs();
+            const config = configs.find(c => c.name === project);
+            if (!config)
+                return sendJson(res, { error: "项目不存在" }, 400);
+            const info = getConfigInfo(config.path);
+            const workDir = info[0]?.workDir;
+            const agentType = info[0]?.agent || "claudecode";
+            callAgentStream(project, finalMessage, workDir, agentType, res);
+        };
+        if (contentType.includes("multipart/form-data")) {
+            collectRequestBuffer(req).then((buffer) => {
+                try {
+                    const boundary = getMultipartBoundary(contentType);
+                    if (!boundary)
+                        return sendJson(res, { error: "无效请求" }, 400);
+                    const { files, fields } = parseMultipart(buffer, boundary);
+                    handleStreamSend(fields.project, fields.message, files);
+                }
+                catch (e) {
+                    sendJson(res, { error: e.message }, 400);
+                }
+            }).catch((e) => sendJson(res, { error: e.message }, 400));
+            return;
+        }
         let body = "";
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
                 const { project, message } = JSON.parse(body);
-                if (!project || !message)
-                    return sendJson(res, { error: "参数不足" }, 400);
-                const configs = getConfigs();
-                const config = configs.find(c => c.name === project);
-                if (!config)
-                    return sendJson(res, { error: "项目不存在" }, 400);
-                const info = getConfigInfo(config.path);
-                const workDir = info[0]?.workDir;
-                const agentType = info[0]?.agent || "claudecode";
-                callAgentStream(project, message, workDir, agentType, res);
+                handleStreamSend(project, message);
             }
             catch (e) {
                 sendJson(res, { error: e.message }, 400);
@@ -3387,8 +3923,8 @@ command = "/projects"
             // 构建完整消息
             let fullMessage = message || "";
             if (files && files.length > 0) {
-                const fileList = files.map(f => `[文件: ${f.filename} -> ${f.savedPath}]`).join("\n");
-                fullMessage = fullMessage ? `${fullMessage}\n\n${fileList}` : `请处理以下文件:\n${fileList}`;
+                const filesContext = buildUploadedFilesContext(files, "本次消息附件");
+                fullMessage = fullMessage ? `${fullMessage}${filesContext}` : `请处理以下附件：${filesContext}`;
             }
             if (!fullMessage)
                 return sendJson(res, { error: "消息不能为空" }, 400);
@@ -3439,10 +3975,10 @@ command = "/projects"
             req.on("end", async () => {
                 try {
                     const buffer = Buffer.concat(chunks);
-                    const boundaryMatch = contentType.match(/boundary=(.+)/);
-                    if (!boundaryMatch)
+                    const boundary = getMultipartBoundary(contentType);
+                    if (!boundary)
                         return sendJson(res, { error: "无效请求" }, 400);
-                    const { files, fields } = parseMultipart(buffer, boundaryMatch[1]);
+                    const { files, fields } = parseMultipart(buffer, boundary);
                     await handleSend(fields.project, fields.message, files);
                 }
                 catch (e) {
@@ -3683,11 +4219,16 @@ command = "/projects"
                 const existing = configs[project].shared_files.findIndex(f => f.name === name);
                 if (existing >= 0) {
                     configs[project].shared_files[existing].content = content;
+                    configs[project].shared_files[existing].type = "text";
+                    configs[project].shared_files[existing].readable = true;
                     configs[project].shared_files[existing].updated_at = new Date().toISOString();
                 }
                 else {
                     configs[project].shared_files.push({
-                        name, content,
+                        name,
+                        type: "text",
+                        readable: true,
+                        content,
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString()
                     });
@@ -3733,6 +4274,10 @@ command = "/projects"
         const group = groups.find(g => g.id === groupId);
         if (!group)
             return sendJson(res, { error: "群聊不存在" }, 404);
+        const before = JSON.stringify(group.shared_files || []);
+        group.shared_files = normalizeSharedFileList(group.shared_files || []);
+        if (JSON.stringify(group.shared_files) !== before)
+            saveGroups(groups);
         return sendJson(res, { files: group.shared_files || [] });
     }
     // 添加群聊共享文件
@@ -3754,11 +4299,15 @@ command = "/projects"
                 const existing = group.shared_files.findIndex(f => f.name === name);
                 if (existing >= 0) {
                     group.shared_files[existing].content = content;
+                    group.shared_files[existing].type = "text";
+                    group.shared_files[existing].readable = true;
                     group.shared_files[existing].updated_at = new Date().toISOString();
                 }
                 else {
                     group.shared_files.push({
                         name,
+                        type: "text",
+                        readable: true,
                         content,
                         created_at: new Date().toISOString(),
                         updated_at: new Date().toISOString()
@@ -3813,21 +4362,22 @@ command = "/projects"
                     group.shared_files = [];
                 let imported = 0;
                 for (const name of file_names) {
-                    const filePath = path.join(SHARED_DIR, name);
-                    if (fs.existsSync(filePath)) {
-                        const content = fs.readFileSync(filePath, "utf-8");
+                    const filePath = getSharedFilePath(name);
+                    if (filePath && fs.existsSync(filePath)) {
+                        const record = createSharedFileRecord(name, "global");
+                        if (!record)
+                            continue;
                         const existing = group.shared_files.findIndex(f => f.name === name);
                         if (existing >= 0) {
-                            group.shared_files[existing].content = content;
-                            group.shared_files[existing].updated_at = new Date().toISOString();
+                            group.shared_files[existing] = {
+                                ...group.shared_files[existing],
+                                ...record,
+                                created_at: group.shared_files[existing].created_at || record.created_at,
+                                updated_at: new Date().toISOString()
+                            };
                         }
                         else {
-                            group.shared_files.push({
-                                name,
-                                content,
-                                created_at: new Date().toISOString(),
-                                updated_at: new Date().toISOString()
-                            });
+                            group.shared_files.push(record);
                         }
                         imported++;
                     }
@@ -3964,11 +4514,19 @@ command = "/projects"
     }
     // 在群聊中发消息（用户发给指定 Agent，Agent 回复也在群里）
     if (pathname === "/api/groups/send" && req.method === "POST") {
-        let body = "";
-        req.on("data", (chunk) => body += chunk);
-        req.on("end", async () => {
+        const contentType = req.headers["content-type"] || "";
+        const handleGroupSend = async (payload, uploadedFiles = []) => {
             try {
-                const { group_id, target_project, message } = JSON.parse(body);
+                const { group_id, target_project, message, client_message_id } = payload;
+                const userMessage = String(message || "").trim();
+                const uploadedFilesContext = buildUploadedFilesContext(uploadedFiles, "本次群聊消息附件");
+                const attachmentSummary = summarizeUploadedFiles(uploadedFiles);
+                const messageForAgent = `${userMessage}${uploadedFilesContext}`.trim();
+                const userMessageForHistory = attachmentSummary
+                    ? `${userMessage || "请处理附件"}\n\n[附件]\n${attachmentSummary}`
+                    : userMessage;
+                if (!messageForAgent)
+                    return sendJson(res, { error: "消息或附件不能为空" }, 400);
                 const groups = loadGroups();
                 const group = groups.find(g => g.id === group_id);
                 if (!group)
@@ -3983,19 +4541,19 @@ command = "/projects"
                 }
                 // 记录用户消息
                 const userMsg = {
-                    id: "m" + Date.now().toString(36),
+                    id: client_message_id ? String(client_message_id) : "m" + Date.now().toString(36),
                     role: "user",
                     target: isBroadcast ? "all" : target_project,
-                    content: message,
+                    content: userMessageForHistory,
                     timestamp: new Date().toISOString(),
                 };
                 appendGroupMessage(group_id, userMsg);
                 for (const member of targetMembers) {
-                    broadcastPetSpeech(member.project, { role: "user", text: message, final: true, source: "group" });
+                    broadcastPetSpeech(member.project, { role: "user", text: userMessageForHistory, final: true, source: "group" });
                 }
                 // 记录日志
                 addGroupLog(group_id, "info", "message", `用户发送消息给 ${isBroadcast ? '所有人' : target_project}`, {
-                    message: message.substring(0, 200),
+                    message: userMessageForHistory.substring(0, 200),
                     target: isBroadcast ? "all" : target_project,
                     is_broadcast: isBroadcast
                 });
@@ -4022,30 +4580,9 @@ command = "/projects"
                             return `${who} ${m.content}`;
                         }).join("\n");
                         const memberList = group.members.map(m => m.project).filter(p => p !== member.project && p !== "coordinator").join(", ");
-                        const atInstructions = memberList ? `\n\n群聊中还有其他 Agent：${memberList}。如果你需要其他 Agent 协助，在回复中用 @项目名 的格式提出请求。` : "";
+                        const atInstructions = buildGroupCollaborationRules(memberList);
                         // 获取群聊共享文件
-                        let sharedFilesContext = "";
-                        if (group.shared_files && group.shared_files.length > 0) {
-                            // 判断是否是文本文件
-                            const textExtensions = ['.txt', '.md', '.json', '.js', '.ts', '.html', '.css', '.xml', '.yaml', '.yml', '.csv', '.log', '.py', '.java', '.go', '.rs', '.c', '.cpp', '.h', '.sh', '.bat', '.toml', '.ini', '.conf', '.env'];
-                            const isTextFile = (filename) => {
-                                const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
-                                return textExtensions.includes(ext);
-                            };
-                            const textFiles = group.shared_files.filter(f => isTextFile(f.name) && f.content);
-                            const binaryFiles = group.shared_files.filter(f => !isTextFile(f.name));
-                            if (textFiles.length > 0 || binaryFiles.length > 0) {
-                                sharedFilesContext = "\n\n以下是群聊中的共享文件：";
-                                if (textFiles.length > 0) {
-                                    sharedFilesContext += "\n\n[文本文件 - 可直接读取]\n" +
-                                        textFiles.map(f => `\n--- ${f.name} ---\n${f.content}`).join("\n");
-                                }
-                                if (binaryFiles.length > 0) {
-                                    sharedFilesContext += "\n\n[二进制文件 - 仅列出文件名，无法直接读取内容]\n" +
-                                        binaryFiles.map(f => `- ${f.name}`).join("\n");
-                                }
-                            }
-                        }
+                        const sharedFilesContext = buildFilesContext(group.shared_files || [], "以下是群聊中的共享文件：");
                         // 获取群聊配置的工具
                         let toolsContext = "";
                         if (group.tools) {
@@ -4062,7 +4599,7 @@ command = "/projects"
                             }
                         }
                         toolsContext += toolManager.buildToolPrompt();
-                        return `你是一个在群聊中协作的开发 Agent，项目: ${member.project}。${atInstructions}${toolsContext}${sharedFilesContext}\n以下是群聊最近的消息记录：\n${context}\n\n请回复用户刚才发给你的消息：${message}`;
+                        return `你是一个在群聊中协作的开发 Agent，项目: ${member.project}。${atInstructions}${toolsContext}${sharedFilesContext}\n以下是群聊最近的消息记录：\n${context}\n\n请回复用户刚才发给你的消息：${messageForAgent}`;
                     };
                     const agentPromises = targetMembers.map(member => {
                         return new Promise(async (resolve) => {
@@ -4076,20 +4613,23 @@ command = "/projects"
                             const agentType = info[0]?.agent || "claudecode";
                             const fullPrompt = getAgentPrompt(member);
                             try {
+                                const responseMessageId = "m" + Date.now().toString(36) + member.project + Math.random().toString(36).slice(2, 5);
+                                let memberFileChanges = null;
                                 const text = await callAgentForGroupStream(member.project, fullPrompt, workDir, agentType, {
                                     res,
                                     groupId: group_id,
-                                    timeoutMs: 300000
+                                    timeoutMs: 300000,
+                                    messageId: responseMessageId,
+                                    onDone: ({ fileChanges }) => { memberFileChanges = fileChanges; }
                                 });
                                 appendGroupMessage(group_id, {
-                                    id: "m" + Date.now().toString(36) + member.project,
+                                    id: responseMessageId,
                                     role: "assistant", agent: member.project,
                                     content: text,
                                     timestamp: new Date().toISOString(),
-                                    fileChanges: getFileChanges(member.project),
+                                    fileChanges: memberFileChanges,
                                 });
-                                const atMentions = text.match(/@[\w-]+/g) || [];
-                                const validMentions = atMentions.filter(m => group.members.some(mem => mem.project === m.slice(1)));
+                                const validMentions = extractActionableMentions(text, group, member.project);
                                 if (validMentions.length > 0) {
                                     writeSse(res, { type: "status", text: `🧩 ${member.project} 正在分配协作任务...` });
                                     await processCrossAgents(group_id, group, member.project, text, validMentions, configs, res);
@@ -4137,34 +4677,13 @@ command = "/projects"
                 const memberList = group.members.map(m => m.project).filter(p => p !== target_project_actual).join(", ");
                 let atInstructions = "";
                 if (target_project_actual === "coordinator") {
-                    atInstructions = `\n\n你是群聊的主 Agent（协调者），负责分析用户需求、拆分任务、分配给其他 Agent。群聊中的开发 Agent 有：${memberList}。\n\n你的职责：\n1. 理解用户的需求\n2. 拆分成具体的开发任务\n3. 用 @项目名 的格式把任务分配给对应的 Agent\n4. 跟踪进度，协调各方\n\n示例回复：\n好的，我来拆分这个需求：\n@smart-live-Cloud 用户接口需要新增 user_avatar 字段\n@smart-live-app 用户页面需要展示头像，调用 /api/user 获取`;
+                    atInstructions = `\n\n你是群聊的主 Agent（协调者），负责分析用户需求、判断是否需要拆分任务并分配给其他 Agent。${buildGroupCollaborationRules(memberList)}\n\n你的职责：\n1. 理解用户的需求\n2. 如果自己可以直接回答，就直接回答，不要 @ 其他 Agent\n3. 只有需要具体项目 Agent 执行、确认、补充或适配时，才用独立一行 @项目名 派发任务\n4. 跟踪进度，协调各方\n\n示例（确实需要派发时才这样写）：\n@smart-live-Cloud 请新增 user_avatar 字段并说明接口返回结构\n@smart-live-app 请根据 user_avatar 字段适配用户头像展示`;
                 }
                 else {
-                    atInstructions = memberList ? `\n\n群聊中还有其他 Agent：${memberList}。如果你需要其他 Agent 协助，在回复中用 @项目名 的格式提出请求，例如：@smart-live-app 字段改了请适配前端。系统会自动把你的请求转发给对应的 Agent。` : "";
+                    atInstructions = buildGroupCollaborationRules(memberList);
                 }
                 // 获取群聊共享文件
-                let sharedFilesContext = "";
-                if (group.shared_files && group.shared_files.length > 0) {
-                    // 判断是否是文本文件
-                    const textExtensions = ['.txt', '.md', '.json', '.js', '.ts', '.html', '.css', '.xml', '.yaml', '.yml', '.csv', '.log', '.py', '.java', '.go', '.rs', '.c', '.cpp', '.h', '.sh', '.bat', '.toml', '.ini', '.conf', '.env'];
-                    const isTextFile = (filename) => {
-                        const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
-                        return textExtensions.includes(ext);
-                    };
-                    const textFiles = group.shared_files.filter(f => isTextFile(f.name) && f.content);
-                    const binaryFiles = group.shared_files.filter(f => !isTextFile(f.name));
-                    if (textFiles.length > 0 || binaryFiles.length > 0) {
-                        sharedFilesContext = "\n\n以下是群聊中的共享文件：";
-                        if (textFiles.length > 0) {
-                            sharedFilesContext += "\n\n[文本文件 - 可直接读取]\n" +
-                                textFiles.map(f => `\n--- ${f.name} ---\n${f.content}`).join("\n");
-                        }
-                        if (binaryFiles.length > 0) {
-                            sharedFilesContext += "\n\n[二进制文件 - 仅列出文件名，无法直接读取内容]\n" +
-                                binaryFiles.map(f => `- ${f.name}`).join("\n");
-                        }
-                    }
-                }
+                let sharedFilesContext = buildFilesContext(group.shared_files || [], "以下是群聊中的共享文件：");
                 // 获取群聊配置的工具
                 let toolsContext = "";
                 if (group.tools) {
@@ -4209,28 +4728,14 @@ command = "/projects"
                 toolsContext += toolManager.buildToolPrompt();
                 // 项目共享文件
                 if (projectConfig.shared_files && projectConfig.shared_files.length > 0) {
-                    const textExtensions = ['.txt', '.md', '.json', '.js', '.ts', '.html', '.css', '.xml', '.yaml', '.yml', '.csv', '.log', '.py', '.java', '.go', '.rs', '.c', '.cpp', '.h', '.sh', '.bat', '.toml', '.ini', '.conf', '.env'];
-                    const isTextFile = (filename) => {
-                        const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
-                        return textExtensions.includes(ext);
-                    };
-                    const projectTextFiles = projectConfig.shared_files.filter(f => isTextFile(f.name) && f.content);
-                    const projectBinaryFiles = projectConfig.shared_files.filter(f => !isTextFile(f.name));
-                    if (projectTextFiles.length > 0 || projectBinaryFiles.length > 0) {
-                        sharedFilesContext += "\n\n[项目共享文件]";
-                        if (projectTextFiles.length > 0) {
-                            sharedFilesContext += "\n" + projectTextFiles.map(f => `\n--- ${f.name} ---\n${f.content}`).join("\n");
-                        }
-                        if (projectBinaryFiles.length > 0) {
-                            sharedFilesContext += "\n二进制文件：" + projectBinaryFiles.map(f => f.name).join(", ");
-                        }
-                    }
+                    sharedFilesContext += buildFilesContext(projectConfig.shared_files, "[项目共享文件]");
                 }
-                const fullPrompt = `你是一个在群聊中协作的开发 Agent，项目: ${target_project_actual}。${atInstructions}${toolsContext}${sharedFilesContext}\n以下是群聊最近的消息记录：\n${context}\n\n请回复用户刚才发给你的消息：${message}`;
+                const fullPrompt = `你是一个在群聊中协作的开发 Agent，项目: ${target_project_actual}。${atInstructions}${toolsContext}${sharedFilesContext}\n以下是群聊最近的消息记录：\n${context}\n\n请回复用户刚才发给你的消息：${messageForAgent}`;
                 // 检查是否请求流式输出
                 const useStream = parsed.query.stream === "1" || req.headers["accept"] === "text/event-stream";
                 if (useStream) {
                     // 流式输出
+                    const responseMessageId = "m" + Date.now().toString(36) + "a" + Math.random().toString(36).slice(2, 5);
                     const startedAt = Date.now();
                     const changeSnapshot = workDir ? createFileChangeSnapshot(workDir) : null;
                     const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
@@ -4309,7 +4814,7 @@ command = "/projects"
                             setTimeout(() => setAgentActivity(target_project_actual, "idle", "空闲"), 10000);
                             // 记录到群聊消息
                             appendGroupMessage(group_id, {
-                                id: "m" + Date.now().toString(36) + "a",
+                                id: responseMessageId,
                                 role: "assistant", agent: target_project_actual,
                                 content: fullOutput.trim(),
                                 timestamp: new Date().toISOString(),
@@ -4324,15 +4829,8 @@ command = "/projects"
                             // 异步处理跨 Agent 调用
                             console.log(`[群聊] Agent ${target_project_actual} 回复完成，检查 @mentions...`);
                             console.log(`[群聊] 输出内容 (前500字符): ${fullOutput.substring(0, 500)}`);
-                            // 使用更宽松的正则匹配 @mentions
-                            const atMentions = fullOutput.match(/@[\w-]+/g) || [];
-                            // 过滤掉不是群聊成员的 mentions
-                            const validMentions = atMentions.filter((m) => {
-                                const name = m.slice(1);
-                                return group.members.some(member => member.project === name);
-                            });
-                            console.log(`[群聊] 检测到 @mentions: ${atMentions.join(", ")}`);
-                            console.log(`[群聊] 有效的 @mentions (群聊成员): ${validMentions.join(", ")}`);
+                            const validMentions = extractActionableMentions(fullOutput, group, target_project_actual);
+                            console.log(`[群聊] 检测到可执行 @mentions: ${validMentions.map(m => m.mention).join(", ")}`);
                             if (validMentions.length > 0) {
                                 console.log(`[群聊] 触发跨 Agent 协作处理`);
                                 writeSse(res, { type: "status", text: "🧩 主 Agent 正在分配任务..." });
@@ -4346,7 +4844,7 @@ command = "/projects"
                             else {
                                 console.log(`[群聊] 未检测到有效的 @mentions，跳过跨 Agent 协作`);
                             }
-                            writeSse(res, { type: "done", fileChanges });
+                            writeSse(res, { type: "done", fileChanges, messageId: responseMessageId });
                             res.end();
                         })().catch((err) => {
                             writeSse(res, { type: "error", text: err.message });
@@ -4406,14 +4904,8 @@ command = "/projects"
                     content: output,
                     timestamp: new Date().toISOString(),
                 });
-                const atMentions = output.match(/@[\w-]+/g) || [];
-                // 过滤掉不是群聊成员的 mentions
-                const validMentions = atMentions.filter(m => {
-                    const name = m.slice(1);
-                    return group.members.some(member => member.project === name);
-                });
-                console.log(`[群聊] 检测到 @mentions: ${atMentions.join(", ")}`);
-                console.log(`[群聊] 有效的 @mentions (群聊成员): ${validMentions.join(", ")}`);
+                const validMentions = extractActionableMentions(output, group, target_project_actual);
+                console.log(`[群聊] 检测到可执行 @mentions: ${validMentions.map(m => m.mention).join(", ")}`);
                 if (validMentions.length > 0) {
                     console.log(`[群聊] 触发跨 Agent 协作处理`);
                     sendJson(res, { success: true, reply: output, cross_pending: true });
@@ -4424,6 +4916,31 @@ command = "/projects"
             }
             catch (e) {
                 sendJson(res, { error: e.message }, 500);
+            }
+        };
+        if (contentType.includes("multipart/form-data")) {
+            collectRequestBuffer(req).then((buffer) => {
+                try {
+                    const boundary = getMultipartBoundary(contentType);
+                    if (!boundary)
+                        return sendJson(res, { error: "无效请求" }, 400);
+                    const { files, fields } = parseMultipart(buffer, boundary);
+                    handleGroupSend(fields, files);
+                }
+                catch (e) {
+                    sendJson(res, { error: e.message }, 400);
+                }
+            }).catch((e) => sendJson(res, { error: e.message }, 400));
+            return;
+        }
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", async () => {
+            try {
+                await handleGroupSend(JSON.parse(body));
+            }
+            catch (e) {
+                sendJson(res, { error: e.message }, 400);
             }
         });
         return;
@@ -4460,28 +4977,7 @@ command = "/projects"
                         return `${who} ${m.content}`;
                     }).join("\n");
                     // 获取群聊共享文件
-                    let sharedFilesContext = "";
-                    if (group.shared_files && group.shared_files.length > 0) {
-                        // 判断是否是文本文件
-                        const textExtensions = ['.txt', '.md', '.json', '.js', '.ts', '.html', '.css', '.xml', '.yaml', '.yml', '.csv', '.log', '.py', '.java', '.go', '.rs', '.c', '.cpp', '.h', '.sh', '.bat', '.toml', '.ini', '.conf', '.env'];
-                        const isTextFile = (filename) => {
-                            const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
-                            return textExtensions.includes(ext);
-                        };
-                        const textFiles = group.shared_files.filter(f => isTextFile(f.name) && f.content);
-                        const binaryFiles = group.shared_files.filter(f => !isTextFile(f.name));
-                        if (textFiles.length > 0 || binaryFiles.length > 0) {
-                            sharedFilesContext = "\n\n以下是群聊中的共享文件：";
-                            if (textFiles.length > 0) {
-                                sharedFilesContext += "\n\n[文本文件 - 可直接读取]\n" +
-                                    textFiles.map(f => `\n--- ${f.name} ---\n${f.content}`).join("\n");
-                            }
-                            if (binaryFiles.length > 0) {
-                                sharedFilesContext += "\n\n[二进制文件 - 仅列出文件名，无法直接读取内容]\n" +
-                                    binaryFiles.map(f => `- ${f.name}`).join("\n");
-                            }
-                        }
-                    }
+                    const sharedFilesContext = buildFilesContext(group.shared_files || [], "以下是群聊中的共享文件：");
                     // 获取群聊配置的工具
                     let toolsContext = "";
                     if (group.tools) {
@@ -5031,35 +5527,19 @@ ${diff}
         req.on("end", () => {
             try {
                 const { text, group_id } = JSON.parse(body);
-                // 检测 @mentions
-                const atMentions = text.match(/@[\w-]+/g) || [];
-                // 如果提供了 group_id，过滤出有效的 mentions
-                let validMentions = atMentions;
+                let validMentions = [];
                 if (group_id) {
                     const groups = loadGroups();
                     const group = groups.find(g => g.id === group_id);
                     if (group) {
-                        validMentions = atMentions.filter(m => {
-                            const name = m.slice(1);
-                            return group.members.some(member => member.project === name);
-                        });
+                        validMentions = extractActionableMentions(text, group, "");
                     }
                 }
                 sendJson(res, {
                     success: true,
                     input: text,
-                    all_mentions: atMentions,
-                    valid_mentions: validMentions,
-                    extracted_messages: validMentions.map(m => {
-                        const name = m.slice(1);
-                        const regex = new RegExp(`@${name}\\s+([^@]+?)(?=\\s*@|$)`, "is");
-                        const match = text.match(regex);
-                        return {
-                            mention: m,
-                            target: name,
-                            message: match ? match[1].trim() : text.substring(0, 200)
-                        };
-                    })
+                    valid_mentions: validMentions.map(m => m.mention),
+                    extracted_messages: validMentions.map(m => ({ mention: m.mention, target: m.targetName, message: m.message }))
                 });
             }
             catch (e) {

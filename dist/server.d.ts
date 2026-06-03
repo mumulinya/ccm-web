@@ -2,6 +2,7 @@
 declare const http: any;
 declare const fs: any;
 declare const path: any;
+declare const zlib: any;
 declare const execFileSync: any, execSync: any, spawn: any, spawnSync: any;
 declare const os: any;
 declare const url: any;
@@ -33,6 +34,39 @@ declare function readLogTail(logFile: any, bytes?: number): string;
 declare function getAgentState(name: any): any;
 declare function getWorkDirForProject(projectName: any): any;
 declare function parseGitStatus(workDir: any): any;
+declare const MAX_FILE_SNAPSHOT_BYTES: number;
+declare const MAX_DIFF_CHARS = 60000;
+declare function isLikelyTextBuffer(buffer: any): boolean;
+declare function readWorkingFileText(workDir: any, filePath: any): {
+    exists: boolean;
+    text: any;
+    binary: boolean;
+    tooLarge: boolean;
+};
+declare function readHeadFileText(workDir: any, filePath: any): {
+    exists: boolean;
+    text: any;
+    binary: boolean;
+    tooLarge: boolean;
+};
+declare function createUnifiedDiff(oldText: any, newText: any, filePath: any, contextSize?: number): string;
+declare function buildFileDiff(workDir: any, filePath: any, before: any): {
+    available: boolean;
+    reason: string;
+    beforeExists?: undefined;
+    afterExists?: undefined;
+    diff?: undefined;
+    additions?: undefined;
+    deletions?: undefined;
+} | {
+    available: boolean;
+    beforeExists: boolean;
+    afterExists: boolean;
+    diff: string;
+    additions: number;
+    deletions: number;
+    reason?: undefined;
+};
 declare function createFileChangeSnapshot(workDir: any): {
     workDir: any;
     files: {};
@@ -55,7 +89,10 @@ declare function callAgentStream(projectName: any, message: any, workDir: any, a
 declare function buildAgentCommand(agentType: any, tmpMsg: any): string;
 declare function writeSse(res: any, data: any): void;
 declare function callAgentForGroupStream(projectName: any, message: any, workDir: any, agentType: any, options?: any): Promise<string>;
-declare function processCrossAgents(groupId: any, group: any, sourceProject: any, output: any, atMentions: any, configs: any, streamRes?: any, depth?: number): Promise<void>;
+declare function buildGroupCollaborationRules(memberList?: string): string;
+declare function isActionableMentionText(text: any): boolean;
+declare function extractActionableMentions(text: any, group: any, sourceProject?: string): any[];
+declare function processCrossAgents(groupId: any, group: any, sourceProject: any, output: any, atMentions: any, configs: any, streamRes?: any, depth?: number): Promise<string[]>;
 declare function parseMultipart(buffer: any, boundary: any): {
     files: any[];
     fields: {};
@@ -106,15 +143,79 @@ declare function runTerminalCommand(command: any, cwd: any): {
     cwd: any;
     error: any;
 };
+declare const TEXT_FILE_EXTENSIONS: string[];
+declare const IMAGE_FILE_EXTENSIONS: string[];
+declare const OOXML_FILE_EXTENSIONS: string[];
+declare const MAX_INLINE_FILE_CHARS = 20000;
 declare function ensureSharedDir(): void;
+declare function isTextFileName(name: any): boolean;
+declare function isImageFileName(name: any): boolean;
+declare function isOoxmlFileName(name: any): boolean;
+declare function getSharedFilePath(name: any): any;
+declare function truncateInlineContent(content: any, maxChars?: number): string;
+declare function decodeXmlEntities(text: any): string;
+declare function xmlToPlainText(xml: any): string;
+declare function getZipEntries(buffer: any): any[];
+declare function readZipEntry(buffer: any, entry: any): any;
+declare function extractOoxmlText(filePath: any, name: any): string;
+declare function looksBinaryString(content: any): boolean;
+declare function describeFileFromPath(filePath: any, name: any, maxChars?: number): {
+    name: any;
+    type: any;
+    readable: boolean;
+    size: any;
+    path: any;
+    content: string;
+} | {
+    name: any;
+    type: any;
+    readable: boolean;
+    size: any;
+    path: any;
+    content?: undefined;
+};
+declare function createSharedFileRecord(name: any, source?: string): {
+    source: string;
+    created_at: string;
+    updated_at: string;
+    name: any;
+    type: any;
+    readable: boolean;
+    size: any;
+    path: any;
+    content: string;
+} | {
+    source: string;
+    created_at: string;
+    updated_at: string;
+    name: any;
+    type: any;
+    readable: boolean;
+    size: any;
+    path: any;
+    content?: undefined;
+};
+declare function normalizeSharedFileRecord(file: any): any;
+declare function normalizeSharedFileList(files: any): any;
+declare function buildFilesContext(files: any, title?: string): string;
+declare function buildUploadedFilesContext(files: any, title?: string): string;
+declare function summarizeUploadedFiles(files: any): any;
+declare function getMultipartBoundary(contentType: any): string;
+declare function collectRequestBuffer(req: any): Promise<Buffer<ArrayBufferLike>>;
 declare function listSharedFiles(): any;
 declare function readSharedFile(name: any): {
-    type: string;
-    content: any;
-    size?: undefined;
-} | {
-    type: string;
+    name: any;
+    type: any;
+    readable: boolean;
     size: any;
+    path: any;
+    content: string;
+} | {
+    name: any;
+    type: any;
+    readable: boolean;
+    size: any;
+    path: any;
     content?: undefined;
 };
 declare function writeSharedFile(name: any, content: any): void;
@@ -131,6 +232,7 @@ declare function createTask(task: any): {
     assign_type: any;
     status: string;
     priority: any;
+    auto_execute: boolean;
     created_at: string;
     updated_at: string;
 };
@@ -138,13 +240,24 @@ declare function updateTask(id: any, updates: any): any;
 declare function deleteTask(id: any): void;
 declare const taskQueues: Map<any, any>;
 declare const runningTasks: Map<any, any>;
+declare const runningTaskIds: Set<string>;
 declare function getTaskTargetKey(task: any): string;
 declare const PRIORITY_WEIGHT: {
     high: number;
     normal: number;
     low: number;
 };
-declare function enqueueTask(taskId: any): void;
+declare function enqueueTask(taskId: any): {
+    queued: boolean;
+    message: string;
+    targetKey?: undefined;
+    position?: undefined;
+} | {
+    queued: boolean;
+    message: string;
+    targetKey: string;
+    position: any;
+};
 declare function processTargetQueue(targetKey: any): Promise<void>;
 declare function getQueueStatus(): {
     total_queued: number;
@@ -152,6 +265,7 @@ declare function getQueueStatus(): {
     target_status: any;
     pending_tasks: any;
     in_progress_tasks: any;
+    running_task_ids: string[];
 };
 declare const TASK_LOGS_FILE: any;
 declare const taskLogsCache: Map<any, any>;
@@ -185,6 +299,7 @@ declare function sendTaskCompletionNotification(task: any, result: any): Promise
 declare function sendTaskFailureNotification(task: any, errorMsg: any): Promise<void>;
 declare function executeTask(task: any): Promise<any>;
 declare function checkTaskCompletion(response: any): boolean;
+declare function checkTaskFailure(response: any): boolean;
 declare const TEMPLATES_FILE: any;
 declare function loadTemplates(): any;
 declare function saveTemplates(templates: any): void;
