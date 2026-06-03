@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+<defs>
+    <style>
+      .breathe { transform-origin: 32px 46px; animation: breathe 3s infinite ease-in-out; }
+      .blink { transform-origin: 32px 30px; animation: blink 4s infinite ease-in-out; }
+      .ear-wiggle { transform-origin: 32px 24px; animation: wiggle 6s infinite ease-in-out; }
+      @keyframes breathe { 0%,100%{transform:scale(1) translateY(0)} 50%{transform:scale(1.02, 0.98) translateY(0.5px)} }
+      @keyframes blink { 0%,8%,12%,100%{transform:scaleY(1)} 10%{transform:scaleY(0.15)} }
+      @keyframes wiggle { 0%,90%,100%{transform:rotate(0deg)} 93%{transform:rotate(-3deg)} 96%{transform:rotate(3deg)} }
+    </style>
+  </defs>
+<g class="breathe">
+  <!-- 尾巴 -->
+  <circle cx="16" cy="48" r="5" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2" />
+  
+  <!-- 身体 -->
+  <ellipse cx="32" cy="46" rx="16" ry="13" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2" />
+  <!-- 肚子 -->
+  <circle cx="32" cy="46" r="9" fill="#ffffff" />
+  
+  <!-- 肢爪 -->
+  <circle cx="22" cy="55" r="3.5" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1.5" />
+  <circle cx="42" cy="55" r="3.5" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1.5" />
+  
+  <g class="ear-wiggle">
+<!-- 大耳朵 -->
+  <!-- 左耳 -->
+  <path d="M 20 24 C 18 10, 24 6, 26 24 Z" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2" />
+  <path d="M 21 22 C 20 12, 23 9, 24 22 Z" fill="#fecdd3" />
+  <!-- 右耳 -->
+  <path d="M 44 24 C 46 10, 40 6, 38 24 Z" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2" />
+  <path d="M 43 22 C 44 12, 41 9, 40 22 Z" fill="#fecdd3" />
+  
+  </g>
+<!-- 头部底盘 -->
+  <circle cx="32" cy="30" r="15" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2" />
+  
+  <g class="blink">
+<!-- 眼睛 (红宝石眼，兔子特色) -->
+  <circle cx="25" cy="28" r="3" fill="#f43f5e" />
+  <circle cx="26" cy="27" r="1" fill="#ffffff" />
+  <path d="M 37,29 Q 39,31 41,29" fill="none" stroke="#f43f5e" stroke-width="2" stroke-linecap="round" />
+  
+  </g>
+<!-- 腮红 -->
+  <circle cx="19" cy="34" r="2" fill="#fda4af" opacity="0.6" />
+  <circle cx="45" cy="34" r="2" fill="#fda4af" opacity="0.6" />
+  
+  <!-- 鼻子 -->
+  <polygon points="31,33 33,33 32,34.5" fill="#f43f5e" />
+  
+  <!-- 嘴巴 -->
+  <path d="M 30,36 Q 32,37 32,36 Q 32,37 34,36" fill="none" stroke="#cbd5e1" stroke-width="1.5" stroke-linecap="round" />
+  
+  <!-- 抱着的胡萝卜 -->
+  <path d="M 32 40 C 35 40, 36 48, 32 50 C 28 48, 29 40, 32 40 Z" fill="#f97316" stroke="#c2410c" stroke-width="1.5" />
+  <!-- 萝卜叶子 -->
+  <path d="M 32 40 Q 30 37 31 36 Q 32 37 32 40" fill="none" stroke="#22c55e" stroke-width="1.5" />
+  <path d="M 32 40 Q 34 37 33 36 Q 32 37 32 40" fill="none" stroke="#22c55e" stroke-width="1.5" />
+</g>
+</svg>

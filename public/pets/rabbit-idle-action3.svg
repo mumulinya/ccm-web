@@ -1,0 +1,179 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="500" height="500">
+<defs>
+  <style>
+    /* 🐰 洗脸/理毛 — 8秒循环 */
+    .body-groom {
+      transform-origin: 32px 46px;
+      animation: body-groom 8s infinite ease-in-out;
+    }
+    .head-tilt {
+      transform-origin: 32px 32px;
+      animation: head-tilt 8s infinite ease-in-out;
+    }
+    .ear-droop {
+      transform-origin: 32px 24px;
+      animation: ear-relax 8s infinite ease-in-out;
+    }
+    .wash-paw-l {
+      transform-origin: 22px 42px;
+      animation: wash-paw-l 8s infinite ease-in-out;
+    }
+    .wash-paw-r {
+      transform-origin: 42px 42px;
+      animation: wash-paw-r 8s infinite ease-in-out;
+    }
+    .eyes-close {
+      transform-origin: 32px 28px;
+      animation: eyes-close 8s infinite ease-in-out;
+    }
+    .sparkle-clean1 { animation: sparkle-c1 4s infinite ease-in-out; }
+    .sparkle-clean2 { animation: sparkle-c2 4s 2s infinite ease-in-out; }
+    .breathe {
+      transform-origin: 32px 46px;
+      animation: breathe 3s infinite ease-in-out;
+    }
+
+    @keyframes body-groom {
+      0%,100% { transform: scale(1,1) translateY(0); }
+      25%     { transform: scale(1.02,0.98) translateY(0.5px); }
+      50%     { transform: scale(1,1) translateY(0); }
+      75%     { transform: scale(1.02,0.98) translateY(0.5px); }
+    }
+    @keyframes head-tilt {
+      0%,100% { transform: rotate(0deg); }
+      15%,35% { transform: rotate(-5deg); }
+      40%,60% { transform: rotate(5deg); }
+      65%,85% { transform: rotate(-3deg); }
+      90%     { transform: rotate(0deg); }
+    }
+    @keyframes ear-relax {
+      0%,100% { transform: rotate(0deg); }
+      15%     { transform: rotate(3deg); }
+      35%     { transform: rotate(-2deg); }
+      55%     { transform: rotate(2deg); }
+      75%     { transform: rotate(-3deg); }
+    }
+    @keyframes wash-paw-l {
+      0%,10%  { transform: translate(0,0) rotate(0deg); }
+      15%     { transform: translate(5px,-10px) rotate(20deg); }
+      18%     { transform: translate(4px,-8px) rotate(10deg); }
+      21%     { transform: translate(5px,-10px) rotate(20deg); }
+      24%     { transform: translate(4px,-8px) rotate(10deg); }
+      27%     { transform: translate(5px,-10px) rotate(20deg); }
+      30%     { transform: translate(4px,-8px) rotate(10deg); }
+      33%     { transform: translate(5px,-10px) rotate(20deg); }
+      38%,48% { transform: translate(0,0) rotate(0deg); }
+      /* 第二轮 */
+      52%     { transform: translate(5px,-10px) rotate(20deg); }
+      55%     { transform: translate(4px,-8px) rotate(10deg); }
+      58%     { transform: translate(5px,-10px) rotate(20deg); }
+      61%     { transform: translate(4px,-8px) rotate(10deg); }
+      64%     { transform: translate(5px,-10px) rotate(20deg); }
+      68%,100%{ transform: translate(0,0) rotate(0deg); }
+    }
+    @keyframes wash-paw-r {
+      0%,38%  { transform: translate(0,0) rotate(0deg); }
+      42%     { transform: translate(-5px,-10px) rotate(-20deg); }
+      45%     { transform: translate(-4px,-8px) rotate(-10deg); }
+      48%     { transform: translate(-5px,-10px) rotate(-20deg); }
+      51%     { transform: translate(-4px,-8px) rotate(-10deg); }
+      54%     { transform: translate(-5px,-10px) rotate(-20deg); }
+      57%     { transform: translate(-4px,-8px) rotate(-10deg); }
+      60%     { transform: translate(-5px,-10px) rotate(-20deg); }
+      65%,100%{ transform: translate(0,0) rotate(0deg); }
+    }
+    @keyframes eyes-close {
+      0%,10%  { transform: scaleY(1); }
+      15%,35% { transform: scaleY(0.3); }
+      40%     { transform: scaleY(1); }
+      42%     { transform: scaleY(0.1); }
+      44%,48% { transform: scaleY(1); }
+      52%,68% { transform: scaleY(0.3); }
+      72%     { transform: scaleY(1); }
+      74%     { transform: scaleY(0.1); }
+      76%,100%{ transform: scaleY(1); }
+    }
+    @keyframes sparkle-c1 {
+      0%,40%  { opacity:0; transform:scale(0) rotate(0deg); }
+      50%     { opacity:1; transform:scale(1) rotate(15deg); }
+      70%     { opacity:1; transform:scale(1.2) rotate(-5deg); }
+      90%,100%{ opacity:0; transform:scale(0) rotate(10deg); }
+    }
+    @keyframes sparkle-c2 {
+      0%,40%  { opacity:0; transform:scale(0) rotate(0deg); }
+      50%     { opacity:1; transform:scale(1) rotate(-10deg); }
+      70%     { opacity:1; transform:scale(1.1) rotate(5deg); }
+      90%,100%{ opacity:0; transform:scale(0) rotate(-10deg); }
+    }
+    @keyframes breathe {
+      0%,100% { transform: scale(1) translateY(0); }
+      50%     { transform: scale(1.02,0.98) translateY(0.5px); }
+    }
+  </style>
+</defs>
+
+<!-- 影子 -->
+<ellipse cx="32" cy="60" rx="18" ry="3" fill="#000" opacity="0.12"/>
+
+<!-- 闪光 -->
+<g class="sparkle-clean1" transform="translate(52,14)">
+  <text font-size="8" fill="#60a5fa">✧</text>
+</g>
+<g class="sparkle-clean2" transform="translate(10,18)">
+  <text font-size="7" fill="#93c5fd">✧</text>
+</g>
+
+<g class="body-groom">
+  <g class="breathe">
+    <!-- 尾巴 -->
+    <circle cx="16" cy="48" r="5" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+    
+    <!-- 身体 -->
+    <ellipse cx="32" cy="46" rx="16" ry="13" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+    <circle cx="32" cy="46" r="9" fill="#ffffff"/>
+    
+    <!-- 后肢 -->
+    <circle cx="22" cy="55" r="3.5" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1.5"/>
+    <circle cx="42" cy="55" r="3.5" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1.5"/>
+
+    <!-- 前爪 (洗脸动作) -->
+    <g class="wash-paw-l">
+      <circle cx="24" cy="44" r="3" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1.5"/>
+    </g>
+    <g class="wash-paw-r">
+      <circle cx="40" cy="44" r="3" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1.5"/>
+    </g>
+
+    <g class="head-tilt">
+      <g class="ear-droop">
+        <!-- 大耳朵 -->
+        <path d="M 20 24 C 18 10, 24 6, 26 24 Z" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+        <path d="M 21 22 C 20 12, 23 9, 24 22 Z" fill="#fecdd3"/>
+        <path d="M 44 24 C 46 10, 40 6, 38 24 Z" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+        <path d="M 43 22 C 44 12, 41 9, 40 22 Z" fill="#fecdd3"/>
+      </g>
+
+      <!-- 头部底盘 -->
+      <circle cx="32" cy="30" r="15" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+
+      <g class="eyes-close">
+        <!-- 眼睛 -->
+        <circle cx="25" cy="28" r="3" fill="#f43f5e"/>
+        <circle cx="26" cy="27" r="1" fill="#ffffff"/>
+        <circle cx="39" cy="28" r="3" fill="#f43f5e"/>
+        <circle cx="38" cy="27" r="1" fill="#ffffff"/>
+      </g>
+
+      <!-- 腮红 -->
+      <circle cx="19" cy="34" r="2.5" fill="#fda4af" opacity="0.7"/>
+      <circle cx="45" cy="34" r="2.5" fill="#fda4af" opacity="0.7"/>
+
+      <!-- 鼻子 -->
+      <polygon points="31,33 33,33 32,34.5" fill="#f43f5e"/>
+      
+      <!-- 嘴巴 -->
+      <path d="M 30,36 Q 32,37 34,36" fill="none" stroke="#cbd5e1" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+  </g>
+</g>
+</svg>

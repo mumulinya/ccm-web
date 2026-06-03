@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+<defs>
+    <style>
+      .breathe { transform-origin: 32px 46px; animation: breathe 3s infinite ease-in-out; }
+      .blink { transform-origin: 32px 27px; animation: blink 4.5s infinite ease-in-out; }
+      .ears { transform-origin: 32px 28px; animation: ears-twitch 6s infinite ease-in-out; }
+      @keyframes breathe { 0%,100%{transform:scale(1) translateY(0)} 50%{transform:scale(1.02, 0.98) translateY(0.5px)} }
+      @keyframes blink { 0%,8%,12%,100%{transform:scaleY(1)} 10%{transform:scaleY(0.1)} }
+      @keyframes ears-twitch { 0%,92%,100%{transform:rotate(0deg)} 95%{transform:rotate(-2deg)} 98%{transform:rotate(2deg)} }
+    </style>
+  </defs>
+<g class="breathe">
+  <!-- 身体 -->
+  <ellipse cx="32" cy="46" rx="20" ry="14" fill="#ffffff" stroke="#1e293b" stroke-width="2.5" />
+  <circle cx="18" cy="48" r="6" fill="#1e293b" />
+  <circle cx="46" cy="48" r="6" fill="#1e293b" />
+  
+  <!-- 围脖/前肢 -->
+  <path d="M 12 40 C 20 44, 44 44, 52 40 C 48 50, 16 50, 12 40 Z" fill="#1e293b" />
+
+  <g class="ears">
+<!-- 耳朵 -->
+  <circle cx="16" cy="18" r="8" fill="#1e293b" />
+  <circle cx="16" cy="18" r="4" fill="#0f172a" />
+  <circle cx="48" cy="18" r="8" fill="#1e293b" />
+  <circle cx="48" cy="18" r="4" fill="#0f172a" />
+
+  </g>
+<!-- 头部底盘 -->
+  <circle cx="32" cy="28" r="18" fill="#ffffff" stroke="#1e293b" stroke-width="2.5" />
+
+  <!-- 黑眼圈 -->
+  <ellipse cx="24" cy="27" rx="6" ry="7" transform="rotate(-15 24 27)" fill="#1e293b" />
+  <ellipse cx="40" cy="27" rx="6" ry="7" transform="rotate(15 40 27)" fill="#1e293b" />
+
+  <g class="blink">
+<!-- 眼睛 (眯眼) -->
+  <path d="M 22,27 Q 24,29 26,27" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" />
+  <path d="M 38,27 Q 40,29 42,27" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" />
+  </g>
+<!-- 腮红 -->
+  <circle cx="17" cy="33" r="3" fill="#fda4af" opacity="0.6" />
+  <circle cx="47" cy="33" r="3" fill="#fda4af" opacity="0.6" />
+
+  <!-- 鼻子 -->
+  <polygon points="30,31 34,31 32,33" fill="#1e293b" />
+  
+  <!-- 嘴巴 -->
+  <path d="M 30,34 Q 32,36 32,34 Q 32,36 34,34" fill="none" stroke="#1e293b" stroke-width="1.5" stroke-linecap="round" />
+<!-- Zzz 气泡 -->
+  <text x="50" y="16" font-size="9" font-family="sans-serif" font-weight="bold" fill="#3b82f6" opacity="0.8">Zzz</text>
+</g>
+</svg>

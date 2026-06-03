@@ -1,0 +1,183 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="500" height="500">
+<defs>
+  <style>
+    /* 🐼 吃竹子 — 8秒循环 */
+    .body-bounce {
+      transform-origin: 32px 46px;
+      animation: body-bounce 8s infinite ease-in-out;
+    }
+    .chew-head {
+      transform-origin: 32px 30px;
+      animation: chew-head 8s infinite ease-in-out;
+    }
+    .eye-happy {
+      transform-origin: 32px 27px;
+      animation: eye-happy 8s infinite ease-in-out;
+    }
+    .ear-twitch {
+      transform-origin: 32px 28px;
+      animation: ear-perk 8s infinite ease-in-out;
+    }
+    .paw-left {
+      transform-origin: 14px 42px;
+      animation: paw-grab 8s infinite ease-in-out;
+    }
+    .paw-right {
+      transform-origin: 50px 42px;
+      animation: paw-grab-r 8s infinite ease-in-out;
+    }
+    .bamboo-sway {
+      transform-origin: 32px 56px;
+      animation: bamboo-sway 8s infinite ease-in-out;
+    }
+    .leaf-flutter {
+      transform-origin: 28px 14px;
+      animation: leaf-flutter 3s infinite ease-in-out;
+    }
+    .cheek-glow {
+      animation: cheek-pulse 4s infinite ease-in-out;
+    }
+
+    @keyframes body-bounce {
+      0%,100% { transform: scale(1,1) translateY(0); }
+      15%     { transform: scale(1.03,0.97) translateY(0.8px); }
+      30%     { transform: scale(0.98,1.02) translateY(-0.3px); }
+      45%     { transform: scale(1.03,0.97) translateY(0.8px); }
+      60%     { transform: scale(1,1) translateY(0); }
+      75%     { transform: scale(1.02,0.98) translateY(0.5px); }
+    }
+    @keyframes chew-head {
+      0%,100% { transform: rotate(0deg) translateY(0); }
+      12%     { transform: rotate(-2deg) translateY(1px); }
+      18%     { transform: rotate(1deg) translateY(-0.5px); }
+      25%     { transform: rotate(-2deg) translateY(1px); }
+      32%     { transform: rotate(1deg) translateY(-0.5px); }
+      40%     { transform: rotate(-2deg) translateY(1px); }
+      48%     { transform: rotate(0deg) translateY(0); }
+      60%     { transform: rotate(-1.5deg) translateY(0.5px); }
+      65%     { transform: rotate(1deg) translateY(-0.3px); }
+      70%     { transform: rotate(-1.5deg) translateY(0.5px); }
+      78%     { transform: rotate(0deg) translateY(0); }
+    }
+    @keyframes eye-happy {
+      0%,8%   { transform: scaleY(1); }
+      10%     { transform: scaleY(0.15); }
+      12%,20% { transform: scaleY(0.5); }
+      22%,45% { transform: scaleY(0.5); }
+      48%,56% { transform: scaleY(1); }
+      58%     { transform: scaleY(0.15); }
+      60%     { transform: scaleY(1); }
+      65%,80% { transform: scaleY(0.5); }
+      85%,100%{ transform: scaleY(1); }
+    }
+    @keyframes ear-perk {
+      0%,10%  { transform: rotate(0deg); }
+      15%     { transform: rotate(5deg); }
+      20%     { transform: rotate(-3deg); }
+      25%     { transform: rotate(5deg); }
+      30%,50% { transform: rotate(0deg); }
+      55%     { transform: rotate(-4deg); }
+      60%,100%{ transform: rotate(0deg); }
+    }
+    @keyframes paw-grab {
+      0%,10%  { transform: translate(0,0) rotate(0deg); }
+      15%     { transform: translate(2px,-1px) rotate(5deg); }
+      50%     { transform: translate(2px,-1px) rotate(5deg); }
+      55%,100%{ transform: translate(0,0) rotate(0deg); }
+    }
+    @keyframes paw-grab-r {
+      0%,10%  { transform: translate(0,0) rotate(0deg); }
+      15%     { transform: translate(-2px,-1px) rotate(-5deg); }
+      50%     { transform: translate(-2px,-1px) rotate(-5deg); }
+      55%,100%{ transform: translate(0,0) rotate(0deg); }
+    }
+    @keyframes bamboo-sway {
+      0%,100% { transform: rotate(-2deg); }
+      25%     { transform: rotate(2deg); }
+      50%     { transform: rotate(-3deg); }
+      75%     { transform: rotate(1deg); }
+    }
+    @keyframes leaf-flutter {
+      0%,100% { transform: rotate(0deg) scale(1); }
+      25%     { transform: rotate(8deg) scale(1.05); }
+      50%     { transform: rotate(-5deg) scale(0.95); }
+      75%     { transform: rotate(6deg) scale(1.02); }
+    }
+    @keyframes cheek-pulse {
+      0%,100% { opacity: 0.5; }
+      50%     { opacity: 0.8; }
+    }
+  </style>
+</defs>
+
+<!-- 影子 -->
+<ellipse cx="32" cy="60" rx="18" ry="3" fill="#000" opacity="0.12"/>
+
+<g class="body-bounce">
+  <!-- 身体 -->
+  <ellipse cx="32" cy="46" rx="20" ry="14" fill="#ffffff" stroke="#1e293b" stroke-width="2.5"/>
+  <!-- 黑爪子 -->
+  <circle cx="18" cy="48" r="6" fill="#1e293b"/>
+  <circle cx="46" cy="48" r="6" fill="#1e293b"/>
+  
+  <!-- 围脖/前肢 -->
+  <path d="M 12 40 C 20 44, 44 44, 52 40 C 48 50, 16 50, 12 40 Z" fill="#1e293b"/>
+
+  <!-- 竹子 -->
+  <g class="bamboo-sway">
+    <rect x="29" y="12" width="5" height="44" rx="2.5" fill="#10b981" stroke="#047857" stroke-width="1.5"/>
+    <line x1="29" y1="22" x2="34" y2="22" stroke="#047857" stroke-width="1"/>
+    <line x1="29" y1="32" x2="34" y2="32" stroke="#047857" stroke-width="1"/>
+    <line x1="29" y1="42" x2="34" y2="42" stroke="#047857" stroke-width="1"/>
+    <!-- 竹叶 -->
+    <g class="leaf-flutter">
+      <path d="M 29 18 Q 20 12, 22 18 Q 24 14, 29 18 Z" fill="#34d399"/>
+      <path d="M 34 15 Q 42 10, 40 16 Q 38 12, 34 15 Z" fill="#34d399"/>
+      <path d="M 29 14 Q 18 8, 20 14 Z" fill="#6ee7b7"/>
+    </g>
+  </g>
+
+  <!-- 抓竹子的爪子 -->
+  <g class="paw-left">
+    <circle cx="26" cy="38" r="4" fill="#1e293b"/>
+  </g>
+  <g class="paw-right">
+    <circle cx="38" cy="38" r="4" fill="#1e293b"/>
+  </g>
+
+  <g class="chew-head">
+    <g class="ear-twitch">
+      <!-- 耳朵 -->
+      <circle cx="16" cy="18" r="8" fill="#1e293b"/>
+      <circle cx="16" cy="18" r="4" fill="#0f172a"/>
+      <circle cx="48" cy="18" r="8" fill="#1e293b"/>
+      <circle cx="48" cy="18" r="4" fill="#0f172a"/>
+    </g>
+
+    <!-- 头部底盘 -->
+    <circle cx="32" cy="28" r="18" fill="#ffffff" stroke="#1e293b" stroke-width="2.5"/>
+
+    <!-- 黑眼圈 -->
+    <ellipse cx="24" cy="27" rx="6" ry="7" transform="rotate(-15 24 27)" fill="#1e293b"/>
+    <ellipse cx="40" cy="27" rx="6" ry="7" transform="rotate(15 40 27)" fill="#1e293b"/>
+
+    <g class="eye-happy">
+      <!-- 开心的眯眼 -->
+      <path d="M 22,26 Q 25,29 28,26" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M 36,26 Q 39,29 42,26" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>
+    </g>
+
+    <!-- 腮红 -->
+    <circle class="cheek-glow" cx="17" cy="33" r="3.5" fill="#fda4af" opacity="0.5"/>
+    <circle class="cheek-glow" cx="47" cy="33" r="3.5" fill="#fda4af" opacity="0.5"/>
+
+    <!-- 鼻子 -->
+    <polygon points="30,31 34,31 32,33" fill="#1e293b"/>
+
+    <!-- 嘴巴 (咀嚼) -->
+    <path d="M 28,34 Q 30,36 32,35 Q 34,36 36,34" fill="none" stroke="#1e293b" stroke-width="1.5" stroke-linecap="round"/>
+    <!-- 嘴里的竹叶 -->
+    <path d="M 36,34 Q 40,33 42,30" fill="none" stroke="#34d399" stroke-width="2" stroke-linecap="round"/>
+  </g>
+</g>
+</svg>

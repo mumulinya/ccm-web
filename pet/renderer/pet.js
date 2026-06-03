@@ -51,6 +51,68 @@ const clawdAutoReturnMs = {
   carrying: 3000,
 };
 
+const cloudlingStateFiles = {
+  idle: 'cloudling-idle.svg',
+  yawning: 'cloudling-idle-to-dozing.svg',
+  dozing: 'cloudling-dozing.svg',
+  collapsing: 'cloudling-dozing-to-sleeping.svg',
+  thinking: 'cloudling-thinking.svg',
+  working: 'cloudling-typing.svg',
+  juggling: 'cloudling-juggling.svg',
+  sweeping: 'cloudling-sweeping.svg',
+  error: 'cloudling-error.svg',
+  attention: 'cloudling-attention.svg',
+  happy: 'cloudling-attention.svg',
+  notification: 'cloudling-notification.svg',
+  carrying: 'cloudling-carrying.svg',
+  sleeping: 'cloudling-sleeping.svg',
+  waking: 'cloudling-sleeping-to-idle.svg',
+};
+
+const cloudlingIdleAnimations = [
+  { file: 'cloudling-idle-reading.svg', duration: 14000 },
+];
+
+const cloudlingAutoReturnMs = {
+  attention: 3660,
+  happy: 3660,
+  error: 5000,
+  sweeping: 300000,
+  notification: 2600,
+  carrying: 4500,
+};
+
+const calicoStateFiles = {
+  idle: 'calico-idle-follow.svg',
+  yawning: 'calico-yawning.apng',
+  dozing: 'calico-dozing.apng',
+  collapsing: 'calico-collapsing.apng',
+  thinking: 'calico-thinking.apng',
+  working: 'calico-working-typing.apng',
+  juggling: 'calico-working-juggling.apng',
+  sweeping: 'calico-working-sweeping.apng',
+  error: 'calico-error.apng',
+  attention: 'calico-happy.apng',
+  happy: 'calico-happy.apng',
+  notification: 'calico-notification.apng',
+  carrying: 'calico-working-carrying.apng',
+  sleeping: 'calico-sleeping.apng',
+  waking: 'calico-waking.apng',
+};
+
+const calicoIdleAnimations = [
+  { file: 'calico-idle.apng', duration: 5200 },
+];
+
+const calicoAutoReturnMs = {
+  attention: 5000,
+  happy: 5000,
+  error: 5000,
+  sweeping: 300000,
+  notification: 5200,
+  carrying: 3000,
+};
+
 let clawdIdleTimer = null;
 let clawdReturnTimer = null;
 let clawdReactionTimer = null;
@@ -131,6 +193,81 @@ const petThemes = {
       double: { file: 'clawd-react-double.svg', duration: 3500 },
     },
   },
+  panda: {
+    files: stateFileMap('panda'),
+    bodyHitBox: { x: 0.15, y: 0.1, w: 0.7, h: 0.8 },
+    idleAnimations: [
+      { file: 'panda-idle-action1.svg', duration: 16000 },
+      { file: 'panda-idle-action2.svg', duration: 24000 },
+      { file: 'panda-idle-action3.svg', duration: 12000 }
+    ],
+    autoReturn: { attention: 4000, happy: 4000, error: 5000, notification: 5000, carrying: 3000 },
+    reactions: {
+      drag: { file: 'panda-react-drag.svg' },
+      clickLeft: { file: 'panda-react-left.svg', duration: 2500 },
+      clickRight: { file: 'panda-react-right.svg', duration: 2500 },
+      double: { file: 'panda-react-double.svg', duration: 2500 },
+    },
+  },
+  fox: {
+    files: stateFileMap('fox'),
+    bodyHitBox: { x: 0.15, y: 0.1, w: 0.7, h: 0.8 },
+    idleAnimations: [
+      { file: 'fox-idle-action1.svg', duration: 20000 },
+      { file: 'fox-idle-action2.svg', duration: 20000 },
+      { file: 'fox-idle-action3.svg', duration: 16000 }
+    ],
+    autoReturn: { attention: 4000, happy: 4000, error: 5000, notification: 5000, carrying: 3000 },
+    reactions: {
+      drag: { file: 'fox-react-drag.svg' },
+      clickLeft: { file: 'fox-react-left.svg', duration: 2500 },
+      clickRight: { file: 'fox-react-right.svg', duration: 2500 },
+      double: { file: 'fox-react-double.svg', duration: 2500 },
+    },
+  },
+  rabbit: {
+    files: stateFileMap('rabbit'),
+    bodyHitBox: { x: 0.15, y: 0.1, w: 0.7, h: 0.8 },
+    idleAnimations: [
+      { file: 'rabbit-idle-action1.svg', duration: 16000 },
+      { file: 'rabbit-idle-action2.svg', duration: 18000 },
+      { file: 'rabbit-idle-action3.svg', duration: 16000 }
+    ],
+    autoReturn: { attention: 4000, happy: 4000, error: 5000, notification: 5000, carrying: 3000 },
+    reactions: {
+      drag: { file: 'rabbit-react-drag.svg' },
+      clickLeft: { file: 'rabbit-react-left.svg', duration: 2500 },
+      clickRight: { file: 'rabbit-react-right.svg', duration: 2500 },
+      double: { file: 'rabbit-react-double.svg', duration: 2500 },
+    },
+  },
+  cloudling: {
+    dir: 'cloudling',
+    files: cloudlingStateFiles,
+    pixelated: false,
+    hideBadge: true,
+    bodyHitBox: { x: 0.25, y: 0.25, w: 0.5, h: 0.53 },
+    idleAnimations: cloudlingIdleAnimations,
+    autoReturn: cloudlingAutoReturnMs,
+    reactions: {
+      drag: { file: 'cloudling-react-drag.svg' },
+    },
+  },
+  calico: {
+    dir: 'calico',
+    files: calicoStateFiles,
+    pixelated: false,
+    hideBadge: true,
+    bodyHitBox: { x: 0.3, y: 0.15, w: 0.4, h: 0.7 },
+    idleAnimations: calicoIdleAnimations,
+    autoReturn: calicoAutoReturnMs,
+    reactions: {
+      drag: { file: 'calico-react-drag.apng' },
+      clickLeft: { file: 'calico-react-poke.apng', duration: 2500 },
+      clickRight: { file: 'calico-react-poke.apng', duration: 2500 },
+      double: { file: 'calico-react-poke.apng', duration: 2500 },
+    },
+  },
 };
 
 function getTheme(type = petType) {
@@ -206,7 +343,7 @@ const stateMessages = {
   sleeping: ['💤 zzz...', '好困...', '休息一下...'],
 };
 
-const petEmojis = { cat: '🐱', crab: '🦀', robot: '🤖', ghost: '👻', clawd: '🦀' };
+const petEmojis = { cat: '🐱', crab: '🦀', robot: '🤖', ghost: '👻', clawd: '🦀', panda: '🐼', fox: '🦊', rabbit: '🐰', cloudling: '☁️', calico: '🐱' };
 const SPEECH_MIN_WIDTH = 280;
 const PET_SPRITE_SCALE = 0.5;
 const PET_EXTRA_HEIGHT = 165;
@@ -311,7 +448,7 @@ function scheduleThemeStateTimers(state) {
         loadSVG(petType, 'idle');
         scheduleThemeStateTimers('idle');
       }, idle.duration);
-    }, 12000 + Math.random() * 10000);
+    }, 5000 + Math.random() * 5000);
   }
 
   const returnMs = theme.autoReturn?.[state];

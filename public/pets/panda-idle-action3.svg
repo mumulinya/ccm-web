@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="500" height="500">
+<defs>
+  <style>
+    /* 🐼 打滚玩耍 — 6秒循环 */
+    .roll-body {
+      transform-origin: 32px 42px;
+      animation: roll-body 6s infinite ease-in-out;
+    }
+    .kick-left {
+      transform-origin: 20px 50px;
+      animation: kick-l 6s infinite ease-in-out;
+    }
+    .kick-right {
+      transform-origin: 44px 50px;
+      animation: kick-r 6s infinite ease-in-out;
+    }
+    .dizzy-eyes {
+      transform-origin: 32px 27px;
+      animation: dizzy-eyes 6s infinite linear;
+    }
+    .star1 {
+      transform-origin: 52px 10px;
+      animation: star-spin1 2s infinite linear;
+    }
+    .star2 {
+      transform-origin: 12px 12px;
+      animation: star-spin2 1.5s infinite linear;
+    }
+    .star3 {
+      transform-origin: 56px 18px;
+      animation: star-spin3 2.5s infinite linear;
+    }
+    .breathe {
+      transform-origin: 32px 46px;
+      animation: breathe 3s infinite ease-in-out;
+    }
+
+    @keyframes roll-body {
+      0%,100% { transform: rotate(0deg) translateY(0); }
+      15%     { transform: rotate(12deg) translateY(-2px); }
+      30%     { transform: rotate(-10deg) translateY(-1px); }
+      45%     { transform: rotate(8deg) translateY(-2px); }
+      60%     { transform: rotate(-6deg) translateY(-1px); }
+      75%     { transform: rotate(4deg) translateY(0); }
+      85%     { transform: rotate(-2deg) translateY(0); }
+    }
+    @keyframes kick-l {
+      0%,100% { transform: rotate(0deg); }
+      15%     { transform: rotate(-20deg); }
+      30%     { transform: rotate(10deg); }
+      45%     { transform: rotate(-15deg); }
+      60%     { transform: rotate(5deg); }
+    }
+    @keyframes kick-r {
+      0%,100% { transform: rotate(0deg); }
+      20%     { transform: rotate(20deg); }
+      35%     { transform: rotate(-10deg); }
+      50%     { transform: rotate(15deg); }
+      65%     { transform: rotate(-5deg); }
+    }
+    @keyframes dizzy-eyes {
+      0%,100% { transform: scaleY(1) scaleX(1); }
+      8%      { transform: scaleY(0.1) scaleX(1); }
+      10%     { transform: scaleY(1) scaleX(1); }
+      25%     { transform: scaleY(1) scaleX(-1); }
+      33%     { transform: scaleY(0.1) scaleX(-1); }
+      35%     { transform: scaleY(1) scaleX(-1); }
+      50%     { transform: scaleY(1) scaleX(1); }
+      58%     { transform: scaleY(0.1) scaleX(1); }
+      60%     { transform: scaleY(1) scaleX(1); }
+      75%     { transform: scaleY(1) scaleX(-1); }
+      83%     { transform: scaleY(0.1) scaleX(-1); }
+      85%     { transform: scaleY(1) scaleX(1); }
+    }
+    @keyframes star-spin1 {
+      0%   { transform: rotate(0deg) scale(1); opacity:0.8; }
+      25%  { transform: rotate(90deg) scale(1.2); opacity:1; }
+      50%  { transform: rotate(180deg) scale(1); opacity:0.8; }
+      75%  { transform: rotate(270deg) scale(0.8); opacity:0.6; }
+      100% { transform: rotate(360deg) scale(1); opacity:0.8; }
+    }
+    @keyframes star-spin2 {
+      0%   { transform: rotate(0deg) scale(0.8); opacity:0.6; }
+      50%  { transform: rotate(180deg) scale(1.1); opacity:1; }
+      100% { transform: rotate(360deg) scale(0.8); opacity:0.6; }
+    }
+    @keyframes star-spin3 {
+      0%   { transform: rotate(0deg); opacity:0.5; }
+      50%  { transform: rotate(180deg); opacity:1; }
+      100% { transform: rotate(360deg); opacity:0.5; }
+    }
+    @keyframes breathe {
+      0%,100% { transform: scale(1) translateY(0); }
+      50%     { transform: scale(1.02,0.98) translateY(0.5px); }
+    }
+  </style>
+</defs>
+
+<!-- 影子 -->
+<ellipse cx="32" cy="60" rx="18" ry="3" fill="#000" opacity="0.12"/>
+
+<!-- 旋转小星星 -->
+<g class="star1">
+  <text x="52" y="13" font-size="8" fill="#fbbf24">✦</text>
+</g>
+<g class="star2">
+  <text x="12" y="15" font-size="6" fill="#fb923c">✦</text>
+</g>
+<g class="star3">
+  <text x="56" y="21" font-size="5" fill="#facc15">✧</text>
+</g>
+
+<g class="roll-body">
+  <g class="breathe">
+    <!-- 身体 -->
+    <ellipse cx="32" cy="46" rx="20" ry="14" fill="#ffffff" stroke="#1e293b" stroke-width="2.5"/>
+    
+    <!-- 黑腿 (踢腿) -->
+    <g class="kick-left">
+      <circle cx="18" cy="48" r="6" fill="#1e293b"/>
+    </g>
+    <g class="kick-right">
+      <circle cx="46" cy="48" r="6" fill="#1e293b"/>
+    </g>
+    
+    <!-- 围脖/前肢 -->
+    <path d="M 12 40 C 20 44, 44 44, 52 40 C 48 50, 16 50, 12 40 Z" fill="#1e293b"/>
+
+    <!-- 耳朵 -->
+    <circle cx="16" cy="18" r="8" fill="#1e293b"/>
+    <circle cx="16" cy="18" r="4" fill="#0f172a"/>
+    <circle cx="48" cy="18" r="8" fill="#1e293b"/>
+    <circle cx="48" cy="18" r="4" fill="#0f172a"/>
+
+    <!-- 头部底盘 -->
+    <circle cx="32" cy="28" r="18" fill="#ffffff" stroke="#1e293b" stroke-width="2.5"/>
+
+    <!-- 黑眼圈 -->
+    <ellipse cx="24" cy="27" rx="6" ry="7" transform="rotate(-15 24 27)" fill="#1e293b"/>
+    <ellipse cx="40" cy="27" rx="6" ry="7" transform="rotate(15 40 27)" fill="#1e293b"/>
+
+    <g class="dizzy-eyes">
+      <!-- 眼睛 -->
+      <circle cx="25" cy="26" r="2" fill="#ffffff"/>
+      <circle cx="26" cy="25" r="0.75" fill="#38bdf8"/>
+      <circle cx="39" cy="26" r="2" fill="#ffffff"/>
+      <circle cx="38" cy="25" r="0.75" fill="#38bdf8"/>
+    </g>
+
+    <!-- 腮红 (大一点更可爱) -->
+    <circle cx="17" cy="33" r="4" fill="#fda4af" opacity="0.7"/>
+    <circle cx="47" cy="33" r="4" fill="#fda4af" opacity="0.7"/>
+
+    <!-- 鼻子 -->
+    <polygon points="30,31 34,31 32,33" fill="#1e293b"/>
+    
+    <!-- 嘴巴 (开心大笑) -->
+    <path d="M 28,33 Q 32,38 36,33" fill="#ffffff" stroke="#1e293b" stroke-width="1.5" stroke-linecap="round"/>
+  </g>
+</g>
+</svg>

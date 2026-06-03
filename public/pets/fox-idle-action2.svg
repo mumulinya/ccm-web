@@ -1,0 +1,186 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="500" height="500">
+<defs>
+  <style>
+    /* 🦊 打哈欠/伸懒腰 — 10秒循环 */
+    .stretch-body {
+      transform-origin: 32px 46px;
+      animation: stretch-body 10s infinite ease-in-out;
+    }
+    .yawn-head {
+      transform-origin: 32px 32px;
+      animation: yawn-head 10s infinite ease-in-out;
+    }
+    .yawn-mouth {
+      animation: yawn-mouth 10s infinite ease-in-out;
+    }
+    .eyes-squint {
+      transform-origin: 32px 28px;
+      animation: eyes-squint 10s infinite ease-in-out;
+    }
+    .stretch-paw-l {
+      transform-origin: 24px 54px;
+      animation: paw-stretch-l 10s infinite ease-in-out;
+    }
+    .stretch-paw-r {
+      transform-origin: 40px 54px;
+      animation: paw-stretch-r 10s infinite ease-in-out;
+    }
+    .tail-lazy {
+      transform-origin: 38px 42px;
+      animation: tail-lazy 4s infinite ease-in-out;
+    }
+    .tear1 {
+      animation: tear-appear 10s infinite ease-in-out;
+    }
+    .tear2 {
+      animation: tear-appear2 10s infinite ease-in-out;
+    }
+    .breathe {
+      transform-origin: 32px 46px;
+      animation: breathe 3s infinite ease-in-out;
+    }
+
+    @keyframes stretch-body {
+      0%,15%   { transform: scale(1,1) translateY(0); }
+      25%      { transform: scale(1.06,0.94) translateY(1px); }
+      35%      { transform: scale(0.96,1.06) translateY(-2px); }
+      45%      { transform: scale(1.08,0.92) translateY(1.5px); }
+      55%      { transform: scale(1,1) translateY(0); }
+      65%      { transform: scale(1.03,0.97) translateY(0.5px); }
+      75%,100% { transform: scale(1,1) translateY(0); }
+    }
+    @keyframes yawn-head {
+      0%,15%   { transform: rotate(0deg) translateY(0); }
+      20%      { transform: rotate(-3deg) translateY(-1px); }
+      30%      { transform: rotate(-5deg) translateY(-2px); }
+      45%      { transform: rotate(-3deg) translateY(-1px); }
+      55%,100% { transform: rotate(0deg) translateY(0); }
+    }
+    @keyframes yawn-mouth {
+      0%,18%   { transform: scaleY(0); opacity: 0; }
+      22%      { transform: scaleY(0.5); opacity: 1; }
+      28%      { transform: scaleY(1); opacity: 1; }
+      42%      { transform: scaleY(1); opacity: 1; }
+      48%      { transform: scaleY(0.3); opacity: 1; }
+      52%,100% { transform: scaleY(0); opacity: 0; }
+    }
+    @keyframes eyes-squint {
+      0%,8%    { transform: scaleY(1); }
+      10%      { transform: scaleY(0.1); }
+      12%,18%  { transform: scaleY(1); }
+      22%      { transform: scaleY(0.2); }
+      50%      { transform: scaleY(0.2); }
+      55%,70%  { transform: scaleY(1); }
+      72%      { transform: scaleY(0.1); }
+      74%,100% { transform: scaleY(1); }
+    }
+    @keyframes paw-stretch-l {
+      0%,20%   { transform: translate(0,0) rotate(0deg); }
+      30%      { transform: translate(-6px,-2px) rotate(-15deg); }
+      45%      { transform: translate(-6px,-2px) rotate(-15deg); }
+      55%,100% { transform: translate(0,0) rotate(0deg); }
+    }
+    @keyframes paw-stretch-r {
+      0%,20%   { transform: translate(0,0) rotate(0deg); }
+      30%      { transform: translate(6px,-2px) rotate(15deg); }
+      45%      { transform: translate(6px,-2px) rotate(15deg); }
+      55%,100% { transform: translate(0,0) rotate(0deg); }
+    }
+    @keyframes tail-lazy {
+      0%,100% { transform: rotate(-3deg); }
+      50%     { transform: rotate(5deg); }
+    }
+    @keyframes tear-appear {
+      0%,20%   { opacity: 0; transform: translate(0,0); }
+      25%      { opacity: 1; transform: translate(0,0); }
+      45%      { opacity: 1; transform: translate(-1px,3px); }
+      50%,100% { opacity: 0; transform: translate(-1px,5px); }
+    }
+    @keyframes tear-appear2 {
+      0%,22%   { opacity: 0; transform: translate(0,0); }
+      28%      { opacity: 1; transform: translate(0,0); }
+      48%      { opacity: 1; transform: translate(1px,3px); }
+      52%,100% { opacity: 0; transform: translate(1px,5px); }
+    }
+    @keyframes breathe {
+      0%,100% { transform: scale(1) translateY(0); }
+      50%     { transform: scale(1.018,0.982) translateY(0.4px); }
+    }
+  </style>
+</defs>
+
+<!-- 影子 -->
+<ellipse cx="32" cy="60" rx="16" ry="3" fill="#000" opacity="0.12"/>
+
+<g class="stretch-body">
+  <g class="breathe">
+    <g class="tail-lazy">
+      <!-- 蓬松尾巴 -->
+      <path d="M 40 45 C 52 48, 56 38, 52 32 C 48 26, 44 34, 38 42 Z" fill="#f97316" stroke="#c2410c" stroke-width="2"/>
+      <path d="M 52 32 C 54 30, 50 28, 48 30 Z" fill="#ffffff"/>
+    </g>
+
+    <!-- 身体 -->
+    <ellipse cx="32" cy="46" rx="14" ry="12" fill="#f97316" stroke="#c2410c" stroke-width="2"/>
+    <!-- 白肚子 -->
+    <circle cx="32" cy="46" r="8" fill="#ffffff"/>
+
+    <!-- 肢爪 (伸展) -->
+    <g class="stretch-paw-l">
+      <circle cx="24" cy="54" r="3.5" fill="#1e293b"/>
+    </g>
+    <g class="stretch-paw-r">
+      <circle cx="40" cy="54" r="3.5" fill="#1e293b"/>
+    </g>
+
+    <g class="yawn-head">
+      <!-- 大耳朵 -->
+      <polygon points="16,24 10,6 26,16" fill="#f97316" stroke="#c2410c" stroke-width="2"/>
+      <polygon points="16,22 12,9 23,16" fill="#fef3c7"/>
+      <polygon points="48,24 54,6 38,16" fill="#f97316" stroke="#c2410c" stroke-width="2"/>
+      <polygon points="48,22 52,9 41,16" fill="#fef3c7"/>
+
+      <!-- 头部底盘 -->
+      <path d="M 16 32 C 16 22, 48 22, 48 32 C 48 40, 32 44, 16 32 Z" fill="#f97316" stroke="#c2410c" stroke-width="2"/>
+      
+      <!-- 白脸颊 -->
+      <path d="M 16 32 C 18 36, 26 38, 30 35 C 28 30, 18 28, 16 32 Z" fill="#ffffff"/>
+      <path d="M 48 32 C 46 36, 38 38, 34 35 C 36 30, 46 28, 48 32 Z" fill="#ffffff"/>
+
+      <g class="eyes-squint">
+        <!-- 眼睛 -->
+        <circle cx="25" cy="28" r="3.5" fill="#1e293b"/>
+        <circle cx="26" cy="27" r="1.2" fill="#ffffff"/>
+        <circle cx="39" cy="28" r="3.5" fill="#1e293b"/>
+        <circle cx="38" cy="27" r="1.2" fill="#ffffff"/>
+      </g>
+
+      <!-- 哈欠泪珠 -->
+      <g class="tear1">
+        <circle cx="19" cy="30" r="1" fill="#93c5fd" opacity="0.7"/>
+      </g>
+      <g class="tear2">
+        <circle cx="45" cy="30" r="1" fill="#93c5fd" opacity="0.7"/>
+      </g>
+
+      <!-- 腮红 -->
+      <circle cx="20" cy="33" r="2.5" fill="#fda4af" opacity="0.7"/>
+      <circle cx="44" cy="33" r="2.5" fill="#fda4af" opacity="0.7"/>
+
+      <!-- 鼻子 -->
+      <polygon points="30,35 34,35 32,37" fill="#0f172a"/>
+
+      <!-- 正常嘴巴 -->
+      <path d="M 29,38 Q 32,39 35,38" fill="none" stroke="#c2410c" stroke-width="1.2" stroke-linecap="round"/>
+
+      <!-- 哈欠嘴巴 (张大) -->
+      <g class="yawn-mouth" transform="translate(32,38)">
+        <ellipse cx="0" cy="1.5" rx="4" ry="3" fill="#c2410c"/>
+        <ellipse cx="0" cy="0.5" rx="3" ry="1.5" fill="#1e293b" opacity="0.6"/>
+        <!-- 小舌头 -->
+        <ellipse cx="0" cy="2.5" rx="2" ry="1.2" fill="#f87171"/>
+      </g>
+    </g>
+  </g>
+</g>
+</svg>

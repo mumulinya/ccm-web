@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="500" height="500">
+<defs>
+  <style>
+    .breathe { transform-origin: 32px 32px; animation: breathe 3s infinite ease-in-out; }
+    .blink { animation: blink 4s infinite ease-in-out; }
+    .tail { transform-origin: 50px 48px; animation: tail-wag 2s infinite ease-in-out; }
+    @keyframes breathe { 0%,100%{transform:scale(1,1) translateY(0)} 50%{transform:scale(1.02,0.98) translateY(1px)} }
+    @keyframes blink { 0%,8%,12%,100%{transform:scaleY(1)} 10%{transform:scaleY(0.1)} }
+    @keyframes tail-wag { 0%,100%{transform:rotate(-5deg)} 50%{transform:rotate(10deg)} }
+  </style>
+</defs>
+<!-- Shadow -->
+<ellipse cx="32" cy="58" rx="14" ry="3" fill="#000" opacity="0.15"/>
+<!-- Tail -->
+<g class="tail"><path d="M46,46 Q60,38 56,50" fill="none" stroke="#FF9800" stroke-width="4" stroke-linecap="round"/></g>
+<!-- Body -->
+<g class="breathe">
+  <ellipse cx="32" cy="42" rx="16" ry="12" fill="#FF9800"/>
+  <ellipse cx="32" cy="40" rx="14" ry="10" fill="#FFB74D"/>
+  <!-- Head -->
+  <ellipse cx="32" cy="24" rx="14" ry="12" fill="#FF9800"/>
+  <!-- Ears -->
+  <polygon points="18,16 22,4 28,16" fill="#FF9800"/><polygon points="20,16 23,8 26,16" fill="#FFB74D"/>
+  <polygon points="36,16 42,4 46,16" fill="#FF9800"/><polygon points="38,16 41,8 44,16" fill="#FFB74D"/>
+  <!-- Face -->
+  <ellipse cx="26" cy="22" rx="3.5" ry="4.5" fill="white"/>
+  <ellipse cx="38" cy="22" rx="3.5" ry="4.5" fill="white"/>
+  <g class="blink">
+    <ellipse cx="27" cy="23" rx="2" ry="3" fill="#1a1a2e"/>
+    <ellipse cx="39" cy="23" rx="2" ry="3" fill="#1a1a2e"/>
+    <circle cx="28" cy="21" r="1" fill="white"/>
+    <circle cx="40" cy="21" r="1" fill="white"/>
+  </g>
+  <polygon points="32,27 30,29 34,29" fill="#E91E63"/>
+  <path d="M28,30 Q32,34 36,30" fill="none" stroke="#E65100" stroke-width="1" stroke-linecap="round"/>
+  <!-- Whiskers -->
+  <line x1="14" y1="24" x2="24" y2="26" stroke="#E65100" stroke-width="0.7" opacity="0.6"/>
+  <line x1="14" y1="28" x2="24" y2="28" stroke="#E65100" stroke-width="0.7" opacity="0.6"/>
+  <line x1="40" y1="26" x2="50" y2="24" stroke="#E65100" stroke-width="0.7" opacity="0.6"/>
+  <line x1="40" y1="28" x2="50" y2="28" stroke="#E65100" stroke-width="0.7" opacity="0.6"/>
+  <!-- Paws -->
+  <ellipse cx="22" cy="52" rx="5" ry="3" fill="#FF9800"/>
+  <ellipse cx="42" cy="52" rx="5" ry="3" fill="#FF9800"/>
+</g>
+
+<g><path d="M18 12 L12 7" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/><path d="M32 9 V2" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/><path d="M46 12 L52 7" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/></g>
+</svg>

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+<defs>
+    <style>
+      .breathe { transform-origin: 32px 46px; animation: breathe 3s infinite ease-in-out; }
+      .blink { transform-origin: 32px 27px; animation: blink 4.5s infinite ease-in-out; }
+      .ears { transform-origin: 32px 28px; animation: ears-twitch 6s infinite ease-in-out; }
+      @keyframes breathe { 0%,100%{transform:scale(1) translateY(0)} 50%{transform:scale(1.02, 0.98) translateY(0.5px)} }
+      @keyframes blink { 0%,8%,12%,100%{transform:scaleY(1)} 10%{transform:scaleY(0.1)} }
+      @keyframes ears-twitch { 0%,92%,100%{transform:rotate(0deg)} 95%{transform:rotate(-2deg)} 98%{transform:rotate(2deg)} }
+    </style>
+  </defs>
+<g class="breathe">
+  <!-- 身体 -->
+  <ellipse cx="32" cy="46" rx="20" ry="14" fill="#ffffff" stroke="#1e293b" stroke-width="2.5" />
+  <circle cx="18" cy="48" r="6" fill="#1e293b" />
+  <circle cx="46" cy="48" r="6" fill="#1e293b" />
+  
+  <!-- 怀抱着的嫩竹竿 -->
+  <rect x="29" y="32" width="6" height="24" rx="2" fill="#10b981" stroke="#047857" stroke-width="1.5" transform="rotate(-15 32 44)" />
+  <path d="M 28 35 Q 20 30, 24 38 Z" fill="#10b981" />
+  <path d="M 36 38 Q 44 32, 40 40 Z" fill="#10b981" />
+  <!-- 围脖/前肢 (抱住竹竿) -->
+  <path d="M 12 40 C 20 44, 44 44, 52 40 C 48 50, 16 50, 12 40 Z" fill="#1e293b" />
+</g>
+</svg>

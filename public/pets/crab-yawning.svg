@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-15 -25 45 45" width="500" height="500">
+<defs>
+  <style>
+    .breathe { transform-origin: 7.5px 13px; animation: breathe 3.2s infinite ease-in-out; }
+    .eyes-blink { animation: blink 4s infinite ease-in-out; }
+    @keyframes breathe { 0%,100%{transform:scale(1,1) translate(0,0)} 50%{transform:scale(1.02,0.98) translate(0,0.5px)} }
+    @keyframes blink { 0%,10%,100%{transform:scaleY(1)} 5%{transform:scaleY(0.1)} }
+  </style>
+</defs>
+<rect x="3" y="15" width="9" height="1" fill="#000" opacity="0.5"/>
+<g fill="#E8614D">
+  <rect x="3" y="11" width="1" height="4"/><rect x="5" y="11" width="1" height="4"/>
+  <rect x="9" y="11" width="1" height="4"/><rect x="11" y="11" width="1" height="4"/>
+</g>
+<g class="breathe">
+  <g fill="#E8614D">
+    <rect x="2" y="6" width="11" height="7"/>
+    <rect x="0" y="9" width="2" height="2"/><rect x="13" y="9" width="2" height="2"/>
+    <!-- Claws -->
+    <rect x="-2" y="8" width="2" height="3"/><rect x="15" y="8" width="2" height="3"/>
+  </g>
+  <g fill="#000000">
+    <g class="eyes-blink">
+      <rect x="4" y="8" width="1" height="2"/><rect x="10" y="8" width="1" height="2"/>
+    </g>
+  </g>
+  <!-- Mouth -->
+  <rect x="6" y="11" width="3" height="0.5" fill="#C44536" opacity="0.6"/>
+</g>
+
+<g opacity="0.92"><text x="45" y="15" font-size="8" fill="#94a3b8" font-family="Arial">z</text><text x="51" y="10" font-size="6" fill="#cbd5e1" font-family="Arial">z</text><ellipse cx="32" cy="32" rx="4" ry="2.5" fill="#111827" opacity="0.55"/></g>
+</svg>

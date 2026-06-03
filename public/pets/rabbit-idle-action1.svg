@@ -1,0 +1,199 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="500" height="500">
+<defs>
+  <style>
+    /* 🐰 啃胡萝卜 — 8秒循环 */
+    .body-munch {
+      transform-origin: 32px 46px;
+      animation: body-munch 8s infinite ease-in-out;
+    }
+    .head-chew {
+      transform-origin: 32px 32px;
+      animation: head-chew 8s infinite ease-in-out;
+    }
+    .ear-happy {
+      transform-origin: 32px 24px;
+      animation: ear-happy 8s infinite ease-in-out;
+    }
+    .eyes-enjoy {
+      transform-origin: 32px 28px;
+      animation: eyes-enjoy 8s infinite ease-in-out;
+    }
+    .paw-hold-l {
+      transform-origin: 22px 42px;
+      animation: paw-hold 8s infinite ease-in-out;
+    }
+    .paw-hold-r {
+      transform-origin: 42px 42px;
+      animation: paw-hold-r 8s infinite ease-in-out;
+    }
+    .carrot-bob {
+      transform-origin: 32px 42px;
+      animation: carrot-bob 8s infinite ease-in-out;
+    }
+    .cheek-happy {
+      animation: cheek-glow 4s infinite ease-in-out;
+    }
+    .sparkle1 { animation: sparkle1 3s infinite ease-in-out; }
+    .sparkle2 { animation: sparkle2 3s 1.5s infinite ease-in-out; }
+    .breathe {
+      transform-origin: 32px 46px;
+      animation: breathe 3s infinite ease-in-out;
+    }
+
+    @keyframes body-munch {
+      0%,100% { transform: scale(1,1) translateY(0); }
+      12%     { transform: scale(1.03,0.97) translateY(0.5px); }
+      18%     { transform: scale(0.98,1.02) translateY(-0.3px); }
+      25%     { transform: scale(1.03,0.97) translateY(0.5px); }
+      32%     { transform: scale(0.98,1.02) translateY(-0.3px); }
+      40%     { transform: scale(1.03,0.97) translateY(0.5px); }
+      48%     { transform: scale(0.98,1.02) translateY(-0.3px); }
+      55%     { transform: scale(1.03,0.97) translateY(0.5px); }
+      62%     { transform: scale(1,1) translateY(0); }
+    }
+    @keyframes head-chew {
+      0%,100% { transform: rotate(0deg) translateY(0); }
+      10%     { transform: rotate(-2deg) translateY(1px); }
+      15%     { transform: rotate(1deg) translateY(-0.5px); }
+      20%     { transform: rotate(-2deg) translateY(1px); }
+      25%     { transform: rotate(1deg) translateY(-0.5px); }
+      30%     { transform: rotate(-2deg) translateY(1px); }
+      35%     { transform: rotate(1deg) translateY(-0.5px); }
+      40%     { transform: rotate(-2deg) translateY(1px); }
+      45%     { transform: rotate(1deg) translateY(-0.5px); }
+      50%     { transform: rotate(-1deg) translateY(0.5px); }
+      55%     { transform: rotate(0.5deg) translateY(-0.2px); }
+      60%,100%{ transform: rotate(0deg) translateY(0); }
+    }
+    @keyframes ear-happy {
+      0%,100% { transform: rotate(0deg); }
+      8%      { transform: rotate(5deg); }
+      12%     { transform: rotate(-4deg); }
+      16%     { transform: rotate(5deg); }
+      20%     { transform: rotate(-4deg); }
+      30%     { transform: rotate(3deg); }
+      35%     { transform: rotate(-2deg); }
+      42%,100%{ transform: rotate(0deg); }
+    }
+    @keyframes eyes-enjoy {
+      0%,5%   { transform: scaleY(1); }
+      8%      { transform: scaleY(0.5); }
+      10%,60% { transform: scaleY(0.5); }
+      65%     { transform: scaleY(1); }
+      68%     { transform: scaleY(0.1); }
+      70%,100%{ transform: scaleY(1); }
+    }
+    @keyframes paw-hold {
+      0%,8%   { transform: translate(0,0) rotate(0deg); }
+      12%     { transform: translate(3px,-2px) rotate(8deg); }
+      55%     { transform: translate(3px,-2px) rotate(8deg); }
+      62%,100%{ transform: translate(0,0) rotate(0deg); }
+    }
+    @keyframes paw-hold-r {
+      0%,8%   { transform: translate(0,0) rotate(0deg); }
+      12%     { transform: translate(-3px,-2px) rotate(-8deg); }
+      55%     { transform: translate(-3px,-2px) rotate(-8deg); }
+      62%,100%{ transform: translate(0,0) rotate(0deg); }
+    }
+    @keyframes carrot-bob {
+      0%,8%   { transform: translate(0,10px) rotate(0deg) scale(0); opacity:0; }
+      12%     { transform: translate(0,0) rotate(-5deg) scale(1); opacity:1; }
+      20%     { transform: translate(0,-0.5px) rotate(-4deg) scale(1); }
+      25%     { transform: translate(0,0.5px) rotate(-6deg) scale(1); }
+      30%     { transform: translate(0,-0.5px) rotate(-4deg) scale(1); }
+      35%     { transform: translate(0,0.5px) rotate(-6deg) scale(1); }
+      40%     { transform: translate(0,-0.5px) rotate(-4deg) scale(1); }
+      55%     { transform: translate(0,0) rotate(-5deg) scale(1); opacity:1; }
+      60%     { transform: translate(0,8px) rotate(0deg) scale(0.5); opacity:0; }
+      65%,100%{ transform: translate(0,10px) rotate(0deg) scale(0); opacity:0; }
+    }
+    @keyframes cheek-glow {
+      0%,100% { opacity:0.5; }
+      50%     { opacity:0.9; }
+    }
+    @keyframes sparkle1 {
+      0%,30%  { opacity:0; transform:scale(0); }
+      40%     { opacity:1; transform:scale(1); }
+      60%     { opacity:1; transform:scale(1.2); }
+      80%,100%{ opacity:0; transform:scale(0); }
+    }
+    @keyframes sparkle2 {
+      0%,30%  { opacity:0; transform:scale(0); }
+      40%     { opacity:1; transform:scale(1); }
+      60%     { opacity:1; transform:scale(1.2); }
+      80%,100%{ opacity:0; transform:scale(0); }
+    }
+    @keyframes breathe {
+      0%,100% { transform: scale(1) translateY(0); }
+      50%     { transform: scale(1.02,0.98) translateY(0.5px); }
+    }
+  </style>
+</defs>
+
+<!-- 影子 -->
+<ellipse cx="32" cy="60" rx="18" ry="3" fill="#000" opacity="0.12"/>
+
+<!-- 满足的小星星 -->
+<g class="sparkle1" transform="translate(50,14)">
+  <text font-size="8" fill="#fbbf24">✨</text>
+</g>
+<g class="sparkle2" transform="translate(10,10)">
+  <text font-size="6" fill="#fb923c">✨</text>
+</g>
+
+<g class="body-munch">
+  <g class="breathe">
+    <!-- 尾巴 -->
+    <circle cx="16" cy="48" r="5" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+    
+    <!-- 身体 -->
+    <ellipse cx="32" cy="46" rx="16" ry="13" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+    <circle cx="32" cy="46" r="9" fill="#ffffff"/>
+    
+    <!-- 肢爪 -->
+    <g class="paw-hold-l">
+      <circle cx="22" cy="55" r="3.5" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1.5"/>
+    </g>
+    <g class="paw-hold-r">
+      <circle cx="42" cy="55" r="3.5" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1.5"/>
+    </g>
+
+    <!-- 胡萝卜 -->
+    <g class="carrot-bob">
+      <path d="M 30 38 L 34 38 L 32 52 Z" fill="#f97316" stroke="#c2410c" stroke-width="1.5"/>
+      <path d="M 31 38 Q 28 34 30 32" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round"/>
+      <path d="M 33 38 Q 36 34 34 32" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round"/>
+      <path d="M 32 38 Q 32 33 32 31" fill="none" stroke="#16a34a" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+
+    <g class="head-chew">
+      <g class="ear-happy">
+        <!-- 大耳朵 -->
+        <path d="M 20 24 C 18 10, 24 6, 26 24 Z" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+        <path d="M 21 22 C 20 12, 23 9, 24 22 Z" fill="#fecdd3"/>
+        <path d="M 44 24 C 46 10, 40 6, 38 24 Z" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+        <path d="M 43 22 C 44 12, 41 9, 40 22 Z" fill="#fecdd3"/>
+      </g>
+
+      <!-- 头部底盘 -->
+      <circle cx="32" cy="30" r="15" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+
+      <g class="eyes-enjoy">
+        <!-- 开心眯眼 -->
+        <path d="M 22,28 Q 25,31 28,28" fill="none" stroke="#f43f5e" stroke-width="2" stroke-linecap="round"/>
+        <path d="M 36,28 Q 39,31 42,28" fill="none" stroke="#f43f5e" stroke-width="2" stroke-linecap="round"/>
+      </g>
+
+      <!-- 腮红 (更红) -->
+      <circle class="cheek-happy" cx="19" cy="34" r="3" fill="#fda4af" opacity="0.5"/>
+      <circle class="cheek-happy" cx="45" cy="34" r="3" fill="#fda4af" opacity="0.5"/>
+
+      <!-- 鼻子 -->
+      <polygon points="31,33 33,33 32,34.5" fill="#f43f5e"/>
+      
+      <!-- 嘴巴 (咀嚼) -->
+      <path d="M 29,36 Q 32,38 35,36" fill="none" stroke="#cbd5e1" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+  </g>
+</g>
+</svg>
