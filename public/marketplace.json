@@ -1,0 +1,67 @@
+[
+  {
+    "name": "mcp-feishu",
+    "type": "mcp",
+    "description": "飞书办公协同连接器。支持多 Agent 自动发送飞书富文本卡片消息、同步任务进展、读取团队在线文档等。",
+    "command": "node dist/index.js",
+    "env": "FEISHU_APP_ID=your_app_id\nFEISHU_APP_SECRET=your_app_secret",
+    "author": "CC-Connect 官方",
+    "emoji": "🔌",
+    "version": "1.0.2"
+  },
+  {
+    "name": "filesystem-mcp",
+    "type": "mcp",
+    "description": "本地文件系统安全沙箱读写工具。允许 Agent 极其安全地对白名单文件夹下的代码文件进行高频读写、创建与全局分析。",
+    "command": "npx -y @modelcontextprotocol/server-filesystem C:\\Users\\admin\\Desktop",
+    "author": "Anthropic",
+    "emoji": "📁",
+    "version": "1.1.0"
+  },
+  {
+    "name": "fetch-web-mcp",
+    "type": "mcp",
+    "description": "外部网页内容抓取器。可以让 Agent 直接访问任何公共网页，并自动将 HTML 转为精简 Markdown 以便大模型快速分析。",
+    "command": "npx -y @modelcontextprotocol/server-fetch",
+    "author": "Anthropic",
+    "emoji": "🌐",
+    "version": "1.0.0"
+  },
+  {
+    "name": "github-manager-mcp",
+    "type": "mcp",
+    "description": "GitHub 仓库自动管理工具。允许 Agent 在本地直接帮您进行 Git 仓库的创建、自动推送代码、提交 PR 以及处理 Issue 等操作。",
+    "command": "npx -y @modelcontextprotocol/server-github",
+    "env": "GITHUB_PERSONAL_ACCESS_TOKEN=your_token",
+    "author": "Anthropic",
+    "emoji": "🐙",
+    "version": "1.2.0"
+  },
+  {
+    "name": "code-safety-auditor",
+    "type": "skill",
+    "description": "深度代码安全审计专家。注入高阶安全合规提示词，强力命令 Agent 在编写或重构代码时防范越权、SQL注入和内存泄露等漏洞。",
+    "prompt": "请以极其严苛的资深安全专家身份审查以下代码。排查：1) 垂直与水平越权漏洞；2) 关键参数的输入校验与 SQL 注入防范；3) 异步未关闭句柄与内存泄露。确保代码完全合规。",
+    "author": "Security Team",
+    "emoji": "🛡️",
+    "version": "2.1.0"
+  },
+  {
+    "name": "premium-theme-architect",
+    "type": "skill",
+    "description": "极光设计与高端 UI 交互架构师。轻量化约束 Agent 在生成前端代码时采用渐变色、微动效及玻璃拟态，大幅提升界面美感。",
+    "prompt": "请充当顶级 UI/UX 视觉设计师。在生成所有前端界面（HTML/CSS/Vue）时，必须贯彻以下设计哲学：1) 精选 HSL 渐变色，避免纯红绿蓝；2) 引入 subtle micro-animations 微动效及 hover 过渡；3) 采用玻璃拟态 (backdrop-filter: blur) 与精致的圆角投影，营造 Premium 质感。",
+    "author": "Design Team",
+    "emoji": "🎨",
+    "version": "1.2.0"
+  },
+  {
+    "name": "typescript-oop-guru",
+    "type": "skill",
+    "description": "TypeScript 面向对象重构专家。注入高阶架构指导词，让 Agent 自动使用装饰器、依赖注入与接口设计重构臃肿的 TS 模块。",
+    "prompt": "你现在是 TypeScript 架构专家。在修改或重构所有 TS 代码时，必须贯彻：1) 使用接口定义契约，避免直接依赖具体实现；2) 合理使用装饰器与控制反转（IoC）思想；3) 遵循 SOLID 设计原则，将大类拆分为高内聚、低耦合的小型业务模块。",
+    "author": "Architecture Team",
+    "emoji": "🏗️",
+    "version": "1.0.5"
+  }
+]
