@@ -1,21 +1,104 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <!-- 小幽灵 - 像素风格 -->
-  <!-- 身体 -->
-  <path d="M16,30 Q16,10 32,10 Q48,10 48,30 L48,50 L42,44 L36,50 L30,44 L24,50 L18,44 L16,50 Z" fill="#B39DDB" stroke="#7E57C2" stroke-width="1.5"/>
-  <!-- 内部高光 -->
-  <path d="M20,28 Q20,14 32,14 Q44,14 44,28 L44,20 Q44,14 32,14 Q20,14 20,20 Z" fill="#D1C4E9" opacity="0.5"/>
-  <!-- 眼睛 -->
-  <ellipse cx="26" cy="26" rx="5" ry="6" fill="white"/>
-  <ellipse cx="38" cy="26" rx="5" ry="6" fill="white"/>
-  <ellipse cx="27" cy="27" rx="3" ry="4" fill="#1a1a2e"/>
-  <ellipse cx="39" cy="27" rx="3" ry="4" fill="#1a1a2e"/>
-  <circle cx="28" cy="25" r="1.2" fill="white"/>
-  <circle cx="40" cy="25" r="1.2" fill="white"/>
-  <!-- 嘴巴 -->
-  <ellipse cx="32" cy="36" rx="3" ry="2" fill="#7E57C2"/>
-  <!-- 腮红 -->
-  <ellipse cx="20" cy="32" rx="3" ry="2" fill="#F48FB1" opacity="0.5"/>
-  <ellipse cx="44" cy="32" rx="3" ry="2" fill="#F48FB1" opacity="0.5"/>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="ghost-react-left" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Ghost react-left">
 
-<g><path d="M15 18 L7 14 L15 10" fill="none" stroke="#f472b6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="10" cy="28" r="3" fill="#f472b6" opacity="0.75"/></g>
+  <defs>
+    <linearGradient id="ghost-react-left-body" x1="28" y1="18" x2="96" y2="112" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.45" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e9f8ff"/>
+    </linearGradient>
+    <linearGradient id="ghost-react-left-accent" x1="36" y1="18" x2="90" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#a8ddff"/>
+      <stop offset="1" stop-color="#4879ad"/>
+    </linearGradient>
+    <radialGradient id="ghost-react-left-shine" cx="36%" cy="24%" r="68%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".72"/>
+      <stop offset=".48" stop-color="#ffffff" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="ghost-react-left-soft-shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#10203a" flood-opacity="0.14"/>
+    </filter>
+    <filter id="ghost-react-left-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <style>
+    .pet-core { transform-origin:64px 72px; animation: pet-breathe 2.8s ease-in-out infinite; }
+    .tail { transform-origin:76px 75px; animation: tail-sway 2.4s ease-in-out infinite; }
+    .ear { transform-origin:center; animation: ear-twitch 5s ease-in-out infinite; }
+    .arm-left { transform-origin:46px 74px; animation: arm-left 2.1s ease-in-out infinite; }
+    .arm-right { transform-origin:82px 74px; animation: arm-right 2.1s ease-in-out infinite; }
+    .blink { transform-origin:center; animation: blink 5.2s ease-in-out infinite; }
+    .float-prop { animation: prop-float 2.4s ease-in-out infinite; }
+    .pulse { animation: pulse 1.3s ease-in-out infinite; transform-origin:center; }
+    .spin { animation: spin 3.2s linear infinite; transform-origin:center; }
+    .work-tap { animation: tap 0.55s ease-in-out infinite; transform-origin:64px 95px; }
+    .sleep-drift { animation: sleep-drift 3.6s ease-in-out infinite; }
+    .music-note { animation: note-rise 1.8s ease-in-out infinite; opacity:0; }
+    .music-note.n2 { animation-delay:0.45s; }
+    .music-note.n3 { animation-delay:0.9s; }
+    .juggle-ball { animation: juggle 1.25s ease-in-out infinite; }
+    .juggle-ball.b2 { animation-delay:0.22s; }
+    .juggle-ball.b3 { animation-delay:0.44s; }
+    .spark { animation: sparkle 1.7s ease-in-out infinite; transform-origin:center; }
+    .spark.s2 { animation-delay:0.35s; }
+    .spark.s3 { animation-delay:0.7s; }
+    .state-error .pet-core { animation: shake 0.28s linear infinite; }
+    .state-sweeping .arm-right { animation: sweep 0.9s ease-in-out infinite; }
+    .state-react .pet-core { animation: pop 0.75s ease-in-out infinite; }
+    .state-sleeping .pet-core, .state-dozing .pet-core, .state-collapsing .pet-core { animation: sleep-breathe 3.8s ease-in-out infinite; }
+    @keyframes pet-breathe { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-3px) scale(1.025,0.985)} }
+    @keyframes sleep-breathe { 0%,100%{transform:translateY(1px) scale(1,0.98)} 50%{transform:translateY(-1px) scale(1.02,1)} }
+    @keyframes tail-sway { 0%,100%{transform:rotate(-4deg)} 50%{transform:rotate(9deg)} }
+    @keyframes ear-twitch { 0%,92%,100%{transform:rotate(0)} 95%{transform:rotate(-8deg)} }
+    @keyframes arm-left { 0%,100%{transform:rotate(0)} 50%{transform:rotate(-7deg)} }
+    @keyframes arm-right { 0%,100%{transform:rotate(0)} 50%{transform:rotate(7deg)} }
+    @keyframes blink { 0%,91%,100%{transform:scaleY(1)} 94%{transform:scaleY(0.12)} }
+    @keyframes prop-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+    @keyframes pulse { 0%,100%{transform:scale(1); opacity:.72} 50%{transform:scale(1.18); opacity:1} }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    @keyframes tap { 0%,100%{transform:translateY(0)} 50%{transform:translateY(2px)} }
+    @keyframes sleep-drift { 0%{transform:translate(0,0);opacity:0} 20%{opacity:1} 100%{transform:translate(12px,-22px);opacity:0} }
+    @keyframes note-rise { 0%{transform:translateY(8px) scale(.8);opacity:0} 25%{opacity:1} 100%{transform:translateY(-18px) scale(1.08);opacity:0} }
+    @keyframes juggle { 0%,100%{transform:translateY(7px)} 50%{transform:translateY(-15px)} }
+    @keyframes sparkle { 0%,100%{transform:scale(.75) rotate(0);opacity:.45} 50%{transform:scale(1.15) rotate(16deg);opacity:1} }
+    @keyframes shake { 0%,100%{transform:translate(0,0)} 25%{transform:translate(-1px,1px)} 75%{transform:translate(1px,-1px)} }
+    @keyframes sweep { 0%,100%{transform:rotate(-16deg)} 50%{transform:rotate(18deg)} }
+    @keyframes pop { 0%,100%{transform:scale(1)} 50%{transform:scale(1.055)} }
+  </style>
+  <ellipse cx="64" cy="116" rx="34" ry="7" fill="#0f172a" opacity=".12"/>
+  <g class="state-react" >
+    <g class="pet-core">
+      
+    <g filter="url(#ghost-react-left-glow)" opacity=".98">
+      <path d="M64 18 C41 18 29 39 31 69 C32 88 25 98 24 109 C33 102 38 110 45 112 C53 114 58 107 64 107 C70 107 75 114 83 112 C90 110 95 102 104 109 C103 98 96 88 97 69 C99 39 87 18 64 18 Z" fill="url(#ghost-react-left-body)" stroke="#85c5f7" stroke-width="3.5"/>
+      <ellipse cx="54" cy="38" rx="18" ry="13" fill="url(#ghost-react-left-shine)" opacity=".65"/>
+      <path d="M38 70 C45 82 83 82 90 70" fill="#ffffff" opacity=".28"/>
+      
+    <g class="blink">
+      <ellipse cx="53" cy="52" rx="6.7" ry="7.4" fill="#1e3a8a"/>
+      <ellipse cx="75" cy="52" rx="6.7" ry="7.4" fill="#1e3a8a"/>
+      <circle cx="55.1" cy="49.6" r="2.1" fill="#fff"/>
+      <circle cx="77.1" cy="49.6" r="2.1" fill="#fff"/>
+      <circle cx="51.3" cy="54.7" r="1.1" fill="#fff" opacity=".55"/>
+      <circle cx="73.3" cy="54.7" r="1.1" fill="#fff" opacity=".55"/>
+    </g>
+      
+    <path d="M64 64 V67" stroke="#1e3a8a" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M56 66 Q60 72 64 67 Q68 72 72 66" stroke="#1e3a8a" stroke-width="2.7" fill="none" stroke-linecap="round"/>
+      
+    <ellipse cx="42" cy="63" rx="5.5" ry="3.8" fill="#a8ddff" opacity=".5"/>
+    <ellipse cx="86" cy="63" rx="5.5" ry="3.8" fill="#a8ddff" opacity=".5"/>
+      <path class="float-prop" d="M31 47 C20 44 19 58 29 60" stroke="#a8ddff" stroke-width="4.5" fill="none" stroke-linecap="round" opacity=".58"/>
+      <path class="float-prop" d="M97 47 C108 44 109 58 99 60" stroke="#a8ddff" stroke-width="4.5" fill="none" stroke-linecap="round" opacity=".58"/>
+    </g>
+    </g>
+    <g class="spark"><path d="M24 56 L10 48 L24 40" fill="none" stroke="#4879ad" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></g>
+  </g>
 </svg>

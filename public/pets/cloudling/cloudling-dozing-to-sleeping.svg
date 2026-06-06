@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg id="stage" xmlns="http://www.w3.org/2000/svg" width="880" height="720" viewBox="-32 -24 88 72" preserveAspectRatio="xMidYMid meet">
+<svg id="stage" xmlns="http://www.w3.org/2000/svg" viewBox="-6 -6 36 36" preserveAspectRatio="xMidYMid meet">
 <g id="__cloudling-export-shims" opacity="0" pointer-events="none" style="display:none">
 <g id="btn-play"></g>
 <g id="phase"></g>
@@ -187,9 +187,9 @@ function makeDozeCloudPath(amount) {
 function defs(p, cloudD) {
   return `
     <linearGradient id="${p}-body" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="0.5" stop-color="#f4f5f9"/>
-      <stop offset="1" stop-color="#dee2eb"/>
+      <stop offset="0" stop-color="#93c5fd"/>
+      <stop offset="0.5" stop-color="#60a5fa"/>
+      <stop offset="1" stop-color="#3b82f6"/>
     </linearGradient>
     <linearGradient id="${p}-eye" x1="0" y1="3" x2="0" y2="21" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#B1A7FF"/>
@@ -197,8 +197,8 @@ function defs(p, cloudD) {
       <stop offset="1" stop-color="#3941FF"/>
     </linearGradient>
     <radialGradient id="${p}-hi" cx="0.45" cy="0.25" r="0.55">
-      <stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/>
-      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0" stop-color="#93c5fd" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#93c5fd" stop-opacity="0"/>
     </radialGradient>
     <radialGradient id="${p}-halo" cx="50%" cy="50%" r="50%">
       <stop offset="0" stop-color="#7A9DFF" stop-opacity="0.55"/>
@@ -211,7 +211,7 @@ function defs(p, cloudD) {
       <stop offset="1" stop-color="#1F2BC2"/>
     </linearGradient>
     <linearGradient id="${p}-cuff" x1="12" y1="3.0" x2="12" y2="8.0" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0" stop-color="#93c5fd"/>
       <stop offset="0.5" stop-color="#fafbff"/>
       <stop offset="1" stop-color="#e8ecf6"/>
     </linearGradient>
@@ -224,7 +224,7 @@ function defs(p, cloudD) {
       <feDropShadow dx="0" dy="0.4" stdDeviation="0.5" flood-color="#F5A623" flood-opacity="0.32"/>
     </filter>
     <filter id="${p}-shadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow class="cloud-drop-shadow" dx="0" dy="0.6" stdDeviation="0.8" flood-color="#3941FF" flood-opacity="0.18"/>
+      <feDropShadow class="cloud-drop-shadow" dx="0" dy="0.6" stdDeviation="0.8" flood-color="#3941FF" flood-opacity="0.35"/>
     </filter>
     <filter id="${p}-edge-blur" x="-40%" y="-40%" width="180%" height="180%">
       <feGaussianBlur stdDeviation="0.16"/>
@@ -448,9 +448,9 @@ function renderFrame(t) {
 
   stage.innerHTML = `
 <style>
-.edge-rim-tight { stroke-opacity: .08; }
-.edge-rim-soft  { stroke-opacity: .06; }
-.edge-contact   { stroke-opacity: .08; }
+.edge-rim-tight { stroke-opacity: .9; }
+.edge-rim-soft { stroke-opacity: .75; }
+.edge-contact { stroke-opacity: .9; }
 .wrap {
   width: min(960px, 100%);
   display: grid;
@@ -498,9 +498,9 @@ output {
 .field input { grid-column: 1 / -1; }
 .field output { min-width: 46px; }
 @media (prefers-color-scheme: light) {
-.edge-rim-tight { stroke-opacity: .15; }
-.edge-rim-soft  { stroke-opacity: .10; }
-.edge-contact   { stroke-opacity: .18; }
+.edge-rim-tight { stroke-opacity: .95; }
+.edge-rim-soft { stroke-opacity: .85; }
+.edge-contact { stroke-opacity: .95; }
 .cloud-drop-shadow { flood-opacity: .13; }
 .phase, output, .field { color: rgba(21,33,63,.62); }
 .phase b { color: rgba(21,33,63,.86); }
@@ -524,9 +524,9 @@ output {
       <g class="scene" transform="rotate(${f.sceneRot.toFixed(3)} 12 12)">
         <g id="breath-group" transform="translate(12 12) scale(${f.scale.toFixed(4)}) translate(-12 -12) translate(0 ${f.bodyTy.toFixed(3)})">
           <g class="edge-system">
-            <use class="edge-contact" href="#${p}-cloud-shape" fill="none" stroke="#7d8aa7" stroke-width="1.05" stroke-linejoin="round" transform="translate(0 0.18)" filter="url(#${p}-edge-blur)"/>
-            <use class="edge-rim-soft" href="#${p}-cloud-shape" fill="none" stroke="#7A9DFF" stroke-width="0.90" stroke-linejoin="round" filter="url(#${p}-edge-blur)"/>
-            <use class="edge-rim-tight" href="#${p}-cloud-shape" fill="none" stroke="#aab3c6" stroke-width="0.42" stroke-linejoin="round"/>
+            <use class="edge-contact" href="#${p}-cloud-shape" fill="none" stroke="#7d8aa7" stroke-width="1.4" stroke-linejoin="round" transform="translate(0 0.18)" filter="url(#${p}-edge-blur)"/>
+            <use class="edge-rim-soft" href="#${p}-cloud-shape" fill="none" stroke="#7A9DFF" stroke-width="1.2" stroke-linejoin="round" filter="url(#${p}-edge-blur)"/>
+            <use class="edge-rim-tight" href="#${p}-cloud-shape" fill="none" stroke="#aab3c6" stroke-width="0.8" stroke-linejoin="round"/>
           </g>
           <g filter="url(#${p}-shadow)">
             <use href="#${p}-cloud-shape" fill="url(#${p}-body)"/>

@@ -5,9 +5,9 @@
   font: 600 10px ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #7A9DFF;
 }
-.edge-rim-tight { stroke-opacity: .65; }
-.edge-rim-soft { stroke-opacity: .50; }
-.edge-contact { stroke-opacity: .65; }
+.edge-rim-tight { stroke-opacity: .9; }
+.edge-rim-soft { stroke-opacity: .75; }
+.edge-contact { stroke-opacity: .9; }
 .duration-probe {
   opacity: 0;
   animation: mini-happy-duration-probe 3.6s linear 1 both;
@@ -18,9 +18,9 @@
 }
 @media (prefers-color-scheme: light) {
 .v { color: #3941FF; }
-.edge-rim-tight { stroke-opacity: .75; }
-.edge-rim-soft { stroke-opacity: .60; }
-.edge-contact { stroke-opacity: .75; }
+.edge-rim-tight { stroke-opacity: .95; }
+.edge-rim-soft { stroke-opacity: .85; }
+.edge-contact { stroke-opacity: .95; }
 .cloud-drop-shadow { flood-opacity: .13; }
 .food-cloud-shadow { flood-opacity: .28; flood-color: #5060FF; }
 .food-cloud > path {
@@ -33,9 +33,9 @@
 ]]></style>
       <defs>
         <linearGradient id="body-grad" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stop-color="#f0f9ff"/>
-          <stop offset=".5" stop-color="#e0f2fe"/>
-          <stop offset="1" stop-color="#bae6fd"/>
+          <stop offset="0" stop-color="#93c5fd"/>
+          <stop offset=".5" stop-color="#60a5fa"/>
+          <stop offset="1" stop-color="#3b82f6"/>
         </linearGradient>
         <linearGradient id="eye-grad" x1="12" y1="3" x2="12" y2="21" gradientUnits="userSpaceOnUse">
           <stop offset="0" stop-color="#B1A7FF"/>
@@ -43,13 +43,13 @@
           <stop offset="1" stop-color="#3941FF"/>
         </linearGradient>
         <linearGradient id="visible-bias-grad" x1="0" y1="12" x2="24" y2="12" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stop-color="#f0f9ff" stop-opacity=".95"/>
+          <stop offset="0" stop-color="#93c5fd" stop-opacity=".95"/>
           <stop offset=".48" stop-color="#eaf7ff" stop-opacity=".58"/>
-          <stop offset="1" stop-color="#f0f9ff" stop-opacity=".26"/>
+          <stop offset="1" stop-color="#93c5fd" stop-opacity=".26"/>
         </linearGradient>
         <radialGradient id="hi-grad" cx=".45" cy=".25" r=".55">
-          <stop offset="0" stop-color="#f0f9ff" stop-opacity=".9"/>
-          <stop offset="1" stop-color="#f0f9ff" stop-opacity="0"/>
+          <stop offset="0" stop-color="#93c5fd" stop-opacity=".9"/>
+          <stop offset="1" stop-color="#93c5fd" stop-opacity="0"/>
         </radialGradient>
         <filter id="drop" x="-40%" y="-40%" width="180%" height="180%">
           <feDropShadow class="cloud-drop-shadow" dx="0" dy=".55" stdDeviation=".72" flood-color="#3941FF" flood-opacity=".17"/>
@@ -114,8 +114,8 @@
               <rect id="capR" x="11.05" y="9.65" width="2.2" height="4.65" rx="1.1" fill="url(#eye-grad)" stroke="#ffffff" stroke-width="0.08" stroke-opacity="0.7"/>
             </g>
             <g id="arcEye" opacity="0">
-              <path id="arcL" fill="none" stroke="url(#eye-grad)" stroke-width="1.05" stroke-linecap="round"/>
-              <path id="arcR" fill="none" stroke="url(#eye-grad)" stroke-width="1.05" stroke-linecap="round"/>
+              <path id="arcL" fill="none" stroke="url(#eye-grad)" stroke-width="1.4" stroke-linecap="round"/>
+              <path id="arcR" fill="none" stroke="url(#eye-grad)" stroke-width="1.4" stroke-linecap="round"/>
             </g>
           </g>
         </g>

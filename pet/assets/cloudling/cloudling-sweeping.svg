@@ -46,8 +46,8 @@ function commonDefs() {
   return `
     <linearGradient id="body-grad" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#fff"/>
-      <stop offset=".54" stop-color="#e0f2fe"/>
-      <stop offset="1" stop-color="#bae6fd"/>
+      <stop offset=".54" stop-color="#60a5fa"/>
+      <stop offset="1" stop-color="#3b82f6"/>
     </linearGradient>
     <linearGradient id="eye-grad" x1="12" y1="8" x2="12" y2="16" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#B1A7FF"/>
@@ -190,7 +190,7 @@ function makeCloudling(t) {
   return `
     <g class="cloudling" transform="rotate(${pose.rot.toFixed(3)} 12 12) translate(12 12) scale(${pose.scale.toFixed(4)}) translate(-12 -12)">
       <g class="edge-system">
-        <use class="edge-contact" href="#cloud-shape" fill="none" stroke="#7d8aa7" stroke-width="1.05" stroke-linejoin="round" transform="translate(0 .18)" filter="url(#edge-blur)"/>
+        <use class="edge-contact" href="#cloud-shape" fill="none" stroke="#7d8aa7" stroke-width="1.4" stroke-linejoin="round" transform="translate(0 .18)" filter="url(#edge-blur)"/>
         <use class="edge-rim-soft" href="#cloud-shape" fill="none" stroke="#7A9DFF" stroke-width=".90" stroke-linejoin="round" filter="url(#edge-blur)"/>
         <use class="edge-rim-tight" href="#cloud-shape" fill="none" stroke="#aab3c6" stroke-width=".42" stroke-linejoin="round"/>
       </g>
@@ -254,7 +254,7 @@ function renderFrame(t) {
 :root, svg {--bg: #f5f6fb; --panel: #ffffff; --stage-a: #ffffff; --stage-b: #edf1fb; --ink: #2e3038; --muted: rgba(46,48,56,.62); --accent: #6B5CFF; --card-plate: rgba(52,61,110,.18); --card-fill: rgba(245,247,255,.82); --card-tint: rgba(91,121,220,.08); --card-stroke: rgba(56,68,132,.42); --card-inner: rgba(99,116,178,.34); --line-a: rgba(56,68,132,.52); --line-b: rgba(77,92,154,.40); --line-c: rgba(85,96,126,.34)}
 .edge-rim-tight { stroke-opacity: .18; }
 .edge-rim-soft { stroke-opacity: .12; }
-.edge-contact { stroke-opacity: .75; }
+.edge-contact { stroke-opacity: .95; }
 }
 </style>
 <defs>${commonDefs()}</defs>

@@ -1,4 +1,5 @@
 let agentName = 'loading';
+let agentLabel = 'loading';
 let petType = 'cat';
 let currentState = 'idle';
 let petSize = 120;
@@ -170,6 +171,7 @@ const petThemes = {
   },
   ghost: {
     files: stateFileMap('ghost'),
+    hideBadge: true,
     bodyHitBox: { x: 0.16, y: 0.12, w: 0.68, h: 0.8 },
     reactions: {
       drag: { file: 'ghost-react-drag.svg' },
@@ -184,6 +186,7 @@ const petThemes = {
     pixelated: true,
     hideBadge: true,
     bodyHitBox: { x: 0.12, y: 0.35, w: 0.76, h: 0.55 },
+    resizeHandleAnchor: { x: 0.69, y: 0.9 },
     idleAnimations: clawdIdleAnimations,
     autoReturn: clawdAutoReturnMs,
     reactions: {
@@ -279,7 +282,7 @@ function normalizeState(state) {
   return state || 'idle';
 }
 
-function isClawd() {
+function shouldHideStateBadge() {
   return getTheme().hideBadge === true;
 }
 
@@ -293,11 +296,12 @@ function resolveThemeFile(type, state) {
 // 通过 IPC 接收初始化参数
 window.petBridge.onInitPet((data) => {
   agentName = data.agent || 'unknown';
+  agentLabel = data.label || data.displayName || agentName;
   petType = data.type || 'cat';
   currentState = normalizeState(data.state || 'idle');
   petSize = data.size || 120;
   document.documentElement.dataset.petType = petType;
-  nameEl.textContent = agentName;
+  nameEl.textContent = agentLabel;
   loadSVG(petType, currentState);
   applyState(currentState);
   // 应用保存的大小
@@ -339,7 +343,7 @@ const stateMessages = {
   notification: ['需要你看一下', '有新的提醒', '请确认一下'],
   carrying: ['正在搬运上下文...', '准备工作区...', '带上资料走起'],
   sweeping: ['正在整理上下文...', '清理一下思路...', '压缩上下文中'],
-  juggling: ['子任务启动中...', '多线协作中...', '正在调度任务'],
+  juggling: ['节奏在线♪', '忙碌又带感...', '正在律动中...'],
   sleeping: ['💤 zzz...', '好困...', '休息一下...'],
 };
 
@@ -376,12 +380,17 @@ function positionResizeHandle() {
   if (!img) return;
   const imgRect = img.getBoundingClientRect();
   const spriteRect = sprite.getBoundingClientRect();
-  const hitBox = getTheme().bodyHitBox || { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+  const theme = getTheme();
+  const hitBox = theme.bodyHitBox || { x: 0.1, y: 0.1, w: 0.8, h: 0.8 };
+  const anchor = theme.resizeHandleAnchor || {
+    x: hitBox.x + hitBox.w,
+    y: hitBox.y + hitBox.h,
+  };
   const handleSize = resizeHandle.offsetWidth || 16;
-  const bodyRight = imgRect.left - spriteRect.left + imgRect.width * (hitBox.x + hitBox.w);
-  const bodyBottom = imgRect.top - spriteRect.top + imgRect.height * (hitBox.y + hitBox.h);
-  resizeHandle.style.left = `${Math.round(bodyRight - handleSize * 0.55)}px`;
-  resizeHandle.style.top = `${Math.round(bodyBottom - handleSize * 0.55)}px`;
+  const anchorX = imgRect.left - spriteRect.left + imgRect.width * anchor.x;
+  const anchorY = imgRect.top - spriteRect.top + imgRect.height * anchor.y;
+  resizeHandle.style.left = `${Math.round(anchorX - handleSize * 0.78)}px`;
+  resizeHandle.style.top = `${Math.round(anchorY - handleSize * 0.78)}px`;
 }
 
 function isPetBodyPoint(clientX, clientY) {
@@ -420,7 +429,7 @@ function applyState(state) {
   const cfg = stateConfig[state] || stateConfig.idle;
 
   // 状态徽章
-  stateBadge.textContent = isClawd() ? '' : cfg.badge;
+  stateBadge.textContent = shouldHideStateBadge() ? '' : cfg.badge;
 
   // 更新菜单状态
   menuState.textContent = `状态: ${state}`;
@@ -516,9 +525,9 @@ function getSpeechLabel(role) {
     status: '正在处理',
     error: '错误',
     ask: '需要你确认',
-    assistant: agentName,
+    assistant: agentLabel,
   };
-  return labels[role] || agentName;
+  return labels[role] || agentLabel;
 }
 
 function looksLikeQuestion(text) {
@@ -583,7 +592,7 @@ function applySpeechState(role, streaming, isFinal) {
 
 // 右键菜单
 function showMenu() {
-  menuAgentName.textContent = `${petEmojis[petType] || ''} ${agentName}`;
+  menuAgentName.textContent = `${petEmojis[petType] || ''} ${agentLabel}`;
   menuState.textContent = `状态: ${currentState}`;
   menu.classList.remove('hidden');
 }
@@ -785,7 +794,18 @@ sprite.addEventListener('click', (e) => {
   if (menu.contains(e.target)) return;
   hideMenu();
   showPetReaction('clickLeft');
-  showBubble();
+  showBubble('正在打开工作台...');
+  if (window.petBridge.openWorkspace) {
+    window.petBridge.openWorkspace(agentName)
+      .then((result) => {
+        if (!result || result.success === false) {
+          showBubble('工作台未响应');
+        } else if (!result.workspaceOpen) {
+          showBubble('请先打开工作台');
+        }
+      })
+      .catch(() => showBubble('工作台打开失败'));
+  }
 });
 
 sprite.addEventListener('dblclick', (e) => {

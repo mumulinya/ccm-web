@@ -6,10 +6,81 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
-const { execFileSync, execSync, spawn, spawnSync } = require("child_process");
+const { execFileSync, execSync, spawn, spawnSync, exec } = require("child_process");
 const os = require("os");
 const url = require("url");
 const { toolManager } = require("./tool-manager");
+// === 动态从注册表中读取最新的 Windows PATH 环境变量，并对 Winget 默认路径进行补充 ===
+function refreshEnvPath() {
+    if (process.platform !== "win32")
+        return;
+    try {
+        const { execSync } = require("child_process");
+        let userPath = "";
+        let sysPath = "";
+        try {
+            const hkcu = execSync('reg query "HKCU\\Environment" /v Path', { encoding: "utf8" });
+            const matchHkcu = hkcu.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.*)/i);
+            userPath = matchHkcu ? matchHkcu[1].trim() : "";
+        }
+        catch (e) { }
+        try {
+            const hklm = execSync('reg query "HKLM\\System\\CurrentControlSet\\Control\\Session Manager\\Environment" /v Path', { encoding: "utf8" });
+            const matchHklm = hklm.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.*)/i);
+            sysPath = matchHklm ? matchHklm[1].trim() : "";
+        }
+        catch (e) { }
+        const expandPath = (p) => {
+            return p.replace(/%([^%]+)%/g, (_, name) => process.env[name] || "");
+        };
+        userPath = expandPath(userPath);
+        sysPath = expandPath(sysPath);
+        const paths = new Set();
+        // 把现有的 PATH 加上
+        (process.env.PATH || "").split(path.delimiter).forEach(p => { if (p)
+            paths.add(path.resolve(p.trim())); });
+        // 把最新的注册表 PATH 加上
+        userPath.split(";").forEach(p => { if (p)
+            paths.add(path.resolve(p.trim())); });
+        sysPath.split(";").forEach(p => { if (p)
+            paths.add(path.resolve(p.trim())); });
+        // 针对 winget 常见的 yt-dlp 和 ffmpeg 目录，进行备用容错，如果不存在在 PATH 中则显式加入
+        const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || "C:\\Users\\admin", "AppData\\Local");
+        const wingetPackagesDir = path.join(localAppData, "Microsoft\\WinGet\\Packages");
+        if (fs.existsSync(wingetPackagesDir)) {
+            try {
+                const dirs = fs.readdirSync(wingetPackagesDir);
+                for (const dir of dirs) {
+                    if (dir.includes("yt-dlp.yt-dlp")) {
+                        paths.add(path.resolve(path.join(wingetPackagesDir, dir)));
+                    }
+                    else if (dir.includes("yt-dlp.FFmpeg")) {
+                        // ffmpeg 里面通常有 bin
+                        const ffmpegBin = path.join(wingetPackagesDir, dir, "ffmpeg-N-124716-g054dffd133-win64-gpl", "bin");
+                        if (fs.existsSync(ffmpegBin)) {
+                            paths.add(path.resolve(ffmpegBin));
+                        }
+                        else {
+                            // 备用：搜索任何名为 bin 的文件夹
+                            const subDirs = fs.readdirSync(path.join(wingetPackagesDir, dir));
+                            for (const sub of subDirs) {
+                                const checkBin = path.join(wingetPackagesDir, dir, sub, "bin");
+                                if (fs.existsSync(checkBin))
+                                    paths.add(path.resolve(checkBin));
+                            }
+                        }
+                    }
+                }
+            }
+            catch (e) { }
+        }
+        process.env.PATH = Array.from(paths).join(path.delimiter);
+    }
+    catch (e) {
+        console.error("刷新 Windows PATH 失败:", e.message);
+    }
+}
+refreshEnvPath();
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
 const PID_DIR = path.join(CCM_DIR, "pids");
@@ -81,8 +152,18 @@ function safeAddGroupLog(groupId, level, category, message, details = null) {
     }
 }
 const petStatusClients = new Set();
+const petWorkspaceClients = new Set();
 const stateCache = new Map();
 const agentActivity = new Map();
+const petWorkspaceTargets = new Map();
+const MUSIC_PET_AGENT_NAME = "music-agent";
+const MUSIC_PET_AGENT_LABEL = "音乐管理 Agent";
+let musicPetState = {
+    state: "idle",
+    detail: "等待音乐指令",
+    track: null,
+    timestamp: Date.now(),
+};
 function broadcastPetSpeech(agent, payload = {}) {
     const text = payload.text == null ? "" : String(payload.text);
     if (!agent || (!text.trim() && !payload.final))
@@ -100,8 +181,115 @@ function broadcastPetSpeech(agent, payload = {}) {
     for (const client of petStatusClients)
         writeSse(client, event);
 }
-function setAgentActivity(name, state, detail = "") {
+function broadcastPetConfigChanged() {
+    const event = {
+        type: "config",
+        timestamp: new Date().toISOString(),
+    };
+    for (const client of petStatusClients)
+        writeSse(client, event);
+}
+function sanitizePetNavigationTarget(target = {}) {
+    const tab = String(target.tab || "").trim();
+    if (tab === "music")
+        return { tab: "music" };
+    if (tab === "groups") {
+        return {
+            tab: "groups",
+            groupId: target.groupId ? String(target.groupId) : "",
+            keyword: target.keyword ? String(target.keyword) : "",
+        };
+    }
+    if (tab === "projects") {
+        return {
+            tab: "projects",
+            project: target.project ? String(target.project) : "",
+            sessionId: target.sessionId ? String(target.sessionId) : "",
+            keyword: target.keyword ? String(target.keyword) : "",
+        };
+    }
+    return { tab: "projects", project: target.project ? String(target.project) : "" };
+}
+function setAgentWorkspaceTarget(name, target = null) {
+    if (!name || !target)
+        return;
+    petWorkspaceTargets.set(name, {
+        ...sanitizePetNavigationTarget(target),
+        updatedAt: Date.now(),
+    });
+}
+function getPetNavigationTarget(agent) {
+    const name = String(agent || "").trim();
+    if (name === MUSIC_PET_AGENT_NAME)
+        return { tab: "music" };
+    const existing = petWorkspaceTargets.get(name);
+    if (existing?.tab) {
+        const { updatedAt, ...target } = existing;
+        return target;
+    }
+    const project = getConfigs().find(c => c.name === name);
+    if (project)
+        return { tab: "projects", project: name };
+    return { tab: "projects" };
+}
+function buildPetNavigationUrl(target) {
+    const params = new URLSearchParams();
+    params.set("tab", target?.tab || "projects");
+    if (target?.project)
+        params.set("project", String(target.project));
+    if (target?.sessionId)
+        params.set("sessionId", String(target.sessionId));
+    if (target?.groupId)
+        params.set("groupId", String(target.groupId));
+    if (target?.keyword)
+        params.set("keyword", String(target.keyword));
+    return `http://localhost:${PORT}/?${params.toString()}`;
+}
+function broadcastPetNavigation(agent, target) {
+    const event = {
+        type: "navigate",
+        agent,
+        target,
+        url: buildPetNavigationUrl(target),
+        timestamp: new Date().toISOString(),
+    };
+    for (const client of petStatusClients)
+        writeSse(client, event);
+    return event;
+}
+function setAgentActivity(name, state, detail = "", workspaceTarget = null) {
+    if (workspaceTarget)
+        setAgentWorkspaceTarget(name, workspaceTarget);
     agentActivity.set(name, { state, timestamp: Date.now(), detail });
+}
+function normalizePetState(state) {
+    const value = String(state || "idle");
+    const allowed = new Set([
+        "idle", "working", "thinking", "error", "happy", "attention",
+        "notification", "carrying", "sweeping", "juggling", "yawning",
+        "dozing", "collapsing", "sleeping", "waking",
+    ]);
+    return allowed.has(value) ? value : "idle";
+}
+function setMusicPetState(state, detail = "", track = null) {
+    setAgentWorkspaceTarget(MUSIC_PET_AGENT_NAME, { tab: "music" });
+    musicPetState = {
+        state: normalizePetState(state),
+        detail: detail || "等待音乐指令",
+        track: track || null,
+        timestamp: Date.now(),
+    };
+    const event = {
+        type: "state",
+        agent: MUSIC_PET_AGENT_NAME,
+        displayName: MUSIC_PET_AGENT_LABEL,
+        state: musicPetState.state,
+        lastActivity: new Date(musicPetState.timestamp).toISOString(),
+        detail: musicPetState.detail,
+        track: musicPetState.track,
+    };
+    for (const client of petStatusClients)
+        writeSse(client, event);
 }
 setInterval(() => {
     const now = Date.now();
@@ -199,6 +387,51 @@ function getAgentState(name) {
     const result = { state, lastActivity, detail, cachedAt: now };
     stateCache.set(name, result);
     return result;
+}
+function getMusicPetAgent() {
+    return {
+        name: MUSIC_PET_AGENT_NAME,
+        displayName: MUSIC_PET_AGENT_LABEL,
+        petLabel: MUSIC_PET_AGENT_LABEL,
+        virtual: true,
+        type: "music",
+        agent: "music",
+        running: true,
+        state: musicPetState.state,
+        lastActivity: new Date(musicPetState.timestamp).toISOString(),
+        stateDetail: musicPetState.detail,
+        track: musicPetState.track,
+    };
+}
+function getPetAgents() {
+    const configs = getConfigs();
+    const projectAgents = configs.map(c => {
+        const s = getAgentState(c.name);
+        return {
+            name: c.name,
+            displayName: c.name,
+            petLabel: c.name,
+            virtual: false,
+            type: "project",
+            agent: getConfigInfo(c.path)[0]?.agent || "claudecode",
+            running: s.state !== "sleeping",
+            state: s.state,
+            lastActivity: s.lastActivity,
+            stateDetail: s.detail,
+            track: null,
+        };
+    });
+    return [...projectAgents, getMusicPetAgent()];
+}
+function getPetStatusSnapshot() {
+    return getPetAgents().map(a => ({
+        agent: a.name,
+        displayName: a.displayName || a.name,
+        state: a.state,
+        lastActivity: a.lastActivity,
+        detail: a.stateDetail,
+        track: a.track || null,
+    }));
 }
 function getWorkDirForProject(projectName) {
     const configs = getConfigs();
@@ -478,13 +711,13 @@ async function appendToolResults(output) {
         return output;
     const results = [];
     for (const call of calls) {
-        const result = await toolManager.executeToolCall(call.name, call.arguments || {});
+        const result = await toolManager.execToolCall(call.name, call.arguments || {});
         results.push(`### ${call.name}\n${result}`);
     }
     return `${output}\n\n[工具执行结果]\n${results.join("\n\n")}`;
 }
-function callAgent(projectName, message, workDir, agentType, timeoutMs) {
-    setAgentActivity(projectName, "working", "Agent 调用中");
+function callAgent(projectName, message, workDir, agentType, timeoutMs, workspaceTarget = null) {
+    setAgentActivity(projectName, "working", "Agent 调用中", workspaceTarget || { tab: "projects", project: projectName });
     const startedAt = Date.now();
     const changeSnapshot = workDir ? createFileChangeSnapshot(workDir) : null;
     const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
@@ -548,7 +781,7 @@ function callAgent(projectName, message, workDir, agentType, timeoutMs) {
     }
 }
 // 流式调用 Agent（SSE）
-function callAgentStream(projectName, message, workDir, agentType, res) {
+function callAgentStream(projectName, message, workDir, agentType, res, workspaceTarget = null) {
     const startedAt = Date.now();
     const changeSnapshot = workDir ? createFileChangeSnapshot(workDir) : null;
     const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
@@ -579,7 +812,7 @@ function callAgentStream(projectName, message, workDir, agentType, res) {
     // 发送状态事件
     res.write(`data: ${JSON.stringify({ type: "status", text: "Agent 正在思考..." })}\n\n`);
     broadcastPetSpeech(projectName, { role: "status", text: "Agent 正在思考...", source: "project" });
-    setAgentActivity(projectName, "working", "正在处理消息");
+    setAgentActivity(projectName, "working", "正在处理消息", workspaceTarget || { tab: "projects", project: projectName });
     const child = spawn(cmd, [], { shell: true, cwd: safeCwd, stdio: ["pipe", "pipe", "pipe"] });
     // 关闭 stdin（已通过临时文件传入）
     child.stdin.end();
@@ -709,7 +942,8 @@ function writeSse(res, data) {
     catch { }
 }
 function callAgentForGroupStream(projectName, message, workDir, agentType, options = {}) {
-    setAgentActivity(projectName, "working", options.detail || "群聊协作中");
+    const groupId = options.groupId;
+    setAgentActivity(projectName, "working", options.detail || "群聊协作中", groupId ? { tab: "groups", groupId } : { tab: "groups" });
     const startedAt = Date.now();
     const changeSnapshot = workDir ? createFileChangeSnapshot(workDir) : null;
     const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
@@ -717,7 +951,6 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
     fs.writeFileSync(tmpMsg, message, "utf-8");
     const cmd = buildAgentCommand(agentType, tmpMsg);
     const streamRes = options.res;
-    const groupId = options.groupId;
     writeSse(streamRes, { type: "status", text: `🧠 ${projectName} 正在思考...`, agent: projectName });
     broadcastPetSpeech(projectName, { role: "status", text: `${projectName} 正在思考...`, source: "group" });
     return new Promise((resolve) => {
@@ -3517,6 +3750,260 @@ command = "/projects"
         });
         return;
     }
+    // === Smithery 配置 API ===
+    if (pathname === "/api/smithery/config" && req.method === "GET") {
+        const smitheryConfigPath = path.join(os.homedir(), ".cc-connect", "smithery-config.json");
+        try {
+            if (fs.existsSync(smitheryConfigPath)) {
+                const config = JSON.parse(fs.readFileSync(smitheryConfigPath, "utf-8"));
+                return sendJson(res, { success: true, key: config.key || "" });
+            }
+            return sendJson(res, { success: true, key: "" });
+        }
+        catch (e) {
+            return sendJson(res, { success: false, error: e.message });
+        }
+    }
+    if (pathname === "/api/smithery/config" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const { key } = JSON.parse(body);
+                const smitheryConfigPath = path.join(os.homedir(), ".cc-connect", "smithery-config.json");
+                const dir = path.dirname(smitheryConfigPath);
+                if (!fs.existsSync(dir)) {
+                    fs.mkdirSync(dir, { recursive: true });
+                }
+                fs.writeFileSync(smitheryConfigPath, JSON.stringify({ key: key || "" }, null, 2), "utf-8");
+                sendJson(res, { success: true });
+            }
+            catch (e) {
+                sendJson(res, { error: e.message }, 400);
+            }
+        });
+        return;
+    }
+    // === 技能与工具商城 API ===
+    if (pathname === "/api/marketplace/list" && req.method === "GET") {
+        const homeDir = process.env.USERPROFILE || process.env.HOME || "C:\\Users\\admin";
+        const localItems = [
+            {
+                name: "mcp-feishu",
+                type: "mcp",
+                description: "飞书办公协同连接器。支持多 Agent 自动发送飞书富文本卡片消息、同步任务进展、读取团队在线文档等。",
+                command: "node dist/index.js",
+                env: "FEISHU_APP_ID=your_app_id\nFEISHU_APP_SECRET=your_app_secret",
+                author: "CC-Connect 官方",
+                emoji: "🔌",
+                version: "1.0.2"
+            },
+            {
+                name: "filesystem-mcp",
+                type: "mcp",
+                description: "本地文件系统安全沙箱读写工具。允许 Agent 极其安全地对白名单文件夹下的代码文件进行高频读写、创建与全局分析。",
+                command: `npx -y @modelcontextprotocol/server-filesystem ${path.join(homeDir, "Desktop")}`,
+                author: "Anthropic",
+                emoji: "📁",
+                version: "1.1.0"
+            },
+            {
+                name: "fetch-web-mcp",
+                type: "mcp",
+                description: "外部网页内容抓取器。可以让 Agent 直接访问任何公共网页，并自动将 HTML 转为精简 Markdown 以便大模型快速分析。",
+                command: "npx -y @modelcontextprotocol/server-fetch",
+                author: "Anthropic",
+                emoji: "🌐",
+                version: "1.0.0"
+            },
+            {
+                name: "code-safety-auditor",
+                type: "skill",
+                description: "深度代码安全审计专家。注入高阶安全合规提示词，强力命令 Agent 在编写或重构代码时防范越权、SQL注入和内存泄露等漏洞。",
+                prompt: "请以极其严苛的资深安全专家身份审查以下代码。排查：1) 垂直与水平越权漏洞；2) 关键参数的输入校验与 SQL 注入防范；3) 异步未关闭句柄与内存泄露。确保代码完全合规。",
+                author: "Security Team",
+                emoji: "🛡️",
+                version: "2.1.0"
+            },
+            {
+                name: "premium-theme-architect",
+                type: "skill",
+                description: "极光设计与高端 UI 交互架构师。轻量化约束 Agent 在生成前端代码时采用渐变色、微动效及玻璃拟态，大幅提升界面美感。",
+                prompt: "请充当顶级 UI/UX 视觉设计师。在生成所有前端界面（HTML/CSS/Vue）时，必须贯彻以下设计哲学：1) 精选 HSL 渐变色，避免纯红绿蓝；2) 引入 subtle micro-animations 微动效及 hover 过渡；3) 采用玻璃拟态 (backdrop-filter: blur) 与精致的圆角投影，营造 Premium 质感。",
+                author: "Design Team",
+                emoji: "🎨",
+                version: "1.2.0"
+            }
+        ];
+        const source = parsed.query.source || "local";
+        const customUrl = parsed.query.url;
+        if (source === "local") {
+            return sendJson(res, { success: true, items: localItems });
+        }
+        if (source === "smithery") {
+            // 读取 Smithery Key
+            const smitheryConfigPath = path.join(os.homedir(), ".cc-connect", "smithery-config.json");
+            let key = "";
+            try {
+                if (fs.existsSync(smitheryConfigPath)) {
+                    const config = JSON.parse(fs.readFileSync(smitheryConfigPath, "utf-8"));
+                    key = config.key || "";
+                }
+            }
+            catch (e) { }
+            if (!key) {
+                return sendJson(res, { success: true, needKey: true, items: [] });
+            }
+            const https = require("https");
+            const options = {
+                hostname: "api.smithery.ai",
+                path: "/servers?pageSize=50",
+                method: "GET",
+                headers: {
+                    "User-Agent": "ccm-console",
+                    "Authorization": `Bearer ${key}`
+                }
+            };
+            const reqGet = https.request(options, (remoteRes) => {
+                if (remoteRes.statusCode !== 200) {
+                    remoteRes.resume();
+                    let errDetail = `Smithery API 请求失败 (HTTP ${remoteRes.statusCode})`;
+                    if (remoteRes.statusCode === 401) {
+                        errDetail = "Smithery API Key 无效或过期，请重新激活。";
+                    }
+                    return sendJson(res, {
+                        success: true,
+                        needKey: remoteRes.statusCode === 401,
+                        error: errDetail,
+                        items: []
+                    });
+                }
+                let rawData = "";
+                remoteRes.on("data", (chunk) => rawData += chunk);
+                remoteRes.on("end", () => {
+                    try {
+                        const parsedData = JSON.parse(rawData);
+                        const servers = Array.isArray(parsedData) ? parsedData : (parsedData.servers || parsedData.data || parsedData.items || []);
+                        const items = servers.map((s) => {
+                            return {
+                                name: s.displayName || s.qualifiedName || s.name || s.slug || "未命名MCP",
+                                type: "mcp",
+                                description: s.description || s.summary || "无描述",
+                                command: `npx -y @smithery/cli run ${s.qualifiedName || s.name || s.slug}`,
+                                env: "",
+                                author: s.namespace || s.owner || s.author || "Smithery.ai",
+                                emoji: "🔌",
+                                version: s.version || "1.0.0"
+                            };
+                        });
+                        sendJson(res, { success: true, items });
+                    }
+                    catch (err) {
+                        sendJson(res, {
+                            success: true,
+                            error: "解析 Smithery 返回数据失败",
+                            items: []
+                        });
+                    }
+                });
+            });
+            reqGet.on("error", (err) => {
+                sendJson(res, {
+                    success: true,
+                    error: `连接 Smithery 失败: ${err.message}`,
+                    items: []
+                });
+            });
+            reqGet.end();
+            return;
+        }
+        let fetchUrl = "";
+        if (source === "github") {
+            // 远程精选源，包含约 15 个常用工具与技能，托管在公开的 GitHub raw 上
+            fetchUrl = `https://raw.githubusercontent.com/mumulinya/ccm-web/main/public/marketplace.json?t=${Date.now()}`;
+        }
+        else if (source === "custom" && customUrl) {
+            fetchUrl = String(customUrl);
+        }
+        else {
+            return sendJson(res, { success: false, error: "未指定有效的自定义 URL", items: localItems });
+        }
+        const https = require("https");
+        https.get(fetchUrl, { headers: { "User-Agent": "ccm-console" } }, (remoteRes) => {
+            if (remoteRes.statusCode !== 200) {
+                remoteRes.resume();
+                return sendJson(res, {
+                    success: true,
+                    error: `远程源加载失败 (HTTP ${remoteRes.statusCode})，已自动切换为本地精选。`,
+                    items: localItems
+                });
+            }
+            let rawData = "";
+            remoteRes.on("data", (chunk) => rawData += chunk);
+            remoteRes.on("end", () => {
+                try {
+                    const parsedData = JSON.parse(rawData);
+                    const items = Array.isArray(parsedData) ? parsedData : (parsedData.items || []);
+                    sendJson(res, { success: true, items });
+                }
+                catch (err) {
+                    sendJson(res, {
+                        success: true,
+                        error: "解析外部 JSON 配置文件失败，已自动回退至本地官方精选。",
+                        items: localItems
+                    });
+                }
+            });
+        }).on("error", (err) => {
+            sendJson(res, {
+                success: true,
+                error: `连接远程数据源失败: ${err.message}，已自动回退至本地官方精选。`,
+                items: localItems
+            });
+        });
+        return;
+    }
+    if (pathname === "/api/marketplace/install" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const item = JSON.parse(body);
+                if (!item.name)
+                    return sendJson(res, { error: "名称不能为空" }, 400);
+                if (item.type === "mcp") {
+                    saveMcpTool({
+                        name: item.name,
+                        description: item.description,
+                        command: item.command,
+                        env: item.env || "",
+                        enabled: true
+                    });
+                }
+                else if (item.type === "skill") {
+                    saveSkill({
+                        name: item.name,
+                        description: item.description,
+                        prompt: item.prompt,
+                        enabled: true
+                    });
+                }
+                else {
+                    return sendJson(res, { error: "不支持的工具类型" }, 400);
+                }
+                // 自动热加载工具以使安装立即生效
+                toolManager.loadTools().then(() => {
+                    sendJson(res, { success: true });
+                }).catch((err) => {
+                    sendJson(res, { success: false, error: "加载工具失败: " + err.message });
+                });
+            }
+            catch (e) {
+                sendJson(res, { error: e.message }, 400);
+            }
+        });
+        return;
+    }
     // === 对话模板 API ===
     // 获取所有模板
     if (pathname === "/api/templates" && req.method === "GET") {
@@ -4570,7 +5057,7 @@ command = "/projects"
                     });
                     res.write(`data: ${JSON.stringify({ type: "status", text: `🧠 并行处理中，${targetMembers.length} 个 Agent 同时工作...` })}\n\n`);
                     for (const member of targetMembers) {
-                        setAgentActivity(member.project, "working", "群聊协作中");
+                        setAgentActivity(member.project, "working", "群聊协作中", { tab: "groups", groupId: group_id });
                         broadcastPetSpeech(member.project, { role: "status", text: "群聊协作中，正在思考...", source: "group" });
                     }
                     const getAgentPrompt = (member) => {
@@ -4763,7 +5250,7 @@ command = "/projects"
                         "Access-Control-Allow-Origin": "*",
                     });
                     res.write(`data: ${JSON.stringify({ type: "status", text: "🧠 Agent 正在思考..." })}\n\n`);
-                    setAgentActivity(target_project_actual, "working", "群聊协作中");
+                    setAgentActivity(target_project_actual, "working", "群聊协作中", { tab: "groups", groupId: group_id });
                     broadcastPetSpeech(target_project_actual, { role: "status", text: "Agent 正在思考...", source: "group" });
                     const child = spawn(cmd, [], { shell: true, cwd: safeCwd, stdio: ["pipe", "pipe", "pipe"] });
                     child.stdin.end();
@@ -4896,7 +5383,7 @@ command = "/projects"
                 }
                 // 非流式：普通调用
                 console.log(`[群聊] 非流式调用 Agent ${target_project_actual}...`);
-                const output = callAgent(target_project_actual, fullPrompt, workDir, agentType, 300000);
+                const output = callAgent(target_project_actual, fullPrompt, workDir, agentType, 300000, { tab: "groups", groupId: group_id });
                 console.log(`[群聊] Agent ${target_project_actual} 回复: ${output.substring(0, 200)}...`);
                 appendGroupMessage(group_id, {
                     id: "m" + Date.now().toString(36) + "a",
@@ -4995,7 +5482,7 @@ command = "/projects"
                     }
                     toolsContext += toolManager.buildToolPrompt();
                     const fullPrompt = `你是群聊中的 ${member.project} Agent。${toolsContext}${sharedFilesContext}\n群聊记录：\n${context}\n\n请回复：${message}`;
-                    const output = callAgent(member.project, fullPrompt, workDir, agentType, 300000);
+                    const output = callAgent(member.project, fullPrompt, workDir, agentType, 300000, { tab: "groups", groupId: group_id });
                     appendGroupMessage(group_id, {
                         id: "m" + Date.now().toString(36) + member.project,
                         role: "assistant", agent: member.project, content: output,
@@ -5548,6 +6035,1385 @@ ${diff}
         });
         return;
     }
+    // === 对话历史搜索 API ===
+    if (pathname === "/api/search" && req.method === "GET") {
+        const keyword = (parsed.query.q || "").trim().toLowerCase();
+        const project = parsed.query.project || "";
+        const limit = parseInt(parsed.query.limit) || 50;
+        if (!keyword)
+            return sendJson(res, { success: true, results: [] });
+        const results = [];
+        // 搜索 web-sessions 中的对话历史
+        if (fs.existsSync(WEB_SESSIONS_DIR)) {
+            const projects = fs.readdirSync(WEB_SESSIONS_DIR).filter(f => fs.statSync(path.join(WEB_SESSIONS_DIR, f)).isDirectory());
+            for (const proj of projects) {
+                if (project && proj !== project)
+                    continue;
+                const projDir = path.join(WEB_SESSIONS_DIR, proj);
+                const sessionFiles = fs.readdirSync(projDir).filter(f => f.endsWith(".json"));
+                for (const sf of sessionFiles) {
+                    try {
+                        const session = JSON.parse(fs.readFileSync(path.join(projDir, sf), "utf-8"));
+                        const sessionName = session.name || sf.replace(".json", "");
+                        for (const msg of (session.history || [])) {
+                            const content = (msg.content || "").toLowerCase();
+                            if (content.includes(keyword)) {
+                                results.push({
+                                    project: proj,
+                                    sessionId: session.id || sf.replace(".json", ""),
+                                    sessionName,
+                                    role: msg.role,
+                                    agent: msg.agent || null,
+                                    content: msg.content || "",
+                                    timestamp: msg.timestamp || session.updated_at,
+                                    matchIndex: content.indexOf(keyword),
+                                });
+                                if (results.length >= limit)
+                                    break;
+                            }
+                        }
+                        if (results.length >= limit)
+                            break;
+                    }
+                    catch { }
+                }
+                if (results.length >= limit)
+                    break;
+            }
+        }
+        // 搜索群聊消息
+        if (fs.existsSync(GROUP_MESSAGES_DIR)) {
+            const groupFiles = fs.readdirSync(GROUP_MESSAGES_DIR).filter(f => f.endsWith(".json"));
+            for (const gf of groupFiles) {
+                try {
+                    const messages = JSON.parse(fs.readFileSync(path.join(GROUP_MESSAGES_DIR, gf), "utf-8"));
+                    const groupId = gf.replace(".json", "");
+                    for (const msg of messages) {
+                        const content = (msg.content || "").toLowerCase();
+                        if (content.includes(keyword)) {
+                            results.push({
+                                project: `群聊:${groupId}`,
+                                sessionId: groupId,
+                                sessionName: `群聊 ${groupId}`,
+                                role: msg.role,
+                                agent: msg.agent || null,
+                                content: msg.content || "",
+                                timestamp: msg.timestamp,
+                                matchIndex: content.indexOf(keyword),
+                                isGroup: true,
+                            });
+                            if (results.length >= limit)
+                                break;
+                        }
+                    }
+                    if (results.length >= limit)
+                        break;
+                }
+                catch { }
+            }
+        }
+        // 按时间倒序
+        results.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
+        return sendJson(res, { success: true, results: results.slice(0, limit), total: results.length });
+    }
+    // === B站 WBI 签名 ===
+    const BILI_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+    let wbiMixinKey = "";
+    let wbiCacheTime = 0;
+    let buvid3 = "";
+    const WBI_MIXIN_TABLE = [
+        46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
+        27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13,
+        37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4,
+        22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52
+    ];
+    function getMixinKey(orig) {
+        return WBI_MIXIN_TABLE.map(n => orig[n]).join("").substring(0, 32);
+    }
+    async function ensureBuvid3() {
+        if (buvid3)
+            return buvid3;
+        try {
+            const res = await fetch("https://www.bilibili.com", {
+                method: "GET",
+                headers: { "User-Agent": BILI_UA },
+                redirect: "follow",
+            });
+            let cookieStrings = [];
+            if (typeof res.headers.getSetCookie === "function") {
+                cookieStrings = res.headers.getSetCookie();
+            }
+            else {
+                const rawCookie = res.headers.get("set-cookie");
+                if (rawCookie) {
+                    cookieStrings = rawCookie.split(/,\s*/);
+                }
+            }
+            for (const c of cookieStrings) {
+                const match = c.match(/buvid3=([^;]+)/);
+                if (match) {
+                    buvid3 = match[1];
+                    console.log("[WBI] 获取 buvid3 成功:", buvid3);
+                    return buvid3;
+                }
+            }
+        }
+        catch (e) {
+            console.log("[WBI] 获取 buvid3 失败:", e.message);
+        }
+        buvid3 = require("crypto").randomUUID() + "infoc";
+        return buvid3;
+    }
+    async function refreshWbiKey() {
+        try {
+            await ensureBuvid3();
+            const res = await fetch("https://api.bilibili.com/x/web-interface/nav", {
+                headers: { "User-Agent": BILI_UA, "Referer": "https://www.bilibili.com", "Cookie": `buvid3=${buvid3}` }
+            });
+            const text = await res.text();
+            if (!text.trim().startsWith("{")) {
+                console.log("[WBI] nav 返回非 JSON:", text.substring(0, 80));
+                return;
+            }
+            const data = JSON.parse(text);
+            const img = data?.data?.wbi_img?.img_url || "";
+            const sub = data?.data?.wbi_img?.sub_url || "";
+            const imgKey = img.split("/").pop()?.split(".")[0] || "";
+            const subKey = sub.split("/").pop()?.split(".")[0] || "";
+            wbiMixinKey = getMixinKey(imgKey + subKey);
+            wbiCacheTime = Date.now();
+            console.log("[WBI] key 已刷新:", wbiMixinKey.substring(0, 8) + "...");
+        }
+        catch (e) {
+            console.log("[WBI] 刷新失败:", e.message);
+        }
+    }
+    async function ensureWbiKey() {
+        if (!wbiMixinKey || Date.now() - wbiCacheTime > 12 * 60 * 60 * 1000) {
+            await refreshWbiKey();
+        }
+    }
+    function signBiliParams(params) {
+        const wts = Math.floor(Date.now() / 1000);
+        params.wts = String(wts);
+        const sorted = Object.keys(params).sort().map(k => `${k}=${encodeURIComponent(params[k])}`).join("&");
+        const hash = require("crypto").createHash("md5").update(sorted + wbiMixinKey).digest("hex");
+        params.w_rid = hash;
+        return Object.keys(params).map(k => `${k}=${encodeURIComponent(params[k])}`).join("&");
+    }
+    async function biliSearch(keyword) {
+        try {
+            await ensureBuvid3();
+            await ensureWbiKey();
+            const params = {
+                search_type: "video",
+                keyword: keyword,
+                page: "1",
+                order: "totalrank"
+            };
+            const signedQs = signBiliParams(params);
+            const cfg = loadMusicConfig();
+            let oldHttpProxy = process.env.HTTP_PROXY;
+            let oldHttpsProxy = process.env.HTTPS_PROXY;
+            if (cfg.proxy) {
+                process.env.HTTP_PROXY = cfg.proxy;
+                process.env.HTTPS_PROXY = cfg.proxy;
+            }
+            const url = `https://api.bilibili.com/x/web-interface/search/type?${signedQs}`;
+            try {
+                const res = await fetch(url, {
+                    method: "GET",
+                    headers: {
+                        "User-Agent": BILI_UA,
+                        "Referer": "https://www.bilibili.com/",
+                        "Cookie": `buvid3=${buvid3}`,
+                        "Accept": "application/json, text/plain, */*",
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                        "Origin": "https://www.bilibili.com",
+                        "Sec-Fetch-Dest": "empty",
+                        "Sec-Fetch-Mode": "cors",
+                        "Sec-Fetch-Site": "same-site"
+                    }
+                });
+                if (cfg.proxy) {
+                    if (oldHttpProxy)
+                        process.env.HTTP_PROXY = oldHttpProxy;
+                    else
+                        delete process.env.HTTP_PROXY;
+                    if (oldHttpsProxy)
+                        process.env.HTTPS_PROXY = oldHttpsProxy;
+                    else
+                        delete process.env.HTTPS_PROXY;
+                }
+                const text = await res.text();
+                if (!text.trim().startsWith("{")) {
+                    console.log("[BiliSearch] non-JSON:", text.substring(0, 100));
+                    return [];
+                }
+                const data = JSON.parse(text);
+                if (data.code !== 0) {
+                    console.log("[BiliSearch] API error:", data.code, data.message);
+                    return [];
+                }
+                const resultList = data.data?.result;
+                if (!Array.isArray(resultList)) {
+                    console.log("[BiliSearch] result is not an array");
+                    return [];
+                }
+                const results = resultList.map((item) => ({
+                    bvid: item.bvid,
+                    title: (item.title || "").replace(/<[^>]*>/g, ""),
+                    author: item.author || "",
+                    duration: item.duration || "",
+                    play: item.play || 0,
+                    pic: item.pic ? (item.pic.startsWith("//") ? "https:" + item.pic : item.pic) : "",
+                }));
+                console.log("[BiliSearch] found", results.length, "results");
+                return results;
+            }
+            catch (err) {
+                if (cfg.proxy) {
+                    if (oldHttpProxy)
+                        process.env.HTTP_PROXY = oldHttpProxy;
+                    else
+                        delete process.env.HTTP_PROXY;
+                    if (oldHttpsProxy)
+                        process.env.HTTPS_PROXY = oldHttpsProxy;
+                    else
+                        delete process.env.HTTPS_PROXY;
+                }
+                throw err;
+            }
+        }
+        catch (e) {
+            console.log("[BiliSearch] error:", e.message);
+            return [];
+        }
+    }
+    // === 智能文件名解析 ===
+    function parseMusicFilename(filename) {
+        const name = filename.replace(/\.[^.]+$/, "");
+        // 提取 BV 号
+        const bvidMatch = name.match(/(BV[\w]+)/i);
+        const bvid = bvidMatch ? bvidMatch[1] : undefined;
+        // 格式: "艺术家 - 标题" 或 "[BVxxx] 标题"
+        const cleaned = name.replace(/\[BV[\w]+\]/gi, "").replace(/BV[\w]+/gi, "").trim();
+        const parts = cleaned.split(" - ");
+        let artist = "未知艺术家", title = cleaned;
+        if (parts.length >= 2) {
+            artist = parts[0].trim();
+            title = parts.slice(1).join(" - ").trim();
+        }
+        if (!title)
+            title = name;
+        return { artist, title, bvid };
+    }
+    // === 音乐播放器 API ===
+    const MUSIC_DIR = path.join(CCM_DIR, "music");
+    if (!fs.existsSync(MUSIC_DIR))
+        fs.mkdirSync(MUSIC_DIR, { recursive: true });
+    if (pathname === "/api/music/pet-state" && req.method === "GET") {
+        return sendJson(res, { success: true, agent: getMusicPetAgent() });
+    }
+    if (pathname === "/api/music/pet-state" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const data = JSON.parse(body || "{}");
+                setMusicPetState(data.state || "idle", data.detail || "", data.track || null);
+                sendJson(res, { success: true, agent: getMusicPetAgent() });
+            }
+            catch (e) {
+                sendJson(res, { error: e.message }, 400);
+            }
+        });
+        return;
+    }
+    if (pathname === "/api/music/pet-speech" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const data = JSON.parse(body || "{}");
+                broadcastPetSpeech(MUSIC_PET_AGENT_NAME, {
+                    role: data.role || "assistant",
+                    text: data.text || "",
+                    mode: data.mode || "replace",
+                    final: !!data.final,
+                    source: data.source || "music",
+                });
+                sendJson(res, { success: true });
+            }
+            catch (e) {
+                sendJson(res, { error: e.message }, 400);
+            }
+        });
+        return;
+    }
+    if (pathname === "/api/music/list" && req.method === "GET") {
+        try {
+            const files = fs.readdirSync(MUSIC_DIR)
+                .filter(f => /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(f))
+                .map((f, i) => {
+                const stat = fs.statSync(path.join(MUSIC_DIR, f));
+                const { artist, title, bvid } = parseMusicFilename(f);
+                return { id: i, filename: f, title, artist, bvid, size: stat.size, modified: stat.mtime.toISOString() };
+            })
+                .sort((a, b) => a.title.localeCompare(b.title));
+            return sendJson(res, { success: true, tracks: files });
+        }
+        catch (e) {
+            return sendJson(res, { success: true, tracks: [] });
+        }
+    }
+    if (pathname === "/api/music/stream" && req.method === "GET") {
+        const filename = parsed.query.file;
+        if (!filename || filename.includes(".."))
+            return sendJson(res, { error: "无效文件名" }, 400);
+        const filePath = path.join(MUSIC_DIR, filename);
+        if (!fs.existsSync(filePath))
+            return sendJson(res, { error: "文件不存在" }, 404);
+        const stat = fs.statSync(filePath);
+        const ext = path.extname(filename).toLowerCase();
+        const mimeTypes = {
+            ".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg",
+            ".m4a": "audio/mp4", ".flac": "audio/flac", ".aac": "audio/aac"
+        };
+        const range = req.headers.range;
+        if (range) {
+            const parts = range.replace(/bytes=/, "").split("-");
+            const start = parseInt(parts[0], 10);
+            const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+            res.writeHead(206, {
+                "Content-Range": `bytes ${start}-${end}/${stat.size}`,
+                "Accept-Ranges": "bytes",
+                "Content-Length": end - start + 1,
+                "Content-Type": mimeTypes[ext] || "audio/mpeg",
+                "Access-Control-Allow-Origin": "*",
+            });
+            fs.createReadStream(filePath, { start, end }).pipe(res);
+        }
+        else {
+            res.writeHead(200, {
+                "Content-Length": stat.size,
+                "Content-Type": mimeTypes[ext] || "audio/mpeg",
+                "Access-Control-Allow-Origin": "*",
+            });
+            fs.createReadStream(filePath).pipe(res);
+        }
+        return;
+    }
+    if (pathname === "/api/music/search" && req.method === "GET") {
+        const query = parsed.query.q || "";
+        if (!query)
+            return sendJson(res, { success: true, results: [] });
+        // WBI 签名搜索
+        biliSearch(query).then(results => {
+            sendJson(res, { success: true, results });
+        }).catch((e) => {
+            sendJson(res, { success: false, error: e.message });
+        });
+        return;
+    }
+    if (pathname === "/api/music/download" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const { bvid, title, author } = JSON.parse(body);
+                if (!bvid)
+                    return sendJson(res, { error: "缺少 bvid" }, 400);
+                const safeName = `${author || "unknown"} - ${title || bvid}`.replace(/[<>:"/\\|?*]/g, "_").substring(0, 100);
+                const outputFile = path.join(MUSIC_DIR, `${safeName}.mp3`);
+                if (fs.existsSync(outputFile))
+                    return sendJson(res, { success: true, message: "文件已存在" });
+                // 使用 yt-dlp 下载
+                const url = `https://www.bilibili.com/video/${bvid}`;
+                const child = spawn("yt-dlp", [
+                    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "--referer", "https://www.bilibili.com/",
+                    "--no-playlist",
+                    "-f", "ba",
+                    "-x", "--audio-format", "mp3", "--audio-quality", "0",
+                    "-o", outputFile, url
+                ], { stdio: "ignore", windowsHide: true });
+                child.on("close", (code) => {
+                    if (code === 0 && fs.existsSync(outputFile)) {
+                        sendJson(res, { success: true, filename: path.basename(outputFile) });
+                    }
+                    else {
+                        sendJson(res, { success: false, error: "下载失败，请确保已安装 yt-dlp 和 ffmpeg" });
+                    }
+                });
+                child.on("error", () => {
+                    sendJson(res, { success: false, error: "yt-dlp 未安装，请先安装: pip install yt-dlp" });
+                });
+            }
+            catch (e) {
+                sendJson(res, { error: e.message }, 400);
+            }
+        });
+        return;
+    }
+    // 音乐 Agent 配置 API
+    const MUSIC_CONFIG_FILE = path.join(CCM_DIR, "music-config.json");
+    function loadMusicConfig() {
+        try {
+            if (fs.existsSync(MUSIC_CONFIG_FILE))
+                return JSON.parse(fs.readFileSync(MUSIC_CONFIG_FILE, "utf-8"));
+        }
+        catch { }
+        return {
+            apiUrl: "https://api.anthropic.com",
+            apiKey: "",
+            model: "claude-sonnet-4-20250514",
+            format: "auto",
+            proxy: "",
+        };
+    }
+    function saveMusicConfig(cfg) {
+        fs.writeFileSync(MUSIC_CONFIG_FILE, JSON.stringify(cfg, null, 2));
+    }
+    if (pathname === "/api/music/config" && req.method === "GET") {
+        const cfg = loadMusicConfig();
+        return sendJson(res, {
+            success: true,
+            config: {
+                apiUrl: cfg.apiUrl,
+                model: cfg.model,
+                format: cfg.format || "auto",
+                proxy: cfg.proxy || "",
+                hasKey: !!cfg.apiKey,
+            }
+        });
+    }
+    if (pathname === "/api/music/config" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const updates = JSON.parse(body);
+                const cfg = loadMusicConfig();
+                if (updates.apiUrl !== undefined)
+                    cfg.apiUrl = updates.apiUrl;
+                if (updates.apiKey !== undefined && updates.apiKey !== "")
+                    cfg.apiKey = updates.apiKey;
+                if (updates.model !== undefined)
+                    cfg.model = updates.model;
+                if (updates.format !== undefined)
+                    cfg.format = updates.format;
+                if (updates.proxy !== undefined)
+                    cfg.proxy = updates.proxy;
+                saveMusicConfig(cfg);
+                sendJson(res, { success: true });
+            }
+            catch (e) {
+                sendJson(res, { error: e.message }, 400);
+            }
+        });
+        return;
+    }
+    // 工具定义
+    const AGENT_TOOLS_LIST = [
+        {
+            name: "search_bilibili",
+            description: "搜索B站视频。当用户想听音乐、看视频时使用此工具搜索。",
+            input_schema: { type: "object", properties: { keyword: { type: "string", description: "搜索关键词" } }, required: ["keyword"] }
+        },
+        {
+            name: "search_local",
+            description: "搜索本地音乐库。当用户想播放本地已有的音乐时使用。",
+            input_schema: { type: "object", properties: { keyword: { type: "string", description: "搜索关键词" } }, required: ["keyword"] }
+        }
+    ];
+    async function execToolCall(toolName, toolInput) {
+        if (toolName === "search_bilibili") {
+            const results = await biliSearch(toolInput.keyword || "");
+            return results.slice(0, 5).map((r, i) => `${i + 1}. ${r.title} - ${r.author} (${r.duration}) [BV: ${r.bvid}]`).join("\n") || "没有找到相关结果";
+        }
+        if (toolName === "search_local") {
+            const results = searchLocalMusic(toolInput.keyword || "");
+            return results.slice(0, 5).map((t, i) => `${i + 1}. ${t.title} - ${t.artist} (文件: ${t.filename})`).join("\n") || "本地没有找到相关音乐";
+        }
+        return "未知工具";
+    }
+    // Claude Agent 对话 API（SSE 流式）
+    if (pathname === "/api/music/agent" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const { message, mode: chatMode, history } = JSON.parse(body);
+                const cfg = loadMusicConfig();
+                if (!cfg.apiKey) {
+                    return sendJson(res, { success: false, error: "请先配置 API Key（音乐播放器 → 设置）" });
+                }
+                // 构建 Agent 系统 prompt
+                const systemPrompt = `你是一个音乐助手 Agent。用户会告诉你想听什么音乐，你需要帮助他们搜索和推荐。
+
+你有两个工具可用：
+1. search_bilibili(keyword) - 搜索B站视频
+2. search_local(keyword) - 搜索本地音乐库
+
+当前模式: ${chatMode === "local" ? "本地模式（搜索本地曲库）" : "B站模式（搜索B站并转码）"}
+
+## 推荐输出格式（严格遵守）
+当你向用户推荐歌曲时，先用自然语言简要介绍，然后 **必须** 将曲目放在独立的 \`\`\`tracks 代码块中。格式如下：
+
+### B站模式：
+\`\`\`tracks
+[
+  {"bvid":"BV1xxxxx","title":"视频标题","author":"UP主","duration":"4:32"}
+]
+\`\`\`
+
+### 本地模式：
+\`\`\`tracks
+[
+  {"filename":"文件名.mp3","title":"歌曲名称","artist":"歌手"}
+]
+\`\`\`
+
+关键规则：
+1. 代码块标记必须用 \`\`\`tracks 开头，\`\`\` 结尾，各占独立一行。
+2. 数据必须是合法 JSON 数组，必须从工具返回的结果中提取字段（不要编造或修改 uri、bvid、filename 等核心标识）。
+3. 如果用户只是闲聊、提问，不需要输出 tracks 代码块。
+4. 回复使用中文，简洁友好。`;
+                // 构建消息历史
+                const messages = [];
+                for (const msg of (history || []).slice(-10)) {
+                    if (msg.role === "operator")
+                        messages.push({ role: "user", content: msg.content });
+                    else if (msg.role === "agent")
+                        messages.push({ role: "assistant", content: msg.content });
+                }
+                messages.push({ role: "user", content: message });
+                // 调用 Claude API（SSE 流式）
+                res.writeHead(200, {
+                    "Content-Type": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "Access-Control-Allow-Origin": "*",
+                });
+                // 先执行搜索工具（如果需要）
+                const intent = extractMusicIntent(message);
+                let toolContext = "";
+                if (intent.type === "search" || intent.type === "play") {
+                    if (chatMode === "local") {
+                        const localResults = searchLocalMusic(intent.keyword);
+                        toolContext = `\n\n[工具结果] 本地搜索 "${intent.keyword}" 找到 ${localResults.length} 首：\n${localResults.slice(0, 5).map((t, i) => `${i + 1}. ${t.title} - ${t.artist} (文件: ${t.filename})`).join("\n")}`;
+                    }
+                    else {
+                        // B站搜索（同步等待）
+                        biliSearch(intent.keyword).then((biliResults) => {
+                            toolContext = `\n\n[工具结果] B站搜索 "${intent.keyword}" 找到 ${biliResults.length} 个结果：\n${biliResults.slice(0, 5).map((r, i) => `${i + 1}. ${r.title} - ${r.author} (${r.duration}) [BV: ${r.bvid}]`).join("\n")}`;
+                            messages[messages.length - 1].content += toolContext;
+                            callClaudeAgent(cfg, systemPrompt, messages, res, chatMode);
+                        }).catch(() => {
+                            messages[messages.length - 1].content += "\n\n[工具结果] B站搜索失败";
+                            callClaudeAgent(cfg, systemPrompt, messages, res, chatMode);
+                        });
+                        return;
+                    }
+                    messages[messages.length - 1].content += toolContext;
+                }
+                callClaudeAgent(cfg, systemPrompt, messages, res, chatMode);
+            }
+            catch (e) {
+                sendJson(res, { error: e.message }, 400);
+            }
+        });
+        return;
+    }
+    async function callClaudeAgent(cfg, system, messages, res, chatMode) {
+        const apiUrl = (cfg.apiUrl || "https://api.anthropic.com").replace(/\/$/, "");
+        const model = cfg.model || "claude-sonnet-4-20250514";
+        // 检测 API 格式
+        let isOpenAICompat = true;
+        if (cfg.format === "anthropic")
+            isOpenAICompat = false;
+        else if (cfg.format === "openai")
+            isOpenAICompat = true;
+        else
+            isOpenAICompat = !(apiUrl.includes("anthropic") || apiUrl.endsWith("/anthropic"));
+        // 根据模式调整工具
+        const tools = chatMode === "local"
+            ? AGENT_TOOLS_LIST.filter((t) => t.name === "search_local")
+            : AGENT_TOOLS_LIST;
+        if (isOpenAICompat) {
+            await callOpenAICompat(cfg, system, messages, tools, res);
+        }
+        else {
+            await callAnthropicNative(cfg, system, messages, tools, res);
+        }
+    }
+    // OpenAI 兼容格式（不支持原生 tool_use，模拟工具调用）
+    async function callOpenAICompat(cfg, system, messages, tools, res) {
+        const apiUrl = (cfg.apiUrl || "").replace(/\/$/, "");
+        const model = cfg.model || "claude-sonnet-4-20250514";
+        let fetchUrl;
+        if (apiUrl.includes("/chat/completions"))
+            fetchUrl = apiUrl;
+        else if (apiUrl.endsWith("/v1"))
+            fetchUrl = `${apiUrl}/chat/completions`;
+        else if (apiUrl.includes("/v1/"))
+            fetchUrl = apiUrl;
+        else
+            fetchUrl = `${apiUrl}/v1/chat/completions`;
+        // 在 system prompt 中注入工具说明
+        const toolDesc = tools.map(t => `- ${t.name}: ${t.description}`).join("\n");
+        const enhancedSystem = system + `\n\n可用工具：\n${toolDesc}\n\n当你需要搜索时，输出格式：\n<tool_call>\n{"name": "工具名", "arguments": {"keyword": "关键词"}}\n</tool_call>\n\n搜索结果会自动返回给你，然后你再回复用户。`;
+        const headers = {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${cfg.apiKey}`,
+        };
+        const openaiMessages = [{ role: "system", content: enhancedSystem }, ...messages];
+        const body = JSON.stringify({ model, max_tokens: 1024, messages: openaiMessages, stream: true });
+        try {
+            const apiRes = await fetch(fetchUrl, { method: "POST", headers, body });
+            if (!apiRes.ok) {
+                const t = await apiRes.text();
+                res.write(`data: ${JSON.stringify({ type: "error", text: `API ${apiRes.status}: ${t.substring(0, 200)}` })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+                res.end();
+                return;
+            }
+            const reader = apiRes.body?.getReader();
+            if (!reader)
+                return;
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let fullText = "";
+            const read = () => reader.read().then(({ done, value }) => {
+                if (done) {
+                    // 检查是否有工具调用
+                    const toolMatch = fullText.match(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/);
+                    if (toolMatch) {
+                        try {
+                            const toolCall = JSON.parse(toolMatch[1]);
+                            const toolName = toolCall.name;
+                            const toolArgs = toolCall.arguments || {};
+                            res.write(`data: ${JSON.stringify({ type: "tool_call", name: toolName, args: toolArgs })}\n\n`);
+                            // 执行工具
+                            execToolCall(toolName, toolArgs).then(toolResult => {
+                                res.write(`data: ${JSON.stringify({ type: "tool_result", name: toolName, result: toolResult })}\n\n`);
+                                // 用工具结果再次调用 Agent
+                                const newMessages = [...messages,
+                                    { role: "assistant", content: fullText },
+                                    { role: "user", content: `[工具结果: ${toolName}]\n${toolResult}\n\n请根据搜索结果回复用户。` }
+                                ];
+                                callOpenAICompat(cfg, system, newMessages, [], res); // 不再传工具，避免无限循环
+                            });
+                            return;
+                        }
+                        catch { }
+                    }
+                    res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+                    res.end();
+                    return;
+                }
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
+                for (const line of lines) {
+                    if (!line.startsWith("data: "))
+                        continue;
+                    const data = line.slice(6).trim();
+                    if (data === "[DONE]")
+                        continue;
+                    try {
+                        const parsed = JSON.parse(data);
+                        if (parsed.choices?.[0]?.delta?.content) {
+                            const text = parsed.choices[0].delta.content;
+                            fullText += text;
+                            res.write(`data: ${JSON.stringify({ type: "text", text })}\n\n`);
+                        }
+                    }
+                    catch { }
+                }
+                return read();
+            });
+            await read();
+        }
+        catch (e) {
+            res.write(`data: ${JSON.stringify({ type: "error", text: `连接失败: ${e.message}` })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+            res.end();
+        }
+    }
+    // Anthropic 原生格式（支持 tool_use）
+    async function callAnthropicNative(cfg, system, messages, tools, res) {
+        const apiUrl = (cfg.apiUrl || "https://api.anthropic.com").replace(/\/$/, "");
+        const model = cfg.model || "claude-sonnet-4-20250514";
+        const fetchUrl = `${apiUrl}/v1/messages`;
+        const headers = {
+            "Content-Type": "application/json",
+            "x-api-key": cfg.apiKey,
+            "anthropic-version": "2023-06-01",
+        };
+        const toolDefs = tools.length > 0 ? { tools } : {};
+        const body = JSON.stringify({ model, max_tokens: 1024, system, messages, stream: true, ...toolDefs });
+        try {
+            const apiRes = await fetch(fetchUrl, { method: "POST", headers, body });
+            if (!apiRes.ok) {
+                const t = await apiRes.text();
+                res.write(`data: ${JSON.stringify({ type: "error", text: `API ${apiRes.status}: ${t.substring(0, 200)}` })}\n\n`);
+                res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+                res.end();
+                return;
+            }
+            const reader = apiRes.body?.getReader();
+            if (!reader)
+                return;
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let toolCallId = "";
+            let toolName = "";
+            let toolInputJson = "";
+            const read = () => reader.read().then(({ done, value }) => {
+                if (done) {
+                    // 如果有工具调用，执行并继续对话
+                    if (toolName && toolInputJson) {
+                        try {
+                            const toolInput = JSON.parse(toolInputJson);
+                            res.write(`data: ${JSON.stringify({ type: "tool_call", name: toolName, args: toolInput })}\n\n`);
+                            execToolCall(toolName, toolInput).then(toolResult => {
+                                res.write(`data: ${JSON.stringify({ type: "tool_result", name: toolName, result: toolResult })}\n\n`);
+                                const newMessages = [
+                                    ...messages,
+                                    { role: "assistant", content: [{ type: "tool_use", id: toolCallId, name: toolName, input: toolInput }] },
+                                    { role: "user", content: [{ type: "tool_result", tool_use_id: toolCallId, content: toolResult }] }
+                                ];
+                                callAnthropicNative(cfg, system, newMessages, tools, res);
+                            });
+                        }
+                        catch { }
+                        return;
+                    }
+                    res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+                    res.end();
+                    return;
+                }
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
+                for (const line of lines) {
+                    if (!line.startsWith("data: "))
+                        continue;
+                    const data = line.slice(6).trim();
+                    try {
+                        const parsed = JSON.parse(data);
+                        if (parsed.type === "content_block_start" && parsed.content_block?.type === "tool_use") {
+                            toolCallId = parsed.content_block.id;
+                            toolName = parsed.content_block.name;
+                            toolInputJson = "";
+                        }
+                        if (parsed.type === "content_block_delta") {
+                            if (parsed.delta?.type === "input_json_delta") {
+                                toolInputJson += parsed.delta.partial_json || "";
+                            }
+                            if (parsed.delta?.text) {
+                                res.write(`data: ${JSON.stringify({ type: "text", text: parsed.delta.text })}\n\n`);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                return read();
+            });
+            await read();
+        }
+        catch (e) {
+            res.write(`data: ${JSON.stringify({ type: "error", text: `连接失败: ${e.message}` })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+            res.end();
+        }
+    }
+    // Agent 智能对话 API（简单版，无 API Key）
+    if (pathname === "/api/music/chat" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const { message, mode: chatMode, history } = JSON.parse(body);
+                // 意图提取
+                const intent = extractMusicIntent(message);
+                const result = { intent: intent.type, keyword: intent.keyword };
+                // 根据意图处理
+                if (intent.type === "search") {
+                    // 搜索本地或 B站
+                    if (chatMode === "local") {
+                        const localResults = searchLocalMusic(intent.keyword);
+                        result.localResults = localResults;
+                        result.reply = localResults.length > 0
+                            ? `在本地找到 ${localResults.length} 首匹配的音乐：`
+                            : `本地没有找到"${intent.keyword}"相关音乐，试试切换到 B站模式？`;
+                    }
+                    else {
+                        biliSearch(intent.keyword).then((biliResults) => {
+                            result.biliResults = biliResults;
+                            result.reply = biliResults.length > 0
+                                ? `在B站找到 ${biliResults.length} 个相关结果：`
+                                : `没有找到"${intent.keyword}"相关的结果，换个关键词试试？`;
+                            sendJson(res, { success: true, ...result });
+                        }).catch((e) => {
+                            result.reply = `搜索出错: ${e.message}`;
+                            sendJson(res, { success: true, ...result });
+                        });
+                        return;
+                    }
+                }
+                else if (intent.type === "convert") {
+                    result.reply = "请提供B站视频链接或BV号，我帮你转码。";
+                }
+                else if (intent.type === "play") {
+                    // 搜索并自动播放第一个
+                    if (chatMode === "local") {
+                        const localResults = searchLocalMusic(intent.keyword);
+                        result.localResults = localResults;
+                        result.autoPlay = localResults.length > 0;
+                        result.reply = localResults.length > 0
+                            ? `找到并播放：${localResults[0].title}`
+                            : `本地没有找到"${intent.keyword}"`;
+                    }
+                    else {
+                        biliSearch(intent.keyword).then((biliResults) => {
+                            result.biliResults = biliResults.slice(0, 3);
+                            result.reply = biliResults.length > 0
+                                ? `找到以下结果，点击转码播放：`
+                                : `没有找到相关结果`;
+                            sendJson(res, { success: true, ...result });
+                        }).catch(() => {
+                            result.reply = "搜索出错";
+                            sendJson(res, { success: true, ...result });
+                        });
+                        return;
+                    }
+                }
+                else {
+                    // 通用回复
+                    result.reply = getMusicHelpText(chatMode);
+                }
+                sendJson(res, { success: true, ...result });
+            }
+            catch (e) {
+                sendJson(res, { error: e.message }, 400);
+            }
+        });
+        return;
+    }
+    // 本地音乐搜索辅助函数
+    function searchLocalMusic(keyword) {
+        const q = keyword.toLowerCase();
+        return fs.readdirSync(MUSIC_DIR)
+            .filter(f => /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(f))
+            .filter(f => f.toLowerCase().includes(q))
+            .map((f, i) => {
+            const stat = fs.statSync(path.join(MUSIC_DIR, f));
+            const { artist, title, bvid } = parseMusicFilename(f);
+            return { id: i, filename: f, title, artist, bvid, size: stat.size };
+        });
+    }
+    function extractMusicIntent(msg) {
+        const lower = msg.toLowerCase();
+        // 播放意图
+        const playMatch = msg.match(/(?:播放|放一首?|听一首?|来一首?|来点|来些)(.+)/);
+        if (playMatch)
+            return { type: "play", keyword: playMatch[1].trim() };
+        // 搜索意图
+        const searchMatch = msg.match(/(?:搜索|找|查找|有没有)(.+)/);
+        if (searchMatch)
+            return { type: "search", keyword: searchMatch[1].trim() };
+        // 转码意图
+        if (/(?:转换|转码|下载|转成|转为)/.test(lower))
+            return { type: "convert", keyword: "" };
+        // 默认：提取关键词搜索
+        const cleaned = msg.replace(/[，。！？、]/g, " ").replace(/我想听|帮我找|推荐|一些|一点|的歌|的音乐|吧|呗|听听/g, "").trim();
+        if (cleaned.length >= 2)
+            return { type: "search", keyword: cleaned };
+        return { type: "help", keyword: "" };
+    }
+    function getMusicHelpText(chatMode) {
+        if (chatMode === "local") {
+            return `🎵 本地音乐助手\n\n你可以说：\n• "播放 周杰伦" - 搜索并播放\n• "搜索 轻音乐" - 搜索本地曲库\n• "来首钢琴曲" - 自然语言搜索\n\n将 MP3 文件放入 ~/.cc-connect/music/ 目录`;
+        }
+        return `🎵 B站音乐助手\n\n你可以说：\n• "我想听周杰伦的歌" - 搜索B站\n• "搜索 轻音乐" - 搜索B站视频\n• "来首适合编程的音乐" - 智能推荐\n\n点击搜索结果可一键转码为本地 MP3`;
+    }
+    // 弹幕 API
+    if (pathname === "/api/music/danmaku" && req.method === "GET") {
+        const bvid = parsed.query.bvid;
+        if (!bvid)
+            return sendJson(res, { error: "缺少 bvid" }, 400);
+        (async () => {
+            let oldHttpProxy = process.env.HTTP_PROXY;
+            let oldHttpsProxy = process.env.HTTPS_PROXY;
+            const cfg = loadMusicConfig();
+            if (cfg.proxy) {
+                process.env.HTTP_PROXY = cfg.proxy;
+                process.env.HTTPS_PROXY = cfg.proxy;
+            }
+            try {
+                await ensureBuvid3();
+                await ensureWbiKey();
+                const params = { bvid: bvid };
+                const signedQs = signBiliParams(params);
+                const viewUrl = `https://api.bilibili.com/x/web-interface/view?${signedQs}`;
+                const viewRes = await fetch(viewUrl, {
+                    headers: {
+                        "User-Agent": BILI_UA,
+                        "Referer": "https://www.bilibili.com/",
+                        "Cookie": `buvid3=${buvid3}`,
+                        "Accept": "application/json, text/plain, */*",
+                        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                        "Origin": "https://www.bilibili.com",
+                        "Sec-Fetch-Dest": "empty",
+                        "Sec-Fetch-Mode": "cors",
+                        "Sec-Fetch-Site": "same-site"
+                    }
+                });
+                const viewData = await viewRes.json();
+                const cid = viewData?.data?.cid;
+                const aid = viewData?.data?.aid;
+                const duration = viewData?.data?.duration || 300;
+                if (!cid) {
+                    if (cfg.proxy) {
+                        if (oldHttpProxy)
+                            process.env.HTTP_PROXY = oldHttpProxy;
+                        else
+                            delete process.env.HTTP_PROXY;
+                        if (oldHttpsProxy)
+                            process.env.HTTPS_PROXY = oldHttpsProxy;
+                        else
+                            delete process.env.HTTPS_PROXY;
+                    }
+                    return sendJson(res, { success: true, danmaku: [] });
+                }
+                const dmRes = await fetch(`https://api.bilibili.com/x/v1/dm/list.so?oid=${cid}`, {
+                    headers: {
+                        "User-Agent": BILI_UA,
+                        "Referer": "https://www.bilibili.com/",
+                        "Cookie": `buvid3=${buvid3}`
+                    }
+                });
+                const xml = await dmRes.text();
+                let replies = [];
+                if (aid) {
+                    try {
+                        const replyUrl = `https://api.bilibili.com/x/v2/reply?type=1&oid=${aid}&sort=1`;
+                        const replyRes = await fetch(replyUrl, {
+                            headers: {
+                                "User-Agent": BILI_UA,
+                                "Referer": "https://www.bilibili.com/",
+                                "Cookie": `buvid3=${buvid3}`,
+                                "Accept": "application/json, text/plain, */*",
+                            }
+                        });
+                        const replyData = await replyRes.json();
+                        if (replyData && replyData.code === 0 && replyData.data?.replies) {
+                            replies = replyData.data.replies;
+                        }
+                    }
+                    catch (replyErr) {
+                        console.error("[Danmaku] Failed to fetch Bilibili replies:", replyErr);
+                    }
+                }
+                if (cfg.proxy) {
+                    if (oldHttpProxy)
+                        process.env.HTTP_PROXY = oldHttpProxy;
+                    else
+                        delete process.env.HTTP_PROXY;
+                    if (oldHttpsProxy)
+                        process.env.HTTPS_PROXY = oldHttpsProxy;
+                    else
+                        delete process.env.HTTPS_PROXY;
+                }
+                const items = [];
+                const regex = /<d p="([^"]*)"[^>]*>([^<]*)<\/d>/g;
+                let match;
+                while ((match = regex.exec(xml)) !== null) {
+                    const attrs = match[1].split(",");
+                    const time = parseFloat(attrs[0]);
+                    const type = parseInt(attrs[1]) || 1;
+                    const color = parseInt(attrs[3]) || 16777215;
+                    const hexColor = "#" + color.toString(16).padStart(6, "0");
+                    items.push({ time, content: match[2], type, color: hexColor });
+                }
+                if (replies && replies.length > 0) {
+                    const maxReplies = Math.min(replies.length, 25);
+                    const interval = Math.max(6, Math.floor(duration / (maxReplies + 1)));
+                    for (let i = 0; i < maxReplies; i++) {
+                        const r = replies[i];
+                        const username = r.member?.uname || "路人";
+                        const message = (r.content?.message || "").replace(/\s+/g, " ").trim();
+                        if (!message)
+                            continue;
+                        const shortMsg = message.length > 60 ? message.substring(0, 60) + "..." : message;
+                        const content = `💬 [热评] ${username}: ${shortMsg}`;
+                        const time = 3 + i * interval + Math.random() * 2;
+                        const color = "#ff9f43";
+                        items.push({
+                            time,
+                            content,
+                            type: 1,
+                            color
+                        });
+                    }
+                }
+                sendJson(res, { success: true, danmaku: items });
+            }
+            catch (e) {
+                if (cfg.proxy) {
+                    if (oldHttpProxy)
+                        process.env.HTTP_PROXY = oldHttpProxy;
+                    else
+                        delete process.env.HTTP_PROXY;
+                    if (oldHttpsProxy)
+                        process.env.HTTPS_PROXY = oldHttpsProxy;
+                    else
+                        delete process.env.HTTPS_PROXY;
+                }
+                sendJson(res, { success: false, error: e.message });
+            }
+        })();
+        return;
+    }
+    // B站视频转码 API（增强版，带进度）
+    if (pathname === "/api/music/convert" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const { bvid, title, author } = JSON.parse(body);
+                if (!bvid)
+                    return sendJson(res, { error: "缺少 bvid" }, 400);
+                const safeName = `${author || "unknown"} - ${title || bvid}`.replace(/[<>:"/\\|?*]/g, "_").substring(0, 100);
+                const outputFile = path.join(MUSIC_DIR, `${safeName}.mp3`);
+                if (fs.existsSync(outputFile))
+                    return sendJson(res, { success: true, filename: path.basename(outputFile), message: "文件已存在" });
+                const url = `https://www.bilibili.com/video/${bvid}`;
+                const child = spawn("yt-dlp", [
+                    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "--referer", "https://www.bilibili.com/",
+                    "--no-playlist",
+                    "-f", "ba",
+                    "-x", "--audio-format", "mp3", "--audio-quality", "0",
+                    "-o", outputFile, url
+                ], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+                let stderr = "";
+                child.stderr?.on("data", (d) => { stderr += d.toString(); });
+                child.on("close", (code) => {
+                    if (code === 0 && fs.existsSync(outputFile)) {
+                        sendJson(res, { success: true, filename: path.basename(outputFile) });
+                    }
+                    else {
+                        sendJson(res, { success: false, error: stderr.substring(0, 200) || "下载失败" });
+                    }
+                });
+                child.on("error", () => {
+                    sendJson(res, { success: false, error: "yt-dlp 未安装，请先安装: pip install yt-dlp" });
+                });
+            }
+            catch (e) {
+                sendJson(res, { error: e.message }, 400);
+            }
+        });
+        return;
+    }
+    // 音乐文件上传
+    if (pathname === "/api/music/upload" && req.method === "POST") {
+        const ct = req.headers["content-type"] || "";
+        if (!ct.includes("multipart/form-data"))
+            return sendJson(res, { error: "需要 multipart/form-data" }, 400);
+        const chunks = [];
+        req.on("data", (chunk) => chunks.push(chunk));
+        req.on("end", () => {
+            try {
+                const buffer = Buffer.concat(chunks);
+                const boundaryMatch = ct.match(/boundary=(.+)/);
+                if (!boundaryMatch)
+                    return sendJson(res, { error: "无效请求" }, 400);
+                const boundary = boundaryMatch[1];
+                const boundaryBuf = Buffer.from(`--${boundary}`);
+                const parts = [];
+                let start = buffer.indexOf(boundaryBuf) + boundaryBuf.length + 2;
+                while (true) {
+                    const end = buffer.indexOf(boundaryBuf, start);
+                    if (end === -1)
+                        break;
+                    parts.push(buffer.slice(start, end - 2));
+                    start = end + boundaryBuf.length + 2;
+                }
+                const uploaded = [];
+                for (const part of parts) {
+                    const headerEnd = part.indexOf("\r\n\r\n");
+                    if (headerEnd === -1)
+                        continue;
+                    const headerStr = part.slice(0, headerEnd).toString("utf-8");
+                    const body = part.slice(headerEnd + 4);
+                    const filenameMatch = headerStr.match(/filename="([^"]+)"/);
+                    if (filenameMatch && filenameMatch[1]) {
+                        const filename = filenameMatch[1].replace(/[<>:"/\\|?*]/g, "_");
+                        const ext = path.extname(filename).toLowerCase();
+                        if ([".mp3", ".wav", ".ogg", ".m4a", ".flac", ".aac"].includes(ext)) {
+                            const filePath = path.join(MUSIC_DIR, filename);
+                            fs.writeFileSync(filePath, body);
+                            uploaded.push(filename);
+                        }
+                    }
+                }
+                sendJson(res, { success: true, uploaded });
+            }
+            catch (e) {
+                sendJson(res, { error: e.message }, 400);
+            }
+        });
+        return;
+    }
+    if (pathname === "/api/music/delete" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const { filename } = JSON.parse(body);
+                if (!filename || filename.includes(".."))
+                    return sendJson(res, { error: "无效文件名" }, 400);
+                const filePath = path.join(MUSIC_DIR, filename);
+                if (!fs.existsSync(filePath))
+                    return sendJson(res, { error: "文件不存在" }, 404);
+                fs.unlinkSync(filePath);
+                sendJson(res, { success: true });
+            }
+            catch (e) {
+                sendJson(res, { error: e.message }, 400);
+            }
+        });
+        return;
+    }
+    // 歌词 API
+    if (pathname === "/api/music/lyric" && req.method === "GET") {
+        const filename = parsed.query.filename;
+        const bvid = parsed.query.bvid;
+        function parseLrc(lrc) {
+            const lines = lrc.split("\n");
+            const result = [];
+            for (const line of lines) {
+                const timeRegex = /\[(\d+):(\d+(?:\.\d+)?)\]/g;
+                const text = line.replace(timeRegex, "").trim();
+                if (!text)
+                    continue;
+                let match;
+                while ((match = timeRegex.exec(line)) !== null) {
+                    const min = parseInt(match[1]);
+                    const sec = parseFloat(match[2]);
+                    const time = min * 60 + sec;
+                    result.push({ time, text });
+                }
+            }
+            return result.sort((a, b) => a.time - b.time);
+        }
+        function cleanLyricText(raw) {
+            return String(raw || "")
+                .replace(/<[^>]*>/g, " ")
+                .replace(/https?:\/\/\S+/g, " ")
+                .replace(/BV[\w]+/gi, " ")
+                .replace(/【[^】]*】/g, " ")
+                .replace(/\[[^\]]*\]/g, " ")
+                .replace(/（[^）]*）/g, " ")
+                .replace(/\([^)]+\)/g, " ")
+                .replace(/[《》「」『』]/g, " ")
+                .replace(/[|｜_/]/g, " ")
+                .replace(/(hi[-\s]?res|无损|高音质|极致修复|动态歌词|歌词纯享版|歌词版|纯享|完整版|现场版|live|cover|翻唱|mv|official|lyrics|lyric|audio|video|1080p|1080|4k|2k|hd)/gi, " ")
+                .replace(/\s+/g, " ")
+                .trim();
+        }
+        function pushQuery(target, value) {
+            const query = cleanLyricText(value);
+            if (query && query.length >= 2 && query.length <= 80)
+                target.add(query);
+        }
+        function buildLyricQueries() {
+            const queries = new Set();
+            const title = String(parsed.query.title || "");
+            const parsedFile = filename ? parseMusicFilename(String(filename)) : null;
+            const rawTexts = [title, parsedFile?.title || "", String(filename || "")].filter(Boolean);
+            for (const raw of rawTexts) {
+                const quoted = String(raw).match(/[《「『](.{1,80}?)[》」』]/);
+                if (quoted?.[1]) {
+                    const song = quoted[1].trim();
+                    const before = String(raw).slice(0, quoted.index).replace(/【[^】]*】|\[[^\]]*\]|（[^）]*）|\([^)]+\)/g, " ").trim();
+                    const after = String(raw).slice((quoted.index || 0) + quoted[0].length).replace(/【[^】]*】|\[[^\]]*\]|（[^）]*）|\([^)]+\)/g, " ").trim();
+                    const artistAfter = after.replace(/^[-–—_:：\s]+/, "").split(/[-–—_:：|｜\s]/).filter(Boolean)[0] || "";
+                    const artistBefore = before.split(/[-–—_:：|｜\s]/).filter(Boolean).pop() || "";
+                    if (artistAfter)
+                        pushQuery(queries, `${artistAfter} ${song}`);
+                    if (artistBefore)
+                        pushQuery(queries, `${artistBefore} ${song}`);
+                    pushQuery(queries, song);
+                }
+                const dashParts = cleanLyricText(String(raw)).split(/\s*[-–—]\s*/).map((p) => p.trim()).filter(Boolean);
+                if (dashParts.length >= 2) {
+                    pushQuery(queries, `${dashParts[0]} ${dashParts.slice(1).join(" ")}`);
+                    pushQuery(queries, `${dashParts[dashParts.length - 1]} ${dashParts.slice(0, -1).join(" ")}`);
+                }
+                pushQuery(queries, String(raw));
+            }
+            if (parsedFile?.artist && parsedFile.artist !== "未知艺术家") {
+                pushQuery(queries, `${parsedFile.artist} ${parsedFile.title}`);
+            }
+            return Array.from(queries).slice(0, 6);
+        }
+        async function fetchNeteaseLyrics() {
+            const queries = buildLyricQueries();
+            for (const query of queries) {
+                try {
+                    const searchUrl = `https://music.163.com/api/search/get/web?s=${encodeURIComponent(query)}&type=1&limit=10`;
+                    const searchRes = await fetch(searchUrl, {
+                        headers: {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                            "Referer": "https://music.163.com/",
+                        }
+                    });
+                    const searchData = await searchRes.json();
+                    const songs = searchData?.result?.songs || [];
+                    for (let i = 0; i < Math.min(songs.length, 10); i++) {
+                        const songId = songs[i]?.id;
+                        if (!songId)
+                            continue;
+                        try {
+                            const lyricUrl = `https://music.163.com/api/song/lyric?id=${songId}&lv=1&kv=1&tv=-1`;
+                            const lyricRes = await fetch(lyricUrl, {
+                                headers: {
+                                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                                    "Referer": "https://music.163.com/",
+                                }
+                            });
+                            const lyricData = await lyricRes.json();
+                            const rawLyric = lyricData?.lrc?.lyric;
+                            if (rawLyric && /\[\d+:\d+(?:\.\d+)?\]/.test(rawLyric)) {
+                                const lyrics = parseLrc(rawLyric);
+                                if (lyrics.length > 0) {
+                                    console.log(`[Lyric] matched Netease lyric by query "${query}" (ID: ${songId}), ${lyrics.length} lines`);
+                                    return lyrics;
+                                }
+                            }
+                        }
+                        catch (singleErr) {
+                            console.error(`[Lyric] Failed to fetch Netease lyric for song ID ${songId}:`, singleErr);
+                        }
+                    }
+                }
+                catch (neteaseErr) {
+                    console.error(`[Lyric] Failed to search Netease lyrics by "${query}":`, neteaseErr);
+                }
+            }
+            return null;
+        }
+        async function fetchBiliCcLyrics(targetBvid) {
+            let oldHttpProxy = process.env.HTTP_PROXY;
+            let oldHttpsProxy = process.env.HTTPS_PROXY;
+            const cfg = loadMusicConfig();
+            const restoreProxy = () => {
+                if (!cfg.proxy)
+                    return;
+                if (oldHttpProxy)
+                    process.env.HTTP_PROXY = oldHttpProxy;
+                else
+                    delete process.env.HTTP_PROXY;
+                if (oldHttpsProxy)
+                    process.env.HTTPS_PROXY = oldHttpsProxy;
+                else
+                    delete process.env.HTTPS_PROXY;
+            };
+            if (cfg.proxy) {
+                process.env.HTTP_PROXY = cfg.proxy;
+                process.env.HTTPS_PROXY = cfg.proxy;
+            }
+            try {
+                await ensureBuvid3();
+                await ensureWbiKey();
+                const params = { bvid: targetBvid };
+                const signedQs = signBiliParams(params);
+                const viewUrl = `https://api.bilibili.com/x/web-interface/view?${signedQs}`;
+                const viewRes = await fetch(viewUrl, {
+                    headers: {
+                        "User-Agent": BILI_UA,
+                        "Referer": "https://www.bilibili.com/",
+                        "Cookie": `buvid3=${buvid3}`,
+                        "Accept": "application/json, text/plain, */*"
+                    }
+                });
+                const viewData = await viewRes.json();
+                const subtitles = viewData?.data?.subtitle?.list || [];
+                for (const subtitle of subtitles) {
+                    const subUrl = subtitle?.subtitle_url;
+                    if (!subUrl)
+                        continue;
+                    const fullSubUrl = subUrl.startsWith("//") ? `https:${subUrl}` : subUrl;
+                    const subRes = await fetch(fullSubUrl, {
+                        headers: {
+                            "User-Agent": BILI_UA,
+                            "Referer": `https://www.bilibili.com/video/${targetBvid}`,
+                        }
+                    });
+                    const subData = await subRes.json();
+                    if (subData && Array.isArray(subData.body)) {
+                        const lyrics = subData.body
+                            .map((item) => ({
+                            time: parseFloat(item.from),
+                            text: String(item.content || "").trim()
+                        }))
+                            .filter((item) => Number.isFinite(item.time) && item.text)
+                            .sort((a, b) => a.time - b.time);
+                        if (lyrics.length > 0)
+                            return lyrics;
+                    }
+                }
+            }
+            catch (biliErr) {
+                console.error("[Lyric] Failed to fetch Bilibili subtitles:", biliErr);
+            }
+            finally {
+                restoreProxy();
+            }
+            return null;
+        }
+        (async () => {
+            // 1. 本地歌词
+            if (filename) {
+                try {
+                    const safeFilename = String(filename);
+                    if (safeFilename.includes("..") || /[\\/]/.test(safeFilename)) {
+                        throw new Error("无效文件名");
+                    }
+                    const lrcName = safeFilename.replace(/\.[^.]+$/, ".lrc");
+                    const lrcPath = path.join(MUSIC_DIR, lrcName);
+                    if (fs.existsSync(lrcPath)) {
+                        const lrcContent = fs.readFileSync(lrcPath, "utf-8");
+                        const lyrics = parseLrc(lrcContent);
+                        return sendJson(res, { success: true, source: "local-lrc", lyrics });
+                    }
+                }
+                catch (lrcErr) {
+                    console.error("[Lyric] Failed to read local LRC:", lrcErr);
+                }
+            }
+            // 2. B站 CC 字幕优先于通用歌词匹配，避免同名不同版本串歌词。
+            if (bvid) {
+                const biliLyrics = await fetchBiliCcLyrics(String(bvid));
+                if (biliLyrics && biliLyrics.length > 0) {
+                    return sendJson(res, { success: true, source: "bili-cc", lyrics: biliLyrics });
+                }
+            }
+            // 3. 清洗标题/歌手后查歌词源。
+            const neteaseLyrics = await fetchNeteaseLyrics();
+            if (neteaseLyrics && neteaseLyrics.length > 0) {
+                return sendJson(res, { success: true, source: "netease", lyrics: neteaseLyrics });
+            }
+            return sendJson(res, { success: true, source: "none", lyrics: [{ time: 0, text: "未检测到歌词字幕，听着旋律，静心聆听吧..." }] });
+        })();
+        return;
+    }
     // === MCP/Skills API ===
     if (pathname === "/api/tools/status" && req.method === "GET") {
         return sendJson(res, { success: true, ...toolManager.getToolList() });
@@ -5581,6 +7447,8 @@ ${diff}
     }
     // Agent 状态与宠物语音 SSE 流
     if (pathname === "/api/status/stream" && req.method === "GET") {
+        const clientType = String(parsed.query.client || "").trim();
+        const isWorkspaceClient = clientType === "workspace";
         res.writeHead(200, {
             "Content-Type": "text/event-stream",
             "Cache-Control": "no-cache",
@@ -5588,22 +7456,19 @@ ${diff}
             "Access-Control-Allow-Origin": "*",
         });
         petStatusClients.add(res);
-        const configs = getConfigs();
-        const snapshot = configs.map(c => {
-            const s = getAgentState(c.name);
-            return { agent: c.name, state: s.state, lastActivity: s.lastActivity, detail: s.detail };
-        });
+        if (isWorkspaceClient)
+            petWorkspaceClients.add(res);
+        const snapshot = getPetStatusSnapshot();
         writeSse(res, { type: "snapshot", agents: snapshot });
         const prevStates = {};
         snapshot.forEach(s => { prevStates[s.agent] = s.state; });
         const interval = setInterval(() => {
             try {
-                const currentConfigs = getConfigs();
-                for (const c of currentConfigs) {
-                    const s = getAgentState(c.name);
-                    if (prevStates[c.name] !== s.state) {
-                        prevStates[c.name] = s.state;
-                        writeSse(res, { type: "state", agent: c.name, state: s.state, lastActivity: s.lastActivity, detail: s.detail });
+                const currentSnapshot = getPetStatusSnapshot();
+                for (const s of currentSnapshot) {
+                    if (prevStates[s.agent] !== s.state) {
+                        prevStates[s.agent] = s.state;
+                        writeSse(res, { type: "state", agent: s.agent, displayName: s.displayName, state: s.state, lastActivity: s.lastActivity, detail: s.detail, track: s.track });
                     }
                 }
             }
@@ -5612,11 +7477,39 @@ ${diff}
         req.on("close", () => {
             clearInterval(interval);
             petStatusClients.delete(res);
+            petWorkspaceClients.delete(res);
         });
         return;
     }
     // === 桌面宠物 API ===
     const PETS_FILE = path.join(CCM_DIR, "pets.json");
+    if (pathname === "/api/pets/agents" && req.method === "GET") {
+        return sendJson(res, { success: true, agents: getPetAgents() });
+    }
+    if (pathname === "/api/pets/navigate" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const data = JSON.parse(body || "{}");
+                const agent = String(data.agent || "").trim();
+                if (!agent)
+                    return sendJson(res, { success: false, error: "缺少 agent" }, 400);
+                const target = getPetNavigationTarget(agent);
+                const event = broadcastPetNavigation(agent, target);
+                return sendJson(res, {
+                    success: true,
+                    target,
+                    url: event.url,
+                    workspaceOpen: petWorkspaceClients.size > 0,
+                });
+            }
+            catch (e) {
+                return sendJson(res, { success: false, error: e.message }, 400);
+            }
+        });
+        return;
+    }
     if (pathname === "/api/pets/config" && req.method === "GET") {
         try {
             if (fs.existsSync(PETS_FILE))
@@ -5631,6 +7524,7 @@ ${diff}
         req.on("end", () => {
             try {
                 fs.writeFileSync(PETS_FILE, JSON.stringify(JSON.parse(body), null, 2));
+                broadcastPetConfigChanged();
                 sendJson(res, { success: true });
             }
             catch (e) {

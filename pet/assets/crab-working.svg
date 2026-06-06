@@ -1,51 +1,116 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-15 -25 45 45" width="500" height="500">
-<defs>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="crab-working" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Crab working">
+
+  <defs>
+    <linearGradient id="crab-working-body" x1="28" y1="18" x2="96" y2="112" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff1f3"/>
+      <stop offset="0.45" stop-color="#ffb3be"/>
+      <stop offset="1" stop-color="#ff7b8d"/>
+    </linearGradient>
+    <linearGradient id="crab-working-accent" x1="36" y1="18" x2="90" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffd166"/>
+      <stop offset="1" stop-color="#7b2740"/>
+    </linearGradient>
+    <radialGradient id="crab-working-shine" cx="36%" cy="24%" r="68%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".72"/>
+      <stop offset=".48" stop-color="#ffffff" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="crab-working-soft-shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#10203a" flood-opacity="0.14"/>
+    </filter>
+    <filter id="crab-working-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
   <style>
-    .body-bounce { transform-origin: 7.5px 15px; animation: bounce 0.35s infinite ease-in-out; }
-    .breathe { transform-origin: 7.5px 13px; animation: breathe 3.2s infinite ease-in-out; }
-    .arm-l { transform-origin: 2px 10px; animation: type-l 0.15s infinite ease-in-out; }
-    .arm-r { transform-origin: 13px 10px; animation: type-r 0.12s infinite ease-in-out; }
-    .eyes-code { transform-origin: 7.5px 9px; animation: eye-code 10s infinite ease-in-out; }
-    .code-line { transform-box: fill-box; transform-origin: left center; }
-    .cl1{animation:cl1 6s infinite} .cl2{animation:cl2 6s infinite} .cl3{animation:cl3 6s infinite} .cl4{animation:cl4 6s infinite}
-    .key-flash{opacity:0} .kf1{animation:kf 0.6s infinite} .kf2{animation:kf 0.8s infinite;animation-delay:-0.25s} .kf3{animation:kf 0.5s infinite;animation-delay:-0.1s}
-    .data-bit{opacity:0;animation:float-d 1.5s infinite linear} .d1{animation-delay:0s} .d2{animation-delay:-0.4s} .d3{animation-delay:-0.8s}
-    .shadow-anim{transform-origin:7.5px 15.5px;animation:sb 0.4s infinite ease-in-out}
-    @keyframes bounce{0%,100%{transform:translateY(0)} 50%{transform:translateY(0.8px)}}
-    @keyframes breathe{0%,100%{transform:scale(1,1) translate(0,0)} 50%{transform:scale(1.02,0.98) translate(0,0.5px)}}
-    @keyframes sb{0%,100%{transform:scaleX(1.02);opacity:0.5} 50%{transform:scaleX(1.05);opacity:0.55}}
-    @keyframes type-l{0%{transform:rotate(-5deg)} 25%{transform:rotate(-38deg)} 50%{transform:rotate(-10deg)} 75%{transform:rotate(-30deg)} 100%{transform:rotate(-5deg)}}
-    @keyframes type-r{0%{transform:rotate(5deg)} 25%{transform:rotate(38deg)} 50%{transform:rotate(10deg)} 75%{transform:rotate(30deg)} 100%{transform:rotate(5deg)}}
-    @keyframes eye-code{0%{transform:translate(0,1px) scaleY(0.6)} 14%{transform:translate(0,1px) scaleY(0.6)} 15%{transform:translate(0,1px) scaleY(0.1)} 16%{transform:translate(0,1px) scaleY(0.6)} 54%{transform:translate(0,1px) scaleY(0.6)} 55%{transform:translate(0,1px) scaleY(0.1)} 57%{transform:translate(-1px,-0.5px) scaleY(1)} 62%{transform:translate(1.5px,-0.5px) scaleY(1)} 64%{transform:translate(-0.5px,-0.3px) scaleY(1)} 73%{transform:translate(0,1px) scaleY(0.6)} 89%{transform:translate(0,1px) scaleY(0.6)} 90%{transform:translate(0,1px) scaleY(0.1)} 91%{transform:translate(0,1px) scaleY(0.6)} 100%{transform:translate(0,1px) scaleY(0.6)}}
-    @keyframes cl1{0%{transform:scaleX(0);opacity:0} 3%{transform:scaleX(0);opacity:1} 13%{transform:scaleX(1);opacity:1} 13%,78%{transform:scaleX(1) translateY(0);opacity:1} 88%{transform:scaleX(1) translateY(-3px);opacity:0} 89%,100%{transform:scaleX(0);opacity:0}}
-    @keyframes cl2{0%,14%{transform:scaleX(0);opacity:0} 15%{opacity:1} 27%{transform:scaleX(1)} 27%,82%{transform:scaleX(1) translateY(0);opacity:1} 91%{transform:scaleX(1) translateY(-3px);opacity:0} 92%,100%{transform:scaleX(0);opacity:0}}
-    @keyframes cl3{0%,29%{transform:scaleX(0);opacity:0} 30%{opacity:1} 42%{transform:scaleX(1)} 42%,85%{transform:scaleX(1) translateY(0);opacity:1} 93%{transform:scaleX(1) translateY(-3px);opacity:0} 94%,100%{transform:scaleX(0);opacity:0}}
-    @keyframes cl4{0%,44%{transform:scaleX(0);opacity:0} 45%{opacity:1} 57%{transform:scaleX(1)} 57%,88%{transform:scaleX(1) translateY(0);opacity:1} 95%{transform:scaleX(1) translateY(-3px);opacity:0} 96%,100%{transform:scaleX(0);opacity:0}}
-    @keyframes kf{0%,70%,100%{opacity:0} 35%{opacity:0.8}}
-    @keyframes float-d{0%{transform:translateY(0) scale(0.5);opacity:0} 10%{opacity:0.8} 100%{transform:translateY(-17px) scale(1);opacity:0}}
+    .pet-core { transform-origin:64px 72px; animation: pet-breathe 1.6s ease-in-out infinite; }
+    .tail { transform-origin:76px 75px; animation: tail-sway 2.4s ease-in-out infinite; }
+    .ear { transform-origin:center; animation: ear-twitch 5s ease-in-out infinite; }
+    .arm-left { transform-origin:46px 74px; animation: arm-left 2.1s ease-in-out infinite; }
+    .arm-right { transform-origin:82px 74px; animation: arm-right 2.1s ease-in-out infinite; }
+    .blink { transform-origin:center; animation: blink 5.2s ease-in-out infinite; }
+    .float-prop { animation: prop-float 2.4s ease-in-out infinite; }
+    .pulse { animation: pulse 1.3s ease-in-out infinite; transform-origin:center; }
+    .spin { animation: spin 3.2s linear infinite; transform-origin:center; }
+    .work-tap { animation: tap 0.55s ease-in-out infinite; transform-origin:64px 95px; }
+    .sleep-drift { animation: sleep-drift 3.6s ease-in-out infinite; }
+    .music-note { animation: note-rise 1.8s ease-in-out infinite; opacity:0; }
+    .music-note.n2 { animation-delay:0.45s; }
+    .music-note.n3 { animation-delay:0.9s; }
+    .juggle-ball { animation: juggle 1.25s ease-in-out infinite; }
+    .juggle-ball.b2 { animation-delay:0.22s; }
+    .juggle-ball.b3 { animation-delay:0.44s; }
+    .spark { animation: sparkle 1.7s ease-in-out infinite; transform-origin:center; }
+    .spark.s2 { animation-delay:0.35s; }
+    .spark.s3 { animation-delay:0.7s; }
+    .state-error .pet-core { animation: shake 0.28s linear infinite; }
+    .state-sweeping .arm-right { animation: sweep 0.9s ease-in-out infinite; }
+    .state-react .pet-core { animation: pop 0.75s ease-in-out infinite; }
+    .state-sleeping .pet-core, .state-dozing .pet-core, .state-collapsing .pet-core { animation: sleep-breathe 3.8s ease-in-out infinite; }
+    @keyframes pet-breathe { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-3px) scale(1.025,0.985)} }
+    @keyframes sleep-breathe { 0%,100%{transform:translateY(1px) scale(1,0.98)} 50%{transform:translateY(-1px) scale(1.02,1)} }
+    @keyframes tail-sway { 0%,100%{transform:rotate(-4deg)} 50%{transform:rotate(9deg)} }
+    @keyframes ear-twitch { 0%,92%,100%{transform:rotate(0)} 95%{transform:rotate(-8deg)} }
+    @keyframes arm-left { 0%,100%{transform:rotate(0)} 50%{transform:rotate(-7deg)} }
+    @keyframes arm-right { 0%,100%{transform:rotate(0)} 50%{transform:rotate(7deg)} }
+    @keyframes blink { 0%,91%,100%{transform:scaleY(1)} 94%{transform:scaleY(0.12)} }
+    @keyframes prop-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+    @keyframes pulse { 0%,100%{transform:scale(1); opacity:.72} 50%{transform:scale(1.18); opacity:1} }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    @keyframes tap { 0%,100%{transform:translateY(0)} 50%{transform:translateY(2px)} }
+    @keyframes sleep-drift { 0%{transform:translate(0,0);opacity:0} 20%{opacity:1} 100%{transform:translate(12px,-22px);opacity:0} }
+    @keyframes note-rise { 0%{transform:translateY(8px) scale(.8);opacity:0} 25%{opacity:1} 100%{transform:translateY(-18px) scale(1.08);opacity:0} }
+    @keyframes juggle { 0%,100%{transform:translateY(7px)} 50%{transform:translateY(-15px)} }
+    @keyframes sparkle { 0%,100%{transform:scale(.75) rotate(0);opacity:.45} 50%{transform:scale(1.15) rotate(16deg);opacity:1} }
+    @keyframes shake { 0%,100%{transform:translate(0,0)} 25%{transform:translate(-1px,1px)} 75%{transform:translate(1px,-1px)} }
+    @keyframes sweep { 0%,100%{transform:rotate(-16deg)} 50%{transform:rotate(18deg)} }
+    @keyframes pop { 0%,100%{transform:scale(1)} 50%{transform:scale(1.055)} }
   </style>
-  <g id="pp"><rect width="1.5" height="1.5"/></g>
-</defs>
-<rect class="shadow-anim" x="3" y="15" width="9" height="1" fill="#000" opacity="0.5"/>
-<g fill="#40C4FF"><use href="#pp" class="data-bit d1" x="3" y="7"/><use href="#pp" class="data-bit d2" x="7" y="8"/><use href="#pp" class="data-bit d3" x="11" y="7"/></g>
-<g transform="translate(1.25,0)">
-  <rect x="-0.5" y="-6" width="13.5" height="10.5" fill="#1E1E2E" rx="0.3"/>
-  <rect x="-0.5" y="-6" width="13.5" height="1.2" fill="#2D2D3D" rx="0.3"/>
-  <rect x="0.3" y="-5.6" width="0.5" height="0.4" fill="#FF5F56"/><rect x="1.2" y="-5.6" width="0.5" height="0.4" fill="#FFBD2E"/><rect x="2.1" y="-5.6" width="0.5" height="0.4" fill="#27C93F"/>
-  <rect class="code-line cl1" x="0.5" y="-3.5" width="5" height="0.7" fill="#4CAF50" opacity="0.8"/>
-  <rect class="code-line cl2" x="2" y="-1.8" width="8" height="0.7" fill="#4CAF50" opacity="0.8"/>
-  <rect class="code-line cl3" x="2" y="-0.1" width="4.5" height="0.7" fill="#40C4FF" opacity="0.7"/>
-  <rect class="code-line cl4" x="0.5" y="1.6" width="2" height="0.7" fill="#FFC107" opacity="0.7"/>
-</g>
-<g class="body-bounce"><g class="breathe">
-  <g fill="#E8614D"><rect x="3" y="13" width="1" height="2"/><rect x="5" y="13" width="1" height="2"/><rect x="9" y="13" width="1" height="2"/><rect x="11" y="13" width="1" height="2"/><rect x="2" y="6" width="11" height="7"/></g>
-  <g class="eyes-code" fill="#000"><rect x="4" y="8" width="1" height="2"/><rect x="10" y="8" width="1" height="2"/></g>
-</g></g>
-<g transform="translate(-0.5,11.8)">
-  <rect width="16" height="3.2" fill="#455A64" rx="0.3"/>
-  <g fill="#78909C"><rect x="0.5" y="0.4" width="1" height="0.7"/><rect x="1.8" y="0.4" width="1" height="0.7"/><rect x="3.5" y="0.4" width="6" height="0.7" rx="0.2"/><rect x="10.2" y="0.4" width="1" height="0.7"/><rect x="11.5" y="0.4" width="1" height="0.7"/></g>
-  <g fill="#78909C"><rect x="0.8" y="1.3" width="0.9" height="0.7"/><rect x="2.0" y="1.3" width="0.9" height="0.7"/><rect x="3.2" y="1.3" width="0.9" height="0.7"/><rect x="4.4" y="1.3" width="0.9" height="0.7"/><rect x="5.6" y="1.3" width="0.9" height="0.7"/><rect x="6.8" y="1.3" width="0.9" height="0.7"/><rect x="8.0" y="1.3" width="0.9" height="0.7"/><rect x="9.2" y="1.3" width="0.9" height="0.7"/><rect x="10.4" y="1.3" width="0.9" height="0.7"/><rect x="11.6" y="1.3" width="0.9" height="0.7"/><rect x="12.8" y="1.3" width="0.9" height="0.7"/><rect x="14.0" y="1.3" width="0.9" height="0.7"/></g>
-  <g fill="#B0BEC5"><rect class="key-flash kf1" x="4.4" y="1.3" width="0.9" height="0.7"/><rect class="key-flash kf2" x="9.2" y="1.3" width="0.9" height="0.7"/><rect class="key-flash kf3" x="2.9" y="2.2" width="0.9" height="0.7"/></g>
-</g>
-<g class="body-bounce"><g class="breathe"><g fill="#E8614D"><g class="arm-l"><rect x="0" y="9" width="2" height="2"/></g><g class="arm-r"><rect x="13" y="9" width="2" height="2"/></g></g></g></g>
+  <ellipse cx="64" cy="116" rx="34" ry="7" fill="#0f172a" opacity=".12"/>
+  <g class="state-working" >
+    <g class="pet-core">
+      
+    <g filter="url(#crab-working-soft-shadow)">
+      <g stroke="#8a2b3e" stroke-width="4.2" stroke-linecap="round">
+        <path d="M42 62 C36 48 30 40 22 38"/>
+        <path d="M86 62 C92 48 98 40 106 38"/>
+        <path d="M42 90 L28 101 M51 95 L42 108 M77 95 L86 108 M86 90 L100 101" opacity=".72"/>
+      </g>
+      <g class="arm-left">
+        <path d="M28 39 C12 34 13 16 27 15 C38 15 43 28 33 38" fill="#ffb3be" stroke="#8a2b3e" stroke-width="3.5"/>
+        <path d="M26 17 L21 32" stroke="#8a2b3e" stroke-width="3" stroke-linecap="round"/>
+      </g>
+      <g class="arm-right">
+        <path d="M100 39 C116 34 115 16 101 15 C90 15 85 28 95 38" fill="#ffb3be" stroke="#8a2b3e" stroke-width="3.5"/>
+        <path d="M102 17 L107 32" stroke="#8a2b3e" stroke-width="3" stroke-linecap="round"/>
+      </g>
+      <ellipse cx="64" cy="76" rx="38" ry="29" fill="url(#crab-working-body)" stroke="#8a2b3e" stroke-width="4.2"/>
+      <ellipse cx="55" cy="64" rx="18" ry="10" fill="url(#crab-working-shine)" opacity=".58"/>
+      <path d="M40 66 C48 53 80 53 88 66" fill="#fff1f3" opacity=".4"/>
+      <path d="M53 51 L48 34 M75 51 L80 34" stroke="#8a2b3e" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="48" cy="32" r="9" fill="#fff1f3" stroke="#8a2b3e" stroke-width="3"/>
+      <circle cx="80" cy="32" r="9" fill="#fff1f3" stroke="#8a2b3e" stroke-width="3"/>
+      <g class="blink"><circle cx="48" cy="32" r="3.7" fill="#7b2740"/><circle cx="80" cy="32" r="3.7" fill="#7b2740"/><circle cx="49.3" cy="30.8" r="1" fill="#fff"/><circle cx="81.3" cy="30.8" r="1" fill="#fff"/></g>
+      
+    <path d="M64 76 V79" stroke="#7b2740" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M56 78 Q60 84 64 79 Q68 84 72 78" stroke="#7b2740" stroke-width="2.7" fill="none" stroke-linecap="round"/>
+      
+    <ellipse cx="42" cy="74" rx="5.5" ry="3.8" fill="#ffd1d8" opacity=".5"/>
+    <ellipse cx="86" cy="74" rx="5.5" ry="3.8" fill="#ffd1d8" opacity=".5"/>
+    </g>
+    </g>
+    
+    <g class="work-tap">
+      <rect x="45" y="87" width="38" height="20" rx="4" fill="#1e293b" stroke="#0f172a" stroke-width="2"/>
+      <rect x="49" y="90" width="30" height="10" rx="2" fill="#38bdf8" opacity=".75"/>
+      <path d="M37 108 H91 L84 117 H44 Z" fill="#334155" stroke="#0f172a" stroke-width="2"/>
+      <path d="M50 112 H78" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>
+    </g>
+  </g>
 </svg>

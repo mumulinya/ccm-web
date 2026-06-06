@@ -1,40 +1,121 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="500" height="500">
-<defs>
-  <style>
-    .jump { transform-origin: 32px 50px; animation: jump 0.6s infinite ease-in-out; }
-    @keyframes jump { 0%,100%{transform:translateY(0) scale(1)} 30%{transform:translateY(-12px) scale(1.05,0.95)} 50%{transform:translateY(-14px) scale(0.95,1.05)} 80%{transform:translateY(0) scale(1.05,0.95)} }
-    .sparkle { opacity:0; animation: sparkle 1s infinite ease-out; }
-    .s1{animation-delay:0s} .s2{animation-delay:0.3s} .s3{animation-delay:0.6s} .s4{animation-delay:0.15s}
-    @keyframes sparkle { 0%{opacity:0;transform:scale(0) rotate(0)} 30%{opacity:1;transform:scale(1) rotate(45deg)} 100%{opacity:0;transform:scale(0.5) rotate(90deg)} }
-  </style>
-</defs>
-<ellipse cx="32" cy="58" rx="14" ry="3" fill="#000" opacity="0.1"/>
-<!-- Sparkles -->
-<g class="sparkle s1"><text x="6" y="12" font-size="8" fill="#FFD700">✨</text></g>
-<g class="sparkle s2"><text x="48" y="10" font-size="6" fill="#FFD700">✨</text></g>
-<g class="sparkle s3"><text x="12" y="6" font-size="5" fill="#FFD700">⭐</text></g>
-<g class="sparkle s4"><text x="52" y="18" font-size="7" fill="#FFD700">✨</text></g>
-<g class="jump">
-  <ellipse cx="32" cy="42" rx="16" ry="12" fill="#FF9800"/>
-  <ellipse cx="32" cy="40" rx="14" ry="10" fill="#FFB74D"/>
-  <ellipse cx="32" cy="24" rx="14" ry="12" fill="#FF9800"/>
-  <polygon points="18,16 22,4 28,16" fill="#FF9800"/><polygon points="20,16 23,8 26,16" fill="#FFB74D"/>
-  <polygon points="36,16 42,4 46,16" fill="#FF9800"/><polygon points="38,16 41,8 44,16" fill="#FFB74D"/>
-  <!-- Happy closed eyes -->
-  <path d="M22,22 Q26,18 30,22" fill="none" stroke="#1a1a2e" stroke-width="2" stroke-linecap="round"/>
-  <path d="M34,22 Q38,18 42,22" fill="none" stroke="#1a1a2e" stroke-width="2" stroke-linecap="round"/>
-  <!-- Big smile -->
-  <path d="M24,28 Q32,36 40,28" fill="#E91E63" stroke="#E65100" stroke-width="1"/>
-  <!-- Blush -->
-  <ellipse cx="20" cy="26" rx="4" ry="2.5" fill="#F48FB1" opacity="0.4"/>
-  <ellipse cx="44" cy="26" rx="4" ry="2.5" fill="#F48FB1" opacity="0.4"/>
-  <!-- Tail wagging fast -->
-  <path d="M46,46 Q64,34 60,52" fill="none" stroke="#FF9800" stroke-width="4" stroke-linecap="round">
-    <animateTransform attributeName="transform" type="rotate" values="-5,50,48;15,50,48;-5,50,48" dur="0.4s" repeatCount="indefinite"/>
-  </path>
-  <ellipse cx="22" cy="52" rx="5" ry="3" fill="#FF9800"/>
-  <ellipse cx="42" cy="52" rx="5" ry="3" fill="#FF9800"/>
-</g>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="cat-react-double" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Cat react-double">
 
-<g class="double"><style>.double{animation:double-hop .8s infinite ease-in-out}@keyframes double-hop{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}</style><path d="M20 11 L24 6 L28 11" fill="none" stroke="#facc15" stroke-width="2" stroke-linecap="round"/><path d="M36 11 L40 6 L44 11" fill="none" stroke="#facc15" stroke-width="2" stroke-linecap="round"/><circle cx="32" cy="8" r="3" fill="#fde68a" opacity="0.8"/></g>
+  <defs>
+    <linearGradient id="cat-react-double-body" x1="28" y1="18" x2="96" y2="112" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff7dc"/>
+      <stop offset="0.45" stop-color="#ffd98a"/>
+      <stop offset="1" stop-color="#f6a84f"/>
+    </linearGradient>
+    <linearGradient id="cat-react-double-accent" x1="36" y1="18" x2="90" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff9aa8"/>
+      <stop offset="1" stop-color="#6f3824"/>
+    </linearGradient>
+    <radialGradient id="cat-react-double-shine" cx="36%" cy="24%" r="68%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".72"/>
+      <stop offset=".48" stop-color="#ffffff" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="cat-react-double-soft-shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#10203a" flood-opacity="0.14"/>
+    </filter>
+    <filter id="cat-react-double-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <style>
+    .pet-core { transform-origin:64px 72px; animation: pet-breathe 2.8s ease-in-out infinite; }
+    .tail { transform-origin:76px 75px; animation: tail-sway 2.4s ease-in-out infinite; }
+    .ear { transform-origin:center; animation: ear-twitch 5s ease-in-out infinite; }
+    .arm-left { transform-origin:46px 74px; animation: arm-left 2.1s ease-in-out infinite; }
+    .arm-right { transform-origin:82px 74px; animation: arm-right 2.1s ease-in-out infinite; }
+    .blink { transform-origin:center; animation: blink 5.2s ease-in-out infinite; }
+    .float-prop { animation: prop-float 2.4s ease-in-out infinite; }
+    .pulse { animation: pulse 1.3s ease-in-out infinite; transform-origin:center; }
+    .spin { animation: spin 3.2s linear infinite; transform-origin:center; }
+    .work-tap { animation: tap 0.55s ease-in-out infinite; transform-origin:64px 95px; }
+    .sleep-drift { animation: sleep-drift 3.6s ease-in-out infinite; }
+    .music-note { animation: note-rise 1.8s ease-in-out infinite; opacity:0; }
+    .music-note.n2 { animation-delay:0.45s; }
+    .music-note.n3 { animation-delay:0.9s; }
+    .juggle-ball { animation: juggle 1.25s ease-in-out infinite; }
+    .juggle-ball.b2 { animation-delay:0.22s; }
+    .juggle-ball.b3 { animation-delay:0.44s; }
+    .spark { animation: sparkle 1.7s ease-in-out infinite; transform-origin:center; }
+    .spark.s2 { animation-delay:0.35s; }
+    .spark.s3 { animation-delay:0.7s; }
+    .state-error .pet-core { animation: shake 0.28s linear infinite; }
+    .state-sweeping .arm-right { animation: sweep 0.9s ease-in-out infinite; }
+    .state-react .pet-core { animation: pop 0.75s ease-in-out infinite; }
+    .state-sleeping .pet-core, .state-dozing .pet-core, .state-collapsing .pet-core { animation: sleep-breathe 3.8s ease-in-out infinite; }
+    @keyframes pet-breathe { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-3px) scale(1.025,0.985)} }
+    @keyframes sleep-breathe { 0%,100%{transform:translateY(1px) scale(1,0.98)} 50%{transform:translateY(-1px) scale(1.02,1)} }
+    @keyframes tail-sway { 0%,100%{transform:rotate(-4deg)} 50%{transform:rotate(9deg)} }
+    @keyframes ear-twitch { 0%,92%,100%{transform:rotate(0)} 95%{transform:rotate(-8deg)} }
+    @keyframes arm-left { 0%,100%{transform:rotate(0)} 50%{transform:rotate(-7deg)} }
+    @keyframes arm-right { 0%,100%{transform:rotate(0)} 50%{transform:rotate(7deg)} }
+    @keyframes blink { 0%,91%,100%{transform:scaleY(1)} 94%{transform:scaleY(0.12)} }
+    @keyframes prop-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+    @keyframes pulse { 0%,100%{transform:scale(1); opacity:.72} 50%{transform:scale(1.18); opacity:1} }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    @keyframes tap { 0%,100%{transform:translateY(0)} 50%{transform:translateY(2px)} }
+    @keyframes sleep-drift { 0%{transform:translate(0,0);opacity:0} 20%{opacity:1} 100%{transform:translate(12px,-22px);opacity:0} }
+    @keyframes note-rise { 0%{transform:translateY(8px) scale(.8);opacity:0} 25%{opacity:1} 100%{transform:translateY(-18px) scale(1.08);opacity:0} }
+    @keyframes juggle { 0%,100%{transform:translateY(7px)} 50%{transform:translateY(-15px)} }
+    @keyframes sparkle { 0%,100%{transform:scale(.75) rotate(0);opacity:.45} 50%{transform:scale(1.15) rotate(16deg);opacity:1} }
+    @keyframes shake { 0%,100%{transform:translate(0,0)} 25%{transform:translate(-1px,1px)} 75%{transform:translate(1px,-1px)} }
+    @keyframes sweep { 0%,100%{transform:rotate(-16deg)} 50%{transform:rotate(18deg)} }
+    @keyframes pop { 0%,100%{transform:scale(1)} 50%{transform:scale(1.055)} }
+  </style>
+  <ellipse cx="64" cy="116" rx="34" ry="7" fill="#0f172a" opacity=".12"/>
+  <g class="state-react" >
+    <g class="pet-core">
+      
+    <g class="tail" filter="url(#cat-react-double-soft-shadow)">
+      <path d="M86 81 C116 76 107 43 84 53" fill="none" stroke="#f6a84f" stroke-width="16" stroke-linecap="round"/><path d="M95 53 C104 59 102 70 94 74" fill="none" stroke="#ffd98a" stroke-width="6" stroke-linecap="round" opacity=".72"/>
+    </g>
+    <g filter="url(#cat-react-double-soft-shadow)">
+      <path class="ear" d="M43 31 L34 8 L58 23 Z" fill="#f6a84f" stroke="#85472b" stroke-width="4" stroke-linejoin="round"/><path class="ear" d="M85 31 L94 8 L70 23 Z" fill="#f6a84f" stroke="#85472b" stroke-width="4" stroke-linejoin="round"/><path d="M44 24 L39 15 L52 23 Z" fill="#ff9aa8" opacity=".68"/><path d="M84 24 L89 15 L76 23 Z" fill="#ff9aa8" opacity=".68"/>
+      <ellipse cx="64" cy="84" rx="36" ry="28" fill="url(#cat-react-double-body)" stroke="#85472b" stroke-width="4"/>
+      <ellipse cx="64" cy="88" rx="24" ry="17" fill="#fff7dc" opacity=".92"/>
+      <ellipse cx="52" cy="106" rx="9" ry="6" fill="#fff7dc" stroke="#85472b" stroke-width="2.6"/>
+      <ellipse cx="76" cy="106" rx="9" ry="6" fill="#fff7dc" stroke="#85472b" stroke-width="2.6"/>
+      <circle cx="64" cy="49" r="31" fill="url(#cat-react-double-body)" stroke="#85472b" stroke-width="4"/>
+      <circle cx="54" cy="42" r="16" fill="url(#cat-react-double-shine)" opacity=".7"/>
+      <path d="M42 35 C50 24 58 25 64 33 C70 25 80 24 86 35 C78 32 71 36 64 41 C57 36 50 32 42 35 Z" fill="#ffd98a" opacity=".7"/>
+      <ellipse cx="64" cy="61" rx="14" ry="10" fill="#fff7dc" opacity=".98"/>
+      
+    <g class="blink">
+      <ellipse cx="53" cy="50" rx="6.7" ry="7.4" fill="#6f3824"/>
+      <ellipse cx="75" cy="50" rx="6.7" ry="7.4" fill="#6f3824"/>
+      <circle cx="55.1" cy="47.6" r="2.1" fill="#fff"/>
+      <circle cx="77.1" cy="47.6" r="2.1" fill="#fff"/>
+      <circle cx="51.3" cy="52.7" r="1.1" fill="#fff" opacity=".55"/>
+      <circle cx="73.3" cy="52.7" r="1.1" fill="#fff" opacity=".55"/>
+    </g>
+      <path d="M60 58 Q64 62 68 58 Q64 57 60 58 Z" fill="#6f3824"/>
+      <path d="M55 62 Q64 71 73 62" stroke="#6f3824" stroke-width="3" fill="none" stroke-linecap="round"/>
+      
+    <g stroke="#6f3824" stroke-width="1.9" stroke-linecap="round" opacity=".66">
+      <path d="M42 60 L28 56"/>
+      <path d="M42 65 L28 66"/>
+      <path d="M86 60 L100 56"/>
+      <path d="M86 65 L100 66"/>
+    </g>
+      
+    <ellipse cx="42" cy="62" rx="5.5" ry="3.8" fill="#ff9aa8" opacity=".5"/>
+    <ellipse cx="86" cy="62" rx="5.5" ry="3.8" fill="#ff9aa8" opacity=".5"/>
+    </g>
+    </g>
+    
+      <g fill="#fb7185">
+        <path class="spark" d="M27 33 C20 25 31 18 36 27 C41 18 52 25 45 33 L36 43 Z"/>
+        <path class="spark s2" d="M91 33 C84 25 95 18 100 27 C105 18 116 25 109 33 L100 43 Z"/>
+      </g>
+  </g>
 </svg>

@@ -1,8 +1,8 @@
-<svg id="svg" xmlns="http://www.w3.org/2000/svg" width="880" height="720" viewBox="-32 -24 88 72" preserveAspectRatio="xMidYMid meet">
+<svg id="svg" xmlns="http://www.w3.org/2000/svg" viewBox="-6 -6 36 36" preserveAspectRatio="xMidYMid meet">
 <style><![CDATA[
-.edge-rim-tight { stroke-opacity: .08; }
-.edge-rim-soft  { stroke-opacity: .06; }
-.edge-contact   { stroke-opacity: .08; }
+.edge-rim-tight { stroke-opacity: .9; }
+.edge-rim-soft { stroke-opacity: .75; }
+.edge-contact { stroke-opacity: .9; }
 .statusbar, .preset {
   font-size: 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -21,9 +21,9 @@
   line-height: 1.45;
 }
 @media (prefers-color-scheme: light) {
-.edge-rim-tight { stroke-opacity: .15; }
-.edge-rim-soft  { stroke-opacity: .10; }
-.edge-contact   { stroke-opacity: .18; }
+.edge-rim-tight { stroke-opacity: .95; }
+.edge-rim-soft { stroke-opacity: .85; }
+.edge-contact { stroke-opacity: .95; }
 .cloud-drop-shadow { flood-opacity: .13; }
 .statusbar, .preset { background: #fff; color: #3941FF; }
 .food-cloud-shadow { flood-opacity: .28; flood-color: #5060FF; }

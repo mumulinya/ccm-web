@@ -5,14 +5,14 @@
   font: 600 10px ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #7A9DFF;
 }
-.edge-rim-tight { stroke-opacity: .65; }
-.edge-rim-soft { stroke-opacity: .50; }
-.edge-contact { stroke-opacity: .65; }
+.edge-rim-tight { stroke-opacity: .9; }
+.edge-rim-soft { stroke-opacity: .75; }
+.edge-contact { stroke-opacity: .9; }
 @media (prefers-color-scheme: light) {
 .v { color: #3941FF; }
-.edge-rim-tight { stroke-opacity: .75; }
-.edge-rim-soft { stroke-opacity: .60; }
-.edge-contact { stroke-opacity: .75; }
+.edge-rim-tight { stroke-opacity: .95; }
+.edge-rim-soft { stroke-opacity: .85; }
+.edge-contact { stroke-opacity: .95; }
 .cloud-drop-shadow { flood-opacity: .13; }
 .food-cloud-shadow { flood-opacity: .28; flood-color: #5060FF; }
 .food-cloud > path {
@@ -25,9 +25,9 @@
 ]]></style>
       <defs>
         <linearGradient id="body-grad" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stop-color="#f0f9ff"/>
-          <stop offset="0.5" stop-color="#e0f2fe"/>
-          <stop offset="1" stop-color="#bae6fd"/>
+          <stop offset="0" stop-color="#93c5fd"/>
+          <stop offset="0.5" stop-color="#60a5fa"/>
+          <stop offset="1" stop-color="#3b82f6"/>
         </linearGradient>
         <linearGradient id="eye-grad" x1="12" y1="3" x2="12" y2="21" gradientUnits="userSpaceOnUse">
           <stop offset="0" stop-color="#B1A7FF"/>
@@ -40,8 +40,8 @@
           <stop offset="1" stop-color="#3941FF"/>
         </linearGradient>
         <radialGradient id="hi-grad" cx="0.45" cy="0.25" r="0.55">
-          <stop offset="0" stop-color="#f0f9ff" stop-opacity="0.9"/>
-          <stop offset="1" stop-color="#f0f9ff" stop-opacity="0"/>
+          <stop offset="0" stop-color="#93c5fd" stop-opacity="0.9"/>
+          <stop offset="1" stop-color="#93c5fd" stop-opacity="0"/>
         </radialGradient>
         <filter id="drop" x="-40%" y="-40%" width="180%" height="180%">
           <feDropShadow class="cloud-drop-shadow" dx="0" dy="0.55" stdDeviation="0.72" flood-color="#3941FF" flood-opacity="0.17"/>

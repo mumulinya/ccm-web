@@ -1,4 +1,4 @@
-<svg aria-label="Cloudling happy burst animation" xmlns="http://www.w3.org/2000/svg" width="880" height="720" viewBox="-32 -24 88 72" preserveAspectRatio="xMidYMid meet">
+<svg aria-label="Cloudling happy burst animation" xmlns="http://www.w3.org/2000/svg" viewBox="-6 -6 36 36" preserveAspectRatio="xMidYMid meet">
 <style><![CDATA[
 .phase-tag {
   position: absolute;
@@ -31,18 +31,18 @@
   border-radius: inherit;
   background: linear-gradient(90deg, #9a8cff, #61b8ff, #58e6d4, #ff8fc6, #ffffff);
 }
-.edge-rim-tight { stroke-opacity: .08; }
-.edge-rim-soft { stroke-opacity: .06; }
-.edge-contact { stroke-opacity: .08; }
+.edge-rim-tight { stroke-opacity: .9; }
+.edge-rim-soft { stroke-opacity: .75; }
+.edge-contact { stroke-opacity: .9; }
 @media (prefers-color-scheme: light) {
 .phase-tag {
   background: rgba(57, 65, 255, .1);
   color: #4650ff;
 }
 .timeline { background: rgba(0, 0, 0, .06); }
-.edge-rim-tight { stroke-opacity: .15; }
+.edge-rim-tight { stroke-opacity: .95; }
 .edge-rim-soft { stroke-opacity: .1; }
-.edge-contact { stroke-opacity: .18; }
+.edge-contact { stroke-opacity: .95; }
 .cloud-drop-shadow { flood-opacity: .13; }
 .food-cloud-shadow { flood-opacity: .28; flood-color: #5060FF; }
 .food-cloud > path {
@@ -56,8 +56,8 @@
     <defs>
       <linearGradient id="bg-grad" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse">
         <stop offset="0" stop-color="#fff"/>
-        <stop offset=".5" stop-color="#f4f5f9"/>
-        <stop offset="1" stop-color="#dee2eb"/>
+        <stop offset=".5" stop-color="#60a5fa"/>
+        <stop offset="1" stop-color="#3b82f6"/>
       </linearGradient>
       <linearGradient id="eye-grad" x1="12" y1="3" x2="12" y2="21" gradientUnits="userSpaceOnUse">
         <stop offset="0" stop-color="#B1A7FF"/>
@@ -108,7 +108,7 @@
 
     <g id="cloudWrap">
       <g id="edge-system">
-        <use class="edge-contact" href="#cs" fill="none" stroke="#7d8aa7" stroke-width="1.05" stroke-linejoin="round" transform="translate(0 .18)" filter="url(#edge-blur)"/>
+        <use class="edge-contact" href="#cs" fill="none" stroke="#7d8aa7" stroke-width="1.4" stroke-linejoin="round" transform="translate(0 .18)" filter="url(#edge-blur)"/>
         <use class="edge-rim-soft" href="#cs" fill="none" stroke="#7A9DFF" stroke-width=".9" stroke-linejoin="round" filter="url(#edge-blur)"/>
         <use class="edge-rim-tight" href="#cs" fill="none" stroke="#aab3c6" stroke-width=".42" stroke-linejoin="round"/>
       </g>

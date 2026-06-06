@@ -1,10 +1,11 @@
 {
   "name": "@mumulinya167/cc-web",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "description": "cc-web - cc-connect 的 Web 管理界面，支持多 Agent 协作、任务派发、代码变更查看等",
   "main": "dist/server.js",
   "bin": {
-    "cc-web": "bin/ccm.js"
+    "cc-web": "bin/ccm.js",
+    "ccm": "bin/ccm.js"
   },
   "files": [
     "bin/",
@@ -24,7 +25,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "build:vue": "node -e \"require('fs').rmSync('public',{recursive:true,force:true})\" && cd ../ccm-web-vue && npm run build && xcopy /E /Y /I dist ..\\ccm-package\\public",
+    "build:vue": "cd ../ccm-web-vue && npm run build",
     "build:all": "npm run build:vue && npm run build",
     "start": "node dist/server.js",
     "dev": "node bin/server.js",

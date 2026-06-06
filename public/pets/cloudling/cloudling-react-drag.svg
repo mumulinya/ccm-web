@@ -1,8 +1,8 @@
-<svg id="cloudling" xmlns="http://www.w3.org/2000/svg" width="880" height="720" viewBox="-32 -24 88 72" preserveAspectRatio="xMidYMid meet">
+<svg id="cloudling" xmlns="http://www.w3.org/2000/svg" viewBox="-6 -6 36 36" preserveAspectRatio="xMidYMid meet">
 <style><![CDATA[
-.edge-rim-tight { stroke-opacity: .08; }
-.edge-rim-soft { stroke-opacity: .06; }
-.edge-contact { stroke-opacity: .08; }
+.edge-rim-tight { stroke-opacity: .9; }
+.edge-rim-soft { stroke-opacity: .75; }
+.edge-contact { stroke-opacity: .9; }
 .drag-wobble {
   transform-origin: 12px 12px;
   animation: drag-wobble var(--wobble-period, 0.9s) infinite alternate ease-in-out;
@@ -20,9 +20,9 @@
   50%      { transform: scale(1); }
 }
 @media (prefers-color-scheme: light) {
-.edge-rim-tight { stroke-opacity: .15; }
-.edge-rim-soft { stroke-opacity: .10; }
-.edge-contact { stroke-opacity: .18; }
+.edge-rim-tight { stroke-opacity: .95; }
+.edge-rim-soft { stroke-opacity: .85; }
+.edge-contact { stroke-opacity: .95; }
 .cloud-drop-shadow { flood-opacity: .13; }
 .food-cloud-shadow { flood-opacity: .28; flood-color: #5060FF; }
 .food-cloud > path {
@@ -35,9 +35,9 @@
 ]]></style>
     <defs>
       <linearGradient id="body-grad" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse">
-        <stop offset="0" stop-color="#ffffff"/>
-        <stop offset="0.5" stop-color="#f4f5f9"/>
-        <stop offset="1" stop-color="#dee2eb"/>
+        <stop offset="0" stop-color="#93c5fd"/>
+        <stop offset="0.5" stop-color="#60a5fa"/>
+        <stop offset="1" stop-color="#3b82f6"/>
       </linearGradient>
       <linearGradient id="eye-grad" x1="12" y1="3" x2="12" y2="21" gradientUnits="userSpaceOnUse">
         <stop offset="0" stop-color="#B1A7FF"/>
@@ -45,11 +45,11 @@
         <stop offset="1" stop-color="#3941FF"/>
       </linearGradient>
       <radialGradient id="hi-grad" cx="0.45" cy="0.25" r="0.55">
-        <stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/>
-        <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+        <stop offset="0" stop-color="#93c5fd" stop-opacity="0.9"/>
+        <stop offset="1" stop-color="#93c5fd" stop-opacity="0"/>
       </radialGradient>
       <filter id="drop" x="-40%" y="-40%" width="180%" height="180%">
-        <feDropShadow class="cloud-drop-shadow" id="drop-shadow" dx="0" dy="0.6" stdDeviation="0.8" flood-color="#3941FF" flood-opacity="0.18"/>
+        <feDropShadow class="cloud-drop-shadow" id="drop-shadow" dx="0" dy="0.6" stdDeviation="0.8" flood-color="#3941FF" flood-opacity="0.35"/>
       </filter>
       <filter id="edge-blur" x="-40%" y="-40%" width="180%" height="180%">
         <feGaussianBlur stdDeviation="0.16"/>
@@ -65,9 +65,9 @@
       <!-- 内层 breath (呼吸, pivot 中心) -->
       <g id="breath-layer" class="drag-breath">
         <g id="edge-system">
-          <use class="edge-contact" href="#cloud-shape" fill="none" stroke="#7d8aa7" stroke-width="1.05" stroke-linejoin="round" transform="translate(0 0.18)" filter="url(#edge-blur)"/>
-          <use class="edge-rim-soft" href="#cloud-shape" fill="none" stroke="#7A9DFF" stroke-width="0.90" stroke-linejoin="round" filter="url(#edge-blur)"/>
-          <use class="edge-rim-tight" href="#cloud-shape" fill="none" stroke="#aab3c6" stroke-width="0.42" stroke-linejoin="round"/>
+          <use class="edge-contact" href="#cloud-shape" fill="none" stroke="#7d8aa7" stroke-width="1.4" stroke-linejoin="round" transform="translate(0 0.18)" filter="url(#edge-blur)"/>
+          <use class="edge-rim-soft" href="#cloud-shape" fill="none" stroke="#7A9DFF" stroke-width="1.2" stroke-linejoin="round" filter="url(#edge-blur)"/>
+          <use class="edge-rim-tight" href="#cloud-shape" fill="none" stroke="#aab3c6" stroke-width="0.8" stroke-linejoin="round"/>
         </g>
         <g filter="url(#drop)">
           <use href="#cloud-shape" fill="url(#body-grad)"/>

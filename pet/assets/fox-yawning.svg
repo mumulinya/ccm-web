@@ -1,59 +1,111 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-<defs>
-    <style>
-      .breathe { transform-origin: 32px 46px; animation: breathe 3s infinite ease-in-out; }
-      .blink { transform-origin: 32px 28px; animation: blink 4.5s infinite ease-in-out; }
-      .tail { transform-origin: 38px 42px; animation: tail-wag 2s infinite ease-in-out; }
-      @keyframes breathe { 0%,100%{transform:scale(1) translateY(0)} 50%{transform:scale(1.018, 0.982) translateY(0.4px)} }
-      @keyframes blink { 0%,8%,12%,100%{transform:scaleY(1)} 10%{transform:scaleY(0.1)} }
-      @keyframes tail-wag { 0%,100%{transform:rotate(-5deg)} 50%{transform:rotate(7deg)} }
-    </style>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="fox-yawning" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Fox yawning">
+
+  <defs>
+    <linearGradient id="fox-yawning-body" x1="28" y1="18" x2="96" y2="112" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff3d7"/>
+      <stop offset="0.45" stop-color="#ffc77a"/>
+      <stop offset="1" stop-color="#f39a4a"/>
+    </linearGradient>
+    <linearGradient id="fox-yawning-accent" x1="36" y1="18" x2="90" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff9aa8"/>
+      <stop offset="1" stop-color="#70391f"/>
+    </linearGradient>
+    <radialGradient id="fox-yawning-shine" cx="36%" cy="24%" r="68%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".72"/>
+      <stop offset=".48" stop-color="#ffffff" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="fox-yawning-soft-shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#10203a" flood-opacity="0.14"/>
+    </filter>
+    <filter id="fox-yawning-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
   </defs>
-<g class="breathe">
-  <g class="tail">
-<!-- 蓬松尾巴 -->
-  <path d="M 40 45 C 52 48, 56 38, 52 32 C 48 26, 44 34, 38 42 Z" fill="#f97316" stroke="#c2410c" stroke-width="2" />
-  <path d="M 52 32 C 54 30, 50 28, 48 30 Z" fill="#ffffff" />
 
+  <style>
+    .pet-core { transform-origin:64px 72px; animation: pet-breathe 2.8s ease-in-out infinite; }
+    .tail { transform-origin:76px 75px; animation: tail-sway 2.4s ease-in-out infinite; }
+    .ear { transform-origin:center; animation: ear-twitch 5s ease-in-out infinite; }
+    .arm-left { transform-origin:46px 74px; animation: arm-left 2.1s ease-in-out infinite; }
+    .arm-right { transform-origin:82px 74px; animation: arm-right 2.1s ease-in-out infinite; }
+    .blink { transform-origin:center; animation: blink 5.2s ease-in-out infinite; }
+    .float-prop { animation: prop-float 2.4s ease-in-out infinite; }
+    .pulse { animation: pulse 1.3s ease-in-out infinite; transform-origin:center; }
+    .spin { animation: spin 3.2s linear infinite; transform-origin:center; }
+    .work-tap { animation: tap 0.55s ease-in-out infinite; transform-origin:64px 95px; }
+    .sleep-drift { animation: sleep-drift 3.6s ease-in-out infinite; }
+    .music-note { animation: note-rise 1.8s ease-in-out infinite; opacity:0; }
+    .music-note.n2 { animation-delay:0.45s; }
+    .music-note.n3 { animation-delay:0.9s; }
+    .juggle-ball { animation: juggle 1.25s ease-in-out infinite; }
+    .juggle-ball.b2 { animation-delay:0.22s; }
+    .juggle-ball.b3 { animation-delay:0.44s; }
+    .spark { animation: sparkle 1.7s ease-in-out infinite; transform-origin:center; }
+    .spark.s2 { animation-delay:0.35s; }
+    .spark.s3 { animation-delay:0.7s; }
+    .state-error .pet-core { animation: shake 0.28s linear infinite; }
+    .state-sweeping .arm-right { animation: sweep 0.9s ease-in-out infinite; }
+    .state-react .pet-core { animation: pop 0.75s ease-in-out infinite; }
+    .state-sleeping .pet-core, .state-dozing .pet-core, .state-collapsing .pet-core { animation: sleep-breathe 3.8s ease-in-out infinite; }
+    @keyframes pet-breathe { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-3px) scale(1.025,0.985)} }
+    @keyframes sleep-breathe { 0%,100%{transform:translateY(1px) scale(1,0.98)} 50%{transform:translateY(-1px) scale(1.02,1)} }
+    @keyframes tail-sway { 0%,100%{transform:rotate(-4deg)} 50%{transform:rotate(9deg)} }
+    @keyframes ear-twitch { 0%,92%,100%{transform:rotate(0)} 95%{transform:rotate(-8deg)} }
+    @keyframes arm-left { 0%,100%{transform:rotate(0)} 50%{transform:rotate(-7deg)} }
+    @keyframes arm-right { 0%,100%{transform:rotate(0)} 50%{transform:rotate(7deg)} }
+    @keyframes blink { 0%,91%,100%{transform:scaleY(1)} 94%{transform:scaleY(0.12)} }
+    @keyframes prop-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+    @keyframes pulse { 0%,100%{transform:scale(1); opacity:.72} 50%{transform:scale(1.18); opacity:1} }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    @keyframes tap { 0%,100%{transform:translateY(0)} 50%{transform:translateY(2px)} }
+    @keyframes sleep-drift { 0%{transform:translate(0,0);opacity:0} 20%{opacity:1} 100%{transform:translate(12px,-22px);opacity:0} }
+    @keyframes note-rise { 0%{transform:translateY(8px) scale(.8);opacity:0} 25%{opacity:1} 100%{transform:translateY(-18px) scale(1.08);opacity:0} }
+    @keyframes juggle { 0%,100%{transform:translateY(7px)} 50%{transform:translateY(-15px)} }
+    @keyframes sparkle { 0%,100%{transform:scale(.75) rotate(0);opacity:.45} 50%{transform:scale(1.15) rotate(16deg);opacity:1} }
+    @keyframes shake { 0%,100%{transform:translate(0,0)} 25%{transform:translate(-1px,1px)} 75%{transform:translate(1px,-1px)} }
+    @keyframes sweep { 0%,100%{transform:rotate(-16deg)} 50%{transform:rotate(18deg)} }
+    @keyframes pop { 0%,100%{transform:scale(1)} 50%{transform:scale(1.055)} }
+  </style>
+  <ellipse cx="64" cy="116" rx="34" ry="7" fill="#0f172a" opacity=".12"/>
+  <g class="state-yawning" >
+    <g class="pet-core">
+      
+    <g class="tail" filter="url(#fox-yawning-soft-shadow)">
+      <path d="M84 79 C116 57 123 91 91 101 C105 88 101 73 86 82 Z" fill="#f39a4a" stroke="#7e4427" stroke-width="4" stroke-linejoin="round"/><path d="M106 72 C119 79 113 95 96 98 C106 90 111 80 106 72 Z" fill="#fff3d7" opacity=".96"/>
+    </g>
+    <g filter="url(#fox-yawning-soft-shadow)">
+      <path class="ear" d="M42 31 L31 7 L57 22 Z" fill="#f39a4a" stroke="#7e4427" stroke-width="4" stroke-linejoin="round"/><path class="ear" d="M86 31 L97 7 L71 22 Z" fill="#f39a4a" stroke="#7e4427" stroke-width="4" stroke-linejoin="round"/><path d="M40 22 L37 12 L50 23 Z" fill="#fff3d7" opacity=".92"/><path d="M88 22 L91 12 L78 23 Z" fill="#fff3d7" opacity=".92"/>
+      <ellipse cx="64" cy="84" rx="36" ry="28" fill="url(#fox-yawning-body)" stroke="#7e4427" stroke-width="4"/>
+      <ellipse cx="64" cy="88" rx="21" ry="17" fill="#fff3d7" opacity=".92"/>
+      <ellipse cx="52" cy="106" rx="9" ry="6" fill="#fff3d7" stroke="#7e4427" stroke-width="2.6"/>
+      <ellipse cx="76" cy="106" rx="9" ry="6" fill="#fff3d7" stroke="#7e4427" stroke-width="2.6"/>
+      <circle cx="64" cy="49" r="31" fill="url(#fox-yawning-body)" stroke="#7e4427" stroke-width="4"/>
+      <circle cx="54" cy="42" r="16" fill="url(#fox-yawning-shine)" opacity=".7"/>
+      <path d="M42 39 C48 26 58 29 64 37 C70 29 81 26 86 39 C77 35 72 39 64 43 C56 39 51 35 42 39 Z" fill="#fff3d7" opacity=".78"/>
+      <ellipse cx="64" cy="61" rx="15" ry="10" fill="#fff3d7" opacity=".98"/>
+      
+      <g stroke="#70391f" stroke-width="3.5" stroke-linecap="round" fill="none">
+        <path d="M48 50 Q54 46 60 50"/>
+        <path d="M68 50 Q74 46 80 50"/>
+      </g>
+      <path d="M60 58 Q64 62 68 58 Q64 57 60 58 Z" fill="#70391f"/>
+      <ellipse cx="64" cy="63" rx="5" ry="7" fill="#70391f" opacity=".86"/>
+      
+      
+    <ellipse cx="42" cy="62" rx="5.5" ry="3.8" fill="#ff9aa8" opacity=".5"/>
+    <ellipse cx="86" cy="62" rx="5.5" ry="3.8" fill="#ff9aa8" opacity=".5"/>
+    </g>
+    </g>
+    
+      <g stroke="#70391f" stroke-width="2" stroke-linecap="round" opacity=".55">
+        <path d="M31 42 C25 38 25 32 31 29"/>
+        <path d="M97 42 C103 38 103 32 97 29"/>
+      </g>
   </g>
-<!-- 身体 -->
-  <ellipse cx="32" cy="46" rx="14" ry="12" fill="#f97316" stroke="#c2410c" stroke-width="2" />
-  <!-- 白肚子 -->
-  <circle cx="32" cy="46" r="8" fill="#ffffff" />
-
-  <!-- 肢爪 -->
-  <circle cx="24" cy="54" r="3.5" fill="#1e293b" />
-  <circle cx="40" cy="54" r="3.5" fill="#1e293b" />
-
-  <!-- 大耳朵 -->
-  <polygon points="16,24 10,6 26,16" fill="#f97316" stroke="#c2410c" stroke-width="2" />
-  <polygon points="16,22 12,9 23,16" fill="#fef3c7" />
-
-  <polygon points="48,24 54,6 38,16" fill="#f97316" stroke="#c2410c" stroke-width="2" />
-  <polygon points="48,22 52,9 41,16" fill="#fef3c7" />
-
-  <!-- 头部底盘 (橙色圆润三角) -->
-  <path d="M 16 32 C 16 22, 48 22, 48 32 C 48 40, 32 44, 16 32 Z" fill="#f97316" stroke="#c2410c" stroke-width="2" />
-  
-  <!-- 白脸颊 -->
-  <path d="M 16 32 C 18 36, 26 38, 30 35 C 28 30, 18 28, 16 32 Z" fill="#ffffff" />
-  <path d="M 48 32 C 46 36, 38 38, 34 35 C 36 30, 46 28, 48 32 Z" fill="#ffffff" />
-
-  <g class="blink">
-<!-- 眼睛 -->
-  <path d="M 22,29 Q 25,32 28,29" fill="none" stroke="#1e293b" stroke-width="2.2" stroke-linecap="round" />
-  <path d="M 36,29 Q 39,32 42,29" fill="none" stroke="#1e293b" stroke-width="2.2" stroke-linecap="round" />
-  </g>
-<!-- 腮红 -->
-  <circle cx="20" cy="33" r="2" fill="#fda4af" opacity="0.6" />
-  <circle cx="44" cy="33" r="2" fill="#fda4af" opacity="0.6" />
-
-  <!-- 鼻子 (黑色小尖尖) -->
-  <polygon points="30,35 34,35 32,37" fill="#0f172a" />
-
-  <!-- 嘴巴 -->
-  <path d="M 30,38 Q 32,39 34,38" fill="none" stroke="#1e293b" stroke-width="1.2" stroke-linecap="round" />
-<!-- Zzz 气泡 -->
-  <text x="50" y="16" font-size="9" font-family="sans-serif" font-weight="bold" fill="#3b82f6" opacity="0.8">Zzz</text>
-</g>
 </svg>

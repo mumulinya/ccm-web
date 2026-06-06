@@ -191,7 +191,7 @@ let scrubbing = false;
 function commonDefs(p, cloudD) {
   return `
     <linearGradient id="${p}-body" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#fff"/><stop offset="0.5" stop-color="#e0f2fe"/><stop offset="1" stop-color="#bae6fd"/>
+      <stop offset="0" stop-color="#fff"/><stop offset="0.5" stop-color="#60a5fa"/><stop offset="1" stop-color="#3b82f6"/>
     </linearGradient>
     <linearGradient id="${p}-eye" x1="0" y1="3" x2="0" y2="21" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#B1A7FF"/><stop offset="0.5" stop-color="#7A9DFF"/><stop offset="1" stop-color="#3941FF"/>
@@ -256,9 +256,9 @@ function makeCloudlingBody(p) {
   return `
     <g class="cloudling-body">
       <g class="edge-system">
-        <use class="edge-contact" href="#${p}-cloud-shape" fill="none" stroke="#7d8aa7" stroke-width="1.05" stroke-linejoin="round" transform="translate(0 0.18)" filter="url(#${p}-edge-blur)"/>
-        <use class="edge-rim-soft" href="#${p}-cloud-shape" fill="none" stroke="#7A9DFF" stroke-width="0.90" stroke-linejoin="round" filter="url(#${p}-edge-blur)"/>
-        <use class="edge-rim-tight" href="#${p}-cloud-shape" fill="none" stroke="#aab3c6" stroke-width="0.42" stroke-linejoin="round"/>
+        <use class="edge-contact" href="#${p}-cloud-shape" fill="none" stroke="#7d8aa7" stroke-width="1.4" stroke-linejoin="round" transform="translate(0 0.18)" filter="url(#${p}-edge-blur)"/>
+        <use class="edge-rim-soft" href="#${p}-cloud-shape" fill="none" stroke="#7A9DFF" stroke-width="1.2" stroke-linejoin="round" filter="url(#${p}-edge-blur)"/>
+        <use class="edge-rim-tight" href="#${p}-cloud-shape" fill="none" stroke="#aab3c6" stroke-width="0.8" stroke-linejoin="round"/>
       </g>
       <g filter="url(#${p}-shadow)">
         <use href="#${p}-cloud-shape" fill="url(#${p}-body)"/>
@@ -540,13 +540,13 @@ function renderFrame(t) {
 
   stage.innerHTML = `
 <style>
-.edge-rim-tight { stroke-opacity: .65; }
-.edge-rim-soft { stroke-opacity: .50; }
-.edge-contact { stroke-opacity: .65; }
+.edge-rim-tight { stroke-opacity: .9; }
+.edge-rim-soft { stroke-opacity: .75; }
+.edge-contact { stroke-opacity: .9; }
 @media (prefers-color-scheme: light) {
-.edge-rim-tight { stroke-opacity: .75; }
-.edge-rim-soft { stroke-opacity: .60; }
-.edge-contact { stroke-opacity: .75; }
+.edge-rim-tight { stroke-opacity: .95; }
+.edge-rim-soft { stroke-opacity: .85; }
+.edge-contact { stroke-opacity: .95; }
 .cloud-drop-shadow { flood-opacity: .13; }
 }
 </style>

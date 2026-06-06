@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('petBridge', {
   startDrag: () => ipcRenderer.send('start-drag'),
   endDrag: (agent, x, y) => ipcRenderer.send('end-drag', agent, x, y),
   openConsole: () => ipcRenderer.send('open-console'),
+  openWorkspace: (agent) => ipcRenderer.invoke('open-workspace', agent),
   changeType: (agent, type) => ipcRenderer.send('change-type', agent, type),
   hidePet: (agent) => ipcRenderer.send('hide-pet', agent),
 });

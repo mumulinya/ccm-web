@@ -1,57 +1,113 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-<defs>
-    <style>
-      .breathe { transform-origin: 32px 46px; animation: breathe 3s infinite ease-in-out; }
-      .blink { transform-origin: 32px 27px; animation: blink 4.5s infinite ease-in-out; }
-      .ears { transform-origin: 32px 28px; animation: ears-twitch 6s infinite ease-in-out; }
-      @keyframes breathe { 0%,100%{transform:scale(1) translateY(0)} 50%{transform:scale(1.02, 0.98) translateY(0.5px)} }
-      @keyframes blink { 0%,8%,12%,100%{transform:scaleY(1)} 10%{transform:scaleY(0.1)} }
-      @keyframes ears-twitch { 0%,92%,100%{transform:rotate(0deg)} 95%{transform:rotate(-2deg)} 98%{transform:rotate(2deg)} }
-    </style>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="panda-react-drag" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Panda react-drag">
+
+  <defs>
+    <linearGradient id="panda-react-drag-body" x1="28" y1="18" x2="96" y2="112" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.45" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#fff8ee"/>
+    </linearGradient>
+    <linearGradient id="panda-react-drag-accent" x1="36" y1="18" x2="90" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff9fb8"/>
+      <stop offset="1" stop-color="#252b36"/>
+    </linearGradient>
+    <radialGradient id="panda-react-drag-shine" cx="36%" cy="24%" r="68%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".72"/>
+      <stop offset=".48" stop-color="#ffffff" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="panda-react-drag-soft-shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#10203a" flood-opacity="0.14"/>
+    </filter>
+    <filter id="panda-react-drag-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="2.5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
   </defs>
-<g class="breathe">
-  <!-- 身体 -->
-  <ellipse cx="32" cy="46" rx="20" ry="14" fill="#ffffff" stroke="#1e293b" stroke-width="2.5" />
-  <circle cx="18" cy="48" r="6" fill="#1e293b" />
-  <circle cx="46" cy="48" r="6" fill="#1e293b" />
-  
-  <!-- 围脖/前肢 -->
-  <path d="M 12 40 C 20 44, 44 44, 52 40 C 48 50, 16 50, 12 40 Z" fill="#1e293b" />
 
-  <g class="ears">
-<!-- 耳朵 -->
-  <circle cx="16" cy="18" r="8" fill="#1e293b" />
-  <circle cx="16" cy="18" r="4" fill="#0f172a" />
-  <circle cx="48" cy="18" r="8" fill="#1e293b" />
-  <circle cx="48" cy="18" r="4" fill="#0f172a" />
-
+  <style>
+    .pet-core { transform-origin:64px 72px; animation: pet-breathe 2.8s ease-in-out infinite; }
+    .tail { transform-origin:76px 75px; animation: tail-sway 2.4s ease-in-out infinite; }
+    .ear { transform-origin:center; animation: ear-twitch 5s ease-in-out infinite; }
+    .arm-left { transform-origin:46px 74px; animation: arm-left 2.1s ease-in-out infinite; }
+    .arm-right { transform-origin:82px 74px; animation: arm-right 2.1s ease-in-out infinite; }
+    .blink { transform-origin:center; animation: blink 5.2s ease-in-out infinite; }
+    .float-prop { animation: prop-float 2.4s ease-in-out infinite; }
+    .pulse { animation: pulse 1.3s ease-in-out infinite; transform-origin:center; }
+    .spin { animation: spin 3.2s linear infinite; transform-origin:center; }
+    .work-tap { animation: tap 0.55s ease-in-out infinite; transform-origin:64px 95px; }
+    .sleep-drift { animation: sleep-drift 3.6s ease-in-out infinite; }
+    .music-note { animation: note-rise 1.8s ease-in-out infinite; opacity:0; }
+    .music-note.n2 { animation-delay:0.45s; }
+    .music-note.n3 { animation-delay:0.9s; }
+    .juggle-ball { animation: juggle 1.25s ease-in-out infinite; }
+    .juggle-ball.b2 { animation-delay:0.22s; }
+    .juggle-ball.b3 { animation-delay:0.44s; }
+    .spark { animation: sparkle 1.7s ease-in-out infinite; transform-origin:center; }
+    .spark.s2 { animation-delay:0.35s; }
+    .spark.s3 { animation-delay:0.7s; }
+    .state-error .pet-core { animation: shake 0.28s linear infinite; }
+    .state-sweeping .arm-right { animation: sweep 0.9s ease-in-out infinite; }
+    .state-react .pet-core { animation: pop 0.75s ease-in-out infinite; }
+    .state-sleeping .pet-core, .state-dozing .pet-core, .state-collapsing .pet-core { animation: sleep-breathe 3.8s ease-in-out infinite; }
+    @keyframes pet-breathe { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-3px) scale(1.025,0.985)} }
+    @keyframes sleep-breathe { 0%,100%{transform:translateY(1px) scale(1,0.98)} 50%{transform:translateY(-1px) scale(1.02,1)} }
+    @keyframes tail-sway { 0%,100%{transform:rotate(-4deg)} 50%{transform:rotate(9deg)} }
+    @keyframes ear-twitch { 0%,92%,100%{transform:rotate(0)} 95%{transform:rotate(-8deg)} }
+    @keyframes arm-left { 0%,100%{transform:rotate(0)} 50%{transform:rotate(-7deg)} }
+    @keyframes arm-right { 0%,100%{transform:rotate(0)} 50%{transform:rotate(7deg)} }
+    @keyframes blink { 0%,91%,100%{transform:scaleY(1)} 94%{transform:scaleY(0.12)} }
+    @keyframes prop-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
+    @keyframes pulse { 0%,100%{transform:scale(1); opacity:.72} 50%{transform:scale(1.18); opacity:1} }
+    @keyframes spin { to{transform:rotate(360deg)} }
+    @keyframes tap { 0%,100%{transform:translateY(0)} 50%{transform:translateY(2px)} }
+    @keyframes sleep-drift { 0%{transform:translate(0,0);opacity:0} 20%{opacity:1} 100%{transform:translate(12px,-22px);opacity:0} }
+    @keyframes note-rise { 0%{transform:translateY(8px) scale(.8);opacity:0} 25%{opacity:1} 100%{transform:translateY(-18px) scale(1.08);opacity:0} }
+    @keyframes juggle { 0%,100%{transform:translateY(7px)} 50%{transform:translateY(-15px)} }
+    @keyframes sparkle { 0%,100%{transform:scale(.75) rotate(0);opacity:.45} 50%{transform:scale(1.15) rotate(16deg);opacity:1} }
+    @keyframes shake { 0%,100%{transform:translate(0,0)} 25%{transform:translate(-1px,1px)} 75%{transform:translate(1px,-1px)} }
+    @keyframes sweep { 0%,100%{transform:rotate(-16deg)} 50%{transform:rotate(18deg)} }
+    @keyframes pop { 0%,100%{transform:scale(1)} 50%{transform:scale(1.055)} }
+  </style>
+  <ellipse cx="64" cy="116" rx="34" ry="7" fill="#0f172a" opacity=".12"/>
+  <g class="state-react" transform="rotate(-5 64 72) scale(1.04 .98)">
+    <g class="pet-core">
+      
+    <g filter="url(#panda-react-drag-soft-shadow)">
+      <circle cx="43" cy="32" r="13" fill="#252b36"/>
+      <circle cx="85" cy="32" r="13" fill="#252b36"/>
+      <ellipse cx="64" cy="84" rx="35" ry="29" fill="#fff8ee" stroke="#252b36" stroke-width="4"/>
+      <path d="M39 78 C45 104 83 104 89 78 C80 94 48 94 39 78 Z" fill="#252b36" opacity=".95"/>
+      <ellipse cx="51" cy="104" rx="9" ry="6" fill="#ffffff" stroke="#252b36" stroke-width="2.6"/>
+      <ellipse cx="77" cy="104" rx="9" ry="6" fill="#ffffff" stroke="#252b36" stroke-width="2.6"/>
+      <circle cx="64" cy="50" r="31" fill="#ffffff" stroke="#252b36" stroke-width="4"/>
+      <circle cx="54" cy="42" r="15" fill="url(#panda-react-drag-shine)" opacity=".74"/>
+      <ellipse cx="52" cy="50" rx="11" ry="13" fill="#252b36" transform="rotate(-18 52 50)"/>
+      <ellipse cx="76" cy="50" rx="11" ry="13" fill="#252b36" transform="rotate(18 76 50)"/>
+      
+    <g class="blink">
+      <ellipse cx="53" cy="50" rx="6.7" ry="7.4" fill="#ffffff"/>
+      <ellipse cx="75" cy="50" rx="6.7" ry="7.4" fill="#ffffff"/>
+      <circle cx="55.1" cy="47.6" r="2.1" fill="#fff"/>
+      <circle cx="77.1" cy="47.6" r="2.1" fill="#fff"/>
+      <circle cx="51.3" cy="52.7" r="1.1" fill="#fff" opacity=".55"/>
+      <circle cx="73.3" cy="52.7" r="1.1" fill="#fff" opacity=".55"/>
+    </g>
+      <ellipse cx="64" cy="62" rx="12" ry="9" fill="#fff8ee" opacity=".98"/>
+      <path d="M60 59 Q64 63 68 59 Q64 58 60 59 Z" fill="#252b36"/>
+      
+    <path d="M64 64 V67" stroke="#252b36" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M56 66 Q60 72 64 67 Q68 72 72 66" stroke="#252b36" stroke-width="2.7" fill="none" stroke-linecap="round"/>
+      
+    <ellipse cx="42" cy="64" rx="5.5" ry="3.8" fill="#ff9fb8" opacity=".5"/>
+    <ellipse cx="86" cy="64" rx="5.5" ry="3.8" fill="#ff9fb8" opacity=".5"/>
+      <path d="M36 84 C25 77 30 65 43 69" fill="#252b36" opacity=".95"/>
+      <path d="M92 84 C103 77 98 65 85 69" fill="#252b36" opacity=".95"/>
+    </g>
+    </g>
+    <path d="M33 24 C24 18 22 34 32 36" stroke="#ff9fb8" stroke-width="4" fill="none" stroke-linecap="round"/>
   </g>
-<!-- 头部底盘 -->
-  <circle cx="32" cy="28" r="18" fill="#ffffff" stroke="#1e293b" stroke-width="2.5" />
-
-  <!-- 黑眼圈 -->
-  <ellipse cx="24" cy="27" rx="6" ry="7" transform="rotate(-15 24 27)" fill="#1e293b" />
-  <ellipse cx="40" cy="27" rx="6" ry="7" transform="rotate(15 40 27)" fill="#1e293b" />
-
-  <g class="blink">
-<!-- 眼睛 (瞳孔) -->
-  <circle cx="25" cy="26" r="2" fill="#ffffff" />
-  <circle cx="26" cy="25" r="0.75" fill="#38bdf8" />
-  <circle cx="39" cy="26" r="2" fill="#ffffff" />
-  <circle cx="38" cy="25" r="0.75" fill="#38bdf8" />
-
-  </g>
-<!-- 腮红 -->
-  <circle cx="17" cy="33" r="3" fill="#fda4af" opacity="0.6" />
-  <circle cx="47" cy="33" r="3" fill="#fda4af" opacity="0.6" />
-
-  <!-- 鼻子 -->
-  <polygon points="30,31 34,31 32,33" fill="#1e293b" />
-  
-  <!-- 嘴巴 -->
-  <circle cx="32" cy="35" r="2" fill="none" stroke="#1e293b" stroke-width="1.5" />
-<!-- 惊吓汗滴 -->
-  <path d="M 12,30 Q 10,33 11,36" fill="none" stroke="#38bdf8" stroke-width="1.2" stroke-linecap="round" />
-  <path d="M 52,30 Q 54,33 53,36" fill="none" stroke="#38bdf8" stroke-width="1.2" stroke-linecap="round" />
-</g>
 </svg>

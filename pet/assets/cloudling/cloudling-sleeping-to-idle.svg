@@ -89,9 +89,9 @@ function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 function commonDefs(p) {
   return `
     <linearGradient id="${p}-body" x1="12" y1="2" x2="12" y2="22" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#f0f9ff"/>
-      <stop offset="0.5" stop-color="#e0f2fe"/>
-      <stop offset="1" stop-color="#bae6fd"/>
+      <stop offset="0" stop-color="#93c5fd"/>
+      <stop offset="0.5" stop-color="#60a5fa"/>
+      <stop offset="1" stop-color="#3b82f6"/>
     </linearGradient>
     <linearGradient id="${p}-eye" x1="0" y1="3" x2="0" y2="21" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#B1A7FF"/>
@@ -99,8 +99,8 @@ function commonDefs(p) {
       <stop offset="1" stop-color="#3941FF"/>
     </linearGradient>
     <radialGradient id="${p}-hi" cx="0.45" cy="0.25" r="0.55">
-      <stop offset="0" stop-color="#f0f9ff" stop-opacity="0.9"/>
-      <stop offset="1" stop-color="#f0f9ff" stop-opacity="0"/>
+      <stop offset="0" stop-color="#93c5fd" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#93c5fd" stop-opacity="0"/>
     </radialGradient>
     <linearGradient id="${p}-hat" x1="11" y1="-3" x2="14" y2="6" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#7AA0FF"/>
@@ -108,7 +108,7 @@ function commonDefs(p) {
       <stop offset="1" stop-color="#1F2BC2"/>
     </linearGradient>
     <linearGradient id="${p}-cuff" x1="12" y1="3.0" x2="12" y2="8.0" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#f0f9ff"/>
+      <stop offset="0" stop-color="#93c5fd"/>
       <stop offset="0.5" stop-color="#fafbff"/>
       <stop offset="1" stop-color="#e8ecf6"/>
     </linearGradient>
@@ -121,7 +121,7 @@ function commonDefs(p) {
       <feDropShadow dx="0" dy="0.4" stdDeviation="0.5" flood-color="#F5A623" flood-opacity="0.32"/>
     </filter>
     <filter id="${p}-shadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow class="cloud-drop-shadow" dx="0" dy="0.6" stdDeviation="0.8" flood-color="#3941FF" flood-opacity="0.18"/>
+      <feDropShadow class="cloud-drop-shadow" dx="0" dy="0.6" stdDeviation="0.8" flood-color="#3941FF" flood-opacity="0.35"/>
     </filter>
     <filter id="${p}-edge-blur" x="-40%" y="-40%" width="180%" height="180%">
       <feGaussianBlur stdDeviation="0.16"/>
@@ -278,9 +278,9 @@ function makeCloudling(p) {
   return `
     <g class="cloudling-base">
       <g class="edge-system">
-        <use class="edge-contact" href="#${p}-cloud-shape" fill="none" stroke="#7d8aa7" stroke-width="1.05" stroke-linejoin="round" transform="translate(0 0.18)" filter="url(#${p}-edge-blur)"/>
-        <use class="edge-rim-soft" href="#${p}-cloud-shape" fill="none" stroke="#7A9DFF" stroke-width="0.90" stroke-linejoin="round" filter="url(#${p}-edge-blur)"/>
-        <use class="edge-rim-tight" href="#${p}-cloud-shape" fill="none" stroke="#aab3c6" stroke-width="0.42" stroke-linejoin="round"/>
+        <use class="edge-contact" href="#${p}-cloud-shape" fill="none" stroke="#7d8aa7" stroke-width="1.4" stroke-linejoin="round" transform="translate(0 0.18)" filter="url(#${p}-edge-blur)"/>
+        <use class="edge-rim-soft" href="#${p}-cloud-shape" fill="none" stroke="#7A9DFF" stroke-width="1.2" stroke-linejoin="round" filter="url(#${p}-edge-blur)"/>
+        <use class="edge-rim-tight" href="#${p}-cloud-shape" fill="none" stroke="#aab3c6" stroke-width="0.8" stroke-linejoin="round"/>
       </g>
       <g filter="url(#${p}-shadow)">
         <use href="#${p}-cloud-shape" fill="url(#${p}-body)"/>
@@ -462,9 +462,9 @@ function renderFrame(t) {
   const wakeSwitch = makeWakeSwitch(p, WAKE_SWITCH.cx, WAKE_SWITCH.cy, f.lamp.toggleMix, f.lamp.opacity, f.lamp.scale, f.lamp.rot, f.lamp.glow);
   stage.innerHTML = `
 <style>
-.edge-rim-tight { stroke-opacity: .65; }
-.edge-rim-soft { stroke-opacity: .50; }
-.edge-contact { stroke-opacity: .65; }
+.edge-rim-tight { stroke-opacity: .9; }
+.edge-rim-soft { stroke-opacity: .75; }
+.edge-contact { stroke-opacity: .9; }
 .wrap {
   width: min(960px, 100%);
   display: grid;
@@ -497,9 +497,9 @@ output {
 }
 .phase b { color: rgba(255,255,255,.88); font-weight: 650; }
 @media (prefers-color-scheme: light) {
-.edge-rim-tight { stroke-opacity: .75; }
-.edge-rim-soft { stroke-opacity: .60; }
-.edge-contact { stroke-opacity: .75; }
+.edge-rim-tight { stroke-opacity: .95; }
+.edge-rim-soft { stroke-opacity: .85; }
+.edge-contact { stroke-opacity: .95; }
 .cloud-drop-shadow { flood-opacity: .13; }
 .phase, output { color: rgba(21,33,63,.62); }
 .phase b { color: rgba(21,33,63,.86); }
