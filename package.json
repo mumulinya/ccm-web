@@ -28,7 +28,7 @@
     "build:vue": "cd ../ccm-web-vue && npm run build",
     "build:all": "npm run build:vue && npm run build",
     "start": "node dist/server.js",
-    "dev": "node bin/server.js",
+    "dev": "npm run build && node dist/server.js",
     "check": "tsc --noEmit",
     "prepublishOnly": "npm run build:all"
   },

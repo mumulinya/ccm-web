@@ -140,9 +140,11 @@ function connectSSE() {
           const data = JSON.parse(line.slice(6));
           if (data.type === 'snapshot') {
             for (const a of data.agents) {
-              const oldState = agentStates[a.agent];
-              agentStates[a.agent] = a.state;
-              if (oldState !== a.state) notifyStateChange(a.agent, a.state);
+              const agentKey = a.name || a.agent;
+              if (!agentKey) continue;
+              const oldState = agentStates[agentKey];
+              agentStates[agentKey] = a.state;
+              if (oldState !== a.state) notifyStateChange(agentKey, a.state);
             }
           } else if (data.type === 'state') {
             const oldState = agentStates[data.agent];
@@ -163,8 +165,10 @@ function connectSSE() {
           const data = JSON.parse(buffer.trim().replace(/^data: /, ''));
           if (data.type === 'snapshot') {
             for (const a of data.agents) {
-              agentStates[a.agent] = a.state;
-              notifyStateChange(a.agent, a.state);
+              const agentKey = a.name || a.agent;
+              if (!agentKey) continue;
+              agentStates[agentKey] = a.state;
+              notifyStateChange(agentKey, a.state);
             }
           } else if (data.type === 'state') {
             agentStates[data.agent] = data.state;

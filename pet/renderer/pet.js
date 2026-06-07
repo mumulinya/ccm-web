@@ -278,7 +278,6 @@ function getTheme(type = petType) {
 }
 
 function normalizeState(state) {
-  if (state === 'happy') return 'attention';
   return state || 'idle';
 }
 
@@ -344,6 +343,10 @@ const stateMessages = {
   carrying: ['正在搬运上下文...', '准备工作区...', '带上资料走起'],
   sweeping: ['正在整理上下文...', '清理一下思路...', '压缩上下文中'],
   juggling: ['节奏在线♪', '忙碌又带感...', '正在律动中...'],
+  yawning: ['打个哈欠...', '稍微有点困...', '伸个懒腰'],
+  dozing: ['眯一会儿...', '短暂待机...', '轻轻休息中'],
+  collapsing: ['准备睡一会儿...', '电量下沉中...', '先趴一下'],
+  waking: ['醒来了...', '重新待命！', '精神恢复中'],
   sleeping: ['💤 zzz...', '好困...', '休息一下...'],
 };
 
