@@ -1,6 +1,42 @@
 import { execFileSync, execSync } from "child_process";
-import { sendJson } from "../utils";
+import { createUnifiedDiff, describeFileStatus, readWorkingFileText, sendJson } from "../utils";
 import { getConfigs, getConfigInfo } from "../db";
+
+function parseDiffHunks(diff: string) {
+  const lines = String(diff || "").split("\n");
+  const hunks: any[] = [];
+  let currentHunk: any = null;
+
+  for (const line of lines) {
+    if (line.startsWith("@@")) {
+      const match = line.match(/@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@(.*)/);
+      if (match) {
+        if (currentHunk) hunks.push(currentHunk);
+        currentHunk = {
+          header: line,
+          oldStart: parseInt(match[1]),
+          oldLines: parseInt(match[2] || "1"),
+          newStart: parseInt(match[3]),
+          newLines: parseInt(match[4] || "1"),
+          context: match[5]?.trim() || "",
+          changes: []
+        };
+      } else if (currentHunk) {
+        currentHunk.changes.push({ type: "context", content: line });
+      }
+    } else if (currentHunk) {
+      if (line.startsWith("+") && !line.startsWith("+++")) {
+        currentHunk.changes.push({ type: "add", content: line.substring(1) });
+      } else if (line.startsWith("-") && !line.startsWith("---")) {
+        currentHunk.changes.push({ type: "remove", content: line.substring(1) });
+      } else if (!line.startsWith("---") && !line.startsWith("+++")) {
+        currentHunk.changes.push({ type: "context", content: line.startsWith(" ") ? line.substring(1) : line });
+      }
+    }
+  }
+  if (currentHunk) hunks.push(currentHunk);
+  return hunks;
+}
 
 export function handleGitApi(pathname: string, req: any, res: any, parsed: any): boolean {
   // 1. 获取项目 Git 状态
@@ -36,32 +72,9 @@ export function handleGitApi(pathname: string, req: any, res: any, parsed: any):
       const files = status.split("\n")
         .filter(line => line.trim())
         .map(line => {
-          const statusCode = line.substring(0, 2).trim();
+          const statusCode = line.substring(0, 2);
           const filePath = line.substring(3).trim();
-          let statusText = "";
-          let statusColor = "";
-
-          if (statusCode === "M" || statusCode === "MM") {
-            statusText = "已修改";
-            statusColor = "#facc15";
-          } else if (statusCode === "A") {
-            statusText = "新增";
-            statusColor = "#22c55e";
-          } else if (statusCode === "D") {
-            statusText = "已删除";
-            statusColor = "#ef4444";
-          } else if (statusCode === "R") {
-            statusText = "重命名";
-            statusColor = "#a78bfa";
-          } else if (statusCode === "??") {
-            statusText = "未跟踪";
-            statusColor = "#64748b";
-          } else {
-            statusText = statusCode;
-            statusColor = "#94a3b8";
-          }
-
-          return { path: filePath, status: statusCode, statusText, statusColor };
+          return { path: filePath, status: statusCode.trim() || statusCode, ...describeFileStatus(statusCode) };
         });
 
       sendJson(res, { success: true, branch, files, total: files.length });
@@ -87,47 +100,37 @@ export function handleGitApi(pathname: string, req: any, res: any, parsed: any):
     const workDir = info[0]?.workDir;
 
     try {
+      const statusForFile = execFileSync("git", ["-c", "core.quotepath=false", "status", "--porcelain", "--", filePath], {
+        encoding: "utf-8",
+        cwd: workDir,
+        stdio: ["pipe", "pipe", "pipe"]
+      }).split("\n")[0] || "";
+      const statusCode = statusForFile.substring(0, 2);
       const diffArgs = staged ? ["diff", "--staged", "--", filePath] : ["diff", "--", filePath];
-      const diff = execFileSync("git", diffArgs, {
+      let diff = execFileSync("git", diffArgs, {
         encoding: "utf-8",
         cwd: workDir,
         stdio: ["pipe", "pipe", "pipe"],
         maxBuffer: 10 * 1024 * 1024
       });
+      let reason = "";
+      let truncated = false;
 
-      // 解析 diff 为结构化数据
-      const lines = diff.split("\n");
-      const hunks: any[] = [];
-      let currentHunk: any = null;
-
-      for (const line of lines) {
-        if (line.startsWith("@@")) {
-          if (currentHunk) hunks.push(currentHunk);
-          const match = line.match(/@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@(.*)/);
-          if (match) {
-            currentHunk = {
-              header: line,
-              oldStart: parseInt(match[1]),
-              oldLines: parseInt(match[2] || "1"),
-              newStart: parseInt(match[3]),
-              newLines: parseInt(match[4] || "1"),
-              context: match[5]?.trim() || "",
-              changes: []
-            };
-          }
-        } else if (currentHunk) {
-          if (line.startsWith("+")) {
-            currentHunk.changes.push({ type: "add", content: line.substring(1) });
-          } else if (line.startsWith("-")) {
-            currentHunk.changes.push({ type: "remove", content: line.substring(1) });
-          } else {
-            currentHunk.changes.push({ type: "context", content: line.substring(1) });
-          }
+      if (!staged && !diff.trim() && (statusCode === "??" || statusCode.includes("A"))) {
+        const afterState = readWorkingFileText(workDir, filePath);
+        if (afterState.binary) {
+          reason = "二进制文件无法做文本对比";
+        } else if (afterState.exists) {
+          diff = createUnifiedDiff("", afterState.text, filePath);
+          truncated = !!(afterState.truncated || afterState.tooLarge);
+          if (truncated) reason = "文件过大，仅展示前半部分内容";
         }
       }
-      if (currentHunk) hunks.push(currentHunk);
 
-      sendJson(res, { success: true, file: filePath, hunks, raw: diff });
+      // 解析 diff 为结构化数据
+      const hunks = parseDiffHunks(diff);
+
+      sendJson(res, { success: true, file: filePath, hunks, raw: diff, reason, truncated });
     } catch (e: any) {
       sendJson(res, { success: false, error: "获取 diff 失败: " + e.message });
     }

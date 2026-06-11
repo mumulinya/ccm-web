@@ -302,6 +302,7 @@ async function syncPets() {
     const agentCfg = getConfigForAgent(p.name);
     agentStates[p.name] = p.state || (p.running ? 'working' : 'idle');
     const label = p.petLabel || p.displayName || p.label || p.name;
+    const previousLabel = petLabels.get(p.name);
     petLabels.set(p.name, label);
     console.log(`[pet] Agent: ${label}, enabled: ${agentCfg.enabled}, type: ${agentCfg.type}`);
     if (agentCfg.enabled !== false) {
@@ -321,6 +322,9 @@ async function syncPets() {
           continue;
         }
         if (win && !win.isDestroyed()) {
+          if (previousLabel !== label) {
+            win.webContents.send('label-update', { agent: p.name, label });
+          }
           win.webContents.send('state-update', { agent: p.name, state: agentStates[p.name] });
         }
       }

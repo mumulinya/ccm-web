@@ -38,16 +38,16 @@ const clawdStateFiles = {
 };
 
 const clawdIdleAnimations = [
-  { file: 'clawd-idle-look.svg', duration: 6500 },
-  { file: 'clawd-idle-bubble.svg', duration: 13500 },
-  { file: 'clawd-idle-reading.svg', duration: 14000 },
+  { file: 'clawd-idle-look.svg', duration: 10000 },
+  { file: 'clawd-idle-bubble.svg', duration: 10000 },
+  { file: 'clawd-idle-reading.svg', duration: 10000 },
 ];
 
 const clawdAutoReturnMs = {
   attention: 4000,
   happy: 4000,
   error: 5000,
-  sweeping: 300000,
+  sweeping: 10000,
   notification: 5000,
   carrying: 3000,
 };
@@ -71,14 +71,14 @@ const cloudlingStateFiles = {
 };
 
 const cloudlingIdleAnimations = [
-  { file: 'cloudling-idle-reading.svg', duration: 14000 },
+  { file: 'cloudling-idle-reading.svg', duration: 10000 },
 ];
 
 const cloudlingAutoReturnMs = {
   attention: 3660,
   happy: 3660,
   error: 5000,
-  sweeping: 300000,
+  sweeping: 10000,
   notification: 2600,
   carrying: 4500,
 };
@@ -102,7 +102,7 @@ const calicoStateFiles = {
 };
 
 const calicoIdleAnimations = [
-  { file: 'calico-idle.apng', duration: 5200 },
+  { file: 'calico-idle.apng', duration: 10000 },
 ];
 
 const calicoAutoReturnMs = {
@@ -200,9 +200,9 @@ const petThemes = {
     files: stateFileMap('panda'),
     bodyHitBox: { x: 0.15, y: 0.1, w: 0.7, h: 0.8 },
     idleAnimations: [
-      { file: 'panda-idle-action1.svg', duration: 16000 },
-      { file: 'panda-idle-action2.svg', duration: 24000 },
-      { file: 'panda-idle-action3.svg', duration: 12000 }
+      { file: 'panda-idle-action1.svg', duration: 10000 },
+      { file: 'panda-idle-action2.svg', duration: 10000 },
+      { file: 'panda-idle-action3.svg', duration: 10000 }
     ],
     autoReturn: { attention: 4000, happy: 4000, error: 5000, notification: 5000, carrying: 3000 },
     reactions: {
@@ -216,9 +216,9 @@ const petThemes = {
     files: stateFileMap('fox'),
     bodyHitBox: { x: 0.15, y: 0.1, w: 0.7, h: 0.8 },
     idleAnimations: [
-      { file: 'fox-idle-action1.svg', duration: 20000 },
-      { file: 'fox-idle-action2.svg', duration: 20000 },
-      { file: 'fox-idle-action3.svg', duration: 16000 }
+      { file: 'fox-idle-action1.svg', duration: 10000 },
+      { file: 'fox-idle-action2.svg', duration: 10000 },
+      { file: 'fox-idle-action3.svg', duration: 10000 }
     ],
     autoReturn: { attention: 4000, happy: 4000, error: 5000, notification: 5000, carrying: 3000 },
     reactions: {
@@ -232,9 +232,9 @@ const petThemes = {
     files: stateFileMap('rabbit'),
     bodyHitBox: { x: 0.15, y: 0.1, w: 0.7, h: 0.8 },
     idleAnimations: [
-      { file: 'rabbit-idle-action1.svg', duration: 16000 },
-      { file: 'rabbit-idle-action2.svg', duration: 18000 },
-      { file: 'rabbit-idle-action3.svg', duration: 16000 }
+      { file: 'rabbit-idle-action1.svg', duration: 10000 },
+      { file: 'rabbit-idle-action2.svg', duration: 10000 },
+      { file: 'rabbit-idle-action3.svg', duration: 10000 }
     ],
     autoReturn: { attention: 4000, happy: 4000, error: 5000, notification: 5000, carrying: 3000 },
     reactions: {
@@ -460,7 +460,7 @@ function scheduleThemeStateTimers(state) {
         loadSVG(petType, 'idle');
         scheduleThemeStateTimers('idle');
       }, idle.duration);
-    }, 5000 + Math.random() * 5000);
+    }, 10000);
   }
 
   const returnMs = theme.autoReturn?.[state];
@@ -857,6 +857,16 @@ function updateEyeTracking() {
 setInterval(updateEyeTracking, 200);
 
 // 接收状态更新
+window.petBridge.onLabelUpdate((data) => {
+  if (data.agent === agentName) {
+    agentLabel = data.label || data.displayName || agentName;
+    nameEl.textContent = agentLabel;
+    if (!speech.classList.contains('hidden')) {
+      speechLabel.textContent = getSpeechLabel('assistant');
+    }
+  }
+});
+
 window.petBridge.onStateUpdate((data) => {
   if (data.agent === agentName) {
     applyState(data.state);

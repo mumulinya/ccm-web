@@ -27,6 +27,7 @@ export declare const OOXML_FILE_EXTENSIONS: string[];
 export declare const MAX_INLINE_FILE_CHARS = 20000;
 export declare const MAX_FILE_SNAPSHOT_BYTES: number;
 export declare const MAX_DIFF_CHARS = 60000;
+export declare const MAX_DIFF_MATRIX_CELLS = 4000000;
 export declare function ensureSharedDir(): void;
 export declare function isTextFileName(name: string): boolean;
 export declare function isImageFileName(name: string): boolean;
@@ -98,12 +99,28 @@ export declare function readWorkingFileText(workDir: string, filePath: string): 
     text: string;
     binary: boolean;
     tooLarge: boolean;
+    truncated?: undefined;
+    size?: undefined;
+} | {
+    exists: boolean;
+    text: string;
+    binary: boolean;
+    tooLarge: boolean;
+    truncated: boolean;
+    size: number;
 };
 export declare function readHeadFileText(workDir: string, filePath: string): {
     exists: boolean;
     text: string;
     binary: boolean;
     tooLarge: boolean;
+    truncated?: undefined;
+} | {
+    exists: boolean;
+    text: string;
+    binary: boolean;
+    tooLarge: boolean;
+    truncated: boolean;
 };
 export declare function createUnifiedDiff(oldText: string, newText: string, filePath: string, contextSize?: number): string;
 export declare function buildFileDiff(workDir: string, filePath: string, before: any): {
@@ -111,17 +128,19 @@ export declare function buildFileDiff(workDir: string, filePath: string, before:
     reason: string;
     beforeExists?: undefined;
     afterExists?: undefined;
+    truncated?: undefined;
     diff?: undefined;
     additions?: undefined;
     deletions?: undefined;
 } | {
     available: boolean;
+    reason: string;
     beforeExists: boolean;
     afterExists: boolean;
+    truncated: boolean;
     diff: string;
     additions: number;
     deletions: number;
-    reason?: undefined;
 };
 export declare function createFileChangeSnapshot(workDir: string): {
     workDir: string;
@@ -131,7 +150,13 @@ export declare function getFileChanges(projectName: string, beforeSnapshot?: any
     files: {
         statusText: string;
         statusColor: string;
+        statusKind: string;
         path: string;
     }[];
     count: number;
+};
+export declare function describeFileStatus(statusCode: string, before?: any): {
+    statusText: string;
+    statusColor: string;
+    statusKind: string;
 };

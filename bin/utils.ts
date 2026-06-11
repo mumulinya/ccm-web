@@ -111,6 +111,7 @@ export const OOXML_FILE_EXTENSIONS = [".docx", ".pptx", ".xlsx"];
 export const MAX_INLINE_FILE_CHARS = 20000;
 export const MAX_FILE_SNAPSHOT_BYTES = 512 * 1024;
 export const MAX_DIFF_CHARS = 60000;
+export const MAX_DIFF_MATRIX_CELLS = 4_000_000;
 
 // === 新增：文件类型验证与路径匹配 ===
 export function ensureSharedDir() {
@@ -458,10 +459,23 @@ export function readWorkingFileText(workDir: string, filePath: string) {
     const absPath = path.join(workDir, filePath);
     if (!fs.existsSync(absPath)) return { exists: false, text: "", binary: false, tooLarge: false };
     const stat = fs.statSync(absPath);
-    if (stat.size > MAX_FILE_SNAPSHOT_BYTES) return { exists: true, text: "", binary: false, tooLarge: true };
-    const buffer = fs.readFileSync(absPath);
+    let buffer: Buffer;
+    if (stat.size > MAX_FILE_SNAPSHOT_BYTES) {
+      buffer = Buffer.alloc(MAX_FILE_SNAPSHOT_BYTES);
+      const fd = fs.openSync(absPath, "r");
+      try { fs.readSync(fd, buffer, 0, MAX_FILE_SNAPSHOT_BYTES, 0); } finally { fs.closeSync(fd); }
+    } else {
+      buffer = fs.readFileSync(absPath);
+    }
     if (!isLikelyTextBuffer(buffer)) return { exists: true, text: "", binary: true, tooLarge: false };
-    return { exists: true, text: buffer.toString("utf-8"), binary: false, tooLarge: false };
+    return {
+      exists: true,
+      text: buffer.toString("utf-8"),
+      binary: false,
+      tooLarge: stat.size > MAX_FILE_SNAPSHOT_BYTES,
+      truncated: stat.size > MAX_FILE_SNAPSHOT_BYTES,
+      size: stat.size
+    };
   } catch {
     return { exists: false, text: "", binary: false, tooLarge: false };
   }
@@ -469,18 +483,40 @@ export function readWorkingFileText(workDir: string, filePath: string) {
 
 export function readHeadFileText(workDir: string, filePath: string) {
   try {
-    const buffer = execFileSync("git", ["show", `HEAD:${filePath}`], {
+    let buffer = execFileSync("git", ["show", `HEAD:${filePath}`], {
       cwd: workDir,
       timeout: 5000,
-      maxBuffer: MAX_FILE_SNAPSHOT_BYTES + 1024,
+      maxBuffer: 8 * 1024 * 1024,
       stdio: ["pipe", "pipe", "pipe"]
     });
-    if (buffer.length > MAX_FILE_SNAPSHOT_BYTES) return { exists: true, text: "", binary: false, tooLarge: true };
+    const tooLarge = buffer.length > MAX_FILE_SNAPSHOT_BYTES;
+    if (tooLarge) buffer = buffer.subarray(0, MAX_FILE_SNAPSHOT_BYTES);
     if (!isLikelyTextBuffer(buffer)) return { exists: true, text: "", binary: true, tooLarge: false };
-    return { exists: true, text: buffer.toString("utf-8"), binary: false, tooLarge: false };
+    return { exists: true, text: buffer.toString("utf-8"), binary: false, tooLarge, truncated: tooLarge };
   } catch {
     return { exists: false, text: "", binary: false, tooLarge: false };
   }
+}
+
+function createPreviewUnifiedDiff(oldLines: string[], newLines: string[], filePath: string, reason: string) {
+  const lines = [
+    `--- a/${filePath}`,
+    `+++ b/${filePath}`,
+    `@@ -1,${Math.max(oldLines.length, 1)} +1,${Math.max(newLines.length, 1)} @@`,
+    ` ${reason}`
+  ];
+  const previewLineBudget = 240;
+  if (oldLines.length) {
+    for (const line of oldLines.slice(0, previewLineBudget)) lines.push(`-${line}`);
+    if (oldLines.length > previewLineBudget) lines.push(`-[旧内容过长，后续 ${oldLines.length - previewLineBudget} 行已省略]`);
+  }
+  if (newLines.length) {
+    for (const line of newLines.slice(0, previewLineBudget)) lines.push(`+${line}`);
+    if (newLines.length > previewLineBudget) lines.push(`+[新内容过长，后续 ${newLines.length - previewLineBudget} 行已省略]`);
+  }
+  let diff = lines.join("\n");
+  if (diff.length > MAX_DIFF_CHARS) diff = `${diff.slice(0, MAX_DIFF_CHARS)}\n\n[diff 过长，已截断]`;
+  return diff;
 }
 
 export function createUnifiedDiff(oldText: string, newText: string, filePath: string, contextSize = 3) {
@@ -492,6 +528,9 @@ export function createUnifiedDiff(oldText: string, newText: string, filePath: st
 
   const n = oldLines.length;
   const m = newLines.length;
+  if (n * m > MAX_DIFF_MATRIX_CELLS) {
+    return createPreviewUnifiedDiff(oldLines, newLines, filePath, "[文件较大，展示内容预览而非精确行级 diff]");
+  }
   const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
   for (let i = n - 1; i >= 0; i--) {
     for (let j = m - 1; j >= 0; j--) {
@@ -521,7 +560,7 @@ export function createUnifiedDiff(oldText: string, newText: string, filePath: st
     }
   });
 
-  const lines = [`--- a/${filePath}`, `+++ b/${filePath}`];
+  const lines = [`--- a/${filePath}`, `+++ b/${filePath}`, `@@ -1,${Math.max(n, 1)} +1,${Math.max(m, 1)} @@`];
   let skipped = false;
   for (let idx = 0; idx < ops.length; idx++) {
     if (!keep.has(idx)) {
@@ -548,9 +587,6 @@ export function buildFileDiff(workDir: string, filePath: string, before: any) {
   const beforeState = before?.contentSnapshot || readHeadFileText(workDir, filePath);
   const afterState = readWorkingFileText(workDir, filePath);
 
-  if (beforeState?.tooLarge || afterState?.tooLarge) {
-    return { available: false, reason: "文件过大，已跳过文本对比" };
-  }
   if (beforeState?.binary || afterState?.binary) {
     return { available: false, reason: "二进制文件无法做文本对比" };
   }
@@ -560,8 +596,10 @@ export function buildFileDiff(workDir: string, filePath: string, before: any) {
   const diff = createUnifiedDiff(beforeText, afterText, filePath);
   return {
     available: !!diff,
+    reason: diff ? "" : "没有文本差异",
     beforeExists: !!beforeState?.exists,
     afterExists: !!afterState.exists,
+    truncated: !!(beforeState?.truncated || afterState?.truncated || beforeState?.tooLarge || afterState?.tooLarge),
     diff,
     additions: diff.split("\n").filter(line => line.startsWith("+") && !line.startsWith("+++")).length,
     deletions: diff.split("\n").filter(line => line.startsWith("-") && !line.startsWith("---")).length,
@@ -599,7 +637,10 @@ export function getFileChanges(projectName: string, beforeSnapshot: any = null) 
           || before.mtimeMs !== (entry.stat?.mtimeMs || 0)
           || before.size !== (entry.stat?.size || 0);
       })
-      .map(entry => ({ path: entry.path, ...describeFileStatus(entry.statusCode) }));
+      .map(entry => {
+        const before = beforeFiles ? beforeFiles[entry.path] : null;
+        return { path: entry.path, ...describeFileStatus(entry.statusCode, before) };
+      });
     for (const file of files as any[]) {
       const before = beforeFiles ? beforeFiles[file.path] : null;
       file.diff = buildFileDiff(workDir, file.path, before);
@@ -611,11 +652,19 @@ export function getFileChanges(projectName: string, beforeSnapshot: any = null) 
   }
 }
 
-function describeFileStatus(statusCode: string) {
-  const code = String(statusCode || "").trim();
-  if (code.includes("A") || code === "??") return { statusText: "新增", statusColor: "#22c55e" };
-  if (code.includes("D")) return { statusText: "删除", statusColor: "#ef4444" };
-  if (code.includes("R")) return { statusText: "重命名", statusColor: "#38bdf8" };
-  if (code.includes("C")) return { statusText: "复制", statusColor: "#a78bfa" };
-  return { statusText: "修改", statusColor: "#facc15" };
+export function describeFileStatus(statusCode: string, before: any = null) {
+  const code = String(statusCode || "").padEnd(2, " ");
+  const compact = code.trim();
+  const wasExisting = !!before?.contentSnapshot?.exists;
+  if (before && wasExisting && before.statusCode === statusCode) {
+    return { statusText: "修改", statusColor: "#facc15", statusKind: "modified" };
+  }
+  if (compact === "??") return { statusText: "新增", statusColor: "#22c55e", statusKind: "added" };
+  if (code.includes("D")) return { statusText: "删除", statusColor: "#ef4444", statusKind: "deleted" };
+  if (code.includes("R")) return { statusText: "重命名", statusColor: "#38bdf8", statusKind: "renamed" };
+  if (code.includes("C")) return { statusText: "复制", statusColor: "#a78bfa", statusKind: "copied" };
+  if (code.includes("A")) return { statusText: code.includes("M") ? "新增后修改" : "新增", statusColor: "#22c55e", statusKind: "added" };
+  if (code[0] === "M" && code[1] === "M") return { statusText: "暂存+修改", statusColor: "#facc15", statusKind: "modified" };
+  if (code.includes("M")) return { statusText: "修改", statusColor: "#facc15", statusKind: "modified" };
+  return { statusText: compact || "变更", statusColor: "#94a3b8", statusKind: "changed" };
 }

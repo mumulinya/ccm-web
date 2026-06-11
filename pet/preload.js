@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('petBridge', {
   onInitPet: (cb) => ipcRenderer.on('init-pet', (_, data) => cb(data)),
+  onLabelUpdate: (cb) => ipcRenderer.on('label-update', (_, data) => cb(data)),
   onStateUpdate: (cb) => ipcRenderer.on('state-update', (_, data) => cb(data)),
   onSpeech: (cb) => ipcRenderer.on('speech', (_, data) => cb(data)),
   getAssetPath: (filename) => ipcRenderer.invoke('get-asset-path', filename),

@@ -62,13 +62,26 @@ const stateCache = new Map();
 const agentActivity = new Map();
 const petWorkspaceTargets = new Map();
 const MUSIC_PET_AGENT_NAME = "music-agent";
-const MUSIC_PET_AGENT_LABEL = "音乐管理 Agent";
+const MUSIC_PET_AGENT_DEFAULT_LABEL = "乖乖";
 let musicPetState = {
     state: "idle",
     detail: "等待音乐指令",
     track: null,
     timestamp: Date.now(),
 };
+function getMusicPetAgentLabel() {
+    try {
+        if (!fs.existsSync(utils_1.PETS_FILE))
+            return MUSIC_PET_AGENT_DEFAULT_LABEL;
+        const data = JSON.parse(fs.readFileSync(utils_1.PETS_FILE, "utf-8"));
+        const config = data?.configs?.[MUSIC_PET_AGENT_NAME] || {};
+        const label = String(config.label || config.petLabel || config.displayName || "").trim();
+        return label ? label.slice(0, 24) : MUSIC_PET_AGENT_DEFAULT_LABEL;
+    }
+    catch {
+        return MUSIC_PET_AGENT_DEFAULT_LABEL;
+    }
+}
 // === 辅助广播及状态跟踪函数 ===
 function writeSse(res, data) {
     if (!res || res.writableEnded || res.destroyed)
@@ -172,18 +185,14 @@ function broadcastPetNavigation(agent, target) {
     return event;
 }
 const PROJECT_IDLE_ACTION_STRATEGY = [
-    { state: "idle", seconds: 34, detail: "空闲，等待指令" },
-    { state: "thinking", seconds: 16, detail: "例行观察项目状态" },
-    { state: "carrying", seconds: 14, detail: "整理任务资料" },
-    { state: "sweeping", seconds: 18, detail: "清扫工作区上下文" },
-    { state: "notification", seconds: 12, detail: "有空可以看看待处理任务" },
-    { state: "juggling", seconds: 16, detail: "休息一下，保持节奏" },
-    { state: "yawning", seconds: 12, detail: "有点困了" },
-    { state: "dozing", seconds: 18, detail: "短暂打盹" },
-    { state: "collapsing", seconds: 8, detail: "准备睡一会儿" },
-    { state: "sleeping", seconds: 30, detail: "运行中，正在小睡" },
-    { state: "waking", seconds: 10, detail: "醒来了" },
-    { state: "idle", seconds: 52, detail: "空闲，等待指令" },
+    { state: "idle", seconds: 10, detail: "空闲，等待指令" },
+    { state: "thinking", seconds: 10, detail: "例行观察项目状态" },
+    { state: "carrying", seconds: 10, detail: "整理任务资料" },
+    { state: "sweeping", seconds: 10, detail: "清扫工作区上下文" },
+    { state: "notification", seconds: 10, detail: "有空可以看看待处理任务" },
+    { state: "juggling", seconds: 10, detail: "休息一下，保持节奏" },
+    { state: "happy", seconds: 10, detail: "保持在线" },
+    { state: "idle", seconds: 10, detail: "空闲，等待指令" },
 ];
 const PROJECT_IDLE_ACTION_CYCLE_MS = PROJECT_IDLE_ACTION_STRATEGY.reduce((sum, item) => sum + item.seconds * 1000, 0);
 const PROJECT_ACTIVE_ACTION_STRATEGY = [
@@ -202,23 +211,26 @@ function getProjectPetActionStrategy() {
 function getActivityDurationMs(state) {
     const normalized = normalizePetState(state);
     const durations = {
-        idle: 15000,
-        thinking: 30000,
+        idle: 10000,
+        thinking: 10000,
         working: 90000,
-        happy: 12000,
-        attention: 12000,
-        notification: 12000,
+        happy: 10000,
+        attention: 10000,
+        notification: 10000,
         error: 45000,
-        carrying: 15000,
-        sweeping: 180000,
-        juggling: 15000,
-        yawning: 12000,
-        dozing: 18000,
-        collapsing: 8000,
-        sleeping: 30000,
+        carrying: 10000,
+        sweeping: 10000,
+        juggling: 10000,
+        yawning: 10000,
+        dozing: 10000,
+        collapsing: 10000,
+        sleeping: 10000,
         waking: 10000,
     };
     return durations[normalized] || 60000;
+}
+function getAgentRunActivityDuration(timeoutMs) {
+    return Math.max((timeoutMs || 300000) + 30000, getActivityDurationMs("working"));
 }
 function hashString(input) {
     let hash = 0;
@@ -275,6 +287,7 @@ function normalizePetState(state) {
 }
 function setMusicPetState(state, detail = "", track = null) {
     setAgentWorkspaceTarget(MUSIC_PET_AGENT_NAME, { tab: "music" });
+    const displayName = getMusicPetAgentLabel();
     musicPetState = {
         state: normalizePetState(state),
         detail: detail || "等待音乐指令",
@@ -284,7 +297,7 @@ function setMusicPetState(state, detail = "", track = null) {
     const event = {
         type: "state",
         agent: MUSIC_PET_AGENT_NAME,
-        displayName: MUSIC_PET_AGENT_LABEL,
+        displayName,
         state: musicPetState.state,
         lastActivity: new Date(musicPetState.timestamp).toISOString(),
         detail: musicPetState.detail,
@@ -294,10 +307,11 @@ function setMusicPetState(state, detail = "", track = null) {
         writeSse(client, event);
 }
 function getMusicPetAgent() {
+    const displayName = getMusicPetAgentLabel();
     return {
         name: MUSIC_PET_AGENT_NAME,
-        displayName: MUSIC_PET_AGENT_LABEL,
-        petLabel: MUSIC_PET_AGENT_LABEL,
+        displayName,
+        petLabel: displayName,
         virtual: true,
         type: "music",
         agent: "music",
@@ -349,7 +363,7 @@ function getAgentState(name) {
     let processRunning = false;
     try {
         if (!fs.existsSync(pidFile)) {
-            const result = { state: "sleeping", lastActivity: null, detail: "进程未运行", processRunning: false, cachedAt: now };
+            const result = { state: "idle", lastActivity: new Date(now).toISOString(), detail: "待命中", processRunning: false, cachedAt: now };
             stateCache.set(name, result);
             return result;
         }
@@ -367,8 +381,8 @@ function getAgentState(name) {
                 fs.unlinkSync(pidFile);
             }
             catch { }
-            state = "sleeping";
-            detail = "进程僵死或不存在";
+            state = "idle";
+            detail = "待命中";
         }
     }
     catch {
@@ -411,7 +425,7 @@ async function appendToolResults(output) {
     return output + "\n\n" + results.join("\n\n");
 }
 function callAgent(projectName, message, workDir, agentType, timeoutMs, workspaceTarget = null) {
-    setAgentActivity(projectName, "working", "Agent 调用中", workspaceTarget || { tab: "projects", project: projectName });
+    setAgentActivity(projectName, "working", "Agent 调用中", workspaceTarget || { tab: "projects", project: projectName }, getAgentRunActivityDuration(timeoutMs));
     const startedAt = Date.now();
     const changeSnapshot = workDir ? (0, utils_1.createFileChangeSnapshot)(workDir) : null;
     const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
@@ -465,7 +479,7 @@ function callAgent(projectName, message, workDir, agentType, timeoutMs, workspac
 }
 function callAgentForGroupStream(projectName, message, workDir, agentType, options = {}) {
     const groupId = options.groupId;
-    setAgentActivity(projectName, "working", options.detail || "群聊协作中", groupId ? { tab: "groups", groupId } : { tab: "groups" });
+    setAgentActivity(projectName, "working", options.detail || "群聊协作中", groupId ? { tab: "groups", groupId } : { tab: "groups" }, getAgentRunActivityDuration(options.timeoutMs));
     const startedAt = Date.now();
     const changeSnapshot = workDir ? (0, utils_1.createFileChangeSnapshot)(workDir) : null;
     const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
@@ -555,7 +569,7 @@ function callAgentStream(projectName, message, workDir, agentType, res) {
     // 发送状态事件
     res.write(`data: ${JSON.stringify({ type: "status", text: "Agent 正在思考..." })}\n\n`);
     broadcastPetSpeech(projectName, { role: "status", text: "Agent 正在思考...", source: "project" });
-    setAgentActivity(projectName, "working", "正在处理消息");
+    setAgentActivity(projectName, "working", "正在处理消息", null, getAgentRunActivityDuration(300000));
     const child = (0, child_process_1.spawn)(cmd, [], { shell: true, cwd: safeCwd, stdio: ["pipe", "pipe", "pipe"] });
     // 关闭 stdin（已通过临时文件传入）
     child.stdin.end();

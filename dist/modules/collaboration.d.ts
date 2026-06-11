@@ -29,7 +29,7 @@ export interface CollabCtx {
     PORT: number;
     callAgent: (projectName: string, message: string, workDir: string, agentType: string, timeoutMs: number, workspaceTarget?: any) => string;
     callAgentForGroupStream: (projectName: string, message: string, workDir: string, agentType: string, options?: any) => Promise<string>;
-    setAgentActivity: (name: string, state: string, detail?: string, workspaceTarget?: any) => void;
+    setAgentActivity: (name: string, state: string, detail?: string, workspaceTarget?: any, durationMs?: number) => void;
     broadcastPetSpeech: (agent: string, payload: any) => void;
     createFileChangeSnapshot: (workDir: string) => any;
     getFileChanges: (projectName: string, beforeSnapshot?: any) => any;

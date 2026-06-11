@@ -41,6 +41,7 @@ const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const utils_1 = require("../utils");
 const db_1 = require("../db");
+const group_orchestrator_1 = require("./group-orchestrator");
 // === 任务队列系统（支持并行执行）===
 const taskQueues = new Map(); // 每个目标（群聊/Agent）独立队列
 const runningTasks = new Map(); // 正在运行的任务目标
@@ -52,7 +53,15 @@ function loadGroups() {
     if (!fs.existsSync(utils_1.GROUPS_FILE))
         return [];
     try {
-        return JSON.parse(fs.readFileSync(utils_1.GROUPS_FILE, "utf-8"));
+        const groups = JSON.parse(fs.readFileSync(utils_1.GROUPS_FILE, "utf-8"));
+        if (!Array.isArray(groups))
+            return [];
+        const before = JSON.stringify(groups);
+        const normalized = groups.map(group_orchestrator_1.normalizeGroupOrchestrator);
+        if (JSON.stringify(normalized) !== before) {
+            saveGroups(normalized);
+        }
+        return normalized;
     }
     catch {
         return [];
@@ -79,6 +88,42 @@ function appendGroupMessage(groupId, msg) {
         fs.mkdirSync(utils_1.GROUP_MESSAGES_DIR, { recursive: true });
     }
     fs.writeFileSync(path.join(utils_1.GROUP_MESSAGES_DIR, `${groupId}.json`), JSON.stringify(messages, null, 2));
+}
+function saveGroupMessages(groupId, messages) {
+    if (!fs.existsSync(utils_1.GROUP_MESSAGES_DIR)) {
+        fs.mkdirSync(utils_1.GROUP_MESSAGES_DIR, { recursive: true });
+    }
+    fs.writeFileSync(path.join(utils_1.GROUP_MESSAGES_DIR, `${groupId}.json`), JSON.stringify(messages, null, 2));
+}
+function normalizePlanAssignments(assignments) {
+    return (assignments || []).map((item) => ({
+        ...item,
+        status: item.status || "pending",
+        statusText: item.statusText || "待处理",
+    }));
+}
+function updateGroupMessageAssignmentStatus(groupId, messageId, project, status, statusText = "") {
+    if (!messageId || !project)
+        return;
+    const messages = getGroupMessages(groupId);
+    let changed = false;
+    for (const msg of messages) {
+        if (msg.id !== messageId || !Array.isArray(msg.assignments))
+            continue;
+        msg.assignments = msg.assignments.map((item) => {
+            if (item.project !== project)
+                return item;
+            changed = true;
+            return {
+                ...item,
+                status,
+                statusText: statusText || status,
+                updated_at: new Date().toISOString(),
+            };
+        });
+    }
+    if (changed)
+        saveGroupMessages(groupId, messages);
 }
 function safeAddGroupLog(groupId, level, category, message, details = null) {
     try {
@@ -427,45 +472,6 @@ function getTaskTargetKey(task) {
     }
     return `project:${task.target_project}`;
 }
-function buildGroupCollaborationRules(memberList = "") {
-    const members = memberList || "无";
-    return `\n\n群聊协作规则：
-- 当前群聊成员：${members}
-- 这是本地 CCM 群聊协作，不是外部 IM；不要调用飞书、微信、外部机器人或 MCP 通知工具来联系其他 Agent。
-- 像团队群聊一样发言：先给出你的判断、依据和下一步，再在确实需要协作时 @ 对方。
-- 如需其他 Agent 协助，只能在本群聊里用独立一行 "@项目名 具体任务" 派发，系统会自动转发。
-- @ 后面必须写清楚可执行任务、需要确认的问题或交付物，例如：@smart-live-app 请根据后端新增字段适配用户头像展示。
-- 只有确实需要对方执行、确认、补充或适配时才 @；普通总结、技术介绍、成员列表、分类标题里不要 @。
-- 被 @ 的 Agent 只处理明确点到自己的任务；如果任务不属于自己，要说明原因，并可用独立 @ 行转给更合适的成员。
-- 不要声称其他 Agent 已完成尚未回复的工作；需要等待时明确说“已派发，等待某某回复”。`;
-}
-function buildCoordinatorCollaborationInstructions(memberList = "") {
-    return `\n\n你是群聊的主 Agent（协调者），目标是让多个项目 Agent 像团队群聊一样协作，而不是自己包办所有事。${buildGroupCollaborationRules(memberList)}
-
-主 Agent 工作方式：
-1. 先判断用户是在咨询、讨论方案、排查问题，还是要求落地修改。
-2. 简单问题直接回答；跨项目、需要代码确认或需要多端配合时，再拆给对应 Agent。
-3. 派发任务时，每个 @ 行只给一个 Agent 一个清晰任务，说明背景、目标文件/模块、预期输出。
-4. 成员回复后，主 Agent 要负责汇总结论、指出冲突、给出下一步；不要重复粘贴所有上下文。
-5. 如果本轮只是派发任务，明确说明“已派发，等待回复”，不要提前说完成。
-6. 如果信息不足，先问用户一个必要问题；不要随意编造项目状态或实现细节。
-
-推荐回复结构：
-- 判断：一句话说明你理解的需求
-- 协作安排：需要时列出独立 @ 行
-- 当前结论/等待项：告诉用户接下来等谁或你已能直接给出的结论`;
-}
-function buildMemberCollaborationInstructions(projectName, memberList = "") {
-    return `\n\n你是群聊中的 ${projectName} Agent，代表这个项目参与协作。${buildGroupCollaborationRules(memberList)}
-
-成员 Agent 工作方式：
-1. 只对自己项目职责范围内的内容做确定回答或修改；不确定时说明需要谁补充。
-2. 回复要像群聊发言：先给结论，再列关键依据、修改点或风险。
-3. 如果需要其他项目配合，用独立一行 @项目名 具体任务；不要泛泛 @。
-4. 如果你完成了代码或配置修改，说明改了什么、影响范围和验证方式。
-5. 如果只是提供建议，不要伪装成已执行修改。
-6. 不要重复整段群聊历史，只引用必要上下文。`;
-}
 function isActionableMentionText(text) {
     const value = String(text || "").trim();
     if (value.length < 4)
@@ -474,28 +480,94 @@ function isActionableMentionText(text) {
         return false;
     return true;
 }
+function normalizeMentionTask(text) {
+    return String(text || "").replace(/\s+/g, " ").trim().slice(0, 240);
+}
+function stripMessageListPrefix(line) {
+    return String(line || "").trim().replace(/^([>*-]|\d+[.)、]|[（(]\d+[）)])\s*/, "").trim();
+}
+function escapeRegExp(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 function extractActionableMentions(text, group, sourceProject = "") {
-    const members = new Set((group.members || []).map((m) => m.project));
+    const memberNames = (group.members || [])
+        .map((m) => String(m.project || "").trim())
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length);
+    const members = new Set(memberNames);
     const results = [];
     const seen = new Set();
     for (const line of String(text || "").split(/\r?\n/)) {
-        const normalized = line.trim().replace(/^([>*-]|\d+[.)、]|[（(]\d+[）)])\s*/, "").trim();
-        const match = normalized.match(/^@([\w-]+)(?:\s+|[：:，,、-]+)([\s\S]+)$/);
-        if (!match)
-            continue;
-        const targetName = match[1];
-        const message = match[2].trim();
+        const normalized = stripMessageListPrefix(line);
+        let targetName = "";
+        let message = "";
+        for (const name of memberNames) {
+            const token = `@${name}`;
+            if (!normalized.startsWith(token))
+                continue;
+            const rest = normalized.slice(token.length);
+            if (rest && !/^[\s：:，,、\-—]/.test(rest))
+                continue;
+            targetName = name;
+            message = rest.replace(/^[\s：:，,、\-—]+/, "").trim();
+            break;
+        }
+        if (!targetName) {
+            const match = normalized.match(/^@([^\s：:，,、\-—]+)(?:\s+|[：:，,、\-—]+)([\s\S]+)$/);
+            if (!match)
+                continue;
+            targetName = match[1];
+            message = match[2].trim();
+        }
         if (!members.has(targetName) || targetName === sourceProject)
             continue;
         if (!isActionableMentionText(message))
             continue;
-        const key = `${targetName}\n${message}`;
+        const key = `${targetName}\n${normalizeMentionTask(message)}`;
         if (seen.has(key))
             continue;
         seen.add(key);
         results.push({ mention: `@${targetName}`, targetName, message });
     }
     return results;
+}
+function extractStructuredAssignments(result, group, sourceProject = "") {
+    const memberNames = new Set((group.members || [])
+        .map((m) => String(m.project || "").trim())
+        .filter(Boolean));
+    const assignments = Array.isArray(result?.assignments) ? result.assignments : [];
+    const seen = new Set();
+    const mentions = [];
+    for (const item of assignments) {
+        const targetName = String(item?.project || item?.targetName || "").trim();
+        const message = String(item?.task || item?.message || "").trim();
+        if (!memberNames.has(targetName) || targetName === sourceProject)
+            continue;
+        if (!isActionableMentionText(message))
+            continue;
+        const key = `${targetName}\n${normalizeMentionTask(message)}`;
+        if (seen.has(key))
+            continue;
+        seen.add(key);
+        mentions.push({
+            mention: `@${targetName}`,
+            targetName,
+            message,
+            reason: String(item?.reason || "").trim(),
+            dependsOn: String(item?.dependsOn || "").trim(),
+            structured: true,
+        });
+    }
+    return mentions;
+}
+function getCoordinatorActionMentions(result, group, sourceProject = "") {
+    const structured = extractStructuredAssignments(result, group, sourceProject);
+    if (structured.length > 0)
+        return structured;
+    return extractActionableMentions(result?.content || "", group, sourceProject);
+}
+function formatCollectedAgentOutput(agent, text) {
+    return `【${agent}】\n${String(text || "").trim()}`;
 }
 function checkTaskCompletion(response) {
     if (!response)
@@ -521,7 +593,7 @@ function writeSse(res, data) {
     catch { }
 }
 // === 跨 Agent 并行与递归协作（核心）===
-async function processCrossAgents(groupId, group, sourceProject, output, atMentions, configs, ctx, streamRes = null, depth = 0) {
+async function processCrossAgents(groupId, group, sourceProject, output, atMentions, configs, ctx, streamRes = null, depth = 0, seenMentions = new Set(), executionOrder = "parallel") {
     const collectedOutputs = [];
     if (depth > 3) {
         console.log("[跨Agent协作] 达到最大递归深度，停止继续转发");
@@ -533,13 +605,21 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
         const key = typeof m === "string" ? m : `${m.targetName}:${m.message}`;
         return arr.findIndex(item => (typeof item === "string" ? item : `${item.targetName}:${item.message}`) === key) === idx;
     });
-    for (const mention of uniqueMentions) {
+    const getMentionTargetName = (mention) => {
+        const mentionStr = typeof mention === "string" ? String(mention) : mention.mention;
+        return typeof mention === "string"
+            ? (mentionStr.startsWith("@") ? mentionStr.slice(1) : mentionStr)
+            : mention.targetName;
+    };
+    const executeMentionJob = async (mention) => {
+        const outputs = [];
         const mentionStr = typeof mention === "string" ? String(mention) : mention.mention;
         const targetName = typeof mention === "string" ? (mentionStr.startsWith("@") ? mentionStr.slice(1) : mentionStr) : mention.targetName;
+        const coordinatorProject = (0, group_orchestrator_1.getCoordinatorMember)(group).project;
         const targetMember = group.members.find((m) => m.project === targetName && m.project !== sourceProject);
         if (!targetMember)
-            continue;
-        const atRegex = new RegExp(`@${targetName}\\s+([^@]+?)(?=\\s*@|$)`, "is");
+            return outputs;
+        const atRegex = new RegExp(`@${escapeRegExp(targetName)}\\s+([^@]+?)(?=\\s*@|$)`, "is");
         const atMatch = output.match(atRegex);
         let atMessage = typeof mention === "string" ? (atMatch ? atMatch[1].trim() : "") : mention.message;
         if (!atMessage || atMessage.length < 5) {
@@ -560,37 +640,69 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
             }
             atMessage = relevantLines.join("\n").trim() || output.substring(0, 500);
         }
+        const taskKey = `${sourceProject}->${targetName}:${normalizeMentionTask(atMessage)}`;
+        if (seenMentions.has(taskKey)) {
+            addGroupLog(groupId, "info", "collaboration", `跳过重复协作: ${sourceProject} -> ${targetName}`, { task: atMessage.substring(0, 160) });
+            return outputs;
+        }
+        seenMentions.add(taskKey);
         appendGroupMessage(groupId, {
             id: "m" + Date.now().toString(36) + "fwd",
             role: "assistant", agent: sourceProject,
             content: `📤 → @${targetName}\n${atMessage}`,
             timestamp: new Date().toISOString(),
         });
+        writeSse(streamRes, { type: "status", text: `📨 ${sourceProject} 已 @${targetName}，等待 ${targetName} 回复...`, agent: targetName });
+        ctx.setAgentActivity(targetName, "working", `被 ${sourceProject} @ 协作`, { tab: "groups", groupId }, 330000);
+        ctx.broadcastPetSpeech(targetName, { role: "status", text: `${sourceProject} @ 我协作，正在处理...`, source: "group" });
+        const tContext = (0, group_orchestrator_1.buildRecentGroupContext)(getGroupMessages(groupId).slice(-15));
+        if (targetName === coordinatorProject) {
+            const responseMessageId = "m" + Date.now().toString(36) + "coord" + crypto.randomBytes(2).toString("hex");
+            const result = await (0, group_orchestrator_1.runGroupOrchestrator)({
+                group,
+                message: atMessage,
+                context: tContext,
+                source: sourceProject,
+            });
+            outputs.push(formatCollectedAgentOutput(coordinatorProject, result.content));
+            appendGroupMessage(groupId, {
+                id: responseMessageId,
+                role: "assistant",
+                agent: coordinatorProject,
+                content: result.content,
+                timestamp: new Date().toISOString(),
+                assignments: result.assignments || [],
+                executionOrder: result.executionOrder || "parallel",
+                runtime: result.runtime || "",
+            });
+            writeSse(streamRes, {
+                type: "agent_done",
+                agent: coordinatorProject,
+                text: result.content,
+                messageId: responseMessageId,
+                assignments: result.assignments || [],
+                executionOrder: result.executionOrder || "parallel",
+                runtime: result.runtime || "",
+            });
+            const nestedMentions = extractActionableMentions(result.content, group, coordinatorProject);
+            if (nestedMentions.length > 0) {
+                const nestedOutputs = await processCrossAgents(groupId, group, coordinatorProject, result.content, nestedMentions, configs, ctx, streamRes, depth + 1, seenMentions);
+                outputs.push(...nestedOutputs);
+            }
+            return outputs;
+        }
         let tWorkDir = process.cwd();
         let tAgentType = "claudecode";
-        if (targetName === "coordinator") {
-            const firstMember = group.members.find((m) => m.project !== "coordinator");
-            const firstConfig = firstMember ? configs.find(c => c.name === firstMember.project) : configs[0];
-            if (firstConfig) {
-                tWorkDir = (0, db_1.getConfigInfo)(firstConfig.path)[0]?.workDir || process.cwd();
-            }
-        }
-        else {
-            const targetConfig = configs.find(c => c.name === targetName);
-            if (!targetConfig)
-                continue;
-            const tInfo = (0, db_1.getConfigInfo)(targetConfig.path);
-            tWorkDir = tInfo[0]?.workDir;
-            tAgentType = tInfo[0]?.agent || "claudecode";
-        }
-        const tContext = getGroupMessages(groupId).slice(-15).map((m) => {
-            const who = m.role === "user" ? `[用户 → ${m.target}]` : `[${m.agent || "Agent"}]`;
-            return `${who} ${m.content}`;
-        }).join("\n");
+        const targetConfig = configs.find(c => c.name === targetName);
+        if (!targetConfig)
+            return outputs;
+        const tInfo = (0, db_1.getConfigInfo)(targetConfig.path);
+        tWorkDir = tInfo[0]?.workDir;
+        tAgentType = tInfo[0]?.agent || "claudecode";
         const memberList = group.members.map((m) => m.project).filter((p) => p !== targetName).join(", ");
-        const collaborationInstructions = targetName === "coordinator"
-            ? buildCoordinatorCollaborationInstructions(group.members.map((m) => m.project).filter((p) => p !== "coordinator").join(", "))
-            : buildMemberCollaborationInstructions(targetName, memberList);
+        const collaborationInstructions = targetName === coordinatorProject
+            ? (0, group_orchestrator_1.buildCoordinatorCollaborationInstructions)((0, group_orchestrator_1.getRoutableMembers)(group).map((m) => m.project).join(", "))
+            : (0, group_orchestrator_1.buildMemberCollaborationInstructions)(targetName, memberList);
         const tPrompt = `你正在 CCM 群聊中被 @ 请求协作。${collaborationInstructions}
 
 以下是群聊最近的消息记录：
@@ -610,7 +722,7 @@ ${atMessage}
                 messageId: responseMessageId,
                 onDone: (opts) => { targetFileChanges = opts.fileChanges; }
             });
-            collectedOutputs.push(tOutput);
+            outputs.push(formatCollectedAgentOutput(targetName, tOutput));
             appendGroupMessage(groupId, {
                 id: responseMessageId,
                 role: "assistant", agent: targetName,
@@ -620,16 +732,16 @@ ${atMessage}
             });
             const nestedMentions = extractActionableMentions(tOutput, group, targetName);
             if (nestedMentions.length > 0) {
-                const newMentions = nestedMentions.filter(m => m.targetName !== sourceProject && m.targetName !== targetName);
+                const newMentions = nestedMentions.filter(m => m.targetName !== targetName);
                 if (newMentions.length > 0) {
-                    const nestedOutputs = await processCrossAgents(groupId, group, targetName, tOutput, newMentions, configs, ctx, streamRes, depth + 1);
-                    collectedOutputs.push(...nestedOutputs);
+                    const nestedOutputs = await processCrossAgents(groupId, group, targetName, tOutput, newMentions, configs, ctx, streamRes, depth + 1, seenMentions);
+                    outputs.push(...nestedOutputs);
                 }
             }
         }
         catch (error) {
             console.error(`[跨Agent协作] 调用 Agent ${targetName} 失败:`, error.message);
-            collectedOutputs.push(`❌ 转发给 @${targetName} 失败: ${error.message}`);
+            outputs.push(formatCollectedAgentOutput(targetName, `❌ 转发失败: ${error.message}`));
             appendGroupMessage(groupId, {
                 id: "m" + Date.now().toString(36) + "err",
                 role: "assistant", agent: "system",
@@ -637,8 +749,109 @@ ${atMessage}
                 timestamp: new Date().toISOString(),
             });
         }
+        return outputs;
+    };
+    const hasExplicitDependencies = uniqueMentions.some((mention) => typeof mention !== "string" && String(mention.dependsOn || "").trim());
+    if (hasExplicitDependencies) {
+        const pending = [...uniqueMentions];
+        const completed = new Set();
+        let guard = 0;
+        while (pending.length > 0 && guard < 20) {
+            guard++;
+            const readyIndex = pending.findIndex((mention) => {
+                if (typeof mention === "string")
+                    return true;
+                const dependsOn = String(mention.dependsOn || "").trim();
+                return !dependsOn || completed.has(dependsOn) || !uniqueMentions.some((item) => getMentionTargetName(item) === dependsOn);
+            });
+            const index = readyIndex >= 0 ? readyIndex : 0;
+            const [mention] = pending.splice(index, 1);
+            const outputs = await executeMentionJob(mention);
+            collectedOutputs.push(...outputs);
+            completed.add(getMentionTargetName(mention));
+        }
+    }
+    else if (executionOrder === "sequential" || executionOrder === "backend_first") {
+        // 串行执行：后端优先或按顺序
+        const backendMentions = [];
+        const frontendMentions = [];
+        const otherMentions = [];
+        for (const mention of uniqueMentions) {
+            const targetName = getMentionTargetName(mention);
+            const targetMember = group.members.find((m) => m.project === targetName);
+            const kind = targetMember ? (/cloud|api|server|backend|service|后端/i.test(targetName) ? "backend" : /app|web|front|frontend|前端/i.test(targetName) ? "frontend" : "other") : "other";
+            if (kind === "backend")
+                backendMentions.push(mention);
+            else if (kind === "frontend")
+                frontendMentions.push(mention);
+            else
+                otherMentions.push(mention);
+        }
+        // 先执行后端
+        for (const mention of backendMentions) {
+            const outputs = await executeMentionJob(mention);
+            collectedOutputs.push(...outputs);
+        }
+        // 再执行前端
+        for (const mention of frontendMentions) {
+            const outputs = await executeMentionJob(mention);
+            collectedOutputs.push(...outputs);
+        }
+        // 最后其他
+        for (const mention of otherMentions) {
+            const outputs = await executeMentionJob(mention);
+            collectedOutputs.push(...outputs);
+        }
+    }
+    else {
+        // 默认并行执行
+        const settledOutputs = await Promise.all(uniqueMentions.map(mention => executeMentionJob(mention)));
+        for (const outputs of settledOutputs)
+            collectedOutputs.push(...outputs);
     }
     return collectedOutputs;
+}
+async function appendCoordinatorMessage(groupId, agent, content, streamRes = null, suffix = "review") {
+    const messageId = "m" + Date.now().toString(36) + suffix + crypto.randomBytes(2).toString("hex");
+    appendGroupMessage(groupId, {
+        id: messageId,
+        role: "assistant",
+        agent,
+        content,
+        timestamp: new Date().toISOString(),
+    });
+    writeSse(streamRes, { type: "agent_done", agent, text: content, messageId });
+    return messageId;
+}
+async function runCoordinatorReviewLoop(input) {
+    const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(input.group);
+    const seenMentions = new Set();
+    const allOutputs = [...(input.crossOutputs || [])];
+    if (allOutputs.length === 0)
+        return null;
+    let review = await (0, group_orchestrator_1.runLlmCoordinatorReview)(input.group, input.userMessage, input.coordinatorOutput, allOutputs, { allowFollowUps: true, round: 1 });
+    if (!review) {
+        const fallback = await (0, group_orchestrator_1.runLlmCoordinatorSummary)(input.group, input.userMessage, allOutputs)
+            || (0, group_orchestrator_1.buildCodedCoordinatorSummary)(input.group, allOutputs);
+        if (fallback)
+            await appendCoordinatorMessage(input.groupId, fallback.agent, fallback.content, input.streamRes, "sum");
+        return fallback;
+    }
+    await appendCoordinatorMessage(input.groupId, coordinator.project, review.content, input.streamRes, "review");
+    const followUps = Array.isArray(review.followUps) ? review.followUps : [];
+    if (followUps.length === 0)
+        return review;
+    writeSse(input.streamRes, { type: "status", text: "🔎 主 Agent 发现缺口，正在继续追问相关子 Agent...", agent: coordinator.project });
+    const followOutputs = await processCrossAgents(input.groupId, input.group, coordinator.project, review.content, followUps, input.configs, input.ctx, input.streamRes, 1, seenMentions, input.executionOrder || "parallel");
+    allOutputs.push(...followOutputs);
+    const finalReview = await (0, group_orchestrator_1.runLlmCoordinatorReview)(input.group, input.userMessage, input.coordinatorOutput, allOutputs, { allowFollowUps: false, round: 2 });
+    const finalSummary = finalReview
+        || await (0, group_orchestrator_1.runLlmCoordinatorSummary)(input.group, input.userMessage, allOutputs)
+        || (0, group_orchestrator_1.buildCodedCoordinatorSummary)(input.group, allOutputs);
+    if (finalSummary) {
+        await appendCoordinatorMessage(input.groupId, finalSummary.agent || coordinator.project, finalSummary.content, input.streamRes, "final");
+    }
+    return finalSummary;
 }
 // === 执行任务核心 ===
 async function executeTask(task, ctx) {
@@ -648,11 +861,12 @@ async function executeTask(task, ctx) {
         const group = groups.find(g => g.id === task.group_id);
         if (!group)
             throw new Error("群聊不存在");
+        const coordinatorProject = (0, group_orchestrator_1.getCoordinatorMember)(group).project;
         const message = `📋 执行任务：${task.title}\n${task.description || ""}\n\n请完成此任务并回复 "✅ 任务完成"。`;
         appendGroupMessage(task.group_id, {
             id: "m" + Date.now().toString(36) + "task",
             role: "user",
-            target: "coordinator",
+            target: coordinatorProject,
             content: message,
             timestamp: new Date().toISOString(),
             task_id: task.id,
@@ -661,42 +875,37 @@ async function executeTask(task, ctx) {
             task_id: task.id,
             priority: task.priority
         });
-        const firstMember = group.members.find((m) => m.project !== "coordinator");
-        const firstConfig = firstMember ? configs.find(c => c.name === firstMember.project) : configs[0];
-        const workDir = firstConfig ? (0, db_1.getConfigInfo)(firstConfig.path)[0]?.workDir : process.cwd();
-        const recentMsgs = getGroupMessages(task.group_id).slice(-10);
-        const context = recentMsgs.map((m) => {
-            const who = m.role === "user" ? `[用户 → ${m.target}]` : `[${m.agent || "Agent"}]`;
-            return `${who} ${m.content}`;
-        }).join("\n");
-        const memberList = group.members.map((m) => m.project).filter((p) => p !== "coordinator").join(", ");
-        const coordinatorInstructions = buildCoordinatorCollaborationInstructions(memberList);
-        const fullPrompt = `${coordinatorInstructions}
-
-任务处理要求：
-- 理解任务目标，判断是否需要多个 Agent 协作。
-- 需要协作时，用独立 @ 行分派清晰、可执行的子任务。
-- 如果本轮只是派发任务，请说明等待哪些 Agent 回复，不要提前标记完成。
-- 只有任务已经实际完成或无需再等待时，才在回复中包含 "✅ 任务完成"。
-
-以下是群聊最近记录：
-${context}
-
-请处理刚才派发的任务。`;
-        const coordinatorOutput = ctx.callAgent("coordinator", fullPrompt, workDir, "claudecode", 300000);
+        const context = (0, group_orchestrator_1.buildRecentGroupContext)(getGroupMessages(task.group_id).slice(-10));
+        const coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
+            group,
+            message,
+            context,
+            source: "task",
+        });
+        const coordinatorOutput = coordinatorResult.content;
         appendGroupMessage(task.group_id, {
             id: "m" + Date.now().toString(36) + "coord",
             role: "assistant",
-            agent: "coordinator",
+            agent: coordinatorProject,
             content: coordinatorOutput,
             timestamp: new Date().toISOString(),
             task_id: task.id,
         });
-        const validMentions = extractActionableMentions(coordinatorOutput, group, "coordinator");
+        const validMentions = getCoordinatorActionMentions(coordinatorResult, group, coordinatorProject);
         let crossOutputs = [];
         if (validMentions.length > 0) {
             addTaskLog(task.id, "info", `检测到群聊派发目标: ${validMentions.map(m => m.mention).join(", ")}`);
-            crossOutputs = await processCrossAgents(task.group_id, group, "coordinator", coordinatorOutput, validMentions, configs, ctx);
+            crossOutputs = await processCrossAgents(task.group_id, group, coordinatorProject, coordinatorOutput, validMentions, configs, ctx);
+            await runCoordinatorReviewLoop({
+                groupId: task.group_id,
+                group,
+                userMessage: message,
+                coordinatorOutput,
+                crossOutputs,
+                configs,
+                ctx,
+                executionOrder: coordinatorResult.executionOrder || "parallel",
+            });
         }
         return [coordinatorOutput, ...crossOutputs].filter(Boolean).join("\n\n---\n\n");
     }
@@ -1005,6 +1214,48 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
         });
         return true;
     }
+    // === 群聊主 Agent / Orchestrator API ===
+    if (pathname === "/api/orchestrator/config" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, config: (0, group_orchestrator_1.publicOrchestratorConfig)((0, group_orchestrator_1.loadOrchestratorConfig)()) });
+        return true;
+    }
+    if (pathname === "/api/orchestrator/config" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const updates = JSON.parse(body);
+                const config = (0, group_orchestrator_1.saveOrchestratorConfig)(updates);
+                (0, utils_1.sendJson)(res, { success: true, config: (0, group_orchestrator_1.publicOrchestratorConfig)(config) });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/orchestrator/test" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", async () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const groups = loadGroups();
+                const group = payload.group_id
+                    ? groups.find(g => g.id === payload.group_id)
+                    : groups[0];
+                if (!group)
+                    return (0, utils_1.sendJson)(res, { error: "请先创建一个群聊并添加项目 Agent" }, 400);
+                const message = String(payload.message || "帮我排查登录页面调用接口失败的问题，前后端都看一下").trim();
+                const result = await (0, group_orchestrator_1.runGroupOrchestrator)({ group, message, source: "test" });
+                (0, utils_1.sendJson)(res, { success: true, result });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { error: e.message }, 500);
+            }
+        });
+        return true;
+    }
     // === 群聊 API ===
     if (pathname === "/api/groups" && req.method === "GET") {
         (0, utils_1.sendJson)(res, { groups: loadGroups() });
@@ -1018,14 +1269,11 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                 const { name, members } = JSON.parse(body);
                 const groups = loadGroups();
                 const id = "g" + Date.now().toString(36);
-                const allMembers = [
-                    { project: "coordinator", role: "coordinator", agent: "claudecode" },
-                    ...(members || [])
-                ];
-                const group = {
+                const allMembers = Array.isArray(members) ? members : [];
+                const group = (0, group_orchestrator_1.normalizeGroupOrchestrator)({
                     id, name, members: allMembers,
                     created_at: new Date().toISOString(),
-                };
+                });
                 groups.push(group);
                 saveGroups(groups);
                 (0, utils_1.sendJson)(res, { success: true, group });
@@ -1054,8 +1302,10 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                     }
                 }
                 if (remove) {
-                    group.members = group.members.filter((m) => !remove.includes(m.project) || m.project === "coordinator");
+                    const coordinatorProject = (0, group_orchestrator_1.getCoordinatorMember)(group).project;
+                    group.members = group.members.filter((m) => !remove.includes(m.project) || m.project === coordinatorProject || m.role === "coordinator");
                 }
+                (0, group_orchestrator_1.normalizeGroupOrchestrator)(group);
                 saveGroups(groups);
                 (0, utils_1.sendJson)(res, { success: true, group });
             }
@@ -1353,17 +1603,18 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                 const group = groups.find(g => g.id === group_id);
                 if (!group)
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 400);
-                const isBroadcast = !target_project || target_project === "all";
-                const targetMembers = isBroadcast
-                    ? group.members.filter((m) => m.project !== "coordinator")
-                    : [group.members.find((m) => m.project === target_project)].filter(Boolean);
+                (0, group_orchestrator_1.normalizeGroupOrchestrator)(group);
+                const routing = (0, group_orchestrator_1.selectGroupTargets)(group, target_project);
+                const isBroadcast = routing.isBroadcast;
+                const isOrchestrated = routing.orchestrated;
+                const targetMembers = routing.members;
                 if (targetMembers.length === 0) {
                     return (0, utils_1.sendJson)(res, { error: "没有找到目标项目" }, 400);
                 }
                 const userMsg = {
                     id: client_message_id ? String(client_message_id) : "m" + Date.now().toString(36),
                     role: "user",
-                    target: isBroadcast ? "all" : target_project,
+                    target: routing.targetLabel,
                     content: userMessageForHistory,
                     timestamp: new Date().toISOString(),
                 };
@@ -1371,12 +1622,97 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                 for (const member of targetMembers) {
                     ctx.broadcastPetSpeech(member.project, { role: "user", text: userMessageForHistory, final: true, source: "group" });
                 }
-                addGroupLog(group_id, "info", "message", `用户发送消息给 ${isBroadcast ? '所有人' : target_project}`, {
+                addGroupLog(group_id, "info", "message", `用户发送消息给 ${isOrchestrated ? '主 Agent' : isBroadcast ? '所有人' : target_project}`, {
                     message: userMessageForHistory.substring(0, 200),
-                    target: isBroadcast ? "all" : target_project,
-                    is_broadcast: isBroadcast
+                    target: routing.targetLabel,
+                    is_broadcast: isBroadcast,
+                    orchestrated: isOrchestrated
                 });
                 const configs = (0, db_1.getConfigs)();
+                if (isBroadcast && isOrchestrated) {
+                    res.writeHead(200, {
+                        "Content-Type": "text/event-stream",
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "Access-Control-Allow-Origin": "*",
+                    });
+                    const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(group);
+                    writeSse(res, {
+                        type: "status",
+                        text: `🧠 主 Agent ${coordinator.project} 正在协调群聊...`,
+                        agent: coordinator.project
+                    });
+                    ctx.setAgentActivity(coordinator.project, "working", "主 Agent 正在协调群聊", { tab: "groups", groupId: group_id });
+                    ctx.broadcastPetSpeech(coordinator.project, { role: "status", text: "主 Agent 正在协调群聊...", source: "group" });
+                    const recentMsgs = getGroupMessages(group_id).slice(-20);
+                    const context = (0, group_orchestrator_1.buildRecentGroupContext)(recentMsgs);
+                    // 优化3：构建共享文件上下文注入 LLM
+                    const sharedFilesList = (group.shared_files || []).map((f) => `- ${f.name} (${f.type || 'file'})`).join("\n");
+                    const sharedFilesContext = sharedFilesList ? sharedFilesList : undefined;
+                    const coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
+                        group,
+                        message: messageForAgent,
+                        context,
+                        source: "user",
+                        sharedFilesContext,
+                    });
+                    try {
+                        const responseMessageId = "m" + Date.now().toString(36) + "coord" + crypto.randomBytes(2).toString("hex");
+                        const outputText = coordinatorResult.content;
+                        writeSse(res, {
+                            type: "agent_done",
+                            agent: coordinator.project,
+                            text: outputText,
+                            messageId: responseMessageId,
+                            assignments: coordinatorResult.assignments || [],
+                            executionOrder: coordinatorResult.executionOrder || "parallel",
+                            runtime: coordinatorResult.runtime || "",
+                        });
+                        appendGroupMessage(group_id, {
+                            id: responseMessageId,
+                            role: "assistant",
+                            agent: coordinator.project,
+                            content: outputText,
+                            timestamp: new Date().toISOString(),
+                            assignments: coordinatorResult.assignments || [],
+                            executionOrder: coordinatorResult.executionOrder || "parallel",
+                            runtime: coordinatorResult.runtime || "",
+                        });
+                        addGroupLog(group_id, "success", "orchestrator", `主 Agent ${coordinator.project} 回复完成`, {
+                            response_length: outputText.length,
+                            response_preview: outputText.substring(0, 300),
+                            runtime: "coded-orchestrator",
+                        });
+                        let crossOutputs = [];
+                        const validMentions = getCoordinatorActionMentions(coordinatorResult, group, coordinator.project);
+                        if (validMentions.length > 0) {
+                            writeSse(res, { type: "status", text: "🧩 主 Agent 正在分派子 Agent..." });
+                            const execOrder = coordinatorResult.executionOrder || "parallel";
+                            crossOutputs = await processCrossAgents(group_id, group, coordinator.project, outputText, validMentions, configs, ctx, res, 0, new Set(), execOrder);
+                            await runCoordinatorReviewLoop({
+                                groupId: group_id,
+                                group,
+                                userMessage: messageForAgent,
+                                coordinatorOutput: outputText,
+                                crossOutputs,
+                                configs,
+                                ctx,
+                                streamRes: res,
+                                executionOrder: execOrder,
+                            });
+                        }
+                        writeSse(res, { type: "done", messageId: responseMessageId });
+                        res.end();
+                    }
+                    catch (err) {
+                        writeSse(res, { type: "error", text: err.message });
+                        try {
+                            res.end();
+                        }
+                        catch { }
+                    }
+                    return;
+                }
                 if (isBroadcast) {
                     res.writeHead(200, {
                         "Content-Type": "text/event-stream",
@@ -1396,7 +1732,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                             return `${who} ${m.content}`;
                         }).join("\n");
                         const memberList = group.members.map((m) => m.project).filter((p) => p !== member.project && p !== "coordinator").join(", ");
-                        const collaborationInstructions = buildMemberCollaborationInstructions(member.project, memberList);
+                        const collaborationInstructions = (0, group_orchestrator_1.buildMemberCollaborationInstructions)(member.project, memberList);
                         const sharedFilesContext = ctx.buildFilesContext(group.shared_files || [], "以下是群聊中的共享文件：");
                         let toolsContext = "";
                         if (group.tools) {
@@ -1468,20 +1804,86 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                 }
                 // 单个 Agent 模式
                 const target_project_actual = targetMembers[0].project;
-                let workDir, agentType;
-                if (target_project_actual === "coordinator") {
-                    const firstMember = group.members.find((m) => m.project !== "coordinator");
-                    const firstConfig = firstMember ? configs.find(c => c.name === firstMember.project) : configs[0];
-                    workDir = firstConfig ? (0, db_1.getConfigInfo)(firstConfig.path)[0]?.workDir : process.cwd();
-                    agentType = "claudecode";
+                const coordinatorProject = (0, group_orchestrator_1.getCoordinatorMember)(group).project;
+                const useStream = parsed.query.stream === "1" || req.headers["accept"] === "text/event-stream";
+                if (target_project_actual === coordinatorProject) {
+                    const sharedFilesList2 = (group.shared_files || []).map((f) => `- ${f.name} (${f.type || 'file'})`).join("\n");
+                    const sharedFilesCtx2 = sharedFilesList2 ? sharedFilesList2 : undefined;
+                    const context = (0, group_orchestrator_1.buildRecentGroupContext)(getGroupMessages(group_id).slice(-20));
+                    const coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
+                        group,
+                        message: messageForAgent,
+                        context,
+                        source: "direct",
+                        sharedFilesContext: sharedFilesCtx2,
+                    });
+                    const responseMessageId = "m" + Date.now().toString(36) + "coord" + crypto.randomBytes(2).toString("hex");
+                    if (useStream) {
+                        res.writeHead(200, {
+                            "Content-Type": "text/event-stream",
+                            "Cache-Control": "no-cache",
+                            "Connection": "keep-alive",
+                            "Access-Control-Allow-Origin": "*",
+                        });
+                        writeSse(res, { type: "status", text: "🧠 代码协调器正在分配任务...", agent: coordinatorProject });
+                        writeSse(res, {
+                            type: "agent_done",
+                            agent: coordinatorProject,
+                            text: coordinatorResult.content,
+                            messageId: responseMessageId,
+                            assignments: coordinatorResult.assignments || [],
+                            executionOrder: coordinatorResult.executionOrder || "parallel",
+                            runtime: coordinatorResult.runtime || "",
+                        });
+                    }
+                    appendGroupMessage(group_id, {
+                        id: responseMessageId,
+                        role: "assistant",
+                        agent: coordinatorProject,
+                        content: coordinatorResult.content,
+                        timestamp: new Date().toISOString(),
+                        assignments: coordinatorResult.assignments || [],
+                        executionOrder: coordinatorResult.executionOrder || "parallel",
+                        runtime: coordinatorResult.runtime || "",
+                    });
+                    const validMentions = getCoordinatorActionMentions(coordinatorResult, group, coordinatorProject);
+                    let crossOutputs = [];
+                    let reviewResult = null;
+                    if (validMentions.length > 0) {
+                        if (useStream)
+                            writeSse(res, { type: "status", text: "🧩 代码协调器正在分派子 Agent..." });
+                        const execOrder2 = coordinatorResult.executionOrder || "parallel";
+                        crossOutputs = await processCrossAgents(group_id, group, coordinatorProject, coordinatorResult.content, validMentions, configs, ctx, useStream ? res : null, 0, new Set(), execOrder2);
+                        reviewResult = await runCoordinatorReviewLoop({
+                            groupId: group_id,
+                            group,
+                            userMessage: messageForAgent,
+                            coordinatorOutput: coordinatorResult.content,
+                            crossOutputs,
+                            configs,
+                            ctx,
+                            streamRes: useStream ? res : null,
+                            executionOrder: execOrder2,
+                        });
+                    }
+                    if (useStream) {
+                        writeSse(res, { type: "done", messageId: responseMessageId });
+                        res.end();
+                    }
+                    else {
+                        (0, utils_1.sendJson)(res, {
+                            success: true,
+                            reply: reviewResult?.content ? `${coordinatorResult.content}\n\n---\n\n${reviewResult.content}` : coordinatorResult.content,
+                            cross_pending: validMentions.length > 0
+                        });
+                    }
+                    return;
                 }
-                else {
-                    const config = configs.find(c => c.name === target_project_actual);
-                    if (!config)
-                        return (0, utils_1.sendJson)(res, { error: "项目配置不存在" }, 400);
-                    workDir = (0, db_1.getConfigInfo)(config.path)[0]?.workDir;
-                    agentType = (0, db_1.getConfigInfo)(config.path)[0]?.agent || "claudecode";
-                }
+                const runtime = (0, group_orchestrator_1.resolveMemberRuntime)(target_project_actual, group, configs);
+                if (!runtime)
+                    return (0, utils_1.sendJson)(res, { error: "项目配置不存在" }, 400);
+                const workDir = runtime.workDir;
+                const agentType = runtime.agentType;
                 const recentMsgs = getGroupMessages(group_id).slice(-10);
                 const context = recentMsgs.map((m) => {
                     const who = m.role === "user" ? `[用户 → ${m.target}]` : `[${m.agent || "Agent"}]`;
@@ -1489,11 +1891,11 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                 }).join("\n");
                 const memberList = group.members.map((m) => m.project).filter((p) => p !== target_project_actual).join(", ");
                 let atInstructions = "";
-                if (target_project_actual === "coordinator") {
-                    atInstructions = buildCoordinatorCollaborationInstructions(memberList);
+                if (target_project_actual === coordinatorProject) {
+                    atInstructions = (0, group_orchestrator_1.buildCoordinatorCollaborationInstructions)(memberList);
                 }
                 else {
-                    atInstructions = buildMemberCollaborationInstructions(target_project_actual, memberList);
+                    atInstructions = (0, group_orchestrator_1.buildMemberCollaborationInstructions)(target_project_actual, memberList);
                 }
                 let sharedFilesContext = ctx.buildFilesContext(group.shared_files || [], "以下是群聊中的共享文件：");
                 let toolsContext = "";
@@ -1538,7 +1940,6 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                     sharedFilesContext += ctx.buildFilesContext(projectConfig.shared_files, "[项目共享文件]");
                 }
                 const fullPrompt = `${atInstructions}${toolsContext}${sharedFilesContext}\n以下是群聊最近的消息记录：\n${context}\n\n请回复用户刚才发给你的消息：${messageForAgent}`;
-                const useStream = parsed.query.stream === "1" || req.headers["accept"] === "text/event-stream";
                 if (useStream) {
                     const responseMessageId = "m" + Date.now().toString(36) + "a" + crypto.randomBytes(2).toString("hex");
                     const startedAt = Date.now();
@@ -1693,7 +2094,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                     }
                     toolsContext += ctx.toolManager.buildToolPrompt();
                     const memberList = group.members.map((m) => m.project).filter((p) => p !== member.project && p !== "coordinator").join(", ");
-                    const memberInstructions = buildMemberCollaborationInstructions(member.project, memberList);
+                    const memberInstructions = (0, group_orchestrator_1.buildMemberCollaborationInstructions)(member.project, memberList);
                     const fullPrompt = `${memberInstructions}${toolsContext}${sharedFilesContext}\n群聊记录：\n${context}\n\n请从 ${member.project} 的职责视角回复：${message}`;
                     const output = ctx.callAgent(member.project, fullPrompt, workDir, agentType, 300000, { tab: "groups", groupId: group_id });
                     appendGroupMessage(group_id, {
@@ -1722,58 +2123,21 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                 if (!group)
                     return (0, utils_1.sendJson)(res, { error: "群聊不存在" }, 400);
                 const configs = (0, db_1.getConfigs)();
-                const members = group.members.filter((m) => m.project !== "coordinator");
+                const coordinator = (0, group_orchestrator_1.getCoordinatorMember)(group);
+                const members = (0, group_orchestrator_1.getRoutableMembers)(group);
                 const memberList = members.map((m) => `${m.project}(${m.agent})`).join(", ");
-                const decomposePrompt = `你是 CCM 群聊的主 Agent（协调者），负责把开发需求拆成适合群聊协作的具体子任务。
-
-群聊中的开发 Agent 有：${memberList}
-
-请将以下需求拆分成具体的开发任务，返回 JSON 格式：
-{
-  "tasks": [
-    {
-      "title": "任务标题",
-      "description": "任务描述",
-      "target_project": "目标项目名",
-      "priority": "high/normal/low",
-      "estimated_time": "预估时间"
-    }
-  ]
-}
-
-需求：${requirement}
-
-注意：
-1. 每个任务要具体可执行，描述里写清楚背景、交付物和验收方式
-2. 根据项目职责分配任务（前端做 UI，后端做接口，服务端做数据/业务，客户端做交互适配）
-3. 跨项目联调、汇总决策或需要等待多方结果的任务分配给 coordinator
-4. 不要把“讨论/确认”伪装成已完成实现；需要确认就写成确认任务
-5. 只返回 JSON，不要其他内容`;
-                const firstMember = members[0];
-                const firstConfig = firstMember ? configs.find(c => c.name === firstMember.project) : configs[0];
-                const workDir = firstConfig ? (0, db_1.getConfigInfo)(firstConfig.path)[0]?.workDir : process.cwd();
-                const output = ctx.callAgent("coordinator", decomposePrompt, workDir, "claudecode", 120000);
-                let tasks = [];
-                try {
-                    const jsonMatch = output.match(/\{[\s\S]*"tasks"[\s\S]*\}/);
-                    if (jsonMatch) {
-                        const parsed = JSON.parse(jsonMatch[0]);
-                        tasks = parsed.tasks || [];
-                    }
-                }
-                catch (e) {
-                    console.log("任务分解 JSON 解析失败:", e.message);
-                }
+                const tasks = (0, group_orchestrator_1.decomposeRequirementWithCodedCoordinator)(group, requirement);
+                const output = JSON.stringify({ coordinator: coordinator.project, members: memberList, tasks }, null, 2);
                 const createdTasks = tasks.map(t => createTask({
                     title: t.title,
                     description: t.description || "",
-                    target_project: t.target_project || "coordinator",
+                    target_project: t.target_project || coordinator.project,
                     priority: t.priority || "normal"
                 }));
                 appendGroupMessage(group_id, {
                     id: "m" + Date.now().toString(36) + "decompose",
                     role: "assistant",
-                    agent: "coordinator",
+                    agent: coordinator.project,
                     content: `📋 需求分解完成，共 ${createdTasks.length} 个任务：\n${createdTasks.map((t, i) => `${i + 1}. [${t.target_project}] ${t.title}`).join("\n")}`,
                     timestamp: new Date().toISOString(),
                 });
@@ -1912,10 +2276,13 @@ ${diff}
                     }
                 }
                 if (group_id) {
+                    const groups = loadGroups();
+                    const group = groups.find(g => g.id === group_id);
+                    const coordinator = group ? (0, group_orchestrator_1.getCoordinatorMember)(group) : { project: "coordinator" };
                     appendGroupMessage(group_id, {
                         id: "m" + Date.now().toString(36) + "review",
                         role: "assistant",
-                        agent: "coordinator",
+                        agent: coordinator.project,
                         content: `🔍 代码审查完成：${project}\n${reviewResults.map(r => `【${r.reviewer}】${r.result?.substring(0, 200) || r.error}`).join("\n\n")}`,
                         timestamp: new Date().toISOString(),
                     });
