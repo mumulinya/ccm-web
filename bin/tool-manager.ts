@@ -21,6 +21,15 @@ interface SkillDef {
   enabled: boolean;
 }
 
+export interface ToolScope {
+  mcp?: string[];
+  skill?: string[];
+}
+
+function normalizeScopeList(value: any) {
+  return Array.isArray(value) ? value.map(item => String(item || "").trim()).filter(Boolean) : [];
+}
+
 export class ToolManager {
   private clients = new Map<string, McpClient>(); // serverName -> client
   private tools: ToolDef[] = [];
@@ -61,15 +70,29 @@ export class ToolManager {
   }
 
   // 生成工具 prompt 注入文本
-  buildToolPrompt(): string {
+  buildToolPrompt(scope?: ToolScope): string {
     if (!this.initialized) return "";
 
+    const allowedMcp = scope ? new Set(normalizeScopeList(scope.mcp)) : null;
+    const allowedSkills = scope ? new Set(normalizeScopeList(scope.skill)) : null;
+    const tools = allowedMcp
+      ? this.tools.filter(tool => allowedMcp.has(tool.serverName) || allowedMcp.has(tool.name))
+      : this.tools;
+    const skills = allowedSkills
+      ? this.skills.filter(skill => allowedSkills.has(skill.name))
+      : this.skills;
     const parts: string[] = [];
+    const missingMcp = allowedMcp
+      ? Array.from(allowedMcp).filter(name => !tools.some(tool => tool.serverName === name || tool.name === name))
+      : [];
+    const missingSkills = allowedSkills
+      ? Array.from(allowedSkills).filter(name => !skills.some(skill => skill.name === name))
+      : [];
 
     // MCP 工具
-    if (this.tools.length > 0) {
+    if (tools.length > 0) {
       parts.push("\n\n你可以使用以下工具：");
-      for (const tool of this.tools) {
+      for (const tool of tools) {
         let desc = `\n\n### 工具: ${tool.name}`;
         desc += `\n描述: ${tool.description}`;
         desc += `\n来源: ${tool.serverName}`;
@@ -96,14 +119,21 @@ export class ToolManager {
     }
 
     // Skills
-    if (this.skills.length > 0) {
+    if (skills.length > 0) {
       parts.push("\n\n你可以使用以下 Skills（技能）：");
-      for (const skill of this.skills) {
+      for (const skill of skills) {
         parts.push(`\n- ${skill.name}: ${skill.description}`);
         if (skill.prompt) {
           parts.push(`  模板: ${skill.prompt}`);
         }
       }
+    }
+
+    if (missingMcp.length > 0 || missingSkills.length > 0) {
+      parts.push("\n\n已配置但当前未加载成功的工具：");
+      if (missingMcp.length > 0) parts.push(`\n- MCP 服务器：${missingMcp.join(", ")}`);
+      if (missingSkills.length > 0) parts.push(`\n- Skills：${missingSkills.join(", ")}`);
+      parts.push("\n如果任务依赖这些工具，请说明工具暂不可用，不要假装已经调用。");
     }
 
     return parts.join("");
@@ -126,10 +156,14 @@ export class ToolManager {
   }
 
   // 执行工具调用
-  async executeToolCall(toolName: string, args: any): Promise<string> {
+  async executeToolCall(toolName: string, args: any, scope?: ToolScope): Promise<string> {
     const tool = this.tools.find(t => t.name === toolName);
     if (!tool) {
       return `[错误] 工具 "${toolName}" 不存在`;
+    }
+    const allowedMcp = scope ? new Set(normalizeScopeList(scope.mcp)) : null;
+    if (allowedMcp && !allowedMcp.has(tool.serverName) && !allowedMcp.has(tool.name)) {
+      return `[错误] 工具 "${toolName}" 未授权给当前 Agent 使用`;
     }
 
     const client = this.clients.get(tool.serverName);

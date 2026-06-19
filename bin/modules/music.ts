@@ -4,6 +4,7 @@ import * as crypto from "crypto";
 import { spawn } from "child_process";
 import { sendJson, CCM_DIR } from "../utils";
 import { loadMusicConfig, saveMusicConfig } from "../db";
+import { loadOrchestratorConfig, publicOrchestratorConfig } from "./group-orchestrator";
 
 // B站相关常量与模块级变量
 const BILI_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -20,6 +21,24 @@ const WBI_MIXIN_TABLE = [
 
 const MUSIC_DIR = path.join(CCM_DIR, "music");
 if (!fs.existsSync(MUSIC_DIR)) fs.mkdirSync(MUSIC_DIR, { recursive: true });
+
+function loadMusicAgentConfig() {
+  const llm = loadOrchestratorConfig();
+  const music = loadMusicConfig();
+  return {
+    ...llm,
+    proxy: music.proxy || "",
+  };
+}
+
+function publicMusicAgentConfig() {
+  const config = loadMusicAgentConfig();
+  return {
+    ...publicOrchestratorConfig(config),
+    source: "orchestrator",
+    sourceLabel: "系统设置 / 统一大模型配置",
+  };
+}
 
 function getMixinKey(orig: string): string {
   return WBI_MIXIN_TABLE.map(n => orig[n]).join("").substring(0, 32);
@@ -179,6 +198,100 @@ async function biliSearch(keyword: string): Promise<any[]> {
   }
 }
 
+async function neteaseSearch(keyword: string): Promise<any[]> {
+  try {
+    const searchUrl = `https://music.163.com/api/search/get/web?s=${encodeURIComponent(keyword)}&type=1&limit=20`;
+    const searchRes = await fetch(searchUrl, {
+      method: "POST",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": "https://music.163.com/",
+        "Content-Type": "application/x-www-form-urlencoded",
+      }
+    });
+    const data: any = await searchRes.json();
+    const songs = data?.result?.songs || [];
+    const results = songs.map((song: any) => {
+      const artists = (song.artists || [])
+        .map((a: any) => a.name)
+        .filter((name: any) => name && name !== "undefined" && name !== "null")
+        .join("/");
+      const album = song.album?.name || "";
+      const durationMs = song.duration || 0;
+      const minutes = Math.floor(durationMs / 60000);
+      const seconds = Math.floor((durationMs % 60000) / 1000);
+      const durationStr = `${minutes}:${String(seconds).padStart(2, "0")}`;
+      const picUrl = song.album?.picUrl || "";
+      return {
+        songId: song.id,
+        title: song.name || "",
+        artist: artists || "未知艺术家",
+        album,
+        duration: durationStr,
+        pic: picUrl ? picUrl + "?param=120y120" : "",
+      };
+    });
+    console.log("[NeteaseSearch] found", results.length, "results for:", keyword);
+    return results;
+  } catch (e: any) {
+    console.log("[NeteaseSearch] error:", e.message);
+    return [];
+  }
+}
+
+async function getBiliAudioUrl(bvid: string): Promise<string> {
+  await ensureBuvid3();
+  await ensureWbiKey();
+
+  const params = { bvid };
+  const signedQs = signBiliParams(params);
+  const viewUrl = `https://api.bilibili.com/x/web-interface/view?${signedQs}`;
+  const viewRes = await fetch(viewUrl, {
+    headers: {
+      "User-Agent": BILI_UA,
+      "Referer": "https://www.bilibili.com/",
+      "Cookie": `buvid3=${buvid3}`,
+      "Accept": "application/json, text/plain, */*"
+    }
+  });
+  const viewData: any = await viewRes.json();
+  if (viewData?.code !== 0) {
+    throw new Error(`获取视频信息失败: ${viewData?.message || "未知错误"}`);
+  }
+  const cid = viewData?.data?.cid;
+  if (!cid) {
+    throw new Error("视频不存在或未能获取到播放标志 cid");
+  }
+
+  const playParams = {
+    bvid,
+    cid: String(cid),
+    qn: "16",
+    fnver: "0",
+    fnval: "16",
+    otype: "json"
+  };
+  const playQs = signBiliParams(playParams);
+  const playUrl = `https://api.bilibili.com/x/player/wbi/playurl?${playQs}`;
+  const playRes = await fetch(playUrl, {
+    headers: {
+      "User-Agent": BILI_UA,
+      "Referer": "https://www.bilibili.com/",
+      "Cookie": `buvid3=${buvid3}`,
+      "Accept": "application/json, text/plain, */*"
+    }
+  });
+  const playData: any = await playRes.json();
+  if (playData?.code !== 0) {
+    throw new Error(`获取播放地址失败: ${playData?.message || "未知错误"}`);
+  }
+  const audioList = playData?.data?.dash?.audio;
+  if (!audioList || audioList.length === 0) {
+    throw new Error("未找到对应的音频流直链");
+  }
+  return audioList[0].baseUrl || audioList[0].backupUrl[0];
+}
+
 function parseMusicFilename(filename: string) {
   const name = filename.replace(/\.[^.]+$/, "");
   const bvidMatch = name.match(/(BV[\w]+)/i);
@@ -222,6 +335,9 @@ function getMusicHelpText(chatMode: string) {
   if (chatMode === "local") {
     return `🎵 本地音乐助手\n\n你可以说：\n• "播放 周杰伦" - 搜索并播放\n• "搜索 轻音乐" - 搜索本地曲库\n• "来首钢琴曲" - 自然语言搜索\n\n将 MP3 文件放入 ~/.cc-connect/music/ 目录`;
   }
+  if (chatMode === "netease") {
+    return `🎵 网易云音乐助手\n\n你可以说：\n• "我想听周杰伦的歌" - 搜索网易云\n• "搜索 轻音乐" - 搜索网易云音乐\n• "来首适合学习的音乐" - 智能推荐\n\n点击搜索结果可一键下载为本地 MP3`;
+  }
   return `🎵 B站音乐助手\n\n你可以说：\n• "我想听周杰伦的歌" - 搜索B站\n• "搜索 轻音乐" - 搜索B站视频\n• "来首适合编程的音乐" - 智能推荐\n\n点击搜索结果可一键转码为本地 MP3`;
 }
 
@@ -240,6 +356,11 @@ const AGENT_TOOLS_LIST = [
     name: "search_local",
     description: "搜索本地音乐库。当用户想播放本地已有的音乐时使用。",
     input_schema: { type: "object", properties: { keyword: { type: "string", description: "搜索关键词" } }, required: ["keyword"] }
+  },
+  {
+    name: "search_netease",
+    description: "搜索网易云音乐。当用户想从网易云搜索歌曲时使用此工具。",
+    input_schema: { type: "object", properties: { keyword: { type: "string", description: "搜索关键词" } }, required: ["keyword"] }
   }
 ];
 
@@ -256,15 +377,27 @@ async function execToolCall(toolName: string, toolInput: any) {
       `${i + 1}. ${t.title} - ${t.artist} (文件: ${t.filename})`
     ).join("\n") || "本地没有找到相关音乐";
   }
+  if (toolName === "search_netease") {
+    const results = await neteaseSearch(toolInput.keyword || "");
+    return results.slice(0, 8).map((r: any, i: number) =>
+      `${i + 1}. ${r.title} - ${(r.artist && r.artist !== "undefined" && r.artist !== "null" ? r.artist : "") || "未知歌手"} (${r.duration}) [ID: ${r.songId}]`
+    ).join("\n") || "网易云没有找到相关音乐";
+  }
   return "未知工具";
 }
 
 async function callClaudeAgent(cfg: any, system: string, messages: any[], res: any, chatMode: string) {
   const apiUrl = (cfg.apiUrl || "https://api.anthropic.com").replace(/\/$/, "");
-  const isOpenAICompat = cfg.format === "openai" || (cfg.format !== "anthropic" && !(apiUrl.includes("anthropic") || apiUrl.endsWith("/anthropic")));
+  const format = String(cfg.format || "auto");
+  const isAnthropicCompat = format === "anthropic"
+    || format === "anthropic-compatible"
+    || (format === "auto" && (apiUrl.includes("anthropic") || apiUrl.endsWith("/anthropic")));
+  const isOpenAICompat = !isAnthropicCompat;
   const tools = chatMode === "local"
     ? AGENT_TOOLS_LIST.filter((t: any) => t.name === "search_local")
-    : AGENT_TOOLS_LIST;
+    : chatMode === "netease"
+      ? AGENT_TOOLS_LIST.filter((t: any) => t.name === "search_netease" || t.name === "search_local")
+      : AGENT_TOOLS_LIST;
 
   if (isOpenAICompat) {
     await callOpenAICompat(cfg, system, messages, tools, res);
@@ -361,7 +494,11 @@ async function callOpenAICompat(cfg: any, system: string, messages: any[], tools
 async function callAnthropicNative(cfg: any, system: string, messages: any[], tools: any[], res: any) {
   const apiUrl = (cfg.apiUrl || "https://api.anthropic.com").replace(/\/$/, "");
   const model = cfg.model || "claude-sonnet-4-20250514";
-  const fetchUrl = `${apiUrl}/v1/messages`;
+  const fetchUrl = apiUrl.endsWith("/v1/messages")
+    ? apiUrl
+    : apiUrl.endsWith("/v1")
+      ? `${apiUrl}/messages`
+      : `${apiUrl}/v1/messages`;
 
   const headers = {
     "Content-Type": "application/json",
@@ -552,6 +689,20 @@ export function handleMusicApi(
     return true;
   }
 
+  if (pathname === "/api/music/search-netease" && req.method === "GET") {
+    const query = parsed.query.q || "";
+    if (!query) {
+      sendJson(res, { success: true, results: [] });
+      return true;
+    }
+    neteaseSearch(query as string).then(results => {
+      sendJson(res, { success: true, results });
+    }).catch((e: Error) => {
+      sendJson(res, { success: false, error: e.message });
+    });
+    return true;
+  }
+
   if (pathname === "/api/music/search" && req.method === "GET") {
     const query = parsed.query.q || "";
     if (!query) {
@@ -569,32 +720,38 @@ export function handleMusicApi(
   if (pathname === "/api/music/download" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
         const { bvid, title, author } = JSON.parse(body);
         if (!bvid) return sendJson(res, { error: "缺少 bvid" }, 400);
-        const safeName = `${author || "unknown"} - ${title || bvid}`.replace(/[<>:"/\\|?*]/g, "_").substring(0, 100);
+        const safeName = `${author || "unknown"} - ${title || bvid} [${bvid}]`.replace(/[<>:"/\\|?*]/g, "_").substring(0, 100);
         const outputFile = path.join(MUSIC_DIR, `${safeName}.mp3`);
         if (fs.existsSync(outputFile)) return sendJson(res, { success: true, message: "文件已存在" });
 
-        const url = `https://www.bilibili.com/video/${bvid}`;
-        const child = spawn("yt-dlp", [
-          "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "--referer", "https://www.bilibili.com/",
-          "--no-playlist",
-          "-f", "ba",
-          "-x", "--audio-format", "mp3", "--audio-quality", "0",
-          "-o", outputFile, url
+        let audioUrl: string;
+        try {
+          audioUrl = await getBiliAudioUrl(bvid);
+        } catch (e: any) {
+          return sendJson(res, { success: false, error: `解析失败: ${e.message}` });
+        }
+
+        const headers = `User-Agent: ${BILI_UA}\r\nReferer: https://www.bilibili.com/\r\n`;
+        const child = spawn("ffmpeg", [
+          "-headers", headers,
+          "-i", audioUrl,
+          "-y",
+          "-q:a", "0",
+          outputFile
         ], { stdio: "ignore", windowsHide: true });
         child.on("close", (code) => {
           if (code === 0 && fs.existsSync(outputFile)) {
             sendJson(res, { success: true, filename: path.basename(outputFile) });
           } else {
-            sendJson(res, { success: false, error: "下载失败，请确保已安装 yt-dlp 和 ffmpeg" });
+            sendJson(res, { success: false, error: "下载转码失败，请确保安装了 ffmpeg" });
           }
         });
         child.on("error", () => {
-          sendJson(res, { success: false, error: "yt-dlp 未安装，请先安装: pip install yt-dlp" });
+          sendJson(res, { success: false, error: "ffmpeg 未安装或未加入环境变量" });
         });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
@@ -604,16 +761,9 @@ export function handleMusicApi(
   }
 
   if (pathname === "/api/music/config" && req.method === "GET") {
-    const cfg = loadMusicConfig();
     sendJson(res, {
       success: true,
-      config: {
-        apiUrl: cfg.apiUrl || "https://api.anthropic.com",
-        model: cfg.model || "claude-sonnet-4-20250514",
-        format: cfg.format || "auto",
-        proxy: cfg.proxy || "",
-        hasKey: !!cfg.apiKey,
-      }
+      config: publicMusicAgentConfig()
     });
     return true;
   }
@@ -625,13 +775,9 @@ export function handleMusicApi(
       try {
         const updates = JSON.parse(body);
         const cfg = loadMusicConfig();
-        if (updates.apiUrl !== undefined) cfg.apiUrl = updates.apiUrl;
-        if (updates.apiKey !== undefined && updates.apiKey !== "") cfg.apiKey = updates.apiKey;
-        if (updates.model !== undefined) cfg.model = updates.model;
-        if (updates.format !== undefined) cfg.format = updates.format;
         if (updates.proxy !== undefined) cfg.proxy = updates.proxy;
         saveMusicConfig(cfg);
-        sendJson(res, { success: true });
+        sendJson(res, { success: true, config: publicMusicAgentConfig() });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -645,18 +791,25 @@ export function handleMusicApi(
     req.on("end", () => {
       try {
         const { message, mode: chatMode, history } = JSON.parse(body);
-        const cfg = loadMusicConfig();
+        const cfg = loadMusicAgentConfig();
+        if (!cfg.enabled) {
+          return sendJson(res, { success: false, error: "请先在系统设置启用统一大模型配置" });
+        }
         if (!cfg.apiKey) {
-          return sendJson(res, { success: false, error: "请先配置 API Key（音乐播放器 → 设置）" });
+          return sendJson(res, { success: false, error: "请先到系统设置 → 统一大模型配置 中填写 API Key" });
+        }
+        if (!cfg.model) {
+          return sendJson(res, { success: false, error: "请先到系统设置 → 统一大模型配置 中填写模型名称" });
         }
 
         const systemPrompt = `你是一个音乐助手 Agent。用户会告诉你想听什么音乐，你需要帮助他们搜索和推荐。
 
-你有两个工具可用：
+你有三个工具可用：
 1. search_bilibili(keyword) - 搜索B站视频
 2. search_local(keyword) - 搜索本地音乐库
+3. search_netease(keyword) - 搜索网易云音乐
 
-当前模式: ${chatMode === "local" ? "本地模式（搜索本地曲库）" : "B站模式（搜索B站并转码）"}
+当前模式: \${chatMode === "local" ? "本地模式（搜索本地曲库）" : chatMode === "netease" ? "网易云模式（搜索网易云音乐）" : "B站模式（搜索B站并转码）"}
 
 ## 推荐输出格式（严格遵守）
 当你向用户推荐歌曲时，先用自然语言简要介绍，然后 **必须** 将曲目放在独立的 \`\`\`tracks 代码块中。格式如下：
@@ -665,6 +818,13 @@ export function handleMusicApi(
 \`\`\`tracks
 [
   {"bvid":"BV1xxxxx","title":"视频标题","author":"UP主","duration":"4:32"}
+]
+\`\`\`
+
+### 网易云模式：
+\`\`\`tracks
+[
+  {"songId":12345,"title":"歌曲名","artist":"歌手名","duration":"4:32"}
 ]
 \`\`\`
 
@@ -677,7 +837,7 @@ export function handleMusicApi(
 
 关键规则：
 1. 代码块标记必须用 \`\`\`tracks 开头，\`\`\` 结尾，各占独立一行。
-2. 数据必须是合法 JSON 数组，必须从工具返回的结果中提取字段（不要编造或修改 uri、bvid、filename 等核心标识）。
+2. 数据必须是合法 JSON 数组，必须从工具返回的结果中提取字段（不要编造或修改 uri、bvid、filename、songId 等核心标识）。
 3. 如果用户只是闲聊、提问，不需要输出 tracks 代码块。
 4. 回复使用中文，简洁友好。`;
 
@@ -703,6 +863,16 @@ export function handleMusicApi(
             toolContext = `\n\n[工具结果] 本地搜索 "${intent.keyword}" 找到 ${localResults.length} 首：\n${localResults.slice(0, 5).map((t, i) => `${i + 1}. ${t.title} - ${t.artist} (文件: ${t.filename})`).join("\n")}`;
             messages[messages.length - 1].content += toolContext;
             callClaudeAgent(cfg, systemPrompt, messages, res, chatMode);
+          } else if (chatMode === "netease") {
+            neteaseSearch(intent.keyword).then((neteaseResults: any[]) => {
+              toolContext = `\n\n[工具结果] 网易云搜索 "${intent.keyword}" 找到 ${neteaseResults.length} 个结果：\n${neteaseResults.slice(0, 8).map((r: any, i: number) => `${i + 1}. ${r.title} - ${(r.artist && r.artist !== "undefined" && r.artist !== "null" ? r.artist : "") || "未知歌手"} (${r.duration}) [ID: ${r.songId}]`).join("\n")}`;
+              messages[messages.length - 1].content += toolContext;
+              callClaudeAgent(cfg, systemPrompt, messages, res, chatMode);
+            }).catch(() => {
+              messages[messages.length - 1].content += "\n\n[工具结果] 网易云搜索失败";
+              callClaudeAgent(cfg, systemPrompt, messages, res, chatMode);
+            });
+            return;
           } else {
             biliSearch(intent.keyword).then((biliResults: any[]) => {
               toolContext = `\n\n[工具结果] B站搜索 "${intent.keyword}" 找到 ${biliResults.length} 个结果：\n${biliResults.slice(0, 5).map((r: any, i: number) => `${i + 1}. ${r.title} - ${r.author} (${r.duration}) [BV: ${r.bvid}]`).join("\n")}`;
@@ -741,6 +911,17 @@ export function handleMusicApi(
               ? `在本地找到 ${localResults.length} 首匹配的音乐：`
               : `本地没有找到"${intent.keyword}"相关音乐，试试切换到 B站模式？`;
             sendJson(res, { success: true, ...result });
+          } else if (chatMode === "netease") {
+            neteaseSearch(intent.keyword).then((neteaseResults: any[]) => {
+              result.neteaseResults = neteaseResults;
+              result.reply = neteaseResults.length > 0
+                ? `在网易云找到 ${neteaseResults.length} 个相关结果：`
+                : `网易云没有找到"${intent.keyword}"相关的结果，换个关键词试试？`;
+              sendJson(res, { success: true, ...result });
+            }).catch((e: Error) => {
+              result.reply = `搜索出错: ${e.message}`;
+              sendJson(res, { success: true, ...result });
+            });
           } else {
             biliSearch(intent.keyword).then((biliResults: any[]) => {
               result.biliResults = biliResults;
@@ -765,6 +946,17 @@ export function handleMusicApi(
               ? `找到并播放：${localResults[0].title}`
               : `本地没有找到"${intent.keyword}"`;
             sendJson(res, { success: true, ...result });
+          } else if (chatMode === "netease") {
+            neteaseSearch(intent.keyword).then((neteaseResults: any[]) => {
+              result.neteaseResults = neteaseResults.slice(0, 5);
+              result.reply = neteaseResults.length > 0
+                ? `找到以下结果，点击下载播放：`
+                : `没有找到相关结果`;
+              sendJson(res, { success: true, ...result });
+            }).catch(() => {
+              result.reply = "搜索出错";
+              sendJson(res, { success: true, ...result });
+            });
           } else {
             biliSearch(intent.keyword).then((biliResults: any[]) => {
               result.biliResults = biliResults.slice(0, 3);
@@ -790,111 +982,212 @@ export function handleMusicApi(
 
   if (pathname === "/api/music/danmaku" && req.method === "GET") {
     const bvid = parsed.query.bvid;
-    if (!bvid) return sendJson(res, { error: "缺少 bvid" }, 400);
+    const title = parsed.query.title;
+    const artist = parsed.query.artist;
+
+    if (!bvid && !title) return sendJson(res, { error: "缺少 bvid 或 title" }, 400);
 
     (async () => {
-      let oldHttpProxy = process.env.HTTP_PROXY;
-      let oldHttpsProxy = process.env.HTTPS_PROXY;
-      const cfg = loadMusicConfig();
-      if (cfg.proxy) {
-        process.env.HTTP_PROXY = cfg.proxy;
-        process.env.HTTPS_PROXY = cfg.proxy;
-      }
+      if (bvid) {
+        let oldHttpProxy = process.env.HTTP_PROXY;
+        let oldHttpsProxy = process.env.HTTPS_PROXY;
+        const cfg = loadMusicConfig();
+        if (cfg.proxy) {
+          process.env.HTTP_PROXY = cfg.proxy;
+          process.env.HTTPS_PROXY = cfg.proxy;
+        }
 
-      try {
-        await ensureBuvid3();
-        await ensureWbiKey();
+        try {
+          await ensureBuvid3();
+          await ensureWbiKey();
 
-        const params = { bvid: bvid as string };
-        const signedQs = signBiliParams(params);
+          const params = { bvid: bvid as string };
+          const signedQs = signBiliParams(params);
 
-        const viewUrl = `https://api.bilibili.com/x/web-interface/view?${signedQs}`;
-        const viewRes = await fetch(viewUrl, {
-          headers: {
-            "User-Agent": BILI_UA,
-            "Referer": "https://www.bilibili.com/",
-            "Cookie": `buvid3=${buvid3}`,
-            "Accept": "application/json, text/plain, */*",
-            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-            "Origin": "https://www.bilibili.com",
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-site"
+          const viewUrl = `https://api.bilibili.com/x/web-interface/view?${signedQs}`;
+          const viewRes = await fetch(viewUrl, {
+            headers: {
+              "User-Agent": BILI_UA,
+              "Referer": "https://www.bilibili.com/",
+              "Cookie": `buvid3=${buvid3}`,
+              "Accept": "application/json, text/plain, */*",
+              "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+              "Origin": "https://www.bilibili.com",
+              "Sec-Fetch-Dest": "empty",
+              "Sec-Fetch-Mode": "cors",
+              "Sec-Fetch-Site": "same-site"
+            }
+          });
+          const viewData: any = await viewRes.json();
+          const cid = viewData?.data?.cid;
+          const aid = viewData?.data?.aid;
+          const duration = viewData?.data?.duration || 300;
+
+          if (!cid) {
+            if (cfg.proxy) {
+              if (oldHttpProxy) process.env.HTTP_PROXY = oldHttpProxy; else delete process.env.HTTP_PROXY;
+              if (oldHttpsProxy) process.env.HTTPS_PROXY = oldHttpsProxy; else delete process.env.HTTPS_PROXY;
+            }
+            return sendJson(res, { success: true, danmaku: [] });
           }
-        });
-        const viewData: any = await viewRes.json();
-        const cid = viewData?.data?.cid;
-        const aid = viewData?.data?.aid;
-        const duration = viewData?.data?.duration || 300;
 
-        if (!cid) {
+          const dmRes = await fetch(`https://api.bilibili.com/x/v1/dm/list.so?oid=${cid}`, {
+            headers: {
+              "User-Agent": BILI_UA,
+              "Referer": "https://www.bilibili.com/",
+              "Cookie": `buvid3=${buvid3}`
+            }
+          });
+          const xml = await dmRes.text();
+
+          let replies: any[] = [];
+          if (aid) {
+            try {
+              const replyUrl = `https://api.bilibili.com/x/v2/reply?type=1&oid=${aid}&sort=1`;
+              const replyRes = await fetch(replyUrl, {
+                headers: {
+                  "User-Agent": BILI_UA,
+                  "Referer": "https://www.bilibili.com/",
+                  "Cookie": `buvid3=${buvid3}`,
+                  "Accept": "application/json, text/plain, */*",
+                }
+              });
+              const replyData: any = await replyRes.json();
+              if (replyData && replyData.code === 0 && replyData.data?.replies) {
+                replies = replyData.data.replies;
+              }
+            } catch (replyErr) {
+              console.error("[Danmaku] Failed to fetch Bilibili replies:", replyErr);
+            }
+          }
+
           if (cfg.proxy) {
             if (oldHttpProxy) process.env.HTTP_PROXY = oldHttpProxy; else delete process.env.HTTP_PROXY;
             if (oldHttpsProxy) process.env.HTTPS_PROXY = oldHttpsProxy; else delete process.env.HTTPS_PROXY;
           }
-          return sendJson(res, { success: true, danmaku: [] });
-        }
 
-        const dmRes = await fetch(`https://api.bilibili.com/x/v1/dm/list.so?oid=${cid}`, {
-          headers: {
-            "User-Agent": BILI_UA,
-            "Referer": "https://www.bilibili.com/",
-            "Cookie": `buvid3=${buvid3}`
+          const items: any[] = [];
+          const regex = /<d p="([^"]*)"[^>]*>([^<]*)<\/d>/g;
+          let match;
+          while ((match = regex.exec(xml)) !== null) {
+            const attrs = match[1].split(",");
+            const time = parseFloat(attrs[0]);
+            const type = parseInt(attrs[1]) || 1;
+            const color = parseInt(attrs[3]) || 16777215;
+            const hexColor = "#" + color.toString(16).padStart(6, "0");
+            items.push({ time, content: match[2], type, color: hexColor });
           }
-        });
-        const xml = await dmRes.text();
 
-        let replies: any[] = [];
-        if (aid) {
-          try {
-            const replyUrl = `https://api.bilibili.com/x/v2/reply?type=1&oid=${aid}&sort=1`;
-            const replyRes = await fetch(replyUrl, {
-              headers: {
-                "User-Agent": BILI_UA,
-                "Referer": "https://www.bilibili.com/",
-                "Cookie": `buvid3=${buvid3}`,
-                "Accept": "application/json, text/plain, */*",
-              }
-            });
-            const replyData: any = await replyRes.json();
-            if (replyData && replyData.code === 0 && replyData.data?.replies) {
-              replies = replyData.data.replies;
+          if (replies && replies.length > 0) {
+            const maxReplies = Math.min(replies.length, 25);
+            const interval = Math.max(6, Math.floor(duration / (maxReplies + 1)));
+            for (let i = 0; i < maxReplies; i++) {
+              const r = replies[i];
+              const username = r.member?.uname || "路人";
+              const message = (r.content?.message || "").replace(/\s+/g, " ").trim();
+              if (!message) continue;
+
+              const shortMsg = message.length > 60 ? message.substring(0, 60) + "..." : message;
+              const content = `💬 [热评] ${username}: ${shortMsg}`;
+              const time = 3 + i * interval + Math.random() * 2;
+              const color = "#ff9f43";
+
+              items.push({
+                time,
+                content,
+                type: 1,
+                color
+              });
             }
-          } catch (replyErr) {
-            console.error("[Danmaku] Failed to fetch Bilibili replies:", replyErr);
           }
-        }
 
-        if (cfg.proxy) {
-          if (oldHttpProxy) process.env.HTTP_PROXY = oldHttpProxy; else delete process.env.HTTP_PROXY;
-          if (oldHttpsProxy) process.env.HTTPS_PROXY = oldHttpsProxy; else delete process.env.HTTPS_PROXY;
+          sendJson(res, { success: true, danmaku: items });
+        } catch (e: any) {
+          if (cfg.proxy) {
+            if (oldHttpProxy) process.env.HTTP_PROXY = oldHttpProxy; else delete process.env.HTTP_PROXY;
+            if (oldHttpsProxy) process.env.HTTPS_PROXY = oldHttpsProxy; else delete process.env.HTTPS_PROXY;
+          }
+          sendJson(res, { success: false, error: e.message });
         }
+      } else {
+        try {
+          const query = `${artist || ""} ${title}`.trim();
+          console.log("[NeteaseComments] searching for:", query);
+          const searchUrl = `https://music.163.com/api/search/get/web?s=${encodeURIComponent(query)}&type=1&limit=5`;
+          const searchRes = await fetch(searchUrl, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              "Referer": "https://music.163.com/",
+            }
+          });
+          const searchData: any = await searchRes.json();
+          const songs = searchData?.result?.songs || [];
+          if (songs.length === 0) {
+            return sendJson(res, { success: true, danmaku: [] });
+          }
+          const songId = songs[0].id;
+          
+          // 并发请求多页，获取更多评论（共 5 页，每页最多 40 条，累计最多 200 条评论 + 热评）
+          const limit = 40;
+          const offsets = [0, 40, 80, 120, 160];
+          const promises = offsets.map(offset => {
+            const commentsUrl = `https://music.163.com/api/v1/resource/comments/R_SO_4_${songId}?limit=${limit}&offset=${offset}`;
+            return fetch(commentsUrl, {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://music.163.com/",
+              }
+            }).then(r => r.json()).catch(() => ({}));
+          });
 
-        const items: any[] = [];
-        const regex = /<d p="([^"]*)"[^>]*>([^<]*)<\/d>/g;
-        let match;
-        while ((match = regex.exec(xml)) !== null) {
-          const attrs = match[1].split(",");
-          const time = parseFloat(attrs[0]);
-          const type = parseInt(attrs[1]) || 1;
-          const color = parseInt(attrs[3]) || 16777215;
-          const hexColor = "#" + color.toString(16).padStart(6, "0");
-          items.push({ time, content: match[2], type, color: hexColor });
-        }
+          const results = await Promise.all(promises);
+          
+          let allHotComments: any[] = [];
+          let allStandardComments: any[] = [];
+          for (const data of results) {
+            const d = data as any;
+            if (d?.hotComments) {
+              allHotComments = allHotComments.concat(d.hotComments);
+            }
+            if (d?.comments) {
+              allStandardComments = allStandardComments.concat(d.comments);
+            }
+          }
 
-        if (replies && replies.length > 0) {
-          const maxReplies = Math.min(replies.length, 25);
-          const interval = Math.max(6, Math.floor(duration / (maxReplies + 1)));
-          for (let i = 0; i < maxReplies; i++) {
-            const r = replies[i];
-            const username = r.member?.uname || "路人";
-            const message = (r.content?.message || "").replace(/\s+/g, " ").trim();
+          // 对热评和最新评论去重
+          const uniqueHotMap = new Map();
+          for (const c of allHotComments) {
+            if (c?.commentId) uniqueHotMap.set(c.commentId, c);
+          }
+          const hotComments = Array.from(uniqueHotMap.values());
+
+          const uniqueStandardMap = new Map();
+          for (const c of allStandardComments) {
+            if (c?.commentId && !uniqueHotMap.has(c.commentId)) {
+              uniqueStandardMap.set(c.commentId, c);
+            }
+          }
+          const standardComments = Array.from(uniqueStandardMap.values());
+          const allComments = [...hotComments, ...standardComments];
+
+          const items: any[] = [];
+          const duration = 240;
+          // 上限调高到 200 条，弹幕更加饱满热闹
+          const maxComments = Math.min(allComments.length, 200);
+
+          for (let i = 0; i < maxComments; i++) {
+            const c = allComments[i];
+            const username = c.user?.nickname || "网易云用户";
+            const message = (c.content || "").replace(/\s+/g, " ").trim();
             if (!message) continue;
 
-            const shortMsg = message.length > 60 ? message.substring(0, 60) + "..." : message;
-            const content = `💬 [热评] ${username}: ${shortMsg}`;
-            const time = 3 + i * interval + Math.random() * 2;
-            const color = "#ff9f43";
+            const shortMsg = message.length > 80 ? message.substring(0, 80) + "..." : message;
+            const isHot = i < hotComments.length;
+            const content = isHot ? `💬 [网易云热评] ${username}: ${shortMsg}` : `💬 [评论] ${username}: ${shortMsg}`;
+            
+            // 采用更加随机且紧凑的散布方式，使弹幕不会死板地等距出现，而是产生密集的弹幕云效果
+            const time = 3 + Math.random() * (duration - 13);
+            const color = isHot ? "#ff4d4f" : "#a6a6a6";
 
             items.push({
               time,
@@ -903,38 +1196,87 @@ export function handleMusicApi(
               color
             });
           }
+          console.log("[NeteaseComments] loaded", items.length, "comments for songId:", songId);
+          sendJson(res, { success: true, danmaku: items });
+        } catch (e: any) {
+          console.error("[NeteaseComments] error:", e.message);
+          sendJson(res, { success: false, error: e.message });
         }
-
-        sendJson(res, { success: true, danmaku: items });
-      } catch (e: any) {
-        if (cfg.proxy) {
-          if (oldHttpProxy) process.env.HTTP_PROXY = oldHttpProxy; else delete process.env.HTTP_PROXY;
-          if (oldHttpsProxy) process.env.HTTPS_PROXY = oldHttpsProxy; else delete process.env.HTTPS_PROXY;
-        }
-        sendJson(res, { success: false, error: e.message });
       }
     })();
+    return true;
+  }
+
+  if (pathname === "/api/music/convert-netease" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { songId, title, artist } = JSON.parse(body);
+        if (!songId) return sendJson(res, { error: "缺少 songId" }, 400);
+        const safeName = `${artist || "unknown"} - ${title || songId}`.replace(/[<>:"/\\|?*]/g, "_").substring(0, 100);
+        const outputFile = path.join(MUSIC_DIR, `${safeName}.mp3`);
+        if (fs.existsSync(outputFile)) return sendJson(res, { success: true, filename: path.basename(outputFile), message: "文件已存在" });
+
+        const audioUrl = `https://music.163.com/song/media/outer/url?id=${songId}.mp3`;
+        const child = spawn("ffmpeg", [
+          "-headers", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\nReferer: https://music.163.com/\r\n",
+          "-i", audioUrl,
+          "-y",
+          "-q:a", "0",
+          "-loglevel", "error",
+          outputFile
+        ], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+        let stderr = "";
+        child.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+        child.on("close", (code: number) => {
+          if (code === 0 && fs.existsSync(outputFile)) {
+            const stat = fs.statSync(outputFile);
+            if (stat.size > 1024) {
+              sendJson(res, { success: true, filename: path.basename(outputFile) });
+            } else {
+              try { fs.unlinkSync(outputFile); } catch {}
+              sendJson(res, { success: false, error: "该歌曲可能需要VIP或已下架，无法获取音频" });
+            }
+          } else {
+            sendJson(res, { success: false, error: stderr.substring(0, 200) || "下载转码失败" });
+          }
+        });
+        child.on("error", () => {
+          sendJson(res, { success: false, error: "ffmpeg 未安装或未加入环境变量" });
+        });
+      } catch (e: any) {
+        sendJson(res, { error: e.message }, 400);
+      }
+    });
     return true;
   }
 
   if (pathname === "/api/music/convert" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);
-    req.on("end", () => {
+    req.on("end", async () => {
       try {
         const { bvid, title, author } = JSON.parse(body);
         if (!bvid) return sendJson(res, { error: "缺少 bvid" }, 400);
-        const safeName = `${author || "unknown"} - ${title || bvid}`.replace(/[<>:"/\\|?*]/g, "_").substring(0, 100);
+        const safeName = `${author || "unknown"} - ${title || bvid} [${bvid}]`.replace(/[<>:"/\\|?*]/g, "_").substring(0, 100);
         const outputFile = path.join(MUSIC_DIR, `${safeName}.mp3`);
         if (fs.existsSync(outputFile)) return sendJson(res, { success: true, filename: path.basename(outputFile), message: "文件已存在" });
-        const url = `https://www.bilibili.com/video/${bvid}`;
-        const child = spawn("yt-dlp", [
-          "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "--referer", "https://www.bilibili.com/",
-          "--no-playlist",
-          "-f", "ba",
-          "-x", "--audio-format", "mp3", "--audio-quality", "0",
-          "-o", outputFile, url
+        
+        let audioUrl: string;
+        try {
+          audioUrl = await getBiliAudioUrl(bvid);
+        } catch (e: any) {
+          return sendJson(res, { success: false, error: `解析失败: ${e.message}` });
+        }
+
+        const headers = `User-Agent: ${BILI_UA}\r\nReferer: https://www.bilibili.com/\r\n`;
+        const child = spawn("ffmpeg", [
+          "-headers", headers,
+          "-i", audioUrl,
+          "-y",
+          "-q:a", "0",
+          outputFile
         ], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
         let stderr = "";
         child.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
@@ -942,11 +1284,11 @@ export function handleMusicApi(
           if (code === 0 && fs.existsSync(outputFile)) {
             sendJson(res, { success: true, filename: path.basename(outputFile) });
           } else {
-            sendJson(res, { success: false, error: stderr.substring(0, 200) || "下载失败" });
+            sendJson(res, { success: false, error: stderr.substring(0, 200) || "下载转码失败" });
           }
         });
         child.on("error", () => {
-          sendJson(res, { success: false, error: "yt-dlp 未安装，请先安装: pip install yt-dlp" });
+          sendJson(res, { success: false, error: "ffmpeg 未安装或未加入环境变量" });
         });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);

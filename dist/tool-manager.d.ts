@@ -4,18 +4,22 @@ interface SkillDef {
     prompt?: string;
     enabled: boolean;
 }
+export interface ToolScope {
+    mcp?: string[];
+    skill?: string[];
+}
 export declare class ToolManager {
     private clients;
     private tools;
     private skills;
     private initialized;
     loadTools(): Promise<void>;
-    buildToolPrompt(): string;
+    buildToolPrompt(scope?: ToolScope): string;
     parseToolCalls(text: string): Array<{
         name: string;
         arguments: any;
     }>;
-    executeToolCall(toolName: string, args: any): Promise<string>;
+    executeToolCall(toolName: string, args: any, scope?: ToolScope): Promise<string>;
     getToolList(): {
         mcp: {
             name: string;

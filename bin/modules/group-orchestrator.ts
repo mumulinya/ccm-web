@@ -23,8 +23,8 @@ export function defaultOrchestratorConfig() {
     apiKey: "",
     model: "",
     temperature: 0.2,
-    timeoutMs: 45000,
-    fallbackToRules: false,
+    timeoutMs: 120000,
+    fallbackToRules: true,
   };
 }
 
@@ -245,7 +245,22 @@ export function buildMemberCollaborationInstructions(projectName: string, member
 3. 如果需要其他项目配合，用独立一行 @项目名 具体任务；不要泛泛 @。
 4. 如果你完成了代码或配置修改，说明改了什么、影响范围和验证方式。
 5. 如果只是提供建议，不要伪装成已执行修改。
-6. 不要重复整段群聊历史，只引用必要上下文。`;
+6. 不要重复整段群聊历史，只引用必要上下文。
+7. 回复末尾必须追加一个“CCM_AGENT_RECEIPT”结构化回执，供主 Agent 验收；即使阻塞或只是分析，也要填写。
+
+CCM_AGENT_RECEIPT 格式：
+\`\`\`json
+{
+  "ccm_receipt": true,
+  "status": "done | partial | blocked | failed | needs_info",
+  "summary": "一句话说明本项目实际完成/确认了什么",
+  "actions": ["实际执行的动作；如果只是分析，写分析了哪些代码/配置"],
+  "filesChanged": ["修改过的文件路径；没有修改填空数组"],
+  "verification": ["已经运行或建议运行的验证；不能编造未运行的测试"],
+  "blockers": ["阻塞点或缺失信息；没有填空数组"],
+  "needs": ["还需要用户或其他 Agent 补充的内容；没有填空数组"]
+}
+\`\`\``;
 }
 
 export function buildCoordinatorPrompt(input: {
@@ -293,6 +308,84 @@ function compactText(value: string, maxLength = 360) {
   return text.length <= maxLength ? text : `${text.slice(0, maxLength)}...`;
 }
 
+const DOCUMENT_FINDING_PATTERN = /接口|api|endpoint|路径|字段|入参|出参|参数|返回|状态|流转|验收|权限|鉴权|页面|按钮|流程|规则|错误码|PRD|prd|需求|文档|acceptance|schema|GET\s+|POST\s+|PUT\s+|PATCH\s+|DELETE\s+|\/api\//i;
+
+function extractDocumentFindingsFromText(value: any, sourceLabel = "", limit = 8) {
+  const text = String(value || "").replace(/\r/g, "");
+  if (!text.trim()) return [];
+  const lines = text
+    .split("\n")
+    .map(line => line.replace(/^\s*[-*]\s+/, "").trim())
+    .filter(Boolean);
+  const findings: string[] = [];
+  const seen = new Set<string>();
+  for (const line of lines) {
+    if (!DOCUMENT_FINDING_PATTERN.test(line)) continue;
+    const compacted = compactText(line.replace(/\s*\|\s*/g, " | "), 220);
+    const finding = sourceLabel ? `${sourceLabel}: ${compacted}` : compacted;
+    const key = finding.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    findings.push(finding);
+    if (findings.length >= limit) break;
+  }
+  return findings;
+}
+
+function extractCodedDocumentFindings(input: { message?: string; context?: string; sharedFilesContext?: string }) {
+  const findings = [
+    ...extractDocumentFindingsFromText(input.message, "用户需求", 4),
+    ...extractDocumentFindingsFromText(input.context, "群聊上下文", 4),
+    ...extractDocumentFindingsFromText(input.sharedFilesContext, "共享文档", 8),
+  ];
+  const seen = new Set<string>();
+  return findings.filter(item => {
+    const key = item.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 10);
+}
+
+function mergeDocumentFindings(...groups: any[]) {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const group of groups) {
+    const values = Array.isArray(group) ? group : [];
+    for (const value of values) {
+      const item = String(value || "").trim();
+      if (!item) continue;
+      const key = item.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(item);
+      if (merged.length >= 12) return merged;
+    }
+  }
+  return merged;
+}
+
+function buildDocumentAwareAnalysis(group: any, input: { message?: string; context?: string; sharedFilesContext?: string }) {
+  const documentContext = [input.context || "", input.sharedFilesContext || ""].filter(Boolean).join("\n");
+  const baseAnalysis = analyzeRequirement(group, input.message || "", documentContext);
+  const documentFindings = extractCodedDocumentFindings(input);
+  const provisionalAnalysis = {
+    ...baseAnalysis,
+    documentFindings,
+  };
+  return {
+    ...baseAnalysis,
+    documentFindings,
+    coordinationStrategy: inferCoordinatorStrategy(provisionalAnalysis, Array.isArray(baseAnalysis.domains) ? baseAnalysis.domains.length : 0),
+    constraints: [
+      ...(baseAnalysis.constraints || []),
+      documentFindings.length ? "需要按业务/接口文档中的字段、规则和验收点执行" : "",
+    ].filter(Boolean),
+    needsCoordination: baseAnalysis.needsCoordination || documentFindings.length > 0,
+    confidence: documentFindings.length ? Math.max(baseAnalysis.confidence || 0, 0.72) : baseAnalysis.confidence,
+  };
+}
+
 function containsAny(text: string, words: string[]) {
   return words.some(word => text.includes(word.toLowerCase()));
 }
@@ -304,15 +397,15 @@ function memberKind(member: any) {
   return "general";
 }
 
-const FRONTEND_HINTS = ["前端", "页面", "界面", "ui", "组件", "样式", "交互", "app", "客户端", "移动端", "小程序", "按钮", "表单", "展示"];
-const BACKEND_HINTS = ["后端", "接口", "api", "服务", "数据库", "鉴权", "权限", "字段", "表", "缓存", "队列", "部署", "cloud", "server"];
-const BROAD_HINTS = ["全栈", "前后端", "联调", "跨端", "需求", "开发", "实现", "修复", "排查", "bug", "报错", "测试", "验收", "项目"];
+const FRONTEND_HINTS = ["前端", "页面", "界面", "ui", "组件", "样式", "交互", "app", "客户端", "移动端", "小程序", "按钮", "表单", "展示", "原型", "流程"];
+const BACKEND_HINTS = ["后端", "接口", "api", "服务", "数据库", "鉴权", "权限", "字段", "表", "缓存", "队列", "部署", "cloud", "server", "endpoint", "schema", "入参", "出参"];
+const BROAD_HINTS = ["全栈", "前后端", "联调", "跨端", "需求", "开发", "实现", "修复", "排查", "bug", "报错", "测试", "验收", "项目", "接口文档", "业务文档", "需求文档", "prd", "文档"];
 const QUESTION_HINTS = ["?", "？", "怎么", "如何", "为什么", "能不能", "是否", "吗"];
 const REVIEW_HINTS = ["review", "审查", "评审", "检查代码", "看一下代码", "风险"];
 const TEST_HINTS = ["测试", "验收", "验证", "用例", "回归", "自测"];
 const BUG_HINTS = ["bug", "报错", "错误", "异常", "失败", "崩溃", "无法", "不生效", "修复"];
-const IMPLEMENT_HINTS = ["实现", "开发", "新增", "接入", "适配", "改成", "优化", "重构", "做一下", "加一个"];
-const PLANNING_HINTS = ["方案", "设计", "架构", "规划", "拆分", "怎么做", "思路"];
+const IMPLEMENT_HINTS = ["实现", "开发", "新增", "接入", "适配", "改成", "优化", "重构", "做一下", "加一个", "完成这个任务", "按文档"];
+const PLANNING_HINTS = ["方案", "设计", "架构", "规划", "拆分", "怎么做", "思路", "接口文档", "业务文档", "需求文档", "prd"];
 const GREETING_PATTERNS = [
   /^(你好|您好|hi|hello|hey|在吗|在不在|哈喽|嗨)[。！!,.，\s]*$/i,
   /^(早上好|下午好|晚上好|辛苦了)[。！!,.，\s]*$/i,
@@ -339,7 +432,8 @@ function isSimpleMessage(message: string) {
 export function analyzeRequirement(group: any, message: string, context = "") {
   const normalized = normalizeGroupOrchestrator(group);
   const raw = String(message || "").trim();
-  const text = raw.toLowerCase();
+  const contextText = String(context || "").trim();
+  const text = [raw, contextText].filter(Boolean).join("\n").toLowerCase();
   const members = getRoutableMembers(normalized);
   const explicitProjects = members
     .map((m: any) => String(m.project || ""))
@@ -494,12 +588,13 @@ function formatRequirementUnderstanding(analysis: any) {
 }
 
 function buildDelegationLine(project: string, task: string, analysis: any) {
+  const broadDevelopmentRequest = isBroadDevelopmentRequest(task, analysis);
   const brief = [
     `需求理解：${analysis.summary}`,
     `意图：${analysis.intent}`,
     `交付物：${analysis.deliverables.join("、")}`,
     analysis.constraints.length ? `约束：${analysis.constraints.join("、")}` : "",
-    analysis.missingInfo.length ? `注意缺口：${analysis.missingInfo.join("、")}` : "",
+    analysis.missingInfo.length ? `${broadDevelopmentRequest ? "先按项目职责判断并补齐范围" : "注意缺口"}：${analysis.missingInfo.join("、")}` : "",
     `原始需求：${compactText(task)}`
   ].filter(Boolean).join("；");
   return `@${project} 请从 ${project} 项目职责处理。${brief}。回复时请给出结论、依据、需要修改的点、风险和验证方式。`;
@@ -517,6 +612,117 @@ function buildVisibleAssignmentLine(item: any) {
   return `@${project} ${task}${suffix ? `（${suffix}）` : ""}`;
 }
 
+function inferCoordinatorStrategy(analysis: any = {}, targetCount = 0) {
+  const intent = String(analysis?.intent || "");
+  const hasDocuments = Array.isArray(analysis?.documentFindings) && analysis.documentFindings.length > 0;
+  const complexIntent = ["implementation", "bugfix", "planning", "review"].includes(intent);
+  const crossProject = targetCount > 1 || (Array.isArray(analysis?.domains) && analysis.domains.length > 1);
+  if (hasDocuments || crossProject || complexIntent) {
+    return "research_synthesis_implementation_verification";
+  }
+  return "direct_worker_execution";
+}
+
+function buildCoordinatorPlan(group: any, analysis: any, targets: any[], executionOrder = "parallel", strategy = "") {
+  const targetNames = (targets || []).map((item: any) => item?.member?.project || item?.project).filter(Boolean);
+  const coordinationStrategy = strategy || inferCoordinatorStrategy(analysis, targetNames.length);
+  const phases = [
+    "理解需求：主 Agent 提炼业务目标、范围、约束、文档依据和缺口",
+    coordinationStrategy === "research_synthesis_implementation_verification"
+      ? "研究与综合：子 Agent 先在各自项目内确认事实，主 Agent 综合成明确实现/验证判断，禁止把理解责任转嫁给 Worker"
+      : "",
+    targetNames.length
+      ? `分配任务：按 ${executionOrder} 派发给 ${targetNames.join("、")}，每个子 Agent 获得自包含工作单`
+      : "分配任务：当前没有可执行子 Agent，先直接回答或向用户补充提问",
+    "协同执行：子 Agent 在各自项目中完成研究、实现、验证，并返回 CCM_AGENT_RECEIPT",
+    "复盘验收：主 Agent 汇总回执、文件变更和验证证据，发现缺口时继续返工",
+  ].filter(Boolean);
+  const missingInfo = Array.isArray(analysis?.missingInfo) ? analysis.missingInfo.filter(Boolean) : [];
+  return {
+    mode: "cc-style-coordinator",
+    strategy: coordinationStrategy,
+    executionOrder,
+    phases,
+    targets: targetNames,
+    missingInfo,
+  };
+}
+
+function buildCoordinatorPlanText(plan: any) {
+  if (!plan?.phases?.length) return "";
+  const lines = ["主 Agent 计划："];
+  for (const phase of plan.phases) lines.push(`- ${phase}`);
+  if (plan.missingInfo?.length) lines.push(`- 已识别缺口：${plan.missingInfo.join("；")}`);
+  return lines.join("\n");
+}
+
+function buildSelfContainedWorkerTask(project: string, rawTask: string, analysis: any, options: any = {}) {
+  const task = String(rawTask || "").trim();
+  const reason = String(options.reason || "").trim();
+  const dependsOn = String(options.dependsOn || "").trim();
+  const documentFindings = Array.isArray(analysis?.documentFindings) ? analysis.documentFindings.filter(Boolean) : [];
+  const constraints = Array.isArray(analysis?.constraints) ? analysis.constraints.filter(Boolean) : [];
+  const missingInfo = Array.isArray(analysis?.missingInfo) ? analysis.missingInfo.filter(Boolean) : [];
+  const deliverables = Array.isArray(analysis?.deliverables) && analysis.deliverables.length
+    ? analysis.deliverables
+    : ["结论、实际动作、文件变更和验证记录"];
+  const coordinationStrategy = String(options.coordinationStrategy || analysis?.coordinationStrategy || inferCoordinatorStrategy(analysis, 1));
+
+  const alreadyStructured = /主 Agent 工作单|需求理解|交付物|验证要求|CCM_AGENT_RECEIPT/i.test(task);
+  if (alreadyStructured) return task;
+
+  const lines = [
+    `主 Agent 工作单：${project}`,
+    `- 需求理解：${analysis?.summary || compactText(analysis?.raw || task, 260)}`,
+    `- 你的职责：只处理 ${project} 项目职责范围内的代码、配置、文档或验证；不要越权修改其他项目。`,
+    reason ? `- 派发原因：${reason}` : "",
+    dependsOn ? `- 依赖关系：先参考 ${dependsOn} 的结论；如果前置结果未到，请说明等待项或可先做的独立检查。` : "",
+    coordinationStrategy === "research_synthesis_implementation_verification"
+      ? "- 协调协议：按 Claude Code Coordinator/Worker 思路执行。主 Agent 已先理解并计划；你负责本项目 Research/Implementation/Verification，把事实和证据交回主 Agent 综合验收。不要把理解责任再推给其他 Agent。"
+      : "- 协调协议：这是主 Agent 派给你的自包含工作单；直接按本项目职责执行并提交证据。",
+    `- 本次任务：${task || analysis?.raw || "根据主 Agent 的需求理解完成本项目相关工作。"}`,
+    documentFindings.length ? `- 文档依据/验收关注：${documentFindings.slice(0, 6).map((item: any) => compactText(String(item), 180)).join("；")}` : "",
+    constraints.length ? `- 用户约束：${constraints.join("；")}` : "",
+    missingInfo.length ? `- 已知缺口/风险：${missingInfo.join("；")}；能在项目内确认的先确认，不能确认的写入 blockers/needs。` : "",
+    `- 交付物：${deliverables.join("；")}`,
+    "- 禁止空泛回复：不要只写“按文档实现”“根据前置结果处理”。必须说明你实际检查了什么、修改了什么、验证了什么，或为什么被阻塞。",
+    "- 验证要求：运行与你改动范围匹配的最小必要验证；未运行的验证必须明确写成建议，不能伪造成已执行。",
+    "- 回执要求：最后必须追加 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs。",
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+
+function inferCodedExecutionPlan(message: string, analysis: any, routed: any[]) {
+  const documentText = Array.isArray(analysis?.documentFindings) ? analysis.documentFindings.join("\n") : "";
+  const text = [
+    message || analysis?.raw || "",
+    analysis?.contextSignal || "",
+    documentText,
+  ].filter(Boolean).join("\n").toLowerCase();
+  const hasBackend = (routed || []).some((item: any) => memberKind(item.member) === "backend");
+  const hasFrontend = (routed || []).some((item: any) => memberKind(item.member) === "frontend");
+  const needsBackendFirst = hasBackend && hasFrontend && /接口|api|字段|契约|联调|对接|入参|出参|endpoint|schema|后端.*前端|前端.*后端/i.test(text);
+  const needsSequential = !needsBackendFirst
+    && routed.length > 1
+    && /先.+再|然后|依赖|步骤|流程|迁移|分阶段|串行|sequential/i.test(text);
+  const executionOrder = needsBackendFirst ? "backend_first" : needsSequential ? "sequential" : "parallel";
+  const firstBackend = needsBackendFirst
+    ? routed.find((item: any) => memberKind(item.member) === "backend")?.member?.project || ""
+    : "";
+  const plannedRouted = (routed || []).map((item: any) => ({
+    ...item,
+    dependsOn: item.dependsOn || (firstBackend && memberKind(item.member) === "frontend" ? firstBackend : ""),
+    reason: item.reason || (needsBackendFirst && memberKind(item.member) === "frontend"
+      ? `前端对接依赖 ${firstBackend} 先确认接口契约`
+      : needsBackendFirst && memberKind(item.member) === "backend"
+        ? "接口/字段/联调类需求需要先确认后端契约"
+        : needsSequential
+          ? "该需求存在步骤或依赖关系，按顺序推进"
+          : "规则主 Agent 根据需求范围和项目职责派发"),
+  }));
+  return { executionOrder, routed: plannedRouted };
+}
+
 function buildAssignment(member: any, task: string, reason = "", dependsOn = "") {
   return {
     project: String(member?.project || "").trim(),
@@ -532,21 +738,98 @@ function buildAssignmentsFromTargets(targets: any[]) {
     .filter((item: any) => item.project && item.task);
 }
 
+function buildDispatchPolicy(
+  action: string,
+  reason: string,
+  analysis: any,
+  options: { requiresConfirmation?: boolean; risk?: string; nextStep?: string } = {}
+) {
+  return {
+    action,
+    reason: reason || "",
+    requiresConfirmation: !!options.requiresConfirmation,
+    risk: options.risk || "",
+    nextStep: options.nextStep || "",
+    confidence: typeof analysis?.confidence === "number" ? analysis.confidence : 0,
+  };
+}
+
+function isBroadDevelopmentRequest(message: string, analysis: any = {}) {
+  const text = String(message || analysis?.raw || "").toLowerCase();
+  return !!analysis?.needsCoordination
+    && ["implementation", "planning", "bugfix"].includes(String(analysis?.intent || ""))
+    && (containsAny(text, BROAD_HINTS) || /业务|需求|文档|prd|实现|开发|功能|模块/i.test(String(message || analysis?.raw || "")));
+}
+
+function inferCodedDispatchPolicy(group: any, message: string, analysis: any, targets: any[]) {
+  if (isSimpleMessage(message) || analysis.intent === "greeting") {
+    return buildDispatchPolicy("direct_answer", "简单寒暄或确认消息，不需要调用项目 Agent。", analysis, {
+      nextStep: "直接回复用户",
+    });
+  }
+
+  if (getRoutableMembers(group).length === 0) {
+    return buildDispatchPolicy("hold", "当前群聊没有可分派的项目 Agent。", analysis, {
+      risk: "无法执行项目级排查或修改",
+      nextStep: "请先添加群聊成员",
+    });
+  }
+
+  const broadDevelopmentRequest = isBroadDevelopmentRequest(message, analysis);
+  if (targets.length === 0 || (analysis.missingInfo?.length && analysis.confidence < 0.72 && !broadDevelopmentRequest)) {
+    return buildDispatchPolicy("ask_user", analysis.missingInfo?.[0] || "需求范围不够明确，先问用户补充关键信息。", analysis, {
+      risk: "信息不足时派发会导致子 Agent 空转或误改",
+      nextStep: "向用户追问一个关键问题",
+    });
+  }
+
+  const risky = /删除|清空|重置|迁移|生产|线上|支付|权限|密钥|token|数据库|drop|delete|reset/i.test(message);
+  return buildDispatchPolicy("delegate", broadDevelopmentRequest
+    ? "业务开发需求需要项目 Agent 先按职责判断并落地处理。"
+    : targets.length > 1 ? "需要多个项目 Agent 协作处理。" : "需要项目 Agent 查看代码或项目上下文。", analysis, {
+    requiresConfirmation: risky,
+    risk: risky ? "包含高风险操作，建议用户确认后再执行具体修改。" : (broadDevelopmentRequest && analysis.missingInfo?.length ? analysis.missingInfo.join("；") : ""),
+    nextStep: risky ? "先展示派发计划并等待确认" : "立即派发给对应子 Agent",
+  });
+}
+
+function normalizeDispatchPolicy(parsed: any, analysis: any, targets: any[]) {
+  const rawAction = String(parsed?.dispatchPolicy?.action || parsed?.dispatchAction || "").trim();
+  const allowed = new Set(["direct_answer", "ask_user", "delegate", "hold"]);
+  const broadDevelopmentRequest = isBroadDevelopmentRequest(parsed?.summary || analysis.raw || "", analysis);
+  const parsedRequiresConfirmation = !!(parsed?.dispatchPolicy?.requiresConfirmation || parsed?.requiresConfirmation);
+  const action = broadDevelopmentRequest && targets.length > 0 && !parsedRequiresConfirmation
+    ? "delegate"
+    : allowed.has(rawAction)
+    ? rawAction
+    : targets.length > 0 ? "delegate" : analysis.missingInfo?.length ? "ask_user" : "direct_answer";
+  const reason = broadDevelopmentRequest && action === "delegate"
+    ? String(parsed?.dispatchPolicy?.reason || parsed?.dispatchReason || "业务开发需求可先由项目 Agent 按职责判断并处理").trim()
+    : String(parsed?.dispatchPolicy?.reason || parsed?.dispatchReason || "").trim();
+  return buildDispatchPolicy(action, reason, analysis, {
+    requiresConfirmation: parsedRequiresConfirmation,
+    risk: String(parsed?.dispatchPolicy?.risk || parsed?.risk || (broadDevelopmentRequest && analysis.missingInfo?.length ? analysis.missingInfo.join("；") : "")).trim(),
+    nextStep: String(parsed?.dispatchPolicy?.nextStep || parsed?.nextStep || (action === "delegate" ? "立即派发给对应子 Agent" : "")).trim(),
+  });
+}
+
 export function runCodedGroupOrchestrator(input: {
   group: any;
   message: string;
   context?: string;
   source?: string;
+  sharedFilesContext?: string;
 }) {
   const group = normalizeGroupOrchestrator(input.group);
   const coordinator = getCoordinatorMember(group);
-  const analysis = analyzeRequirement(group, input.message, input.context || "");
+  const analysis = buildDocumentAwareAnalysis(group, input);
   const routed = routeMembers(group, input.message, analysis);
   const members = getRoutableMembers(group);
 
   // 优化1：简单消息直接给出自然回复，不展示结构化分析
   if (isSimpleMessage(input.message)) {
     const memberNames = members.length ? members.map((m: any) => m.project).join("、") : "暂无";
+    const dispatchPolicy = inferCodedDispatchPolicy(group, input.message, analysis, []);
     let friendlyReply = "";
     if (analysis.intent === "greeting") {
       friendlyReply = `你好！我是群聊协调者，可以帮你把任务分配给 ${memberNames}。直接说你想做什么就行 😊`;
@@ -558,16 +841,19 @@ export function runCodedGroupOrchestrator(input: {
       delegated: [],
       assignments: [],
       analysis,
+      dispatchPolicy,
       content: friendlyReply,
     };
   }
 
   if (members.length === 0) {
+    const dispatchPolicy = inferCodedDispatchPolicy(group, input.message, analysis, []);
     return {
       agent: coordinator.project,
       delegated: [],
       assignments: [],
       analysis,
+      dispatchPolicy,
       content: [
         "需求理解：",
         ...formatRequirementUnderstanding(analysis).map(line => `- ${line}`),
@@ -582,31 +868,153 @@ export function runCodedGroupOrchestrator(input: {
   if (routed.length === 0) {
     const memberNames = members.map((m: any) => m.project).join("、");
     const question = analysis.missingInfo[0] || "这是前端、后端、联调还是排查任务";
+    const dispatchPolicy = inferCodedDispatchPolicy(group, input.message, analysis, routed);
     return {
       agent: coordinator.project,
       delegated: [],
       assignments: [],
       analysis,
+      dispatchPolicy,
       content: `我大致理解了你的需求，不过还需要你补充一下：**${question}**\n\n当前可协调成员：${memberNames}`,
     };
   }
 
-  const delegationLines = routed.map(item => buildVisibleAssignmentLine(item));
-  const delegated = routed.map(item => item.member.project);
+  const executionPlan = inferCodedExecutionPlan(input.message, analysis, routed);
+  const executionOrder = executionPlan.executionOrder;
+  const coordinationStrategy = inferCoordinatorStrategy(analysis, executionPlan.routed.length);
+  analysis.coordinationStrategy = coordinationStrategy;
+  const plannedRouted = executionPlan.routed.map((item: any) => ({
+    ...item,
+    task: buildSelfContainedWorkerTask(item.member.project, item.task || input.message, analysis, {
+      reason: item.reason || "规则主 Agent 根据需求范围和项目职责派发",
+      dependsOn: item.dependsOn || "",
+      coordinationStrategy,
+    }),
+  }));
+  const plan = buildCoordinatorPlan(group, analysis, plannedRouted, executionOrder, coordinationStrategy);
+  const delegationLines = plannedRouted.map(item => buildVisibleAssignmentLine(item));
+  const delegated = plannedRouted.map(item => item.member.project);
+  const dispatchPolicy = inferCodedDispatchPolicy(group, input.message, analysis, plannedRouted);
 
   return {
     agent: coordinator.project,
     delegated,
-    assignments: buildAssignmentsFromTargets(routed),
-    executionOrder: "parallel",
+    assignments: buildAssignmentsFromTargets(plannedRouted),
+    executionOrder,
+    coordinationStrategy,
     analysis,
+    coordinationPlan: plan,
+    dispatchPolicy,
     content: [
       `好的，这个需求我安排 ${delegated.join("、")} 来处理。`,
+      "",
+      buildCoordinatorPlanText(plan),
       "",
       ...delegationLines,
       "",
       `等他们回复后我会做汇总 📋`
     ].join("\n"),
+  };
+}
+
+export function runCoordinatorProtocolSelfTest() {
+  const group = normalizeGroupOrchestrator({
+    id: "coordinator-protocol-self-test",
+    members: [
+      { project: "coordinator", role: "coordinator" },
+      { project: "backend-service", agent: "claudecode" },
+      { project: "web-app", agent: "claudecode" },
+    ],
+  });
+  const message = "按接口文档实现订单退款审核功能，后端提供审核接口，前端订单详情页增加审核入口，并完成验证。";
+  const sharedFilesContext = [
+    "[共享文档 refund-prd.md]",
+    "接口：POST /api/refunds/:id/audit",
+    "入参字段：approved(boolean), reason(string)",
+    "状态流转：pending_review -> approved/rejected",
+    "验收：后端校验权限并记录操作日志；前端订单详情页展示审核入口和结果提示。",
+  ].join("\n");
+  const result = runCodedGroupOrchestrator({
+    group,
+    message,
+    sharedFilesContext,
+  });
+  const shortDocResult = runCodedGroupOrchestrator({
+    group,
+    message: "请按这个文档做。",
+    sharedFilesContext,
+  });
+  const llmParsedWithoutDocumentFindings = {
+    intent: "implementation",
+    summary: "实现订单退款审核功能",
+    domains: ["backend", "frontend"],
+    deliverables: ["后端接口", "前端审核入口", "验证记录"],
+    constraints: [],
+    missingInfo: [],
+    shouldDelegate: true,
+    executionOrder: "backend_first",
+    targets: [
+      { project: "backend-service", task: "实现退款审核接口并完成权限校验。", reason: "后端负责 API 和业务规则", dependsOn: "" },
+      { project: "web-app", task: "在订单详情页增加退款审核入口并对接后端接口。", reason: "前端负责页面交互", dependsOn: "backend-service" },
+    ],
+  };
+  const llmFallbackAnalysis = buildDocumentAwareAnalysis(group, { message, sharedFilesContext });
+  const llmAnalysis = normalizeLlmAnalysis(llmParsedWithoutDocumentFindings, llmFallbackAnalysis);
+  const llmTargets = sanitizeLlmTargets(group, llmParsedWithoutDocumentFindings, message, llmAnalysis, true);
+  const llmDocumentGuardPass = llmTargets.length >= 2
+    && llmAnalysis.documentFindings.some((item: string) => item.includes("/api/refunds"))
+    && llmTargets.every((item: any) => String(item.task || "").includes("文档依据/验收关注") && String(item.task || "").includes("/api/refunds"));
+  const assignments = Array.isArray(result.assignments) ? result.assignments : [];
+  const taskChecks = assignments.map((assignment: any) => {
+    const task = String(assignment.task || "");
+    return {
+      project: assignment.project,
+      dependsOn: assignment.dependsOn || "",
+      hasWorkerPacket: task.includes("主 Agent 工作单"),
+      hasUnderstanding: task.includes("需求理解"),
+      hasVerification: task.includes("验证要求"),
+      hasReceipt: task.includes("CCM_AGENT_RECEIPT"),
+      hasDocumentEvidence: task.includes("文档依据/验收关注") && task.includes("/api/refunds"),
+      hasCoordinatorWorkerProtocol: task.includes("Claude Code Coordinator/Worker") && task.includes("Research/Implementation/Verification"),
+      forbidsLazyDelegation: task.includes("禁止空泛回复"),
+    };
+  });
+  const backendProject = assignments.find((item: any) => /cloud|api|server|backend|service|后端/i.test(String(item.project || "")))?.project || "";
+  const frontendDependsOnBackend = !backendProject || taskChecks
+    .filter((item: any) => /app|web|front|frontend|前端/i.test(String(item.project || "")))
+    .every((item: any) => item.dependsOn === backendProject);
+  const shortDocAssignments = Array.isArray((shortDocResult as any).assignments) ? (shortDocResult as any).assignments : [];
+  const shortDocBackendProject = shortDocAssignments.find((item: any) => /cloud|api|server|backend|service|后端/i.test(String(item.project || "")))?.project || "";
+  const shortDocBackendFirstPass = (shortDocResult as any).executionOrder === "backend_first"
+    && shortDocAssignments.length >= 2
+    && shortDocAssignments
+      .filter((item: any) => /app|web|front|frontend|前端/i.test(String(item.project || "")))
+      .every((item: any) => !shortDocBackendProject || item.dependsOn === shortDocBackendProject);
+  const pass = String(result.content || "").includes("主 Agent 计划")
+    && Array.isArray((result as any).coordinationPlan?.phases)
+    && (result as any).coordinationPlan.phases.length >= 5
+    && (result as any).coordinationPlan.strategy === "research_synthesis_implementation_verification"
+    && (result as any).coordinationPlan.phases.some((phase: string) => phase.includes("研究与综合"))
+    && assignments.length >= 2
+    && (result as any).executionOrder === "backend_first"
+    && frontendDependsOnBackend
+    && taskChecks.every((item: any) => item.hasWorkerPacket && item.hasUnderstanding && item.hasVerification && item.hasReceipt && item.hasDocumentEvidence && item.hasCoordinatorWorkerProtocol && item.forbidsLazyDelegation)
+    && llmDocumentGuardPass
+    && shortDocBackendFirstPass;
+  return {
+    pass,
+    contentHasPlan: String(result.content || "").includes("主 Agent 计划"),
+    coordinationPlan: (result as any).coordinationPlan || null,
+    assignmentCount: assignments.length,
+    assignments: assignments.map((item: any) => item.project),
+    taskChecks,
+    executionOrder: (result as any).executionOrder || "",
+    coordinationStrategy: (result as any).coordinationStrategy || "",
+    frontendDependsOnBackend,
+    llmDocumentGuardPass,
+    shortDocBackendFirstPass,
+    shortDocExecutionOrder: (shortDocResult as any).executionOrder || "",
+    documentFindings: Array.isArray((result as any).analysis?.documentFindings) ? (result as any).analysis.documentFindings : [],
   };
 }
 
@@ -636,9 +1044,9 @@ export async function runLlmCoordinatorSummary(group: any, userMessage: string, 
   const validOutputs = (outputs || []).filter(Boolean);
   if (validOutputs.length === 0) return null;
 
-  const childReplies = validOutputs.map((text, i) => `--- 子 Agent 回复 ${i + 1} ---\n${String(text).slice(0, 2000)}`).join("\n\n");
+  const childReplies = validOutputs.map((text, i) => `--- 子 Agent task-notification ${i + 1} ---\n${String(text).slice(0, 2000)}`).join("\n\n");
 
-  const system = `你是 CCM 群聊的主 Agent（协调者）。子 Agent 已经回复了用户的需求，请你做一个简洁的汇总。
+  const system = `你是 CCM 群聊的主 Agent（协调者）。子 Agent 已经以 <task-notification> 形式回复了用户的需求，请你做一个简洁的汇总。
 
 要求：
 1. 提取各子 Agent 的核心结论，用 1-3 句话概括每个 Agent 的回复要点
@@ -649,7 +1057,7 @@ export async function runLlmCoordinatorSummary(group: any, userMessage: string, 
 
 直接输出汇总文本，不要输出 JSON。`;
 
-  const user = `用户原始需求：${String(userMessage).slice(0, 500)}\n\n以下是各子 Agent 的回复：\n${childReplies}\n\n请输出汇总。`;
+  const user = `用户原始需求：${String(userMessage).slice(0, 500)}\n\n以下是各子 Agent 的 task-notification / 回复：\n${childReplies}\n\n请输出汇总。`;
 
   try {
     const messages = [
@@ -707,7 +1115,7 @@ export async function runLlmCoordinatorReview(
   userMessage: string,
   coordinatorPlan: string,
   outputs: string[],
-  options: { allowFollowUps?: boolean; round?: number } = {}
+  options: { allowFollowUps?: boolean; round?: number; maxRounds?: number } = {}
 ) {
   const config = loadOrchestratorConfig();
   const configIssue = getLlmConfigIssue(config);
@@ -720,11 +1128,15 @@ export async function runLlmCoordinatorReview(
   if (validOutputs.length === 0) return null;
 
   const allowFollowUps = options.allowFollowUps !== false;
+  const round = Math.max(1, Number(options.round || 1));
+  const maxRounds = Math.max(round, Number(options.maxRounds || 3));
   const childReplies = validOutputs
-    .map((text, i) => `--- 子 Agent 回复 ${i + 1} ---\n${String(text).slice(0, 2400)}`)
+    .map((text, i) => `--- 子 Agent task-notification ${i + 1} ---\n${String(text).slice(0, 2400)}`)
     .join("\n\n");
 
   const system = `你是 CCM 群聊的主 Agent（工作协调者）。你已经把用户需求分派给项目 Agent，现在要像项目负责人一样复盘子 Agent 的回复。
+
+当前是第 ${round}/${maxRounds} 轮验收；${allowFollowUps ? "如果证据不足，可以继续派发返工任务。" : "本轮不能再派发返工任务，必须给出最终结论或向用户提出具体问题。"}
 
 你不是代码执行 Agent，不写代码，不假装完成没有证据的工作。你要做的是：
 1. 判断子 Agent 是否真正回答了任务、是否完成修改/验证、是否有缺口。
@@ -732,6 +1144,15 @@ export async function runLlmCoordinatorReview(
 3. 如果还需要某个项目 Agent 继续补充，只能在 followUps 里给出明确任务。
 4. 如果已经足够，输出给用户的最终协调结论。
 5. 如果需要用户决策或补充信息，明确指出。
+
+验收门禁：
+- 优先读取每个 Worker 的 <task-notification>：task-id 表示 Worker，status 表示 completed/failed/blocked/partial/missing_receipt，receipt-status 表示 CCM_AGENT_RECEIPT 状态，result 是 Worker 结果摘要。
+- 优先读取每个子 Agent 回复末尾的 CCM_AGENT_RECEIPT / “结构化回执”摘要。
+- 如果某个被派发的 Agent 缺少结构化回执，或回执 status 不是 done，或没有提供实际动作/验证证据，通常不能判定 complete。
+- 对代码修改类任务，必须看到修改点/文件或明确说明未修改，以及验证方式；否则在 gaps 里指出，并在允许追问时 followUps 要求补齐。
+- 对依赖任务，后续 Agent 的结论必须引用或吸收前置 Agent 的结论；否则指出依赖未闭环。
+- 对接口文档、业务文档、需求文档或 PRD 驱动的任务，必须检查子 Agent 是否覆盖了被分派的接口契约、字段、业务规则、页面/交互、验收标准；缺少文档条目对应的实现/确认/验证证据时不能判定 complete。
+- 不要把“已建议”“可以修改”“应该检查”当成已完成。
 
 只能返回 JSON 对象，不要 Markdown，不要解释。
 
@@ -761,7 +1182,7 @@ ${String(userMessage || "").slice(0, 1200)}
 主 Agent 初始安排：
 ${String(coordinatorPlan || "").slice(0, 1600)}
 
-子 Agent 回复：
+子 Agent task-notification / 回复：
 ${childReplies}
 
 是否允许继续追问子 Agent：${allowFollowUps ? "允许" : "不允许，本轮必须输出最终总结或用户问题"}
@@ -966,9 +1387,27 @@ function buildLlmCoordinatorMessages(input: {
 - 只做需求理解、任务拆分、路由分派、等待和汇总。
 - 你的输出会被系统直接执行，targets 不是建议，而是真实派单。
 - 不要为了显得忙而分派；只有需要项目上下文、代码确认、修改、验证或跨项目联调时才分派。
+- 像 Claude Code Coordinator 一样工作：先自己理解需求并形成计划，再把自包含工作单交给 Worker；不要把“理解需求”的责任转嫁给子 Agent。
+- Coordinator 不写代码、不读项目文件、不运行命令；Worker 才负责研究、实现、验证和回执。
+- 子 Agent 看不到你和用户的完整对话，targets[].task 必须包含足够背景、文档依据、边界、交付物、验证要求和回执要求。
+- 不要写“根据上面的内容/根据你的发现去做”这种空任务；必须把你综合出的具体理解写进 task。
+- 研究、实现、验证要按阶段思考：可并行研究，写同一代码区域时谨慎串行，验证要独立检查证据。
 - 分派任务必须像工作单：说明背景、边界、要检查/修改的范围、交付物、验收/验证方式。
+- 复杂、跨项目、文档型或实现型需求默认采用 research_synthesis_implementation_verification：Worker 在各自项目研究/实现/验证，Coordinator 负责综合事实、判断缺口和继续返工。
+- Worker 失败、验证失败或回执证据不足时，优先继续同一个 Worker 补充，因为它保留了上下文；如果方向明显错误，再重新派给新的 Worker。
 - 如果一个项目依赖另一个项目的结论，在 dependsOn 写依赖项目名，并选择 sequential 或 backend_first。
 - 如果用户需求太模糊，shouldDelegate=false，并用 questionForUser 问一个最关键的问题。
+- 对业务开发、PRD、需求文档、接口文档、功能实现类任务，只要群聊里存在可分派项目 Agent，默认 shouldDelegate=true；即使未明确前端/后端/具体项目，也要先派给相关或全部项目 Agent 让其按职责判断影响范围。
+- 缺少范围、字段或验收细节时，把缺口写入 missingInfo、dispatchPolicy.risk 和子 Agent task 的“待确认/风险”，不要因此直接 ask_user，除非完全没有业务目标、没有可分派项目 Agent，或涉及高风险操作必须用户确认。
+
+文档型需求处理规则：
+- 如果用户消息或共享文件包含接口文档、业务文档、需求文档、PRD、验收标准、字段表、API 示例或流程说明，你必须先读取这些内容再拆任务。
+- 先在 summary / deliverables / constraints 中提炼：业务目标、涉及模块、接口契约（方法/路径/入参/出参/错误码/鉴权）、数据字段、页面/交互、业务规则、验收标准、依赖顺序和不明确点。
+- 给子 Agent 的 task 不能只写“阅读文档并实现”。必须写清楚：引用的文档名称或附件来源、该 Agent 负责的文档条目/接口/字段/规则、需要检查或修改的代码范围、交付物、验证方式、与其他 Agent 的依赖。
+- 接口文档优先按“后端实现/校验 API 契约 -> 前端或客户端对接接口 -> 联调/验收”拆分，通常选择 backend_first 或 sequential。
+- 业务/需求文档优先按“业务规则/数据模型 -> API/服务 -> 页面/交互 -> 验收”拆分。
+- 如果文档内容缺少关键契约或验收标准，不要编造；shouldDelegate=false 或 requiresConfirmation=true，并在 questionForUser 写最关键的补充问题。
+- 如果共享文件正文里有具体字段、接口路径、状态流转或验收项，相关子 Agent 工作单必须包含这些关键信息的摘要。
 
 你必须只返回 JSON 对象，不要 Markdown，不要解释。
 
@@ -982,13 +1421,26 @@ JSON 格式：
   "domains": ["frontend", "backend", "general"],
   "deliverables": ["子 Agent 应该交付什么"],
   "constraints": ["用户明确约束或优先级"],
+  "documentFindings": ["如果有文档，提炼文档中的接口、字段、业务规则、验收标准或不明确点；没有则空数组"],
   "missingInfo": ["缺失但重要的信息"],
+  "dispatchPolicy": {
+    "action": "direct_answer | ask_user | delegate | hold",
+    "reason": "为什么选择这个动作",
+    "requiresConfirmation": false,
+    "risk": "如果有风险写清楚；没有则空字符串",
+    "nextStep": "接下来应该做什么"
+  },
+  "coordinationStrategy": "direct_worker_execution | research_synthesis_implementation_verification",
+  "coordinationPlan": {
+    "phases": ["主 Agent 计划阶段，例如理解需求、研究与综合、分配任务、协同执行、复盘验收"],
+    "synthesisStrategy": "你会如何综合子 Agent 回执并判断是否需要返工"
+  },
   "shouldDelegate": true,
   "executionOrder": "parallel | sequential | backend_first",
   "targets": [
     {
       "project": "必须是允许分派的项目 Agent 名称",
-      "task": "给这个项目 Agent 的可执行工作单，包含背景、边界、交付物、需要检查/修改的范围、风险和验证要求",
+      "task": "给这个项目 Agent 的可执行工作单，包含背景、引用的文档/附件、负责的接口/字段/业务规则、边界、交付物、需要检查/修改的范围、风险和验证要求",
       "reason": "为什么分给它",
       "dependsOn": "如果依赖其他 Agent 先完成，填其项目名；否则空字符串"
     }
@@ -1097,16 +1549,45 @@ async function callAnthropicCompatibleOrchestrator(config: any, input: any) {
   }
 }
 
+function normalizeDocumentFindings(parsed: any) {
+  return Array.isArray(parsed?.documentFindings)
+    ? parsed.documentFindings.map((x: any) => String(x).trim()).filter(Boolean)
+    : [];
+}
+
+function enrichTaskWithDocumentFindings(task: string, findings: string[]) {
+  const text = String(task || "").trim();
+  if (!findings.length) return text;
+  if (/文档依据|引用文档|接口文档|业务文档|需求文档|PRD|附件/.test(text)) return text;
+  const brief = findings.slice(0, 6).map(item => `- ${compactText(item, 180)}`).join("\n");
+  return `${text}\n\n文档依据/验收关注：\n${brief}`;
+}
+
 function sanitizeLlmTargets(group: any, parsed: any, message: string, fallbackAnalysis: any, allowRuleRepair = false) {
   const allowed = new Map(getRoutableMembers(group).map((m: any) => [m.project, m]));
   const rawTargets = Array.isArray(parsed?.targets) ? parsed.targets : [];
+  const documentFindings = mergeDocumentFindings(normalizeDocumentFindings(parsed), fallbackAnalysis?.documentFindings);
+  const taskAnalysis = {
+    ...fallbackAnalysis,
+    documentFindings,
+    summary: String(parsed?.summary || fallbackAnalysis?.summary || ""),
+    deliverables: Array.isArray(parsed?.deliverables) && parsed.deliverables.length ? parsed.deliverables : fallbackAnalysis?.deliverables,
+    constraints: Array.isArray(parsed?.constraints) ? parsed.constraints : fallbackAnalysis?.constraints,
+    missingInfo: Array.isArray(parsed?.missingInfo) ? parsed.missingInfo : fallbackAnalysis?.missingInfo,
+    coordinationStrategy: String(parsed?.coordinationStrategy || fallbackAnalysis?.coordinationStrategy || inferCoordinatorStrategy(fallbackAnalysis, rawTargets.length)),
+  };
   const seen = new Set<string>();
   const targets = [];
 
   for (const target of rawTargets) {
     const project = String(target?.project || "").trim();
     if (!allowed.has(project) || seen.has(project)) continue;
-    const task = String(target?.task || "").trim() || message;
+    const enrichedTask = enrichTaskWithDocumentFindings(String(target?.task || "").trim() || message, documentFindings);
+    const task = buildSelfContainedWorkerTask(project, enrichedTask, taskAnalysis, {
+      reason: target?.reason || "LLM 主 Agent 根据需求理解和项目职责派发",
+      dependsOn: target?.dependsOn || "",
+      coordinationStrategy: taskAnalysis.coordinationStrategy,
+    });
     targets.push({
       member: allowed.get(project),
       task,
@@ -1116,14 +1597,24 @@ function sanitizeLlmTargets(group: any, parsed: any, message: string, fallbackAn
     seen.add(project);
   }
 
-  if (allowRuleRepair && targets.length === 0 && parsed?.shouldDelegate !== false) {
-    return routeMembers(group, message, fallbackAnalysis).map((item: any) => ({ ...item, reason: "规则回退路由" }));
+  const broadDevelopmentRequest = isBroadDevelopmentRequest(message, fallbackAnalysis);
+  if ((allowRuleRepair || broadDevelopmentRequest) && targets.length === 0 && (parsed?.shouldDelegate !== false || broadDevelopmentRequest)) {
+    return routeMembers(group, message, fallbackAnalysis).map((item: any) => ({
+      ...item,
+      task: buildSelfContainedWorkerTask(item.member.project, enrichTaskWithDocumentFindings(item.task || message, documentFindings), taskAnalysis, {
+        reason: broadDevelopmentRequest ? "业务开发需求规则补派" : "规则回退路由",
+        dependsOn: item.dependsOn || "",
+        coordinationStrategy: taskAnalysis.coordinationStrategy,
+      }),
+      reason: broadDevelopmentRequest ? "业务开发需求规则补派" : "规则回退路由",
+    }));
   }
 
   return targets;
 }
 
 function normalizeLlmAnalysis(parsed: any, fallback: any) {
+  const documentFindings = mergeDocumentFindings(normalizeDocumentFindings(parsed), fallback?.documentFindings);
   return {
     ...fallback,
     intent: String(parsed?.intent || fallback.intent || "discussion"),
@@ -1131,8 +1622,10 @@ function normalizeLlmAnalysis(parsed: any, fallback: any) {
     domains: Array.isArray(parsed?.domains) ? parsed.domains.map((x: any) => String(x)).filter(Boolean) : fallback.domains,
     deliverables: Array.isArray(parsed?.deliverables) && parsed.deliverables.length ? parsed.deliverables.map((x: any) => String(x)) : fallback.deliverables,
     constraints: Array.isArray(parsed?.constraints) ? parsed.constraints.map((x: any) => String(x)).filter(Boolean) : fallback.constraints,
+    documentFindings,
     missingInfo: Array.isArray(parsed?.missingInfo) ? parsed.missingInfo.map((x: any) => String(x)).filter(Boolean) : fallback.missingInfo,
     needsCoordination: parsed?.shouldDelegate !== false,
+    coordinationStrategy: String(parsed?.coordinationStrategy || fallback?.coordinationStrategy || inferCoordinatorStrategy(fallback, Array.isArray(parsed?.targets) ? parsed.targets.length : 0)),
     confidence: typeof parsed?.confidence === "number" ? parsed.confidence : fallback.confidence,
   };
 }
@@ -1141,33 +1634,51 @@ function buildCoordinatorResultFromAnalysis(group: any, message: string, analysi
   const coordinator = getCoordinatorMember(group);
   // 优化6：优先使用 LLM 生成的 friendlyResponse
   const friendlyText = String(parsed?.friendlyResponse || "").trim();
+  const dispatchPolicy = parsed
+    ? normalizeDispatchPolicy(parsed, analysis, targets)
+    : inferCodedDispatchPolicy(group, message, analysis, targets);
+  const shouldDispatch = dispatchPolicy.action === "delegate" && !dispatchPolicy.requiresConfirmation;
+  const effectiveTargets = shouldDispatch ? targets : [];
 
-  if (targets.length === 0) {
+  if (effectiveTargets.length === 0) {
     const response = friendlyText || String(parsed?.questionForUser || parsed?.directResponse || "").trim();
+    const fallbackQuestion = analysis.missingInfo?.[0] || "请描述更具体的需求";
+    const policyLine = dispatchPolicy.action === "delegate" && dispatchPolicy.requiresConfirmation
+      ? `我先不直接派发：${dispatchPolicy.reason || "该操作需要你确认"}${dispatchPolicy.risk ? `\n风险：${dispatchPolicy.risk}` : ""}`
+      : "";
     return {
       agent: coordinator.project,
       delegated: [],
       assignments: [],
       analysis,
+      dispatchPolicy,
       runtime,
-      content: response || `我理解了你的需求，不过还需要你补充一下：**${analysis.missingInfo[0] || "请描述更具体的需求"}**`,
+      content: response || policyLine || `我理解了你的需求，不过还需要你补充一下：**${fallbackQuestion}**`,
     };
   }
 
-  const delegationLines = targets.map((item: any) => buildVisibleAssignmentLine(item));
-  const delegated = targets.map((item: any) => item.member.project);
+  const delegationLines = effectiveTargets.map((item: any) => buildVisibleAssignmentLine(item));
+  const delegated = effectiveTargets.map((item: any) => item.member.project);
   // 优化5：保存执行顺序信息
   const executionOrder = String(parsed?.executionOrder || "parallel");
+  const coordinationStrategy = String(parsed?.coordinationStrategy || analysis?.coordinationStrategy || inferCoordinatorStrategy(analysis, effectiveTargets.length));
+  analysis.coordinationStrategy = coordinationStrategy;
+  const coordinationPlan = buildCoordinatorPlan(group, analysis, effectiveTargets, executionOrder, coordinationStrategy);
 
   return {
     agent: coordinator.project,
     delegated,
-    assignments: buildAssignmentsFromTargets(targets),
+    assignments: buildAssignmentsFromTargets(effectiveTargets),
     analysis,
+    coordinationPlan,
+    dispatchPolicy,
     runtime,
     executionOrder,
+    coordinationStrategy,
     content: [
       friendlyText || `好的，这个需求我安排 ${delegated.join("、")} 来处理。`,
+      "",
+      buildCoordinatorPlanText(coordinationPlan),
       "",
       ...delegationLines,
       "",
@@ -1184,7 +1695,7 @@ async function runLlmGroupOrchestrator(input: {
 }) {
   const group = normalizeGroupOrchestrator(input.group);
   const config = loadOrchestratorConfig();
-  const fallbackAnalysis = analyzeRequirement(group, input.message, input.context || "");
+  const fallbackAnalysis = buildDocumentAwareAnalysis(group, input);
 
   const parsed = shouldUseAnthropic(config)
     ? await callAnthropicCompatibleOrchestrator(config, input)
@@ -1225,7 +1736,7 @@ export async function runGroupOrchestrator(input: {
         "",
         `原因：${configIssue}`,
         "",
-        "请到 设置 -> 群聊主 Agent 配置 中填写 Base URL、API Key 和模型名。",
+        "请到 设置 -> 统一大模型配置 中填写 Base URL、API Key 和模型名。",
         "配置完成后，主 Agent 会先调用大模型理解需求，再分派给项目 Agent。"
       ].join("\n"),
     };

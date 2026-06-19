@@ -300,7 +300,9 @@ async function syncPets() {
 
   for (const p of petAgents) {
     const agentCfg = getConfigForAgent(p.name);
-    agentStates[p.name] = p.state || (p.running ? 'working' : 'idle');
+    const previousState = agentStates[p.name];
+    const nextState = p.state || (p.running ? 'working' : 'idle');
+    agentStates[p.name] = nextState;
     const label = p.petLabel || p.displayName || p.label || p.name;
     const previousLabel = petLabels.get(p.name);
     petLabels.set(p.name, label);
@@ -325,7 +327,9 @@ async function syncPets() {
           if (previousLabel !== label) {
             win.webContents.send('label-update', { agent: p.name, label });
           }
-          win.webContents.send('state-update', { agent: p.name, state: agentStates[p.name] });
+          if (previousState !== nextState) {
+            win.webContents.send('state-update', { agent: p.name, state: nextState });
+          }
         }
       }
     }
@@ -348,6 +352,16 @@ ipcMain.handle('get-asset-path', (_, filename) => {
   if (safeName.includes('..') || path.isAbsolute(safeName)) return null;
   const filePath = path.join(__dirname, 'assets', safeName);
   if (fs.existsSync(filePath)) return filePath;
+
+  // 加上智能自适应：如果找不到，尝试将后缀替换后查找
+  const ext = path.extname(safeName);
+  if (ext) {
+    const baseWithoutExt = safeName.slice(0, -ext.length);
+    const altExt = ext.toLowerCase() === '.png' ? '.svg' : '.png';
+    const altFilePath = path.join(__dirname, 'assets', baseWithoutExt + altExt);
+    if (fs.existsSync(altFilePath)) return altFilePath;
+  }
+
   // 回退到基础 SVG
   const baseName = path.basename(safeName);
   const baseFile = baseName.split('-')[0] + '.svg';

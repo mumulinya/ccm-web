@@ -239,6 +239,60 @@ function handleGitApi(pathname, req, res, parsed) {
         }
         return true;
     }
+    // 6. 应用局部 patch (Hunk Stage / Rollback)
+    if (pathname === "/api/git/apply-patch" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const { project, patchText, revert, cached } = JSON.parse(body);
+                if (!project || !patchText)
+                    return (0, utils_1.sendJson)(res, { error: "缺少参数" }, 400);
+                const configs = (0, db_1.getConfigs)();
+                const config = configs.find(c => c.name === project);
+                if (!config)
+                    return (0, utils_1.sendJson)(res, { error: "项目不存在" }, 404);
+                const info = (0, db_1.getConfigInfo)(config.path);
+                const workDir = info[0]?.workDir;
+                if (!workDir)
+                    return (0, utils_1.sendJson)(res, { error: "项目目录不存在" }, 400);
+                // 创建临时文件写入 patch 内容
+                const fs = require("fs");
+                const path = require("path");
+                const tempPatchDir = path.join(workDir, ".cc-temp-patches");
+                if (!fs.existsSync(tempPatchDir)) {
+                    fs.mkdirSync(tempPatchDir, { recursive: true });
+                }
+                const patchFile = path.join(tempPatchDir, `patch_${Date.now()}.patch`);
+                fs.writeFileSync(patchFile, patchText, "utf-8");
+                try {
+                    const args = ["apply", "--recount"];
+                    if (cached)
+                        args.push("--cached");
+                    if (revert)
+                        args.push("-R");
+                    args.push(patchFile);
+                    (0, child_process_1.execFileSync)("git", args, { cwd: workDir, stdio: "pipe" });
+                    (0, utils_1.sendJson)(res, { success: true, message: "应用 Patch 成功" });
+                }
+                catch (err) {
+                    (0, utils_1.sendJson)(res, { success: false, error: "应用 Patch 失败: " + (err.stderr || err.message) });
+                }
+                finally {
+                    // 清理临时文件
+                    try {
+                        if (fs.existsSync(patchFile))
+                            fs.unlinkSync(patchFile);
+                    }
+                    catch { }
+                }
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { success: false, error: "系统错误: " + e.message });
+            }
+        });
+        return true;
+    }
     return false;
 }
 //# sourceMappingURL=git.js.map

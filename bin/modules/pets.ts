@@ -81,7 +81,8 @@ function stopPet() {
 function normalizePetAssetPath(assetPath: string) {
   const normalized = String(assetPath || "").replace(/\\/g, "/").replace(/^\/+/, "");
   if (!normalized || normalized.includes("..") || path.isAbsolute(normalized)) return "";
-  if (!normalized.toLowerCase().endsWith(".svg")) return "";
+  const ext = path.extname(normalized).toLowerCase();
+  if (ext !== ".svg" && ext !== ".png") return "";
   if (normalized.split("/").some(part => !/^[\w.-]+$/.test(part))) return "";
   return normalized;
 }
@@ -91,23 +92,32 @@ function writePetAsset(assetPath: string, sourcePath: string) {
   if (!safePath) throw new Error("无效的宠物资源路径");
   const stat = fs.statSync(sourcePath);
   if (stat.size <= 0) throw new Error("上传文件为空");
-  if (stat.size > MAX_PET_ASSET_BYTES) throw new Error("SVG 文件不能超过 2MB");
+  if (stat.size > MAX_PET_ASSET_BYTES) throw new Error("上传文件不能超过 2MB");
 
-  const content = fs.readFileSync(sourcePath, "utf-8");
-  if (!/<svg[\s>]/i.test(content)) throw new Error("请上传有效的 SVG 文件");
-  if (/<script[\s>]/i.test(content) || /\son\w+\s*=/i.test(content)) {
-    throw new Error("SVG 不能包含脚本或内联事件");
+  const contentBuffer = fs.readFileSync(sourcePath);
+  const ext = path.extname(safePath).toLowerCase();
+
+  if (ext === ".svg") {
+    const content = contentBuffer.toString("utf-8");
+    if (!/<svg[\s>]/i.test(content)) throw new Error("请上传有效的 SVG 文件");
+    if (/<script[\s>]/i.test(content) || /\son\w+\s*=/i.test(content)) {
+      throw new Error("SVG 不能包含脚本或内联事件");
+    }
   }
 
+  const devWebAssetsDir = path.resolve(PUBLIC_DIR, "..", "..", "ccm-web-vue", "public", "pets");
   const targets = [
     { root: PET_WEB_ASSETS_DIR, file: path.join(PET_WEB_ASSETS_DIR, safePath) },
     { root: PET_DESKTOP_ASSETS_DIR, file: path.join(PET_DESKTOP_ASSETS_DIR, safePath) },
   ];
+  if (fs.existsSync(devWebAssetsDir)) {
+    targets.push({ root: devWebAssetsDir, file: path.join(devWebAssetsDir, safePath) });
+  }
   for (const target of targets) {
     const relative = path.relative(target.root, target.file);
     if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error("资源路径越界");
     fs.mkdirSync(path.dirname(target.file), { recursive: true });
-    fs.writeFileSync(target.file, content, "utf-8");
+    fs.writeFileSync(target.file, contentBuffer);
   }
 
   return safePath;

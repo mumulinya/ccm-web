@@ -251,5 +251,55 @@ export function handleGitApi(pathname: string, req: any, res: any, parsed: any):
     return true;
   }
 
+  // 6. 应用局部 patch (Hunk Stage / Rollback)
+  if (pathname === "/api/git/apply-patch" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const { project, patchText, revert, cached } = JSON.parse(body);
+        if (!project || !patchText) return sendJson(res, { error: "缺少参数" }, 400);
+
+        const configs = getConfigs();
+        const config = configs.find(c => c.name === project);
+        if (!config) return sendJson(res, { error: "项目不存在" }, 404);
+
+        const info = getConfigInfo(config.path);
+        const workDir = info[0]?.workDir;
+        if (!workDir) return sendJson(res, { error: "项目目录不存在" }, 400);
+
+        // 创建临时文件写入 patch 内容
+        const fs = require("fs");
+        const path = require("path");
+        const tempPatchDir = path.join(workDir, ".cc-temp-patches");
+        if (!fs.existsSync(tempPatchDir)) {
+          fs.mkdirSync(tempPatchDir, { recursive: true });
+        }
+        const patchFile = path.join(tempPatchDir, `patch_${Date.now()}.patch`);
+        fs.writeFileSync(patchFile, patchText, "utf-8");
+
+        try {
+          const args = ["apply", "--recount"];
+          if (cached) args.push("--cached");
+          if (revert) args.push("-R");
+          args.push(patchFile);
+
+          execFileSync("git", args, { cwd: workDir, stdio: "pipe" });
+          sendJson(res, { success: true, message: "应用 Patch 成功" });
+        } catch (err: any) {
+          sendJson(res, { success: false, error: "应用 Patch 失败: " + (err.stderr || err.message) });
+        } finally {
+          // 清理临时文件
+          try {
+            if (fs.existsSync(patchFile)) fs.unlinkSync(patchFile);
+          } catch {}
+        }
+      } catch (e: any) {
+        sendJson(res, { success: false, error: "系统错误: " + e.message });
+      }
+    });
+    return true;
+  }
+
   return false;
 }

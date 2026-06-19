@@ -40,6 +40,7 @@ const path = __importStar(require("path"));
 const url = __importStar(require("url"));
 const child_process_1 = require("child_process");
 const tool_manager_1 = require("./tool-manager");
+const agent_runtime_1 = require("./agent-runtime");
 // 导入底座与持久层
 const utils_1 = require("./utils");
 const db_1 = require("./db");
@@ -63,6 +64,9 @@ const agentActivity = new Map();
 const petWorkspaceTargets = new Map();
 const MUSIC_PET_AGENT_NAME = "music-agent";
 const MUSIC_PET_AGENT_DEFAULT_LABEL = "乖乖";
+const AGENT_RUNNER_DIR = path.join(utils_1.CCM_DIR, "agent-runner");
+const AGENT_RUNNER_REQUESTS_DIR = path.join(AGENT_RUNNER_DIR, "requests");
+const AGENT_RUNNER_RESULTS_DIR = path.join(AGENT_RUNNER_DIR, "results");
 let musicPetState = {
     state: "idle",
     detail: "等待音乐指令",
@@ -324,6 +328,7 @@ function getMusicPetAgent() {
 }
 function getPetAgents() {
     const configs = (0, db_1.getConfigs)();
+    const projectNames = new Set(configs.map(c => c.name));
     const projectAgents = configs.map(c => {
         const s = getAgentState(c.name);
         return {
@@ -339,7 +344,34 @@ function getPetAgents() {
             stateDetail: s.detail,
         };
     });
-    return [getMusicPetAgent(), ...projectAgents];
+    const customAgents = [];
+    try {
+        if (fs.existsSync(utils_1.PETS_FILE)) {
+            const data = JSON.parse(fs.readFileSync(utils_1.PETS_FILE, "utf-8"));
+            const petConfigs = data.configs || {};
+            for (const name of Object.keys(petConfigs)) {
+                if (name !== "music-agent" && !projectNames.has(name)) {
+                    const cfg = petConfigs[name];
+                    customAgents.push({
+                        name: name,
+                        displayName: cfg.label || name,
+                        petLabel: cfg.label || name,
+                        virtual: true,
+                        type: "custom",
+                        agent: "custom",
+                        running: true,
+                        state: "idle",
+                        lastActivity: new Date().toISOString(),
+                        stateDetail: "自定义挂件",
+                    });
+                }
+            }
+        }
+    }
+    catch (e) {
+        console.error("[pet] 读取自定义宠物配置失败", e);
+    }
+    return [getMusicPetAgent(), ...projectAgents, ...customAgents];
 }
 function getAgentState(name) {
     const now = Date.now();
@@ -400,22 +432,84 @@ function getAgentState(name) {
     return result;
 }
 // === Agent 并行/同步调用底座 ===
-function buildAgentCommand(agentType, msgFile) {
-    switch (agentType) {
-        case "cursor": return `type "${msgFile}" | agent -p`;
-        case "gemini": return `type "${msgFile}" | gemini -p`;
-        case "codex": return `type "${msgFile}" | codex -q`;
-        default: return `type "${msgFile}" | claude -p`;
+function normalizeToolSelection(tools = {}) {
+    return {
+        mcp: Array.isArray(tools.mcp) ? tools.mcp.map((x) => String(x).trim()).filter(Boolean) : [],
+        skill: Array.isArray(tools.skill) ? tools.skill.map((x) => String(x).trim()).filter(Boolean) : [],
+    };
+}
+function getProjectToolSelection(projectName) {
+    const configs = (0, db_1.loadProjectConfigs)();
+    return normalizeToolSelection(configs?.[projectName]?.tools || {});
+}
+function buildProjectToolContext(projectName) {
+    const allowedTools = getProjectToolSelection(projectName);
+    const prompt = tool_manager_1.toolManager.buildToolPrompt(allowedTools);
+    return { prompt, allowedTools };
+}
+function ensureAgentRunnerDirs() {
+    for (const dir of [AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, utils_1.UPLOAD_DIR]) {
+        if (!fs.existsSync(dir))
+            fs.mkdirSync(dir, { recursive: true });
     }
 }
-async function appendToolResults(output) {
+function isSpawnPermissionError(error) {
+    const text = `${error?.code || ""} ${error?.message || ""} ${error?.stderr || ""}`;
+    return /\bEPERM\b|spawnSync .* EPERM|spawn .* EPERM/i.test(text);
+}
+function createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools = null) {
+    ensureAgentRunnerDirs();
+    const id = `ar_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const request = {
+        id,
+        projectName,
+        workDir,
+        agentType: (0, agent_runtime_1.normalizeAgentRuntimeId)(agentType || "claudecode"),
+        timeoutMs,
+        allowedTools,
+        message,
+        status: "pending",
+        created_at: new Date().toISOString(),
+    };
+    const tmpFile = path.join(AGENT_RUNNER_REQUESTS_DIR, `${id}.tmp`);
+    const requestFile = path.join(AGENT_RUNNER_REQUESTS_DIR, `${id}.json`);
+    fs.writeFileSync(tmpFile, JSON.stringify(request, null, 2), "utf-8");
+    fs.renameSync(tmpFile, requestFile);
+    return { id, requestFile, resultFile: path.join(AGENT_RUNNER_RESULTS_DIR, `${id}.json`) };
+}
+async function waitForAgentRunnerResult(resultFile, timeoutMs) {
+    const started = Date.now();
+    const pollMs = 1000;
+    while (Date.now() - started < Math.max(1000, timeoutMs || 300000)) {
+        if (fs.existsSync(resultFile)) {
+            try {
+                return JSON.parse(fs.readFileSync(resultFile, "utf-8").replace(/^\uFEFF/, ""));
+            }
+            catch { }
+        }
+        await new Promise(resolve => setTimeout(resolve, pollMs));
+    }
+    throw new Error("外部 Agent Runner 等待超时；请运行 npm run agent-runner:ps 或 npm run agent-runner 启用外部执行通道");
+}
+async function callAgentViaExternalRunner(projectName, message, workDir, agentType, timeoutMs, allowedTools = null) {
+    const request = createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools);
+    const result = await waitForAgentRunnerResult(request.resultFile, timeoutMs);
+    if (!result?.success) {
+        const label = result?.command || (0, agent_runtime_1.getAgentCommandLabel)(agentType);
+        const exitText = result?.exitCode === undefined || result?.exitCode === null ? "" : `，exitCode=${result.exitCode}`;
+        throw new Error(`[${projectName}] 外部 Agent Runner 执行 ${label} 失败${exitText}：${result?.error || result?.output || "未知错误"}`);
+    }
+    const output = await appendToolResults(String(result.output || "").trim(), allowedTools);
+    return { output, fileChanges: result.fileChanges || null, runnerRequestId: request.id };
+}
+async function appendToolResults(output, allowedTools = null) {
     const calls = tool_manager_1.toolManager.parseToolCalls(output);
     if (calls.length === 0)
         return output;
     const results = [];
     for (const call of calls) {
         try {
-            const res = await tool_manager_1.toolManager.executeToolCall(call.name, call.arguments);
+            const res = await tool_manager_1.toolManager.executeToolCall(call.name, call.arguments, allowedTools || undefined);
             results.push(`[工具结果: ${call.name}]\n${res}`);
         }
         catch (err) {
@@ -424,7 +518,7 @@ async function appendToolResults(output) {
     }
     return output + "\n\n" + results.join("\n\n");
 }
-function callAgent(projectName, message, workDir, agentType, timeoutMs, workspaceTarget = null) {
+async function callAgent(projectName, message, workDir, agentType, timeoutMs, workspaceTarget = null) {
     setAgentActivity(projectName, "working", "Agent 调用中", workspaceTarget || { tab: "projects", project: projectName }, getAgentRunActivityDuration(timeoutMs));
     const startedAt = Date.now();
     const changeSnapshot = workDir ? (0, utils_1.createFileChangeSnapshot)(workDir) : null;
@@ -434,7 +528,7 @@ function callAgent(projectName, message, workDir, agentType, timeoutMs, workspac
         fs.mkdirSync(utils_1.UPLOAD_DIR, { recursive: true });
     }
     fs.writeFileSync(tmpMsg, message, "utf-8");
-    const cmd = buildAgentCommand(agentType, tmpMsg);
+    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg);
     try {
         const result = (0, child_process_1.execSync)(cmd, {
             encoding: "utf-8",
@@ -447,7 +541,7 @@ function callAgent(projectName, message, workDir, agentType, timeoutMs, workspac
             fs.unlinkSync(tmpMsg);
         }
         catch { }
-        const output = result.trim();
+        const output = await appendToolResults(result.trim(), workspaceTarget?.allowedTools);
         const fileChanges = (0, utils_1.getFileChanges)(projectName, changeSnapshot);
         (0, db_1.recordMetric)(projectName, {
             success: true,
@@ -464,6 +558,32 @@ function callAgent(projectName, message, workDir, agentType, timeoutMs, workspac
             fs.unlinkSync(tmpMsg);
         }
         catch { }
+        if (isSpawnPermissionError(e)) {
+            try {
+                const runner = await callAgentViaExternalRunner(projectName, message, workDir, agentType, timeoutMs, workspaceTarget?.allowedTools);
+                const fileChanges = runner.fileChanges || (0, utils_1.getFileChanges)(projectName, changeSnapshot);
+                (0, db_1.recordMetric)(projectName, {
+                    success: true,
+                    durationMs: Date.now() - startedAt,
+                    fileChangeCount: fileChanges?.count || 0
+                });
+                broadcastPetSpeech(projectName, { role: "assistant", text: runner.output, final: true, source: "project" });
+                setAgentActivity(projectName, "happy", "外部 Runner 任务完成");
+                setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
+                return runner.output;
+            }
+            catch (runnerError) {
+                const output = `[${projectName}] Agent Runner 错误: ${runnerError.message || runnerError}`;
+                (0, db_1.recordMetric)(projectName, {
+                    success: false,
+                    durationMs: Date.now() - startedAt,
+                    fileChangeCount: (0, utils_1.getFileChanges)(projectName, changeSnapshot)?.count || 0
+                });
+                broadcastPetSpeech(projectName, { role: "error", text: output, final: true, source: "project" });
+                setAgentActivity(projectName, "error", "外部 Runner 错误");
+                return output;
+            }
+        }
         const output = e.killed || e.signal === "SIGTERM"
             ? `[${projectName}] Agent 响应超时，请稍后重试`
             : `[${projectName}] Agent 错误: ${(e.stderr || e.message || "").substring(0, 200)}`;
@@ -488,12 +608,63 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
         fs.mkdirSync(utils_1.UPLOAD_DIR, { recursive: true });
     }
     fs.writeFileSync(tmpMsg, message, "utf-8");
-    const cmd = buildAgentCommand(agentType, tmpMsg);
+    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg);
     const streamRes = options.res;
     writeSse(streamRes, { type: "status", text: `🧠 ${projectName} 正在思考...`, agent: projectName });
     broadcastPetSpeech(projectName, { role: "status", text: `${projectName} 正在思考...`, source: "group" });
     return new Promise((resolve) => {
-        const child = (0, child_process_1.spawn)(cmd, [], { shell: true, cwd: safeCwd, stdio: ["pipe", "pipe", "pipe"] });
+        let child = null;
+        try {
+            child = (0, child_process_1.spawn)(cmd, [], { shell: true, cwd: safeCwd, stdio: ["pipe", "pipe", "pipe"] });
+        }
+        catch (spawnError) {
+            if (!isSpawnPermissionError(spawnError)) {
+                const text = `❌ 错误: ${spawnError.message || spawnError}`;
+                writeSse(streamRes, { type: "agent_done", agent: projectName, text, messageId: options.messageId });
+                resolve(text);
+                return;
+            }
+            writeSse(streamRes, { type: "status", text: `🧩 ${projectName} 交给外部 Agent Runner 执行...`, agent: projectName });
+            callAgentViaExternalRunner(projectName, message, workDir, agentType, options.timeoutMs || 300000, options.allowedTools)
+                .then((runner) => {
+                const fileChanges = runner.fileChanges || (0, utils_1.getFileChanges)(projectName, changeSnapshot);
+                (0, db_1.recordMetric)(projectName, {
+                    success: true,
+                    durationMs: Date.now() - startedAt,
+                    fileChangeCount: fileChanges?.count || 0
+                });
+                try {
+                    if (typeof options.onDone === "function") {
+                        options.onDone({ text: runner.output, fileChanges, isError: false, runnerRequestId: runner.runnerRequestId });
+                    }
+                }
+                catch { }
+                writeSse(streamRes, { type: "agent_done", agent: projectName, text: runner.output, fileChanges, messageId: options.messageId });
+                broadcastPetSpeech(projectName, { role: "assistant", text: runner.output, final: true, source: "group" });
+                setAgentActivity(projectName, "happy", "外部 Runner 回复完成");
+                setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
+                resolve(runner.output);
+            })
+                .catch((runnerError) => {
+                const text = `❌ Agent Runner 错误: ${runnerError.message || runnerError}`;
+                (0, db_1.recordMetric)(projectName, {
+                    success: false,
+                    durationMs: Date.now() - startedAt,
+                    fileChangeCount: (0, utils_1.getFileChanges)(projectName, changeSnapshot)?.count || 0
+                });
+                try {
+                    if (typeof options.onDone === "function") {
+                        options.onDone({ text, fileChanges: null, isError: true });
+                    }
+                }
+                catch { }
+                writeSse(streamRes, { type: "agent_done", agent: projectName, text, messageId: options.messageId });
+                broadcastPetSpeech(projectName, { role: "error", text, final: true, source: "group" });
+                setAgentActivity(projectName, "error", "外部 Runner 错误");
+                resolve(text);
+            });
+            return;
+        }
         child.stdin.end();
         let output = "";
         let settled = false;
@@ -504,7 +675,7 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             settled = true;
             clearTimeout(timeoutId);
             try {
-                child.kill();
+                child?.kill();
             }
             catch { }
             try {
@@ -513,7 +684,7 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             catch { }
             let finalText = text || output.trim();
             if (!isError)
-                finalText = await appendToolResults(finalText);
+                finalText = await appendToolResults(finalText, options.allowedTools);
             const fileChanges = (0, utils_1.getFileChanges)(projectName, changeSnapshot);
             (0, db_1.recordMetric)(projectName, {
                 success: !isError,
@@ -552,49 +723,57 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
     });
 }
 // 流式调用 Agent（SSE）
-function callAgentStream(projectName, message, workDir, agentType, res) {
+function callAgentStream(projectName, message, workDir, agentType, res, options = {}) {
     const startedAt = Date.now();
     const changeSnapshot = workDir ? (0, utils_1.createFileChangeSnapshot)(workDir) : null;
     const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
     const tmpMsg = path.join(utils_1.UPLOAD_DIR, `_msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.txt`);
     fs.writeFileSync(tmpMsg, message, "utf-8");
-    const cmd = buildAgentCommand(agentType, tmpMsg);
+    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg);
+    const send = (data) => writeSse(res, data);
     // 设置 SSE
     res.writeHead(200, {
         "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
+        "Cache-Control": "no-cache, no-transform",
         "Connection": "keep-alive",
         "Access-Control-Allow-Origin": "*",
+        "X-Accel-Buffering": "no",
     });
+    if (typeof res.flushHeaders === "function")
+        res.flushHeaders();
     // 发送状态事件
-    res.write(`data: ${JSON.stringify({ type: "status", text: "Agent 正在思考..." })}\n\n`);
+    send({ type: "status", text: "Agent 正在思考..." });
     broadcastPetSpeech(projectName, { role: "status", text: "Agent 正在思考...", source: "project" });
     setAgentActivity(projectName, "working", "正在处理消息", null, getAgentRunActivityDuration(300000));
     const child = (0, child_process_1.spawn)(cmd, [], { shell: true, cwd: safeCwd, stdio: ["pipe", "pipe", "pipe"] });
     // 关闭 stdin（已通过临时文件传入）
     child.stdin.end();
-    let buffer = "";
-    let charCount = 0;
     let fullOutput = "";
     let finished = false;
     let timeoutTimer = null;
+    let lastStderrStatusAt = 0;
+    const heartbeatTimer = setInterval(() => {
+        if (!res.writableEnded && !res.destroyed) {
+            try {
+                res.write(": keep-alive\n\n");
+            }
+            catch { }
+        }
+    }, 15000);
     child.stdout.on("data", (chunk) => {
         const text = chunk.toString("utf-8");
+        if (!text)
+            return;
         fullOutput += text;
-        buffer += text;
-        charCount += text.length;
-        // 每收到数据就发送
-        if (charCount > 10) {
-            res.write(`data: ${JSON.stringify({ type: "chunk", text: buffer })}\n\n`);
-            broadcastPetSpeech(projectName, { role: "assistant", text: buffer, mode: "append", source: "project" });
-            buffer = "";
-            charCount = 0;
-        }
+        send({ type: "chunk", text });
+        broadcastPetSpeech(projectName, { role: "assistant", text, mode: "append", source: "project" });
     });
     child.stderr.on("data", (chunk) => {
         const text = chunk.toString("utf-8");
-        if (text.trim()) {
-            res.write(`data: ${JSON.stringify({ type: "status", text: "Agent 处理中..." })}\n\n`);
+        const now = Date.now();
+        if (text.trim() && now - lastStderrStatusAt > 1500) {
+            lastStderrStatusAt = now;
+            send({ type: "status", text: "Agent 处理中..." });
             broadcastPetSpeech(projectName, { role: "status", text: "Agent 处理中...", source: "project" });
         }
     });
@@ -604,19 +783,16 @@ function callAgentStream(projectName, message, workDir, agentType, res) {
         finished = true;
         if (timeoutTimer)
             clearTimeout(timeoutTimer);
+        clearInterval(heartbeatTimer);
         (async () => {
             try {
                 fs.unlinkSync(tmpMsg);
             }
             catch { }
-            if (buffer) {
-                res.write(`data: ${JSON.stringify({ type: "chunk", text: buffer })}\n\n`);
-                broadcastPetSpeech(projectName, { role: "assistant", text: buffer, mode: "append", source: "project" });
-            }
-            const outputWithTools = await appendToolResults(fullOutput.trim());
+            const outputWithTools = await appendToolResults(fullOutput.trim(), options.allowedTools);
             const toolAppend = outputWithTools.slice(fullOutput.trim().length);
             if (toolAppend) {
-                res.write(`data: ${JSON.stringify({ type: "chunk", text: toolAppend })}\n\n`);
+                send({ type: "chunk", text: toolAppend });
                 broadcastPetSpeech(projectName, { role: "assistant", text: toolAppend, mode: "append", source: "project" });
             }
             broadcastPetSpeech(projectName, { role: "assistant", text: "", mode: "append", final: true, source: "project" });
@@ -628,10 +804,10 @@ function callAgentStream(projectName, message, workDir, agentType, res) {
             });
             setAgentActivity(projectName, "happy", "任务完成");
             setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
-            res.write(`data: ${JSON.stringify({ type: "done", fileChanges })}\n\n`);
+            send({ type: "done", fileChanges });
             res.end();
         })().catch((err) => {
-            res.write(`data: ${JSON.stringify({ type: "error", text: err.message })}\n\n`);
+            send({ type: "error", text: err.message });
             try {
                 res.end();
             }
@@ -644,11 +820,12 @@ function callAgentStream(projectName, message, workDir, agentType, res) {
         finished = true;
         if (timeoutTimer)
             clearTimeout(timeoutTimer);
+        clearInterval(heartbeatTimer);
         try {
             fs.unlinkSync(tmpMsg);
         }
         catch { }
-        res.write(`data: ${JSON.stringify({ type: "error", text: err.message })}\n\n`);
+        send({ type: "error", text: err.message });
         (0, db_1.recordMetric)(projectName, {
             success: false,
             durationMs: Date.now() - startedAt,
@@ -663,6 +840,7 @@ function callAgentStream(projectName, message, workDir, agentType, res) {
         if (finished)
             return;
         finished = true;
+        clearInterval(heartbeatTimer);
         try {
             child.kill();
         }
@@ -671,7 +849,7 @@ function callAgentStream(projectName, message, workDir, agentType, res) {
             fs.unlinkSync(tmpMsg);
         }
         catch { }
-        res.write(`data: ${JSON.stringify({ type: "error", text: "Agent 响应超时" })}\n\n`);
+        send({ type: "error", text: "Agent 响应超时" });
         res.end();
     }, 300000);
 }
@@ -720,6 +898,7 @@ function createCollabCtx() {
         getSharedFilePath: utils_1.getSharedFilePath,
         createSharedFileRecord: utils_1.createSharedFileRecord,
         normalizeSharedFileList: utils_1.normalizeSharedFileList,
+        onTaskStatusChange: cron_1.syncCronTaskStatus,
     };
 }
 // === 主生命周期请求拦截与模块化分流 ===
@@ -858,7 +1037,9 @@ function handleRequest(req, res) {
             const info = (0, db_1.getConfigInfo)(config.path);
             const workDir = info[0]?.workDir;
             const agentType = info[0]?.agent || "claudecode";
-            callAgentStream(project, finalMessage, workDir, agentType, res);
+            const toolContext = buildProjectToolContext(project);
+            const fullMessage = `${toolContext.prompt}\n\n${finalMessage}`;
+            callAgentStream(project, fullMessage, workDir, agentType, res, { allowedTools: toolContext.allowedTools });
         };
         if (contentType.includes("multipart/form-data")) {
             (0, utils_1.collectRequestBuffer)(req).then((buffer) => {
@@ -908,26 +1089,18 @@ function handleRequest(req, res) {
             if (!fullMessage)
                 return (0, utils_1.sendJson)(res, { error: "消息不能为空" }, 400);
             const agentType = info[0]?.agent || "claudecode";
-            const safeCwd = workDir.replace(/\\/g, "/");
+            const toolContext = buildProjectToolContext(project);
+            const promptWithTools = `${toolContext.prompt}\n\n${fullMessage}`;
             try {
-                const tmpMsg = path.join(utils_1.UPLOAD_DIR, `_msg_${Date.now()}.txt`);
-                fs.writeFileSync(tmpMsg, fullMessage, "utf-8");
-                const cmd = buildAgentCommand(agentType, tmpMsg);
-                const result = (0, child_process_1.execSync)(cmd, {
-                    encoding: "utf-8",
-                    timeout: 120000,
-                    cwd: safeCwd,
-                    shell: true,
-                    maxBuffer: 10 * 1024 * 1024,
+                const output = await callAgent(project, promptWithTools, workDir, agentType, 120000, {
+                    tab: "projects",
+                    project,
+                    allowedTools: toolContext.allowedTools,
                 });
-                try {
-                    fs.unlinkSync(tmpMsg);
-                }
-                catch { }
-                (0, utils_1.sendJson)(res, { success: true, output: result });
+                (0, utils_1.sendJson)(res, { success: true, output });
             }
             catch (e) {
-                (0, utils_1.sendJson)(res, { error: e.stdout || e.stderr || "发送失败" }, 500);
+                (0, utils_1.sendJson)(res, { error: e.stdout || e.stderr || e.message || "发送失败" }, 500);
             }
         };
         if (contentType.includes("multipart/form-data")) {
@@ -990,9 +1163,20 @@ function startServer(port) {
     PORT = port;
     (0, utils_1.refreshEnvPath)();
     tool_manager_1.toolManager.loadTools().catch((e) => console.error("[ToolManager]", e.message));
-    (0, cron_1.startCronScheduler)(createCollabCtx());
+    const startupCollabCtx = createCollabCtx();
+    (0, cron_1.startCronScheduler)(startupCollabCtx);
+    (0, collaboration_1.startTaskWatchdog)(startupCollabCtx);
+    (0, collaboration_1.startAgentRecoveryMonitor)(startupCollabCtx);
+    const resumeResult = (0, collaboration_1.resumeTaskQueues)(startupCollabCtx);
+    if (resumeResult.total > 0) {
+        console.log(`[任务队列] 启动恢复 ${resumeResult.resumed}/${resumeResult.total} 个自动执行任务`);
+    }
     const server = http.createServer(handleRequest);
-    server.on("close", () => (0, cron_1.stopCronScheduler)());
+    server.on("close", () => {
+        (0, cron_1.stopCronScheduler)();
+        (0, collaboration_1.stopTaskWatchdog)();
+        (0, collaboration_1.stopAgentRecoveryMonitor)();
+    });
     server.listen(port, () => {
         console.log(`\n╔══════════════════════════════════════╗`);
         console.log(`║     ccm Web 控制台                    ║`);

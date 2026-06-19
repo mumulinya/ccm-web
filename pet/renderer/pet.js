@@ -117,6 +117,36 @@ const calicoAutoReturnMs = {
 let clawdIdleTimer = null;
 let clawdReturnTimer = null;
 let clawdReactionTimer = null;
+let scheduledState = null;
+let lastAmbientActionKey = '';
+let reactionActiveUntil = 0;
+
+const AMBIENT_MIN_DELAY_MS = 7000;
+const AMBIENT_MAX_DELAY_MS = 15000;
+const ambientStatePools = {
+  idle: [
+    { state: 'idle', weight: 2.6, duration: 8500 },
+    { state: 'thinking', weight: 1.1, duration: 6500 },
+    { state: 'carrying', weight: 0.9, duration: 6200 },
+    { state: 'sweeping', weight: 0.9, duration: 6200 },
+    { state: 'juggling', weight: 0.7, duration: 6200 },
+    { state: 'happy', weight: 0.7, duration: 5200 },
+    { state: 'yawning', weight: 0.6, duration: 6800 },
+  ],
+  working: [
+    { state: 'working', weight: 2.2, duration: 9000 },
+    { state: 'thinking', weight: 1.2, duration: 7000 },
+    { state: 'carrying', weight: 1, duration: 6500 },
+    { state: 'sweeping', weight: 0.9, duration: 6500 },
+    { state: 'juggling', weight: 0.6, duration: 5600 },
+  ],
+  thinking: [
+    { state: 'thinking', weight: 2.2, duration: 8500 },
+    { state: 'working', weight: 1, duration: 7000 },
+    { state: 'carrying', weight: 0.8, duration: 6200 },
+    { state: 'sweeping', weight: 0.8, duration: 6200 },
+  ],
+};
 
 function stateFileMap(type) {
   return {
@@ -135,6 +165,26 @@ function stateFileMap(type) {
     collapsing: `${type}-collapsing.svg`,
     sleeping: `${type}-sleeping.svg`,
     waking: `${type}-waking.svg`,
+  };
+}
+
+function stateFileMapPng(type) {
+  return {
+    idle: `${type}-idle.png`,
+    thinking: `${type}-thinking.png`,
+    working: `${type}-working.png`,
+    error: `${type}-error.png`,
+    attention: `${type}-attention.png`,
+    happy: `${type}-happy.png`,
+    notification: `${type}-notification.png`,
+    carrying: `${type}-carrying.png`,
+    sweeping: `${type}-sweeping.png`,
+    juggling: `${type}-juggling.png`,
+    yawning: `${type}-yawning.png`,
+    dozing: `${type}-dozing.png`,
+    collapsing: `${type}-collapsing.png`,
+    sleeping: `${type}-sleeping.png`,
+    waking: `${type}-waking.png`,
   };
 }
 
@@ -244,6 +294,22 @@ const petThemes = {
       double: { file: 'rabbit-react-double.svg', duration: 2500 },
     },
   },
+  yuexinmiao: {
+    files: stateFileMap('yuexinmiao'),
+    bodyHitBox: { x: 0.13, y: 0.1, w: 0.74, h: 0.82 },
+    idleAnimations: [
+      { file: 'yuexinmiao-idle-action1.svg', duration: 10000 },
+      { file: 'yuexinmiao-idle-action2.svg', duration: 10000 },
+      { file: 'yuexinmiao-idle-action3.svg', duration: 10000 }
+    ],
+    autoReturn: { attention: 4000, happy: 4000, error: 5000, notification: 5000, carrying: 3000 },
+    reactions: {
+      drag: { file: 'yuexinmiao-react-drag.svg' },
+      clickLeft: { file: 'yuexinmiao-react-left.svg', duration: 2500 },
+      clickRight: { file: 'yuexinmiao-react-right.svg', duration: 2500 },
+      double: { file: 'yuexinmiao-react-double.svg', duration: 2500 },
+    },
+  },
   cloudling: {
     dir: 'cloudling',
     files: cloudlingStateFiles,
@@ -271,10 +337,33 @@ const petThemes = {
       double: { file: 'calico-react-poke.apng', duration: 2500 },
     },
   },
+  miao: {
+    files: stateFileMapPng('miao'),
+    bodyHitBox: { x: 0.13, y: 0.1, w: 0.74, h: 0.82 },
+    reactions: {
+      drag: { file: 'miao-react-drag.png' },
+      clickLeft: { file: 'miao-react-left.png', duration: 2500 },
+      clickRight: { file: 'miao-react-right.png', duration: 2500 },
+      double: { file: 'miao-react-double.png', duration: 2500 },
+    },
+  },
 };
 
 function getTheme(type = petType) {
-  return petThemes[type] || petThemes.cat;
+  if (!petThemes[type]) {
+    // 动态初始化未注册的自定义宠物主题，使其采用默认配置
+    petThemes[type] = {
+      files: stateFileMapPng(type), // 默认以 png 形式加载动作
+      bodyHitBox: { x: 0.13, y: 0.1, w: 0.74, h: 0.82 },
+      reactions: {
+        drag: { file: `${type}-react-drag.png` },
+        clickLeft: { file: `${type}-react-left.png`, duration: 2500 },
+        clickRight: { file: `${type}-react-right.png`, duration: 2500 },
+        double: { file: `${type}-react-double.png`, duration: 2500 },
+      }
+    };
+  }
+  return petThemes[type];
 }
 
 function normalizeState(state) {
@@ -324,7 +413,7 @@ const stateConfig = {
   notification: { badge: '!',  anim: 'anim-thinking' },
   carrying: { badge: '📦',     anim: 'anim-working' },
   sweeping: { badge: '🧹',     anim: 'anim-working' },
-  juggling: { badge: '♪',      anim: 'anim-working' },
+  juggling: { badge: '♪',      anim: 'anim-juggling' },
   yawning:  { badge: '',       anim: 'anim-idle' },
   dozing:   { badge: '💤',     anim: 'anim-sleeping' },
   collapsing: { badge: '💤',   anim: 'anim-sleeping' },
@@ -350,7 +439,7 @@ const stateMessages = {
   sleeping: ['💤 zzz...', '好困...', '休息一下...'],
 };
 
-const petEmojis = { cat: '🐱', crab: '🦀', robot: '🤖', ghost: '👻', clawd: '🦀', panda: '🐼', fox: '🦊', rabbit: '🐰', cloudling: '☁️', calico: '🐱' };
+const petEmojis = { cat: '🐱', crab: '🦀', robot: '🤖', ghost: '👻', clawd: '🦀', panda: '🐼', fox: '🦊', rabbit: '🐰', yuexinmiao: '🐱', cloudling: '☁️', calico: '🐱', miao: '🐱' };
 const SPEECH_MIN_WIDTH = 280;
 const PET_SPRITE_SCALE = 0.5;
 const PET_EXTRA_HEIGHT = 165;
@@ -415,13 +504,94 @@ async function loadSVG(type, state) {
     const svgPath = await window.petBridge.getAssetPath(svgFile);
     if (svgPath) {
       const imageRendering = theme.pixelated ? 'pixelated' : 'auto';
-      svgContainer.innerHTML = `<img src="file:///${svgPath.replace(/\\/g, '/')}" draggable="false" style="width:${spriteSize}px;height:${spriteSize}px;image-rendering:${imageRendering}">`;
+      svgContainer.innerHTML = `<img src="file:///${svgPath.replace(/\\/g, '/')}" draggable="false" style="width:${spriteSize}px;height:${spriteSize}px;image-rendering:${imageRendering};object-fit:contain;">`;
       requestAnimationFrame(positionResizeHandle);
       return;
     }
   } catch {}
   svgContainer.innerHTML = `<div style="font-size:48px">${petEmojis[type] || '🐱'}</div>`;
   requestAnimationFrame(positionResizeHandle);
+}
+
+function randomMs(min, max) {
+  return Math.round(min + Math.random() * (max - min));
+}
+
+function weightedPick(items) {
+  const total = items.reduce((sum, item) => sum + (item.weight || 1), 0);
+  let cursor = Math.random() * total;
+  for (const item of items) {
+    cursor -= item.weight || 1;
+    if (cursor <= 0) return item;
+  }
+  return items[items.length - 1] || null;
+}
+
+function themeHasState(theme, state) {
+  return Boolean(theme.files && theme.files[state]);
+}
+
+function getAmbientActions(theme, logicalState) {
+  const pool = ambientStatePools[logicalState];
+  if (!pool) return [];
+
+  const actions = pool
+    .filter((item) => themeHasState(theme, item.state))
+    .map((item) => ({
+      ...item,
+      key: `state:${item.state}`,
+    }));
+
+  if (logicalState === 'idle' && Array.isArray(theme.idleAnimations)) {
+    for (const idle of theme.idleAnimations) {
+      if (!idle?.file) continue;
+      actions.push({
+        key: `file:${idle.file}`,
+        file: idle.file,
+        weight: 1.4,
+        duration: Math.min(idle.duration || 8000, 9000),
+      });
+    }
+  }
+
+  const nonRepeating = actions.filter((item) => item.key !== lastAmbientActionKey);
+  return nonRepeating.length ? nonRepeating : actions;
+}
+
+function clearAmbientTimer() {
+  if (clawdIdleTimer) clearTimeout(clawdIdleTimer);
+  clawdIdleTimer = null;
+}
+
+function clearReturnTimer() {
+  if (clawdReturnTimer) clearTimeout(clawdReturnTimer);
+  clawdReturnTimer = null;
+}
+
+function playAmbientAction(theme, logicalState) {
+  clawdIdleTimer = null;
+  if (getTheme() !== theme || currentState !== logicalState) return;
+  if (Date.now() < reactionActiveUntil) {
+    scheduleThemeStateTimers(logicalState, { force: true });
+    return;
+  }
+
+  const action = weightedPick(getAmbientActions(theme, logicalState));
+  if (!action) return;
+  lastAmbientActionKey = action.key;
+
+  if (action.file) {
+    loadThemeFile(action.file);
+  } else {
+    loadSVG(petType, action.state || logicalState);
+  }
+
+  clawdIdleTimer = setTimeout(() => {
+    if (getTheme() !== theme || currentState !== logicalState) return;
+    if (Date.now() >= reactionActiveUntil) loadSVG(petType, logicalState);
+    clawdIdleTimer = null;
+    scheduleThemeStateTimers(logicalState, { force: true });
+  }, action.duration || 7000);
 }
 
 // 应用状态
@@ -437,30 +607,34 @@ function applyState(state) {
   // 更新菜单状态
   menuState.textContent = `状态: ${state}`;
 
+  // 动态切换动画 class 以便 CSS 动画生效
+  Object.values(stateConfig).forEach(c => {
+    if (c.anim) sprite.classList.remove(c.anim);
+  });
+  if (cfg.anim) {
+    sprite.classList.add(cfg.anim);
+  }
+
   // 状态变化时重新加载对应的动画 SVG
   if (prevState !== state) {
     loadSVG(petType, state);
   }
 
-  scheduleThemeStateTimers(state);
+  scheduleThemeStateTimers(state, { force: prevState !== state });
 }
 
-function scheduleThemeStateTimers(state) {
-  if (clawdIdleTimer) clearTimeout(clawdIdleTimer);
-  if (clawdReturnTimer) clearTimeout(clawdReturnTimer);
+function scheduleThemeStateTimers(state, options = {}) {
   const theme = getTheme();
+  if (!options.force && scheduledState === state && (clawdIdleTimer || clawdReturnTimer)) return;
 
-  if (state === 'idle' && theme.idleAnimations?.length) {
-    const idle = theme.idleAnimations[Math.floor(Math.random() * theme.idleAnimations.length)];
+  clearAmbientTimer();
+  clearReturnTimer();
+  scheduledState = state;
+
+  if (getAmbientActions(theme, state).length) {
     clawdIdleTimer = setTimeout(() => {
-      if (getTheme() !== theme || currentState !== 'idle') return;
-      loadThemeFile(idle.file);
-      clawdIdleTimer = setTimeout(() => {
-        if (getTheme() !== theme || currentState !== 'idle') return;
-        loadSVG(petType, 'idle');
-        scheduleThemeStateTimers('idle');
-      }, idle.duration);
-    }, 10000);
+      playAmbientAction(theme, state);
+    }, randomMs(AMBIENT_MIN_DELAY_MS, AMBIENT_MAX_DELAY_MS));
   }
 
   const returnMs = theme.autoReturn?.[state];
@@ -479,7 +653,7 @@ async function loadThemeFile(file) {
     const svgPath = await window.petBridge.getAssetPath(assetFile);
     if (svgPath) {
       const imageRendering = theme.pixelated ? 'pixelated' : 'auto';
-      svgContainer.innerHTML = `<img src="file:///${svgPath.replace(/\\/g, '/')}" draggable="false" style="width:${spriteSize}px;height:${spriteSize}px;image-rendering:${imageRendering}">`;
+      svgContainer.innerHTML = `<img src="file:///${svgPath.replace(/\\/g, '/')}" draggable="false" style="width:${spriteSize}px;height:${spriteSize}px;image-rendering:${imageRendering};object-fit:contain;">`;
       requestAnimationFrame(positionResizeHandle);
     }
   } catch {}
@@ -490,14 +664,21 @@ function showPetReaction(action) {
   const reaction = theme.reactions?.[action];
   if (!reaction) return;
   if (clawdReactionTimer) clearTimeout(clawdReactionTimer);
+  clearAmbientTimer();
+  scheduledState = null;
   const duration = reaction.duration || 2500;
+  reactionActiveUntil = Date.now() + duration;
   if (reaction.file) {
     loadThemeFile(reaction.file);
   } else if (reaction.state) {
     loadSVG(petType, reaction.state);
   }
   clawdReactionTimer = setTimeout(() => {
-    if (getTheme() === theme) loadSVG(petType, currentState);
+    reactionActiveUntil = 0;
+    if (getTheme() === theme) {
+      loadSVG(petType, currentState);
+      scheduleThemeStateTimers(currentState, { force: true });
+    }
   }, duration);
 }
 
@@ -630,6 +811,8 @@ document.querySelectorAll('.menu-types button').forEach(btn => {
     petType = type;
     document.documentElement.dataset.petType = petType;
     loadSVG(type, currentState);
+    scheduledState = null;
+    scheduleThemeStateTimers(currentState, { force: true });
     window.petBridge.changeType(agentName, type);
   });
 });

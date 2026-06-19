@@ -83,6 +83,99 @@ function stopProject(projectName: string) {
 
 export { startProject, stopProject };
 
+function normalizeVerificationCommands(value: any) {
+  if (Array.isArray(value)) return value.map((item: any) => String(item || "").trim()).filter(Boolean);
+  const text = String(value || "").trim();
+  if (!text) return [];
+  return text.split(/\r?\n|[；;]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.map((item) => String(item || "").trim()).filter(Boolean)));
+}
+
+function readPackageJsonScripts(workDir: string) {
+  try {
+    const file = path.join(workDir, "package.json");
+    if (!fs.existsSync(file)) return {};
+    const data = JSON.parse(fs.readFileSync(file, "utf-8"));
+    return data?.scripts && typeof data.scripts === "object" ? data.scripts : {};
+  } catch {
+    return {};
+  }
+}
+
+function inferProjectVerificationCommands(workDir = "") {
+  const dir = String(workDir || "").trim();
+  if (!dir || !fs.existsSync(dir)) return [];
+  const hints: string[] = [];
+  const scripts = readPackageJsonScripts(dir);
+  const scriptNames = Object.keys(scripts);
+  const addNpmScript = (name: string) => {
+    if (scriptNames.includes(name)) hints.push(`npm run ${name}`);
+  };
+  addNpmScript("check");
+  addNpmScript("typecheck");
+  addNpmScript("lint");
+  addNpmScript("test");
+  addNpmScript("build");
+  if (fs.existsSync(path.join(dir, "pom.xml"))) hints.push("mvn test");
+  if (fs.existsSync(path.join(dir, "build.gradle")) || fs.existsSync(path.join(dir, "build.gradle.kts"))) hints.push("gradle test");
+  if (fs.existsSync(path.join(dir, "pytest.ini")) || fs.existsSync(path.join(dir, "pyproject.toml"))) hints.push("pytest");
+  if (fs.existsSync(path.join(dir, "go.mod"))) hints.push("go test ./...");
+  if (fs.existsSync(path.join(dir, "Cargo.toml"))) hints.push("cargo test");
+  return uniqueStrings(hints).slice(0, 6);
+}
+
+function getProjectWorkDir(projectName: string) {
+  const config = getConfigs().find((item) => item.name === projectName);
+  if (!config) return "";
+  const info = getConfigInfo(config.path);
+  return info[0]?.workDir || "";
+}
+
+function applyInferredVerificationCommands(options: { projects?: string[]; overwrite?: boolean } = {}) {
+  const projectNames = Array.isArray(options.projects) && options.projects.length
+    ? options.projects.map((item) => String(item || "").trim()).filter(Boolean)
+    : getConfigs().map((item) => item.name);
+  const overwrite = options.overwrite === true;
+  const configs = loadProjectConfigs();
+  const results: any[] = [];
+
+  for (const project of projectNames) {
+    const configured = normalizeVerificationCommands(
+      configs[project]?.verification_commands
+        || configs[project]?.verificationCommands
+        || configs[project]?.test_commands
+        || configs[project]?.testCommands
+        || configs[project]?.check_commands
+        || configs[project]?.checkCommands
+    );
+    const inferred = inferProjectVerificationCommands(getProjectWorkDir(project));
+    if (configured.length > 0 && !overwrite) {
+      results.push({ project, status: "skipped_configured", configured, inferred });
+      continue;
+    }
+    if (inferred.length === 0) {
+      results.push({ project, status: "missing_inferred", configured, inferred: [] });
+      continue;
+    }
+    if (!configs[project]) configs[project] = {};
+    configs[project].verification_commands = inferred;
+    results.push({ project, status: configured.length > 0 ? "overwritten" : "applied", configured: inferred, inferred });
+  }
+
+  const applied = results.filter((item) => item.status === "applied" || item.status === "overwritten").length;
+  if (applied > 0) saveProjectConfigs(configs);
+  return {
+    success: true,
+    applied,
+    skipped_configured: results.filter((item) => item.status === "skipped_configured").length,
+    missing_inferred: results.filter((item) => item.status === "missing_inferred").length,
+    results,
+  };
+}
+
 export function handleProjectsApi(
   pathname: string,
   req: any,
@@ -366,7 +459,14 @@ type = "${platform || "weixin"}"
     const project = parsed.query.project;
     if (!project) return sendJson(res, { error: "缺少项目参数" }, 400);
     const configs = loadProjectConfigs();
-    sendJson(res, { tools: configs[project]?.tools || { mcp: [], skill: [] } });
+    const configuredCommands = normalizeVerificationCommands(configs[project]?.verification_commands || configs[project]?.verificationCommands || []);
+    const inferredCommands = inferProjectVerificationCommands(getProjectWorkDir(project));
+    sendJson(res, {
+      tools: configs[project]?.tools || { mcp: [], skill: [] },
+      verification_commands: configuredCommands,
+      inferred_verification_commands: inferredCommands,
+      verification_source: configuredCommands.length > 0 ? "configured" : (inferredCommands.length > 0 ? "inferred" : "missing"),
+    });
     return true;
   }
 
@@ -376,13 +476,15 @@ type = "${platform || "weixin"}"
     req.on("data", (chunk) => body += chunk);
     req.on("end", () => {
       try {
-        const { project, tools } = JSON.parse(body);
+        const { project, tools, verification_commands, verificationCommands } = JSON.parse(body);
         if (!project) return sendJson(res, { error: "缺少项目参数" }, 400);
         const configs = loadProjectConfigs();
         if (!configs[project]) configs[project] = {};
         configs[project].tools = tools;
+        const commands = normalizeVerificationCommands(verification_commands || verificationCommands);
+        configs[project].verification_commands = commands;
         saveProjectConfigs(configs);
-        sendJson(res, { success: true, tools });
+        sendJson(res, { success: true, tools, verification_commands: commands });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -390,7 +492,25 @@ type = "${platform || "weixin"}"
     return true;
   }
 
-  // 11. 获取项目共享文件
+  // 11. 批量采用可推断的项目验证命令
+  if (pathname === "/api/projects/verification-commands/apply-inferred" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => body += chunk);
+    req.on("end", () => {
+      try {
+        const payload = body ? JSON.parse(body) : {};
+        sendJson(res, applyInferredVerificationCommands({
+          projects: payload.projects,
+          overwrite: payload.overwrite,
+        }));
+      } catch (e: any) {
+        sendJson(res, { success: false, error: e.message }, 400);
+      }
+    });
+    return true;
+  }
+
+  // 12. 获取项目共享文件
   if (pathname === "/api/projects/shared" && req.method === "GET") {
     const project = parsed.query.project;
     if (!project) return sendJson(res, { error: "缺少项目参数" }, 400);
@@ -399,7 +519,7 @@ type = "${platform || "weixin"}"
     return true;
   }
 
-  // 12. 添加项目共享文件
+  // 13. 添加项目共享文件
   if (pathname === "/api/projects/shared/add" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);
@@ -435,7 +555,7 @@ type = "${platform || "weixin"}"
     return true;
   }
 
-  // 13. 删除项目共享文件
+  // 14. 删除项目共享文件
   if (pathname === "/api/projects/shared/delete" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);
@@ -457,7 +577,7 @@ type = "${platform || "weixin"}"
   }
 
   // === 动态路由：获取项目会话列表、详情以及日志 ===
-  // 14. 动态路由: /api/projects/:name/sessions
+  // 15. 动态路由: /api/projects/:name/sessions
   const sessionsMatch = pathname.match(/^\/api\/projects\/([^/]+)\/sessions$/);
   if (sessionsMatch && req.method === "GET") {
     const projectName = decodeURIComponent(sessionsMatch[1]);

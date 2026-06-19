@@ -21,6 +21,7 @@
     "mcp-feishu/.env.example",
     "configs/",
     "templates/",
+    "scripts/",
     "README.md"
   ],
   "scripts": {
@@ -28,6 +29,9 @@
     "build:vue": "cd ../ccm-web-vue && npm run build",
     "build:all": "npm run build:vue && npm run build",
     "start": "node dist/server.js",
+    "agent-runner": "node dist/agent-runner.js --watch",
+    "agent-runner:ps": "powershell -ExecutionPolicy Bypass -File bin/agent-runner.ps1 -Watch",
+    "test:coordinator": "npm run build && node scripts/coordinator-smoke.js",
     "dev": "npm run build && node dist/server.js",
     "check": "tsc --noEmit",
     "prepublishOnly": "npm run build:all"
