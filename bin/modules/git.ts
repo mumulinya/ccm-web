@@ -54,7 +54,7 @@ export function handleGitApi(pathname: string, req: any, res: any, parsed: any):
 
     try {
       // 检查是否是 git 仓库
-      execSync("git rev-parse --is-inside-work-tree", { cwd: workDir, stdio: "pipe" });
+      execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: workDir, stdio: "pipe" });
 
       // 获取 git 状态
       const status = execFileSync("git", ["-c", "core.quotepath=false", "status", "--porcelain"], {
@@ -63,7 +63,7 @@ export function handleGitApi(pathname: string, req: any, res: any, parsed: any):
         stdio: ["pipe", "pipe", "pipe"]
       });
 
-      const branch = execSync("git branch --show-current", {
+      const branch = execFileSync("git", ["branch", "--show-current"], {
         encoding: "utf-8",
         cwd: workDir,
         stdio: ["pipe", "pipe", "pipe"]

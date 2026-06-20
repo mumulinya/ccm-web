@@ -60,14 +60,14 @@ function handleGitApi(pathname, req, res, parsed) {
             return (0, utils_1.sendJson)(res, { error: "项目目录不存在" }, 400);
         try {
             // 检查是否是 git 仓库
-            (0, child_process_1.execSync)("git rev-parse --is-inside-work-tree", { cwd: workDir, stdio: "pipe" });
+            (0, child_process_1.execFileSync)("git", ["rev-parse", "--is-inside-work-tree"], { cwd: workDir, stdio: "pipe" });
             // 获取 git 状态
             const status = (0, child_process_1.execFileSync)("git", ["-c", "core.quotepath=false", "status", "--porcelain"], {
                 encoding: "utf-8",
                 cwd: workDir,
                 stdio: ["pipe", "pipe", "pipe"]
             });
-            const branch = (0, child_process_1.execSync)("git branch --show-current", {
+            const branch = (0, child_process_1.execFileSync)("git", ["branch", "--show-current"], {
                 encoding: "utf-8",
                 cwd: workDir,
                 stdio: ["pipe", "pipe", "pipe"]

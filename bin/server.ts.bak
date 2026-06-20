@@ -936,7 +936,6 @@ const AGENTS = [
   { type: "gemini", name: "Gemini CLI" },
   { type: "codex", name: "Codex" },
   { type: "qoder", name: "Qoder CLI" },
-  { type: "opencode", name: "OpenCode" },
 ];
 
 // === 数据读取函数 ===

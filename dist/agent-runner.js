@@ -70,6 +70,97 @@ function markRequest(file, patch) {
     const request = readJson(file);
     writeJsonAtomic(file, { ...request, ...patch, updated_at: new Date().toISOString() });
 }
+function normalizeVerificationCommands(value) {
+    const raw = Array.isArray(value) ? value : (typeof value === "string" ? value.split(/\r?\n|,/) : []);
+    const seen = new Set();
+    const commands = [];
+    for (const item of raw) {
+        const command = String(item || "").trim();
+        if (!command || seen.has(command))
+            continue;
+        seen.add(command);
+        commands.push(command);
+    }
+    return commands.slice(0, 8);
+}
+function getProjectVerificationCommands(projectName) {
+    if (!projectName)
+        return [];
+    const configFile = path.join(utils_1.CCM_DIR, "project-configs.json");
+    if (!fs.existsSync(configFile))
+        return [];
+    try {
+        const configs = readJson(configFile);
+        const config = configs?.[projectName] || {};
+        return normalizeVerificationCommands(config.verification_commands
+            || config.verificationCommands
+            || config.test_commands
+            || config.testCommands
+            || config.check_commands
+            || config.checkCommands);
+    }
+    catch {
+        return [];
+    }
+}
+function isAgentProbeRequest(request) {
+    return /CCM_AGENT_PROBE_OK|执行通道健康探针/i.test(String(request?.message || ""));
+}
+function buildCliAllowedTools(request) {
+    if (isAgentProbeRequest(request))
+        return [];
+    const explicit = Array.isArray(request.cliAllowedTools)
+        ? request.cliAllowedTools.map((item) => String(item || "").trim()).filter(Boolean)
+        : [];
+    const rules = explicit.length ? explicit : getProjectVerificationCommands(String(request.projectName || "")).flatMap(command => {
+        const rule = `Bash(${command})`;
+        return process.platform === "win32" ? [rule, `PowerShell(${command})`] : [rule];
+    });
+    return Array.from(new Set(rules));
+}
+function runProjectVerificationCommands(projectName, workDir, timeoutMs) {
+    const commands = getProjectVerificationCommands(projectName);
+    const results = [];
+    const verification = [];
+    const failed = [];
+    if (!commands.length || !workDir) {
+        return { ccm_runner_verification: true, status: "skipped", verification, failed, results };
+    }
+    const perCommandTimeout = Math.max(30000, Math.min(timeoutMs || 300000, 180000));
+    for (const command of commands) {
+        try {
+            const output = (0, child_process_1.execSync)(command, {
+                cwd: workDir,
+                encoding: "utf-8",
+                shell: true,
+                timeout: perCommandTimeout,
+                maxBuffer: 5 * 1024 * 1024,
+            });
+            const item = { command, exitCode: 0, status: "passed", output: String(output || "").slice(-4000) };
+            results.push(item);
+            verification.push(`${command} passed by external runner (exit 0)`);
+        }
+        catch (error) {
+            const exitCode = error?.status ?? null;
+            const output = String(error?.stdout || error?.stderr || error?.message || error || "").slice(-4000);
+            const item = { command, exitCode, status: "failed", output };
+            results.push(item);
+            failed.push(`${command} failed by external runner${exitCode === null ? "" : ` (exit ${exitCode})`}`);
+        }
+    }
+    return {
+        ccm_runner_verification: true,
+        status: failed.length ? "failed" : "passed",
+        verification,
+        failed,
+        results,
+    };
+}
+function appendRunnerVerificationOutput(output, runnerVerification) {
+    if (!runnerVerification || runnerVerification.status === "skipped")
+        return output;
+    return `${output || ""}\n\nCCM_RUNNER_VERIFICATION\n` + "```json\n" + JSON.stringify(runnerVerification, null, 2) + "\n```";
+}
 async function runRequest(file) {
     const request = readJson(file);
     if (!request?.id || request.status === "done" || request.status === "running")
@@ -85,15 +176,20 @@ async function runRequest(file) {
     const command = (0, agent_runtime_1.getAgentCommandLabel)(agentType);
     const timeoutMs = Number(request.timeoutMs || 300000);
     const changeSnapshot = workDir ? (0, utils_1.createFileChangeSnapshot)(workDir) : null;
+    const cliAllowedTools = buildCliAllowedTools(request);
     try {
         fs.writeFileSync(msgFile, String(request.message || ""), "utf-8");
-        const output = (0, child_process_1.execSync)((0, agent_runtime_1.buildAgentCommand)(agentType, msgFile), {
+        const agentOutput = (0, child_process_1.execSync)((0, agent_runtime_1.buildAgentCommand)(agentType, msgFile, { cliAllowedTools, mcpConfigPath: String(request.mcpConfigPath || "") }), {
             encoding: "utf-8",
             timeout: timeoutMs,
             cwd: workDir,
             shell: true,
             maxBuffer: 10 * 1024 * 1024,
         }).trim();
+        const runnerVerification = isAgentProbeRequest(request)
+            ? { ccm_runner_verification: true, status: "skipped", verification: [], failed: [], results: [] }
+            : runProjectVerificationCommands(request.projectName || "", workDir, timeoutMs);
+        const output = appendRunnerVerificationOutput(agentOutput, runnerVerification);
         const fileChanges = (0, utils_1.getFileChanges)(request.projectName || "", changeSnapshot);
         writeJsonAtomic(resultFile, {
             id: request.id,
@@ -101,7 +197,10 @@ async function runRequest(file) {
             output,
             fileChanges,
             agentType,
-            command,
+            command: cliAllowedTools.length ? `${command} --allowed-tools ${cliAllowedTools.join(",")}` : command,
+            cliAllowedTools,
+            effectiveCliAllowedTools: cliAllowedTools.join(","),
+            runnerVerification,
             runner: "node",
             completed_at: new Date().toISOString(),
         });
@@ -119,7 +218,9 @@ async function runRequest(file) {
             output,
             fileChanges,
             agentType,
-            command,
+            command: cliAllowedTools.length ? `${command} --allowed-tools ${cliAllowedTools.join(",")}` : command,
+            cliAllowedTools,
+            effectiveCliAllowedTools: cliAllowedTools.join(","),
             exitCode: error?.status ?? null,
             runner: "node",
             completed_at: new Date().toISOString(),
@@ -170,9 +271,9 @@ async function main() {
         await new Promise(resolve => setTimeout(resolve, 1500));
     }
 }
-main().catch((error) => {
-    writeHeartbeat("error", error.message || String(error));
-    console.error("[agent-runner]", error);
-    process.exit(1);
+main().catch(error => {
+    writeHeartbeat("failed", error.message || String(error));
+    console.error(error);
+    process.exitCode = 1;
 });
 //# sourceMappingURL=agent-runner.js.map

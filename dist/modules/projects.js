@@ -113,6 +113,23 @@ function normalizeVerificationCommands(value) {
 function uniqueStrings(values) {
     return Array.from(new Set(values.map((item) => String(item || "").trim()).filter(Boolean)));
 }
+function normalizeConfigList(value) {
+    if (Array.isArray(value))
+        return value.map((item) => String(item || "").trim()).filter(Boolean);
+    const text = String(value || "").trim();
+    if (!text)
+        return [];
+    return text.split(/\r?\n|[；;]/).map((item) => item.trim()).filter(Boolean);
+}
+function normalizeProjectAgentProfile(config = {}) {
+    return {
+        responsibility: String(config.responsibility || config.role_scope || config.roleScope || "").trim(),
+        capabilities: normalizeConfigList(config.capabilities || config.capability_tags || config.capabilityTags),
+        writable_paths: normalizeConfigList(config.writable_paths || config.writablePaths || config.allowed_paths || config.allowedPaths),
+        forbidden_paths: normalizeConfigList(config.forbidden_paths || config.forbiddenPaths || config.blocked_paths || config.blockedPaths),
+        delivery_contract: String(config.delivery_contract || config.deliveryContract || "").trim(),
+    };
+}
 function readPackageJsonScripts(workDir) {
     try {
         const file = path.join(workDir, "package.json");
@@ -277,7 +294,7 @@ language = "zh"
 
 [[projects]]
 name = "${name}"
-work_dir = "${work_dir.replace(/\\/g, "\\\\")}"
+work_dir = "${work_dir.replace(/\\\\/g, "\\").replace(/\\/g, "\\\\")}"
 
 [projects.agent]
 type = "${agent || "claudecode"}"
@@ -311,7 +328,7 @@ type = "${platform || "weixin"}"
                 const existingContent = fs.readFileSync(configPath, "utf-8");
                 let updatedContent = existingContent;
                 if (work_dir) {
-                    updatedContent = updatedContent.replace(/work_dir\s*=\s*"[^"]*"/g, `work_dir = "${work_dir.replace(/\\/g, "\\\\")}"`);
+                    updatedContent = updatedContent.replace(/work_dir\s*=\s*"[^"]*"/g, `work_dir = "${work_dir.replace(/\\\\/g, "\\").replace(/\\/g, "\\\\")}"`);
                 }
                 if (agent) {
                     updatedContent = updatedContent.replace(/type\s*=\s*"[^"]*"/g, `type = "${agent}"`);
@@ -443,11 +460,13 @@ type = "${platform || "weixin"}"
         const configs = (0, db_1.loadProjectConfigs)();
         const configuredCommands = normalizeVerificationCommands(configs[project]?.verification_commands || configs[project]?.verificationCommands || []);
         const inferredCommands = inferProjectVerificationCommands(getProjectWorkDir(project));
+        const profile = normalizeProjectAgentProfile(configs[project] || {});
         (0, utils_1.sendJson)(res, {
             tools: configs[project]?.tools || { mcp: [], skill: [] },
             verification_commands: configuredCommands,
             inferred_verification_commands: inferredCommands,
             verification_source: configuredCommands.length > 0 ? "configured" : (inferredCommands.length > 0 ? "inferred" : "missing"),
+            ...profile,
         });
         return true;
     }
@@ -457,7 +476,8 @@ type = "${platform || "weixin"}"
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
-                const { project, tools, verification_commands, verificationCommands } = JSON.parse(body);
+                const payload = JSON.parse(body);
+                const { project, tools, verification_commands, verificationCommands } = payload;
                 if (!project)
                     return (0, utils_1.sendJson)(res, { error: "缺少项目参数" }, 400);
                 const configs = (0, db_1.loadProjectConfigs)();
@@ -465,9 +485,15 @@ type = "${platform || "weixin"}"
                     configs[project] = {};
                 configs[project].tools = tools;
                 const commands = normalizeVerificationCommands(verification_commands || verificationCommands);
+                const profile = normalizeProjectAgentProfile(payload);
                 configs[project].verification_commands = commands;
+                configs[project].responsibility = profile.responsibility;
+                configs[project].capabilities = profile.capabilities;
+                configs[project].writable_paths = profile.writable_paths;
+                configs[project].forbidden_paths = profile.forbidden_paths;
+                configs[project].delivery_contract = profile.delivery_contract;
                 (0, db_1.saveProjectConfigs)(configs);
-                (0, utils_1.sendJson)(res, { success: true, tools, verification_commands: commands });
+                (0, utils_1.sendJson)(res, { success: true, tools, verification_commands: commands, ...profile });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);

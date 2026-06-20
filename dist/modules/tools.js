@@ -143,6 +143,45 @@ function deleteSharedFile(name) {
     if (fs.existsSync(filePath))
         fs.unlinkSync(filePath);
 }
+// 物理 Customizations Skills 路径
+const customSkillsPath = path.join(os.homedir(), ".gemini", "config", "skills");
+function loadCustomSkills() {
+    const result = [];
+    if (!fs.existsSync(customSkillsPath))
+        return result;
+    try {
+        const folders = fs.readdirSync(customSkillsPath, { withFileTypes: true })
+            .filter(dirent => dirent.isDirectory());
+        for (const folder of folders) {
+            const folderPath = path.join(customSkillsPath, folder.name);
+            const skillMdPath = path.join(folderPath, "SKILL.md");
+            if (fs.existsSync(skillMdPath)) {
+                const mdContent = fs.readFileSync(skillMdPath, "utf-8");
+                let name = folder.name;
+                let description = "";
+                const fmMatch = mdContent.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---/);
+                const yamlText = fmMatch ? fmMatch[1] : mdContent.substring(0, 500);
+                const nameMatch = yamlText.match(/name:\s*(.*)/);
+                const descMatch = yamlText.match(/description:\s*(.*)/);
+                if (nameMatch)
+                    name = nameMatch[1].replace(/['"]/g, "").trim();
+                if (descMatch)
+                    description = descMatch[1].replace(/['"]/g, "").trim();
+                result.push({
+                    id: folder.name,
+                    name,
+                    description,
+                    mdPath: skillMdPath,
+                    content: mdContent
+                });
+            }
+        }
+    }
+    catch (e) {
+        console.error("加载物理高级技能失败:", e);
+    }
+    return result;
+}
 function handleToolsAndMetricsApi(pathname, req, res, parsed) {
     // === MCP/Skills API ===
     if (pathname === "/api/tools/status" && req.method === "GET") {
@@ -208,6 +247,10 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         return true;
     }
     // === Skills API ===
+    if (pathname === "/api/skills/customizations" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, skills: loadCustomSkills() });
+        return true;
+    }
     if (pathname === "/api/skills" && req.method === "GET") {
         (0, utils_1.sendJson)(res, { skills: (0, db_1.loadSkills)() });
         return true;

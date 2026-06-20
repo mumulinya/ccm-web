@@ -52,7 +52,7 @@ function launchPet(port: number) {
       detached: true,
       stdio: "ignore",
       shell: !electronBin,
-      windowsHide: true,
+      windowsHide: false,
       env: { ...process.env, CCM_PORT: String(port) }
     });
     child.on("error", (err: any) => console.error("[pet]", err.message));

@@ -1,3 +1,4 @@
+export declare function loadGroups(): any[];
 export declare const FEISHU_SCOPES: string[];
 export declare function buildEvidenceGateFollowUps(group: any, outputs: string[]): any[];
 export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
@@ -36,72 +37,8 @@ export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
         queued: boolean;
         blocked: boolean;
         reason: string;
-        message: string;
-        readiness: {
-            ready: boolean;
-            mode: string;
-            message: string;
-            fix_actions: string[];
-            childProcess: {
-                ok: boolean;
-                status: number;
-                stdout: string;
-                stderr: string;
-                error: string;
-            } | {
-                ok: boolean;
-                status: any;
-                stdout: string;
-                stderr: string;
-                error: any;
-            };
-            externalRunner: {
-                active: boolean;
-                status: any;
-                detail: any;
-                pid: number;
-                process_alive: boolean;
-                updated_at: any;
-                age_ms: number;
-                pending_requests: number;
-                requests: number;
-                results: number;
-                last_result: any;
-            };
-            probe: any;
-            probeHealth: {
-                status: string;
-                successFresh: boolean;
-                failureRecent: boolean;
-                message: any;
-            };
-        } | {
-            ready: boolean;
-            mode: string;
-            message: string;
-            fix_actions: any[];
-            childProcess: {
-                ok: boolean;
-                status: number;
-                stdout: string;
-                stderr: string;
-                error: string;
-            } | {
-                ok: boolean;
-                status: any;
-                stdout: string;
-                stderr: string;
-                error: any;
-            };
-            probe: any;
-            probeHealth: {
-                status: string;
-                successFresh: boolean;
-                failureRecent: boolean;
-                message: any;
-            };
-            externalRunner?: undefined;
-        };
+        message: any;
+        readiness: any;
         targetKey?: undefined;
         position?: undefined;
     } | {
@@ -142,7 +79,7 @@ export declare function runTaskWatchdog(ctx: CollabCtx, options?: any): {
     gap_continued: number;
     gap_queued: number;
     gap_results: any[];
-    gap_continue_skipped_reason: any;
+    gap_continue_skipped_reason: string;
     runtime_retry: any;
     runtime_retry_skipped_reason: string;
     execution_readiness: {
@@ -210,7 +147,71 @@ export declare function runTaskWatchdog(ctx: CollabCtx, options?: any): {
         };
         externalRunner?: undefined;
     };
-    daily_dev_execution_readiness: any;
+    daily_dev_execution_readiness: {
+        ready: boolean;
+        mode: string;
+        message: string;
+        fix_actions: string[];
+        childProcess: {
+            ok: boolean;
+            status: number;
+            stdout: string;
+            stderr: string;
+            error: string;
+        } | {
+            ok: boolean;
+            status: any;
+            stdout: string;
+            stderr: string;
+            error: any;
+        };
+        externalRunner: {
+            active: boolean;
+            status: any;
+            detail: any;
+            pid: number;
+            process_alive: boolean;
+            updated_at: any;
+            age_ms: number;
+            pending_requests: number;
+            requests: number;
+            results: number;
+            last_result: any;
+        };
+        probe: any;
+        probeHealth: {
+            status: string;
+            successFresh: boolean;
+            failureRecent: boolean;
+            message: any;
+        };
+    } | {
+        ready: boolean;
+        mode: string;
+        message: string;
+        fix_actions: any[];
+        childProcess: {
+            ok: boolean;
+            status: number;
+            stdout: string;
+            stderr: string;
+            error: string;
+        } | {
+            ok: boolean;
+            status: any;
+            stdout: string;
+            stderr: string;
+            error: any;
+        };
+        probe: any;
+        probeHealth: {
+            status: string;
+            successFresh: boolean;
+            failureRecent: boolean;
+            message: any;
+        };
+        externalRunner?: undefined;
+    };
     results: any[];
     status: {
         stale_ms: number;
@@ -257,52 +258,6 @@ export declare function runAgentRecoveryMonitorOnce(ctx: CollabCtx, options?: an
 }> | Promise<{
     success: boolean;
     skipped: boolean;
-    probe: {
-        success: boolean;
-        blocked: boolean;
-        message: string;
-        error: string;
-        fix_actions: string[];
-        execution_path: string;
-        expected_marker: string;
-        readiness: {
-            ready: boolean;
-            mode: string;
-            message: string;
-            fix_actions: string[];
-            childProcess: any;
-            externalRunner: any;
-            probe: any;
-            probeHealth: any;
-        };
-    } | {
-        success: boolean;
-        blocked: boolean;
-        message: any;
-        error: any;
-        fix_actions: string[];
-        execution_path: string;
-        expected_marker: string;
-        target: {
-            group_id: any;
-            group_name: any;
-            project: any;
-            agent_type: any;
-            work_dir: any;
-        };
-        duration_ms: number;
-        output: string;
-        readiness: {
-            ready: boolean;
-            mode: string;
-            message: string;
-            fix_actions: string[];
-            childProcess: any;
-            externalRunner: any;
-            probe: any;
-            probeHealth: any;
-        };
-    };
     work: {
         blocked_pending: {
             id: any;
@@ -322,96 +277,23 @@ export declare function runAgentRecoveryMonitorOnce(ctx: CollabCtx, options?: an
         }[];
         total: number;
     };
+    probe_groups: any[];
+    target_results: any[];
+    failures: any[];
     message: any;
-    blocked_recovery?: undefined;
-    runtime_recovery?: undefined;
-} | {
-    success: boolean;
-    skipped: boolean;
-    probe: {
-        success: boolean;
-        blocked: boolean;
-        message: string;
-        error: string;
-        fix_actions: string[];
-        execution_path: string;
-        expected_marker: string;
-        readiness: {
-            ready: boolean;
-            mode: string;
-            message: string;
-            fix_actions: string[];
-            childProcess: any;
-            externalRunner: any;
-            probe: any;
-            probeHealth: any;
-        };
-    } | {
-        success: boolean;
-        blocked: boolean;
-        message: any;
-        error: any;
-        fix_actions: string[];
-        execution_path: string;
-        expected_marker: string;
-        target: {
-            group_id: any;
-            group_name: any;
-            project: any;
-            agent_type: any;
-            work_dir: any;
-        };
-        duration_ms: number;
-        output: string;
-        readiness: {
-            ready: boolean;
-            mode: string;
-            message: string;
-            fix_actions: string[];
-            childProcess: any;
-            externalRunner: any;
-            probe: any;
-            probeHealth: any;
-        };
-    };
-    work: {
-        blocked_pending: {
-            id: any;
-            title: any;
-            status: any;
-            target_key: string;
-            blocked_at: any;
-            status_detail: string;
-        }[];
-        runtime_failed: {
-            id: any;
-            title: any;
-            status: any;
-            target_key: string;
-            retry_count: number;
-            reason: string;
-        }[];
-        total: number;
-    };
+    probe: any;
     blocked_recovery: {
-        total_blocked: number;
-        recovered: number;
+        total_blocked: any;
+        recovered: any;
         results: any[];
     };
     runtime_recovery: {
         success: boolean;
-        dry_run: boolean;
-        total_recoverable: number;
-        retried: number;
-        queued: number;
+        total_recoverable: any;
+        retried: any;
+        queued: any;
         auto_execute: boolean;
-        results: {
-            task_id: any;
-            title: any;
-            status: any;
-            retry_count: number;
-            previous_failure: string;
-        }[];
+        results: any[];
         queue_status: {
             total_queued: number;
             running_targets: number;
@@ -421,143 +303,7 @@ export declare function runAgentRecoveryMonitorOnce(ctx: CollabCtx, options?: an
             failed_tasks: number;
             running_task_ids: string[];
         };
-    } | {
-        success: boolean;
-        total_recoverable: number;
-        retried: number;
-        queued: number;
-        auto_execute: boolean;
-        results: ({
-            success: boolean;
-            status: number;
-            error: string;
-            task?: undefined;
-            queued?: undefined;
-            queue_result?: undefined;
-            queue_status?: undefined;
-            task_id: any;
-            title: any;
-            previous_failure: string;
-        } | {
-            success: boolean;
-            task: any;
-            queued: boolean;
-            queue_result: {
-                queued: boolean;
-                message: string;
-                blocked?: undefined;
-                reason?: undefined;
-                readiness?: undefined;
-                targetKey?: undefined;
-                position?: undefined;
-            } | {
-                queued: boolean;
-                blocked: boolean;
-                reason: string;
-                message: string;
-                readiness: {
-                    ready: boolean;
-                    mode: string;
-                    message: string;
-                    fix_actions: string[];
-                    childProcess: {
-                        ok: boolean;
-                        status: number;
-                        stdout: string;
-                        stderr: string;
-                        error: string;
-                    } | {
-                        ok: boolean;
-                        status: any;
-                        stdout: string;
-                        stderr: string;
-                        error: any;
-                    };
-                    externalRunner: {
-                        active: boolean;
-                        status: any;
-                        detail: any;
-                        pid: number;
-                        process_alive: boolean;
-                        updated_at: any;
-                        age_ms: number;
-                        pending_requests: number;
-                        requests: number;
-                        results: number;
-                        last_result: any;
-                    };
-                    probe: any;
-                    probeHealth: {
-                        status: string;
-                        successFresh: boolean;
-                        failureRecent: boolean;
-                        message: any;
-                    };
-                } | {
-                    ready: boolean;
-                    mode: string;
-                    message: string;
-                    fix_actions: any[];
-                    childProcess: {
-                        ok: boolean;
-                        status: number;
-                        stdout: string;
-                        stderr: string;
-                        error: string;
-                    } | {
-                        ok: boolean;
-                        status: any;
-                        stdout: string;
-                        stderr: string;
-                        error: any;
-                    };
-                    probe: any;
-                    probeHealth: {
-                        status: string;
-                        successFresh: boolean;
-                        failureRecent: boolean;
-                        message: any;
-                    };
-                    externalRunner?: undefined;
-                };
-                targetKey?: undefined;
-                position?: undefined;
-            } | {
-                queued: boolean;
-                message: string;
-                targetKey: string;
-                position: number;
-                blocked?: undefined;
-                reason?: undefined;
-                readiness?: undefined;
-            };
-            queue_status: {
-                total_queued: number;
-                running_targets: number;
-                target_status: any;
-                pending_tasks: number;
-                in_progress_tasks: number;
-                failed_tasks: number;
-                running_task_ids: string[];
-            };
-            status?: undefined;
-            error?: undefined;
-            task_id: any;
-            title: any;
-            previous_failure: string;
-        })[];
-        queue_status: {
-            total_queued: number;
-            running_targets: number;
-            target_status: any;
-            pending_tasks: number;
-            in_progress_tasks: number;
-            failed_tasks: number;
-            running_task_ids: string[];
-        };
-        dry_run?: undefined;
     };
-    message?: undefined;
 }>;
 export declare function startAgentRecoveryMonitor(ctx: CollabCtx): void;
 export declare function stopAgentRecoveryMonitor(): void;
@@ -630,6 +376,15 @@ export declare function runCollaborationProtocolSelfTest(): {
         dailyDevRequiresFreshProbe: boolean;
         dailyDevWatchdogGapsRequireFreshProbe: boolean;
         dailyDevFreshProbePasses: boolean;
+        dailyDevFreshProbeMustMatchTarget: boolean;
+        groupProbeRequiresAllMembers: boolean;
+        groupProbeAllMembersPass: boolean;
+        explicitProjectBypassesGroupWideProbe: boolean;
+        targetProbeKeysAreIsolated: boolean;
+        targetProbePartialMatchWorks: boolean;
+        recoveryProbeGroupsAreTargeted: boolean;
+        recoveryProbePayloadKeepsTarget: boolean;
+        recoveryTargetMatchWorks: boolean;
         generalTaskDoesNotRequireProbe: boolean;
     };
     taskNotificationChecks: {

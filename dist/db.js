@@ -120,7 +120,7 @@ function getConfigInfo(configPath) {
         if (currentProject && trimmed.startsWith("name = "))
             currentProject.name = trimmed.split("=")[1].trim().replace(/"/g, "");
         if (currentProject && trimmed.startsWith("work_dir = "))
-            currentProject.workDir = trimmed.split("=")[1].trim().replace(/"/g, "");
+            currentProject.workDir = trimmed.split("=")[1].trim().replace(/"/g, "").replace(/\\\\/g, "\\");
         if (currentProject && trimmed.startsWith("type = ") && !inPlatformsBlock) {
             const v = trimmed.split("=")[1].trim().replace(/"/g, "");
             if (exports.AGENTS.find((a) => a.type === v))

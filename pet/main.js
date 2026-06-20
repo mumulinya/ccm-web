@@ -6,6 +6,14 @@ const fs = require('fs');
 // 禁用 GPU 硬件加速，防止在 Headless/远程/系统 Session 隔离环境下因 GPU 崩溃导致闪退
 app.disableHardwareAcceleration();
 
+const os = require('os');
+const CCM_DIR = path.join(os.homedir(), '.cc-connect');
+const USER_DATA_DIR = path.join(CCM_DIR, 'temp', 'pet-userdata');
+if (!fs.existsSync(USER_DATA_DIR)) {
+  fs.mkdirSync(USER_DATA_DIR, { recursive: true });
+}
+app.setPath('userData', USER_DATA_DIR);
+
 const CCM_PORT = parseInt(process.env.CCM_PORT) || 3080;
 
 // 防止未处理错误导致进程崩溃
@@ -14,7 +22,6 @@ process.on('unhandledRejection', (err) => { console.error('[pet] unhandledReject
 
 const PET_DIR = path.join(__dirname);
 const API_BASE = `http://localhost:${CCM_PORT}`;
-const CCM_DIR = path.join(require('os').homedir(), '.cc-connect');
 const PETS_FILE = path.join(CCM_DIR, 'pets.json');
 const PID_FILE = path.join(CCM_DIR, 'pids', 'pet.pid');
 

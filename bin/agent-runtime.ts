@@ -1,4 +1,10 @@
-export type AgentRuntimeId = "claudecode" | "claude" | "cursor" | "gemini" | "codex";
+import * as path from "path";
+export type AgentRuntimeId = "claudecode" | "claude" | "cursor" | "gemini" | "codex" | "qoder";
+
+export interface AgentCommandOptions {
+  cliAllowedTools?: string[];
+  mcpConfigPath?: string;
+}
 
 export interface AgentRuntimeDescriptor {
   id: AgentRuntimeId;
@@ -13,13 +19,36 @@ export interface AgentRuntimeDescriptor {
     sessionResume: boolean;
     scratchpadContinuation: boolean;
   };
-  buildCommand: (msgFile: string) => string;
+  buildCommand: (msgFile: string, options?: AgentCommandOptions) => string;
 }
 
-function pipeFileToCommand(msgFile: string, command: string) {
-  return `type "${msgFile}" | ${command}`;
+function quoteCmdArg(value: string) {
+  return `"${String(value || "").replace(/"/g, "\\\"")}"`;
 }
 
+function formatAllowedToolsArg(options: AgentCommandOptions = {}) {
+  const tools = Array.isArray(options.cliAllowedTools)
+    ? Array.from(new Set(options.cliAllowedTools.map(item => String(item || "").trim()).filter(Boolean)))
+    : [];
+  if (!tools.length) return "";
+  return ` --allowed-tools ${quoteCmdArg(tools.join(","))}`;
+}
+
+function pipeFileToCommand(msgFile: string, command: string, options: AgentCommandOptions = {}) {
+  return `type "${msgFile}" | ${command}${formatAllowedToolsArg(options)}`;
+}
+
+function formatStrictMcpConfigArg(options: AgentCommandOptions = {}) {
+  const configPath = String(options.mcpConfigPath || "").trim();
+  return configPath ? ` --mcp-config ${quoteCmdArg(configPath)} --strict-mcp-config` : "";
+}
+
+function buildCodexExecCommand(msgFile: string, options: AgentCommandOptions = {}) {
+  const configPath = String(options.mcpConfigPath || "").trim();
+  const runtimeHome = configPath ? path.dirname(configPath) : "";
+  const homePrefix = runtimeHome ? `set "CODEX_HOME=${runtimeHome}" && ` : "";
+  return `${homePrefix}type "${msgFile}" | codex exec --full-auto --ephemeral --skip-git-repo-check -`;
+}
 export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
   {
     id: "claudecode",
@@ -34,7 +63,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
       sessionResume: false,
       scratchpadContinuation: true,
     },
-    buildCommand: msgFile => pipeFileToCommand(msgFile, "claude --permission-mode acceptEdits -p"),
+    buildCommand: (msgFile, options) => `${pipeFileToCommand(msgFile, "claude --permission-mode acceptEdits", options)}${formatStrictMcpConfigArg(options)} -p`,
   },
   {
     id: "cursor",
@@ -70,7 +99,7 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
     id: "codex",
     aliases: ["codex"],
     label: "Codex CLI",
-    commandLabel: "codex -q",
+    commandLabel: "codex exec --full-auto --ephemeral -",
     capabilities: {
       print: true,
       streaming: false,
@@ -79,7 +108,22 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
       sessionResume: false,
       scratchpadContinuation: true,
     },
-    buildCommand: msgFile => pipeFileToCommand(msgFile, "codex -q"),
+    buildCommand: (msgFile, options) => buildCodexExecCommand(msgFile, options),
+  },
+  {
+    id: "qoder",
+    aliases: ["qoder", "qoder-cli"],
+    label: "Qoder CLI",
+    commandLabel: "qodercli -p",
+    capabilities: {
+      print: true,
+      streaming: false,
+      externalRunner: true,
+      worktreeIsolation: true,
+      sessionResume: false,
+      scratchpadContinuation: true,
+    },
+    buildCommand: msgFile => pipeFileToCommand(msgFile, "qodercli -p"),
   },
 ];
 
@@ -94,8 +138,8 @@ export function getAgentRuntime(agentType = "") {
   return AGENT_RUNTIMES.find(item => item.id === id) || AGENT_RUNTIMES[0];
 }
 
-export function buildAgentCommand(agentType: string, msgFile: string) {
-  return getAgentRuntime(agentType).buildCommand(msgFile);
+export function buildAgentCommand(agentType: string, msgFile: string, options: AgentCommandOptions = {}) {
+  return getAgentRuntime(agentType).buildCommand(msgFile, options);
 }
 
 export function getAgentCommandLabel(agentType: string) {
@@ -111,4 +155,3 @@ export function getPublicAgentRuntimes() {
     capabilities: runtime.capabilities,
   }));
 }
-

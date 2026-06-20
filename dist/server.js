@@ -41,6 +41,7 @@ const url = __importStar(require("url"));
 const child_process_1 = require("child_process");
 const tool_manager_1 = require("./tool-manager");
 const agent_runtime_1 = require("./agent-runtime");
+const runtime_tool_sync_1 = require("./runtime-tool-sync");
 // 导入底座与持久层
 const utils_1 = require("./utils");
 const db_1 = require("./db");
@@ -55,6 +56,8 @@ const tools_1 = require("./modules/tools");
 const pets_1 = require("./modules/pets");
 const music_1 = require("./modules/music");
 const collaboration_1 = require("./modules/collaboration");
+const global_agent_1 = require("./modules/global-agent");
+const rag_1 = require("./modules/rag");
 const sessions_2 = require("./modules/sessions");
 // === 运行时内存状态与心跳推送 ===
 const petStatusClients = new Set();
@@ -442,10 +445,76 @@ function getProjectToolSelection(projectName) {
     const configs = (0, db_1.loadProjectConfigs)();
     return normalizeToolSelection(configs?.[projectName]?.tools || {});
 }
-function buildProjectToolContext(projectName) {
+function normalizeVerificationCommands(value) {
+    const raw = Array.isArray(value) ? value : (typeof value === "string" ? value.split(/\r?\n|,/) : []);
+    const seen = new Set();
+    const commands = [];
+    for (const item of raw) {
+        const command = String(item || "").trim();
+        if (!command || seen.has(command))
+            continue;
+        seen.add(command);
+        commands.push(command);
+    }
+    return commands.slice(0, 8);
+}
+function getProjectVerificationCommandsForRunner(projectName) {
+    const configs = (0, db_1.loadProjectConfigs)();
+    const projectConfig = configs?.[projectName] || {};
+    return normalizeVerificationCommands(projectConfig.verification_commands
+        || projectConfig.verificationCommands
+        || projectConfig.test_commands
+        || projectConfig.testCommands
+        || projectConfig.check_commands
+        || projectConfig.checkCommands);
+}
+function extractVerificationCommandsFromMessage(message) {
+    const text = String(message || "");
+    const commands = [];
+    const add = (value) => {
+        for (const part of value.split(/[；;，,]/)) {
+            const command = part.trim();
+            if (/^(npm run [\w:-]+|mvn \w+|gradle \w+|pytest|go test\b.*|cargo test\b.*)$/i.test(command))
+                commands.push(command);
+        }
+    };
+    for (const match of text.matchAll(/推荐优先执行的项目验证：([^\n]+)/g))
+        add(match[1] || "");
+    for (const match of text.matchAll(/验证命令：([^\n]+)/g))
+        add(match[1] || "");
+    return normalizeVerificationCommands(commands);
+}
+function buildAgentCliAllowedTools(projectName, message = "") {
+    const commands = normalizeVerificationCommands([
+        ...getProjectVerificationCommandsForRunner(projectName),
+        ...extractVerificationCommandsFromMessage(message),
+    ]);
+    const rules = [];
+    for (const command of commands) {
+        rules.push(`Bash(${command})`);
+        if (process.platform === "win32")
+            rules.push(`PowerShell(${command})`);
+    }
+    return Array.from(new Set(rules));
+}
+function buildProjectToolContext(projectName, workDir = "", agentType = "claudecode") {
     const allowedTools = getProjectToolSelection(projectName);
-    const prompt = tool_manager_1.toolManager.buildToolPrompt(allowedTools);
-    return { prompt, allowedTools };
+    const audit = (0, runtime_tool_sync_1.syncRuntimeTools)(workDir, agentType, allowedTools);
+    (0, runtime_tool_sync_1.recordRuntimeToolSyncAudit)(audit, projectName);
+    const prompt = tool_manager_1.toolManager.buildToolPrompt(allowedTools) + (0, runtime_tool_sync_1.buildRuntimeToolSyncPrompt)(audit);
+    const workEvent = {
+        id: "we" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        time: new Date().toISOString(),
+        agent: projectName,
+        kind: audit.mode === "failed" ? "error" : "tool",
+        text: audit.mode === "native-and-proxy"
+            ? `${projectName} (${audit.runtime}/${audit.isolation || "project-scope"}) 已同步原生工具：MCP ${audit.synced.mcp.length}，Skill ${audit.synced.skill.length}${audit.warnings?.length ? `；${audit.warnings.join("；")}` : ""}`
+            : audit.mode === "ccm-proxy-only"
+                ? `${projectName} (${audit.runtime}) 使用 CCM 工具代理模式`
+                : `${projectName} Runtime 工具同步失败：${audit.errors.join("；") || "未知错误"}`,
+        runtimeToolSync: audit,
+    };
+    return { prompt, allowedTools, audit, workEvent };
 }
 function ensureAgentRunnerDirs() {
     for (const dir of [AGENT_RUNNER_DIR, AGENT_RUNNER_REQUESTS_DIR, AGENT_RUNNER_RESULTS_DIR, utils_1.UPLOAD_DIR]) {
@@ -457,7 +526,7 @@ function isSpawnPermissionError(error) {
     const text = `${error?.code || ""} ${error?.message || ""} ${error?.stderr || ""}`;
     return /\bEPERM\b|spawnSync .* EPERM|spawn .* EPERM/i.test(text);
 }
-function createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools = null) {
+function createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools = null, mcpConfigPath = "") {
     ensureAgentRunnerDirs();
     const id = `ar_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const request = {
@@ -467,6 +536,8 @@ function createAgentRunnerRequest(projectName, message, workDir, agentType, time
         agentType: (0, agent_runtime_1.normalizeAgentRuntimeId)(agentType || "claudecode"),
         timeoutMs,
         allowedTools,
+        mcpConfigPath,
+        cliAllowedTools: buildAgentCliAllowedTools(projectName, message),
         message,
         status: "pending",
         created_at: new Date().toISOString(),
@@ -491,8 +562,8 @@ async function waitForAgentRunnerResult(resultFile, timeoutMs) {
     }
     throw new Error("外部 Agent Runner 等待超时；请运行 npm run agent-runner:ps 或 npm run agent-runner 启用外部执行通道");
 }
-async function callAgentViaExternalRunner(projectName, message, workDir, agentType, timeoutMs, allowedTools = null) {
-    const request = createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools);
+async function callAgentViaExternalRunner(projectName, message, workDir, agentType, timeoutMs, allowedTools = null, mcpConfigPath = "") {
+    const request = createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools, mcpConfigPath);
     const result = await waitForAgentRunnerResult(request.resultFile, timeoutMs);
     if (!result?.success) {
         const label = result?.command || (0, agent_runtime_1.getAgentCommandLabel)(agentType);
@@ -528,7 +599,7 @@ async function callAgent(projectName, message, workDir, agentType, timeoutMs, wo
         fs.mkdirSync(utils_1.UPLOAD_DIR, { recursive: true });
     }
     fs.writeFileSync(tmpMsg, message, "utf-8");
-    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg);
+    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: workspaceTarget?.mcpConfigPath });
     try {
         const result = (0, child_process_1.execSync)(cmd, {
             encoding: "utf-8",
@@ -560,7 +631,7 @@ async function callAgent(projectName, message, workDir, agentType, timeoutMs, wo
         catch { }
         if (isSpawnPermissionError(e)) {
             try {
-                const runner = await callAgentViaExternalRunner(projectName, message, workDir, agentType, timeoutMs, workspaceTarget?.allowedTools);
+                const runner = await callAgentViaExternalRunner(projectName, message, workDir, agentType, timeoutMs, workspaceTarget?.allowedTools, workspaceTarget?.mcpConfigPath);
                 const fileChanges = runner.fileChanges || (0, utils_1.getFileChanges)(projectName, changeSnapshot);
                 (0, db_1.recordMetric)(projectName, {
                     success: true,
@@ -608,9 +679,27 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
         fs.mkdirSync(utils_1.UPLOAD_DIR, { recursive: true });
     }
     fs.writeFileSync(tmpMsg, message, "utf-8");
-    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg);
+    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: options.mcpConfigPath });
     const streamRes = options.res;
-    writeSse(streamRes, { type: "status", text: `🧠 ${projectName} 正在思考...`, agent: projectName });
+    const workEvents = Array.isArray(options.initialWorkEvents) ? options.initialWorkEvents.slice(-20) : [];
+    const pushWorkEvent = (kind, text, extra = {}) => {
+        const event = {
+            id: "we" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            time: new Date().toISOString(),
+            agent: projectName,
+            kind,
+            text: String(text || "").slice(0, 2400),
+            ...extra,
+        };
+        workEvents.push(event);
+        if (workEvents.length > 80)
+            workEvents.splice(0, workEvents.length - 80);
+        writeSse(streamRes, { type: "agent_work_event", agent: projectName, event });
+        return event;
+    };
+    const thinkingText = `🧠 ${projectName} 正在思考...`;
+    pushWorkEvent("status", thinkingText);
+    writeSse(streamRes, { type: "status", text: thinkingText, agent: projectName });
     broadcastPetSpeech(projectName, { role: "status", text: `${projectName} 正在思考...`, source: "group" });
     return new Promise((resolve) => {
         let child = null;
@@ -620,12 +709,14 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
         catch (spawnError) {
             if (!isSpawnPermissionError(spawnError)) {
                 const text = `❌ 错误: ${spawnError.message || spawnError}`;
-                writeSse(streamRes, { type: "agent_done", agent: projectName, text, messageId: options.messageId });
+                writeSse(streamRes, { type: "agent_done", agent: projectName, text, messageId: options.messageId, workEvents });
                 resolve(text);
                 return;
             }
-            writeSse(streamRes, { type: "status", text: `🧩 ${projectName} 交给外部 Agent Runner 执行...`, agent: projectName });
-            callAgentViaExternalRunner(projectName, message, workDir, agentType, options.timeoutMs || 300000, options.allowedTools)
+            const runnerText = `🧩 ${projectName} 交给外部 Agent Runner 执行...`;
+            pushWorkEvent("status", runnerText);
+            writeSse(streamRes, { type: "status", text: runnerText, agent: projectName });
+            callAgentViaExternalRunner(projectName, message, workDir, agentType, options.timeoutMs || 300000, options.allowedTools, options.mcpConfigPath)
                 .then((runner) => {
                 const fileChanges = runner.fileChanges || (0, utils_1.getFileChanges)(projectName, changeSnapshot);
                 (0, db_1.recordMetric)(projectName, {
@@ -635,11 +726,12 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
                 });
                 try {
                     if (typeof options.onDone === "function") {
-                        options.onDone({ text: runner.output, fileChanges, isError: false, runnerRequestId: runner.runnerRequestId });
+                        pushWorkEvent("done", "外部 Runner 执行完成", { final: true, fileChanges });
+                        options.onDone({ text: runner.output, fileChanges, isError: false, runnerRequestId: runner.runnerRequestId, workEvents });
                     }
                 }
                 catch { }
-                writeSse(streamRes, { type: "agent_done", agent: projectName, text: runner.output, fileChanges, messageId: options.messageId });
+                writeSse(streamRes, { type: "agent_done", agent: projectName, text: runner.output, fileChanges, messageId: options.messageId, workEvents });
                 broadcastPetSpeech(projectName, { role: "assistant", text: runner.output, final: true, source: "group" });
                 setAgentActivity(projectName, "happy", "外部 Runner 回复完成");
                 setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
@@ -654,11 +746,12 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
                 });
                 try {
                     if (typeof options.onDone === "function") {
-                        options.onDone({ text, fileChanges: null, isError: true });
+                        pushWorkEvent("error", text, { final: true });
+                        options.onDone({ text, fileChanges: null, isError: true, workEvents });
                     }
                 }
                 catch { }
-                writeSse(streamRes, { type: "agent_done", agent: projectName, text, messageId: options.messageId });
+                writeSse(streamRes, { type: "agent_done", agent: projectName, text, messageId: options.messageId, workEvents });
                 broadcastPetSpeech(projectName, { role: "error", text, final: true, source: "group" });
                 setAgentActivity(projectName, "error", "外部 Runner 错误");
                 resolve(text);
@@ -693,11 +786,12 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             });
             try {
                 if (typeof options.onDone === "function") {
-                    options.onDone({ text: finalText, fileChanges, isError });
+                    pushWorkEvent(isError ? "error" : "done", isError ? finalText : "执行完成", { final: true, fileChanges });
+                    options.onDone({ text: finalText, fileChanges, isError, workEvents });
                 }
             }
             catch { }
-            writeSse(streamRes, { type: "agent_done", agent: projectName, text: finalText, fileChanges, messageId: options.messageId });
+            writeSse(streamRes, { type: "agent_done", agent: projectName, text: finalText, fileChanges, messageId: options.messageId, workEvents });
             broadcastPetSpeech(projectName, { role: isError ? "error" : "assistant", text: finalText, final: true, source: "group" });
             setAgentActivity(projectName, isError ? "error" : "happy", isError ? "错误" : "群聊回复完成");
             setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
@@ -708,13 +802,16 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             if (!text)
                 return;
             output += text;
+            pushWorkEvent("output", text);
             writeSse(streamRes, { type: "chunk", agent: projectName, text });
             broadcastPetSpeech(projectName, { role: "assistant", text, mode: "append", source: "group" });
         });
         child.stderr.on("data", (chunk) => {
             const text = chunk.toString("utf-8");
             if (text.trim() && !output.trim()) {
-                writeSse(streamRes, { type: "status", text: `🧠 ${projectName} 运行中...`, agent: projectName });
+                const runningText = `🧠 ${projectName} 运行中...`;
+                pushWorkEvent("status", runningText);
+                writeSse(streamRes, { type: "status", text: runningText, agent: projectName });
                 broadcastPetSpeech(projectName, { role: "status", text: `${projectName} 运行中...`, source: "group" });
             }
         });
@@ -729,8 +826,24 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
     const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
     const tmpMsg = path.join(utils_1.UPLOAD_DIR, `_msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.txt`);
     fs.writeFileSync(tmpMsg, message, "utf-8");
-    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg);
+    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: options.mcpConfigPath });
     const send = (data) => writeSse(res, data);
+    const workEvents = Array.isArray(options.initialWorkEvents) ? options.initialWorkEvents.slice(-20) : [];
+    const pushProjectWorkEvent = (kind, text, extra = {}) => {
+        const event = {
+            id: "we" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            time: new Date().toISOString(),
+            agent: projectName,
+            kind,
+            text: String(text || "").slice(0, 2400),
+            ...extra,
+        };
+        workEvents.push(event);
+        if (workEvents.length > 80)
+            workEvents.splice(0, workEvents.length - 80);
+        send({ type: "work_event", event });
+        return event;
+    };
     // 设置 SSE
     res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -741,7 +854,10 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
     });
     if (typeof res.flushHeaders === "function")
         res.flushHeaders();
+    for (const event of workEvents)
+        send({ type: "work_event", event });
     // 发送状态事件
+    pushProjectWorkEvent("status", "Agent 正在思考...");
     send({ type: "status", text: "Agent 正在思考..." });
     broadcastPetSpeech(projectName, { role: "status", text: "Agent 正在思考...", source: "project" });
     setAgentActivity(projectName, "working", "正在处理消息", null, getAgentRunActivityDuration(300000));
@@ -765,6 +881,7 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
         if (!text)
             return;
         fullOutput += text;
+        pushProjectWorkEvent("output", text);
         send({ type: "chunk", text });
         broadcastPetSpeech(projectName, { role: "assistant", text, mode: "append", source: "project" });
     });
@@ -773,6 +890,7 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
         const now = Date.now();
         if (text.trim() && now - lastStderrStatusAt > 1500) {
             lastStderrStatusAt = now;
+            pushProjectWorkEvent("status", "Agent 处理中...");
             send({ type: "status", text: "Agent 处理中..." });
             broadcastPetSpeech(projectName, { role: "status", text: "Agent 处理中...", source: "project" });
         }
@@ -792,6 +910,7 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
             const outputWithTools = await appendToolResults(fullOutput.trim(), options.allowedTools);
             const toolAppend = outputWithTools.slice(fullOutput.trim().length);
             if (toolAppend) {
+                pushProjectWorkEvent("output", toolAppend);
                 send({ type: "chunk", text: toolAppend });
                 broadcastPetSpeech(projectName, { role: "assistant", text: toolAppend, mode: "append", source: "project" });
             }
@@ -804,10 +923,12 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
             });
             setAgentActivity(projectName, "happy", "任务完成");
             setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
-            send({ type: "done", fileChanges });
+            pushProjectWorkEvent("done", "执行完成", { final: true, fileChanges });
+            send({ type: "done", fileChanges, workEvents });
             res.end();
         })().catch((err) => {
-            send({ type: "error", text: err.message });
+            pushProjectWorkEvent("error", err.message, { final: true });
+            send({ type: "error", text: err.message, workEvents });
             try {
                 res.end();
             }
@@ -825,7 +946,8 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
             fs.unlinkSync(tmpMsg);
         }
         catch { }
-        send({ type: "error", text: err.message });
+        pushProjectWorkEvent("error", err.message, { final: true });
+        send({ type: "error", text: err.message, workEvents });
         (0, db_1.recordMetric)(projectName, {
             success: false,
             durationMs: Date.now() - startedAt,
@@ -1037,9 +1159,9 @@ function handleRequest(req, res) {
             const info = (0, db_1.getConfigInfo)(config.path);
             const workDir = info[0]?.workDir;
             const agentType = info[0]?.agent || "claudecode";
-            const toolContext = buildProjectToolContext(project);
+            const toolContext = buildProjectToolContext(project, workDir, agentType);
             const fullMessage = `${toolContext.prompt}\n\n${finalMessage}`;
-            callAgentStream(project, fullMessage, workDir, agentType, res, { allowedTools: toolContext.allowedTools });
+            callAgentStream(project, fullMessage, workDir, agentType, res, { allowedTools: toolContext.allowedTools, mcpConfigPath: toolContext.audit.mcpConfigPath, initialWorkEvents: [toolContext.workEvent] });
         };
         if (contentType.includes("multipart/form-data")) {
             (0, utils_1.collectRequestBuffer)(req).then((buffer) => {
@@ -1089,13 +1211,14 @@ function handleRequest(req, res) {
             if (!fullMessage)
                 return (0, utils_1.sendJson)(res, { error: "消息不能为空" }, 400);
             const agentType = info[0]?.agent || "claudecode";
-            const toolContext = buildProjectToolContext(project);
+            const toolContext = buildProjectToolContext(project, workDir, agentType);
             const promptWithTools = `${toolContext.prompt}\n\n${fullMessage}`;
             try {
                 const output = await callAgent(project, promptWithTools, workDir, agentType, 120000, {
                     tab: "projects",
                     project,
                     allowedTools: toolContext.allowedTools,
+                    mcpConfigPath: toolContext.audit.mcpConfigPath,
                 });
                 (0, utils_1.sendJson)(res, { success: true, output });
             }
@@ -1154,6 +1277,10 @@ function handleRequest(req, res) {
     if ((0, music_1.handleMusicApi)(pathname, req, res, parsed, musicCtx))
         return;
     if ((0, collaboration_1.handleCollaborationApi)(pathname, req, res, parsed, collabCtx))
+        return;
+    if ((0, global_agent_1.handleGlobalAgentApi)(pathname, req, res, parsed))
+        return;
+    if ((0, rag_1.handleRagApi)(pathname, req, res, parsed))
         return;
     // 404 fallback
     (0, utils_1.sendJson)(res, { error: "Not Found" }, 404);

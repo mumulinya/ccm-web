@@ -116,29 +116,164 @@ function Get-FileChanges {
   return [ordered]@{ files = $files; count = $files.Count }
 }
 
-function Invoke-Agent {
-  param([string]$AgentType, [string]$MessageFile, [string]$WorkDir)
+function Get-ProjectVerificationCommands {
+  param([string]$ProjectName)
+  $configFile = Join-Path $Root "project-configs.json"
+  if (-not (Test-Path -LiteralPath $configFile)) { return @() }
+  try {
+    $configs = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    $config = $configs.PSObject.Properties[$ProjectName].Value
+    if (-not $config) { return @() }
+    foreach ($name in @("verification_commands", "verificationCommands", "test_commands", "testCommands", "check_commands", "checkCommands")) {
+      $value = $config.PSObject.Properties[$name].Value
+      if ($value) { return @($value) }
+    }
+  } catch {}
+  return @()
+}
+
+function Test-AgentProbeRequest {
+  param([object]$Request)
+  return ([string]$Request.message) -match "CCM_AGENT_PROBE_OK|执行通道健康探针"
+}
+
+function Format-CliAllowedTools {
+  param([object]$CliAllowedTools, [string]$ProjectName = "")
+  $items = @()
+  if ($CliAllowedTools) {
+    foreach ($item in @($CliAllowedTools)) {
+      $value = ([string]$item).Trim()
+      if ($value -and $value -ne "null") { $items += $value }
+    }
+  }
+  if ($items.Count -eq 0 -and $ProjectName) {
+    foreach ($command in Get-ProjectVerificationCommands -ProjectName $ProjectName) {
+      $cmd = ([string]$command).Trim()
+      if ($cmd) {
+        $items += "Bash($cmd)"
+        $items += "PowerShell($cmd)"
+      }
+    }
+  }
+  return (($items | Select-Object -Unique) -join ",")
+}
+
+function Invoke-ProjectVerificationCommands {
+  param([string]$ProjectName, [string]$WorkDir)
+  $commands = @(Get-ProjectVerificationCommands -ProjectName $ProjectName)
+  $results = @()
+  $verification = @()
+  $failed = @()
+  if (-not $commands -or $commands.Count -eq 0 -or -not $WorkDir) {
+    return [ordered]@{ ccm_runner_verification = $true; status = "skipped"; verification = $verification; failed = $failed; results = $results }
+  }
+
   Push-Location $WorkDir
   try {
-    $inputText = Get-Content -LiteralPath $MessageFile -Raw -Encoding UTF8
-    switch ($AgentType) {
-      "cursor" { $output = $inputText | agent -p 2>&1 | Out-String }
-      "gemini" { $output = $inputText | gemini -p 2>&1 | Out-String }
-      "codex" { $output = $inputText | codex -q 2>&1 | Out-String }
-      default { $output = $inputText | claude --permission-mode acceptEdits -p 2>&1 | Out-String }
+    foreach ($command in $commands) {
+      $cmd = ([string]$command).Trim()
+      if (-not $cmd) { continue }
+      try {
+        $global:LASTEXITCODE = 0
+        $output = Invoke-Expression $cmd 2>&1 | Out-String
+        $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+        if ($exitCode -eq 0) {
+          $verification += "$cmd passed by external runner (exit 0)"
+          $results += [ordered]@{ command = $cmd; exitCode = 0; status = "passed"; output = ([string]$output).Trim() }
+        } else {
+          $failed += "$cmd failed by external runner (exit $exitCode)"
+          $results += [ordered]@{ command = $cmd; exitCode = $exitCode; status = "failed"; output = ([string]$output).Trim() }
+        }
+      } catch {
+        $failed += "$cmd failed by external runner"
+        $results += [ordered]@{ command = $cmd; exitCode = $null; status = "failed"; output = [string]$_.Exception.Message }
+      }
     }
-    return [ordered]@{ exitCode = $LASTEXITCODE; output = $output.Trim() }
   } finally {
     Pop-Location
   }
+
+  return [ordered]@{
+    ccm_runner_verification = $true
+    status = $(if ($failed.Count -gt 0) { "failed" } else { "passed" })
+    verification = $verification
+    failed = $failed
+    results = $results
+  }
 }
 
+function Add-RunnerVerificationOutput {
+  param([string]$Output, [object]$RunnerVerification)
+  if (-not $RunnerVerification -or $RunnerVerification.status -eq "skipped") { return $Output }
+  $json = $RunnerVerification | ConvertTo-Json -Depth 12
+  $fence = ([string][char]96) * 3
+  return $Output + "`n`nCCM_RUNNER_VERIFICATION`n" + $fence + "json`n" + $json + "`n" + $fence
+}
+function Invoke-Agent {
+  param([string]$AgentType, [string]$MessageFile, [string]$WorkDir, [object]$CliAllowedTools = $null, [string]$ProjectName = "", [string]$McpConfigPath = "", [int]$TimeoutMs = 300000)
+  $timeoutSeconds = [Math]::Max(1, [Math]::Ceiling($TimeoutMs / 1000))
+  $job = Start-Job -ScriptBlock {
+    param([string]$AgentType, [string]$MessageFile, [string]$WorkDir, [object]$CliAllowedTools, [string]$ProjectName, [string]$McpConfigPath)
+    $ErrorActionPreference = "Stop"
+    function Format-JobCliAllowedTools {
+      param([object]$Tools)
+      $items = @()
+      if ($Tools) {
+        foreach ($item in @($Tools)) {
+          $value = ([string]$item).Trim()
+          if ($value -and $value -ne "null") { $items += $value }
+        }
+      }
+      return (($items | Select-Object -Unique) -join ",")
+    }
+    Push-Location $WorkDir
+    try {
+      $inputText = Get-Content -LiteralPath $MessageFile -Raw -Encoding UTF8
+      switch ($AgentType) {
+        "cursor" { $output = $inputText | agent -p 2>&1 | Out-String }
+        "gemini" { $output = $inputText | gemini -p 2>&1 | Out-String }
+        "codex" {
+          $oldCodexHome = $env:CODEX_HOME
+          if ($McpConfigPath) { $env:CODEX_HOME = Split-Path -Parent $McpConfigPath }
+          try { $output = $inputText | codex exec --full-auto --ephemeral --skip-git-repo-check - 2>&1 | Out-String } finally { $env:CODEX_HOME = $oldCodexHome }
+        }
+        "qoder" { $output = $inputText | qodercli -p 2>&1 | Out-String }
+        default {
+          $claudeArgs = @("--permission-mode", "acceptEdits")
+          $allowedToolsArg = Format-JobCliAllowedTools -Tools $CliAllowedTools
+          if ($allowedToolsArg) { $claudeArgs += @("--allowed-tools", $allowedToolsArg) }
+          if ($McpConfigPath) { $claudeArgs += @("--mcp-config", $McpConfigPath, "--strict-mcp-config") }
+          $claudeArgs += "-p"
+          $output = $inputText | claude @claudeArgs 2>&1 | Out-String
+        }
+      }
+      return [ordered]@{ exitCode = $LASTEXITCODE; output = $output.Trim() }
+    } finally {
+      Pop-Location
+    }
+  } -ArgumentList $AgentType, $MessageFile, $WorkDir, $CliAllowedTools, $ProjectName, $McpConfigPath
+
+  if (Wait-Job -Job $job -Timeout $timeoutSeconds) {
+    try {
+      $received = Receive-Job -Job $job
+      if ($received -is [array]) { $received = $received[-1] }
+      return $received
+    } finally {
+      Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  Stop-Job -Job $job -ErrorAction SilentlyContinue
+  Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+  return [ordered]@{ exitCode = 124; output = "Agent timed out after $timeoutSeconds seconds; runner stopped this child call to keep the queue moving" }
+}
 function Get-AgentCommandLabel {
   param([string]$AgentType)
   switch ($AgentType) {
     "cursor" { return "agent -p" }
     "gemini" { return "gemini -p" }
-    "codex" { return "codex -q" }
+    "codex" { return "codex exec --full-auto --ephemeral -" }
+    "qoder" { return "qodercli -p" }
     default { return "claude --permission-mode acceptEdits -p" }
   }
 }
@@ -173,13 +308,19 @@ function Invoke-RunnerRequest {
   $workDir = if ($request.workDir) { [string]$request.workDir } else { (Get-Location).Path }
   $agentType = if ($request.agentType) { [string]$request.agentType } else { "claudecode" }
   $commandLabel = Get-AgentCommandLabel -AgentType $agentType
+  $isProbeRequest = Test-AgentProbeRequest -Request $request
+  $effectiveCliAllowedTools = if ($isProbeRequest) { "" } else { Format-CliAllowedTools -CliAllowedTools $request.cliAllowedTools -ProjectName $request.projectName }
+  $effectiveCliAllowedToolsArray = if ($effectiveCliAllowedTools) { @($effectiveCliAllowedTools -split ",") } else { @() }
+  $commandLabelForResult = if ($effectiveCliAllowedTools) { "$commandLabel --allowed-tools $effectiveCliAllowedTools" } else { $commandLabel }
   $before = Get-GitEntries -WorkDir $workDir
 
   try {
     [string]$request.message | Set-Content -LiteralPath $messageFile -Encoding UTF8
-    $agentResult = Invoke-Agent -AgentType $agentType -MessageFile $messageFile -WorkDir $workDir
+    $agentResult = Invoke-Agent -AgentType $agentType -MessageFile $messageFile -WorkDir $workDir -CliAllowedTools $effectiveCliAllowedToolsArray -ProjectName $request.projectName -McpConfigPath ([string]$request.mcpConfigPath) -TimeoutMs ([int]$request.timeoutMs)
+    $runnerVerification = if ($isProbeRequest) { [ordered]@{ ccm_runner_verification = $true; status = "skipped"; verification = @(); failed = @(); results = @() } } else { Invoke-ProjectVerificationCommands -ProjectName $request.projectName -WorkDir $workDir }
+    $agentResult.output = Add-RunnerVerificationOutput -Output $agentResult.output -RunnerVerification $runnerVerification
     $fileChanges = Get-FileChanges -WorkDir $workDir -Before $before
-    $success = ($agentResult.exitCode -eq 0)
+    $success = ($agentResult.exitCode -eq 0 -and $runnerVerification.status -ne "failed")
     Write-JsonAtomic -Path $resultFile -Data ([ordered]@{
       id = $request.id
       success = $success
@@ -187,7 +328,10 @@ function Invoke-RunnerRequest {
       error = $(if ($success) { "" } else { $agentResult.output })
       fileChanges = $fileChanges
       agentType = $agentType
-      command = $commandLabel
+      command = $commandLabelForResult
+      cliAllowedTools = @($effectiveCliAllowedToolsArray)
+      effectiveCliAllowedTools = $effectiveCliAllowedTools
+      runnerVerification = $runnerVerification
       exitCode = $agentResult.exitCode
       runner = "powershell"
       completed_at = (Get-Date).ToUniversalTime().ToString("o")
@@ -202,7 +346,9 @@ function Invoke-RunnerRequest {
       error = [string]$_.Exception.Message
       fileChanges = $fileChanges
       agentType = $agentType
-      command = $commandLabel
+      command = $commandLabelForResult
+      cliAllowedTools = @($effectiveCliAllowedToolsArray)
+      effectiveCliAllowedTools = $effectiveCliAllowedTools
       exitCode = $null
       runner = "powershell"
       completed_at = (Get-Date).ToUniversalTime().ToString("o")
@@ -243,4 +389,8 @@ while ($true) {
   Invoke-RunnerOnce | Out-Null
   Start-Sleep -Seconds $IntervalSeconds
 }
+
+
+
+
 

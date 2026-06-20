@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { spawn } from "child_process";
-import { sendJson, CCM_DIR } from "../utils";
+import { sendJson, CCM_DIR, PUBLIC_DIR } from "../utils";
 import { loadMusicConfig, saveMusicConfig } from "../db";
 import { loadOrchestratorConfig, publicOrchestratorConfig } from "./group-orchestrator";
 
@@ -307,6 +307,143 @@ function parseMusicFilename(filename: string) {
   return { artist, title, bvid };
 }
 
+function getMp3Cover(filePath: string): { mimeType: string, data: Buffer } | null {
+  try {
+    const fd = fs.openSync(filePath, "r");
+    const stat = fs.fstatSync(fd);
+    const tagSizeHeader = Buffer.alloc(10);
+    fs.readSync(fd, tagSizeHeader, 0, 10, 0);
+
+    if (tagSizeHeader.toString("ascii", 0, 3) !== "ID3") {
+      fs.closeSync(fd);
+      return null;
+    }
+
+    const version = tagSizeHeader[3];
+    const tagSize = (tagSizeHeader[6] << 21) | (tagSizeHeader[7] << 14) | (tagSizeHeader[8] << 7) | tagSizeHeader[9];
+    
+    const tagBuffer = Buffer.alloc(tagSize);
+    fs.readSync(fd, tagBuffer, 0, tagSize, 10);
+    fs.closeSync(fd);
+
+    let offset = 0;
+    while (offset < tagSize - 10) {
+      let frameId = "";
+      if (version === 2) {
+        frameId = tagBuffer.toString("ascii", offset, offset + 3);
+      } else {
+        frameId = tagBuffer.toString("ascii", offset, offset + 4);
+      }
+
+      if (!frameId || frameId[0] === "\0" || /[^A-Z0-9]/.test(frameId)) {
+        break;
+      }
+
+      let frameSize = 0;
+      let headerSize = 0;
+      if (version === 2) {
+        frameSize = (tagBuffer[offset + 3] << 16) | (tagBuffer[offset + 4] << 8) | tagBuffer[offset + 5];
+        headerSize = 6;
+      } else if (version === 3) {
+        frameSize = tagBuffer.readUInt32BE(offset + 4);
+        headerSize = 10;
+      } else if (version === 4) {
+        const b0 = tagBuffer[offset + 4];
+        const b1 = tagBuffer[offset + 5];
+        const b2 = tagBuffer[offset + 6];
+        const b3 = tagBuffer[offset + 7];
+        frameSize = (b0 << 21) | (b1 << 14) | (b2 << 7) | b3;
+        headerSize = 10;
+      }
+
+      if (frameSize <= 0 || offset + headerSize + frameSize > tagSize) {
+        break;
+      }
+
+      const isAPIC = frameId === "APIC" || frameId === "PIC";
+      if (isAPIC) {
+        const frameContent = tagBuffer.subarray(offset + headerSize, offset + headerSize + frameSize);
+        let mimeType = "";
+        let pictureDataOffset = 0;
+
+        if (frameId === "APIC") {
+          const encoding = frameContent[0];
+          let mimeEnd = 1;
+          while (mimeEnd < frameContent.length && frameContent[mimeEnd] !== 0) {
+            mimeEnd++;
+          }
+          mimeType = frameContent.toString("ascii", 1, mimeEnd);
+          
+          let descStart = mimeEnd + 2;
+          let descEnd = descStart;
+          if (encoding === 1 || encoding === 2) {
+            while (descEnd < frameContent.length - 1 && !(frameContent[descEnd] === 0 && frameContent[descEnd + 1] === 0)) {
+              descEnd += 2;
+            }
+            pictureDataOffset = descEnd + 2;
+          } else {
+            while (descEnd < frameContent.length && frameContent[descEnd] !== 0) {
+              descEnd++;
+            }
+            pictureDataOffset = descEnd + 1;
+          }
+        } else {
+          const encoding = frameContent[0];
+          const imageFormat = frameContent.toString("ascii", 1, 4);
+          mimeType = imageFormat === "PNG" ? "image/png" : "image/jpeg";
+          
+          let descStart = 5;
+          let descEnd = descStart;
+          if (encoding === 1) {
+            while (descEnd < frameContent.length - 1 && !(frameContent[descEnd] === 0 && frameContent[descEnd + 1] === 0)) {
+              descEnd += 2;
+            }
+            pictureDataOffset = descEnd + 2;
+          } else {
+            while (descEnd < frameContent.length && frameContent[descEnd] !== 0) {
+              descEnd++;
+            }
+            pictureDataOffset = descEnd + 1;
+          }
+        }
+
+        const pictureData = frameContent.subarray(pictureDataOffset);
+        return { mimeType, data: pictureData };
+      }
+
+      offset += headerSize + frameSize;
+    }
+  } catch (e) {
+    console.error("[GetMp3Cover] error:", e);
+  }
+  return null;
+}
+
+const downloadingPaths = new Set<string>();
+let activeCoverDownloads = 0;
+const MAX_CONCURRENT_COVER_DOWNLOADS = 1;
+
+async function downloadCoverInBackground(cachePath: string) {
+  if (downloadingPaths.has(cachePath)) return;
+  downloadingPaths.add(cachePath);
+  try {
+    for (const url of ["http://www.dmoe.cc/random.php", "http://api.btstu.cn/sjbz/api.php?lx=dongman&format=images", "http://t.alcy.cc/acg", "http://api.amrno.com/api/acg"]) {
+      try {
+        const resp = await fetch(url, {
+          signal: AbortSignal.timeout(5000)
+        });
+        if (resp.ok) {
+          const buffer = Buffer.from(await resp.arrayBuffer());
+          fs.writeFileSync(cachePath, buffer);
+          break;
+        }
+      } catch {}
+    }
+  } catch {} finally {
+    downloadingPaths.delete(cachePath);
+  }
+}
+
 function searchLocalMusic(keyword: string) {
   const q = keyword.toLowerCase();
   return fs.readdirSync(MUSIC_DIR)
@@ -315,7 +452,7 @@ function searchLocalMusic(keyword: string) {
     .map((f, i) => {
       const stat = fs.statSync(path.join(MUSIC_DIR, f));
       const { artist, title, bvid } = parseMusicFilename(f);
-      return { id: i, filename: f, title, artist, bvid, size: stat.size };
+      return { id: i, filename: f, title, artist, bvid, pic: `/api/music/cover?file=${encodeURIComponent(f)}`, size: stat.size };
     });
 }
 
@@ -644,7 +781,7 @@ export function handleMusicApi(
         .map((f, i) => {
           const stat = fs.statSync(path.join(MUSIC_DIR, f));
           const { artist, title, bvid } = parseMusicFilename(f);
-          return { id: i, filename: f, title, artist, bvid, size: stat.size, modified: stat.mtime.toISOString() };
+          return { id: i, filename: f, title, artist, bvid, pic: `/api/music/cover?file=${encodeURIComponent(f)}`, size: stat.size, modified: stat.mtime.toISOString() };
         })
         .sort((a, b) => a.title.localeCompare(b.title));
       sendJson(res, { success: true, tracks: files });
@@ -889,6 +1026,449 @@ export function handleMusicApi(
         }
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
+      }
+    });
+    return true;
+  }
+
+  // === AI 歌曲金句接口 ===
+  if (pathname === "/api/music/song-quote" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk: any) => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { title, artist } = JSON.parse(body);
+        if (!title) {
+          return sendJson(res, { success: false, error: "Missing title" }, 400);
+        }
+        const cleanTitle = String(title).toLowerCase();
+        const cfg = loadOrchestratorConfig();
+        if (cfg.enabled && cfg.apiKey && cfg.model) {
+          try {
+            const prompt = `你是一个音乐感悟助手。请根据歌曲"${title}"（歌手：${artist || "未知"}），用一句话写出听这首歌时的心情感悟，要有诗意，20字以内，不要引号。`;
+            const llmRes: any = await fetch(cfg.apiUrl + "/chat/completions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
+              body: JSON.stringify({ model: cfg.model, messages: [{ role: "user", content: prompt }], max_tokens: 60, temperature: 0.9 }),
+              signal: AbortSignal.timeout(8000)
+            });
+            const llmData: any = await llmRes.json();
+            const quote = llmData?.choices?.[0]?.message?.content?.trim();
+            if (quote) return sendJson(res, { success: true, quote });
+          } catch (_) {}
+        }
+        // Fallback
+        const GENERAL_QUOTES = [
+          "音符流淌的瞬间，世界突然变得温柔了起来。",
+          "愿这首歌的旋律，能轻轻抚平你心底所有的褶皱。",
+          "有些话说不出，但音乐已帮你唱完了所有的思绪。",
+          "在旋律的缝隙里，藏着对生活最真挚的热爱与期待。",
+          "音乐是心灵的避难所，今晚就在这旋律中安心放空吧。",
+          "每一个跃动的音符，都是时间写给你的无声情书。",
+          "任凭窗外风雨飘摇，耳机里永远有属于你的晴空。",
+          "生活虽有颠簸，但音乐总会在合适的角落给你拥抱。",
+          "沉浸在旋律里，让那些疲惫在温柔的歌声中渐渐消散。",
+          "每一首歌都是一个漂流瓶，恰好在这个瞬间被你拾起。"
+        ];
+        sendJson(res, { success: true, quote: GENERAL_QUOTES[Math.floor(Math.random() * GENERAL_QUOTES.length)] });
+      } catch (e: any) {
+        sendJson(res, { success: false, error: e.message }, 500);
+      }
+    });
+    return true;
+  }
+
+  // === 歌曲封面同源代理（支持 MP3 解析与二次元哈希缓存） ===
+  if (pathname === "/api/music/cover" && req.method === "GET") {
+    const filename = parsed.query.file;
+    if (!filename || filename.includes("..")) {
+      res.writeHead(400);
+      res.end("Bad Request");
+      return true;
+    }
+    const filePath = path.join(MUSIC_DIR, filename);
+    if (!fs.existsSync(filePath)) {
+      res.writeHead(404);
+      res.end("Not Found");
+      return true;
+    }
+
+
+
+    const COVERS_CACHE_DIR = path.join(MUSIC_DIR, ".covers");
+    if (!fs.existsSync(COVERS_CACHE_DIR)) {
+      fs.mkdirSync(COVERS_CACHE_DIR, { recursive: true });
+    }
+    
+    const hash = crypto.createHash("md5").update(filename).digest("hex");
+    const cachePath = path.join(COVERS_CACHE_DIR, `${hash}.jpg`);
+
+    if (fs.existsSync(cachePath)) {
+      const buffer = fs.readFileSync(cachePath);
+      res.writeHead(200, {
+        "Content-Type": "image/jpeg",
+        "Content-Length": buffer.length,
+        "Cache-Control": "public, max-age=31536000"
+      });
+      res.end(buffer);
+      return true;
+    }
+
+    (async () => {
+      const cfg = loadMusicConfig();
+      let oldHttpProxy = process.env.HTTP_PROXY;
+      let oldHttpsProxy = process.env.HTTPS_PROXY;
+      if (cfg.proxy) {
+        process.env.HTTP_PROXY = cfg.proxy;
+        process.env.HTTPS_PROXY = cfg.proxy;
+      }
+
+      const cleanProxy = () => {
+        if (cfg.proxy) {
+          if (oldHttpProxy) process.env.HTTP_PROXY = oldHttpProxy; else delete process.env.HTTP_PROXY;
+          if (oldHttpsProxy) process.env.HTTPS_PROXY = oldHttpsProxy; else delete process.env.HTTPS_PROXY;
+        }
+      };
+
+      const fallbackToDefault = () => {
+        cleanProxy();
+        const animeCoversDir = path.join(PUBLIC_DIR, "anime_covers");
+        if (fs.existsSync(animeCoversDir)) {
+          const files = fs.readdirSync(animeCoversDir).filter(f => f.endsWith(".jpg") || f.endsWith(".png"));
+          if (files.length > 0) {
+            let sum = 0;
+            for (let i = 0; i < hash.length; i++) {
+              sum += hash.charCodeAt(i);
+            }
+            const index = sum % files.length;
+            const chosenFile = files[index];
+            const animePath = path.join(animeCoversDir, chosenFile);
+            if (fs.existsSync(animePath)) {
+              const buffer = fs.readFileSync(animePath);
+              try {
+                fs.writeFileSync(cachePath, buffer);
+              } catch (e) {
+                // Ignore cache write error
+              }
+              res.writeHead(200, {
+                "Content-Type": chosenFile.endsWith(".png") ? "image/png" : "image/jpeg",
+                "Content-Length": buffer.length,
+                "Cache-Control": "public, max-age=31536000"
+              });
+              res.end(buffer);
+              return;
+            }
+          }
+        }
+
+        const defaultPath = path.join(PUBLIC_DIR, "room_window_bg.png");
+        if (fs.existsSync(defaultPath)) {
+          const buffer = fs.readFileSync(defaultPath);
+          res.writeHead(200, {
+            "Content-Type": "image/png",
+            "Content-Length": buffer.length,
+            "Cache-Control": "public, max-age=60"
+          });
+          res.end(buffer);
+        } else {
+          res.writeHead(404);
+          res.end("Not Found");
+        }
+      };
+
+      try {
+        let success = false;
+        let imgBuffer: Buffer | null = null;
+        let mimeType = "image/jpeg";
+
+        for (const url of ["http://www.dmoe.cc/random.php", "http://api.btstu.cn/sjbz/api.php?lx=dongman&format=images", "http://t.alcy.cc/acg", "http://api.amrno.com/api/acg"]) {
+          try {
+            const resp = await fetch(url, {
+              signal: AbortSignal.timeout(4500)
+            });
+            if (resp.ok) {
+              imgBuffer = Buffer.from(await resp.arrayBuffer());
+              mimeType = resp.headers.get("content-type") || "image/jpeg";
+              success = true;
+              break;
+            }
+          } catch (e: any) {
+            // 忽略单次连接失败
+          }
+        }
+
+        if (success && imgBuffer) {
+          fs.writeFileSync(cachePath, imgBuffer);
+          cleanProxy();
+          res.writeHead(200, {
+            "Content-Type": mimeType,
+            "Content-Length": imgBuffer.length,
+            "Cache-Control": "public, max-age=31536000"
+          });
+          res.end(imgBuffer);
+        } else {
+          fallbackToDefault();
+        }
+      } catch (err: any) {
+        fallbackToDefault();
+      }
+    })();
+    return true;
+  }
+
+  // === 代理获取天气接口（三级高可用容灾版） ===
+  if (pathname === "/api/music/weather" && req.method === "GET") {
+    const lat = parsed.query.lat;
+    const lon = parsed.query.lon;
+    
+    (async () => {
+      const cfg = loadMusicConfig();
+      let oldHttpProxy = process.env.HTTP_PROXY;
+      let oldHttpsProxy = process.env.HTTPS_PROXY;
+      if (cfg.proxy) {
+        process.env.HTTP_PROXY = cfg.proxy;
+        process.env.HTTPS_PROXY = cfg.proxy;
+      }
+      
+      const cleanProxy = () => {
+        if (cfg.proxy) {
+          if (oldHttpProxy) process.env.HTTP_PROXY = oldHttpProxy; else delete process.env.HTTP_PROXY;
+          if (oldHttpsProxy) process.env.HTTPS_PROXY = oldHttpsProxy; else delete process.env.HTTPS_PROXY;
+        }
+      };
+
+      const isHealthy = (str: string) => {
+        if (!str) return false;
+        const s = str.trim();
+        return s.length > 0 && s.length <= 25 && !s.includes("<") && !s.includes("{") && !s.includes("style");
+      };
+
+      const translateWeather = (raw: string) => {
+        let cleaned = raw.trim().replace(/\+/g, "");
+        const weatherMap: Record<string, string> = {
+          "partly cloudy": "多云",
+          "cloudy": "多云",
+          "sunny": "晴",
+          "clear": "晴",
+          "overcast": "阴",
+          "light rain": "小雨",
+          "heavy rain": "大雨",
+          "rain": "雨",
+          "snow": "雪",
+          "smoky haze": "霾",
+          "haze": "霾",
+          "fog": "雾",
+          "mist": "雾",
+          "windy": "有风",
+          "thunderstorm": "雷阵雨"
+        };
+        let translated = cleaned;
+        for (const eng of Object.keys(weatherMap)) {
+          const reg = new RegExp(eng, "gi");
+          translated = translated.replace(reg, weatherMap[eng]);
+        }
+        return translated;
+      };
+
+      // 阶段 1：HTTPS wttr.in
+      try {
+        let url = "https://wttr.in/?m&format=%C+%t&lang=zh";
+        if (lat && lon) {
+          url = `https://wttr.in/${lat},${lon}?m&format=%C+%t&lang=zh`;
+        }
+        const resp = await fetch(url, {
+          headers: { "User-Agent": "curl/8.4.0" },
+          signal: AbortSignal.timeout(3500)
+        });
+        const text = await resp.text();
+        const translated = translateWeather(text);
+        if (isHealthy(translated)) {
+          cleanProxy();
+          return sendJson(res, { success: true, weather: translated });
+        }
+      } catch (err: any) {
+        console.warn("[Weather Proxy] Stage 1 (HTTPS wttr.in) failed:", err.message);
+      }
+
+      // 阶段 2：HTTP wttr.in (绕过 SSL 阻断)
+      try {
+        let url = "http://wttr.in/?m&format=%C+%t&lang=zh";
+        if (lat && lon) {
+          url = `http://wttr.in/${lat},${lon}?m&format=%C+%t&lang=zh`;
+        }
+        const resp = await fetch(url, {
+          headers: { "User-Agent": "curl/8.4.0" },
+          signal: AbortSignal.timeout(3500)
+        });
+        const text = await resp.text();
+        const translated = translateWeather(text);
+        if (isHealthy(translated)) {
+          cleanProxy();
+          return sendJson(res, { success: true, weather: translated });
+        }
+      } catch (err: any) {
+        console.warn("[Weather Proxy] Stage 2 (HTTP wttr.in) failed:", err.message);
+      }
+
+      // 阶段 3：国内 IP-API + 科大讯飞天气
+      try {
+        const ipResp = await fetch("http://ip-api.com/json/?lang=zh-CN", {
+          signal: AbortSignal.timeout(3000)
+        });
+        const ipData: any = await ipResp.json();
+        if (ipData && ipData.status === "success" && ipData.city) {
+          const city = ipData.city.replace(/市$/, "");
+          const weatherUrl = `http://autodev.openspeech.cn/api/v1/weather?openId=12345678&city=${encodeURIComponent(city)}`;
+          const wResp = await fetch(weatherUrl, {
+            signal: AbortSignal.timeout(3000)
+          });
+          const wData: any = await wResp.json();
+          if (wData && wData.code === 0 && wData.data && wData.data.list && wData.data.list.length > 0) {
+            const item = wData.data.list[0];
+            const wText = item.weather || "";
+            const tempText = (item.temp && item.temp !== 0) ? `${item.temp}°C` : `${item.low}~${item.high}°C`;
+            const result = `${wText} ${tempText}`.trim();
+            if (isHealthy(result)) {
+              cleanProxy();
+              return sendJson(res, { success: true, weather: result });
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error("[Weather Proxy] Stage 3 (Domestic API Fallback) failed:", err.message);
+      }
+
+      cleanProxy();
+      sendJson(res, { success: false, error: "所有天气接口获取均失败" });
+    })();
+    return true;
+  }
+
+  if (pathname === "/api/music/song-emotion" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk: any) => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { title, artist } = JSON.parse(body);
+        if (!title) {
+          return sendJson(res, { success: false, error: "Missing title" }, 400);
+        }
+        const emotionLabels = ["惬意", "治愈", "温柔", "怀念", "放空", "舒缓", "思念", "平静", "动感", "感动"];
+        const cfg = loadOrchestratorConfig();
+        if (cfg.enabled && cfg.apiKey && cfg.model) {
+          try {
+            const prompt = `你是一个音乐情绪分析助手。根据歌曲名"${title}"（歌手：${artist || "未知"}），从以下标签选一个最符合的情绪，只输出标签本身：${emotionLabels.join("、")}`;
+            const llmRes: any = await fetch(cfg.apiUrl + "/chat/completions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
+              body: JSON.stringify({ model: cfg.model, messages: [{ role: "user", content: prompt }], max_tokens: 20, temperature: 0.7 }),
+              signal: AbortSignal.timeout(8000)
+            });
+            const llmData: any = await llmRes.json();
+            const raw = llmData?.choices?.[0]?.message?.content?.trim() || "";
+            const matched = emotionLabels.find(e => raw.includes(e));
+            if (matched) return sendJson(res, { success: true, emotion: matched });
+          } catch (_) {}
+        }
+        const t = String(title).toLowerCase();
+        let fallback = "惬意";
+        if (t.includes("晚安") || t.includes("夜")) fallback = "舒缓";
+        else if (t.includes("思念") || t.includes("想你")) fallback = "思念";
+        else if (t.includes("再见") || t.includes("离别")) fallback = "怀念";
+        else if (t.includes("治愈") || t.includes("温暖")) fallback = "治愈";
+        else if (t.includes("快乐") || t.includes("开心")) fallback = "动感";
+        else fallback = emotionLabels[Math.floor(Math.random() * emotionLabels.length)];
+        sendJson(res, { success: true, emotion: fallback });
+      } catch (e: any) {
+        sendJson(res, { success: false, error: e.message }, 500);
+      }
+    });
+    return true;
+  }
+
+  // === AI 歌曲金句接口 ===
+  if (pathname === "/api/music/song-quote" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk: any) => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { title, artist } = JSON.parse(body);
+        if (!title) {
+          return sendJson(res, { success: false, error: "Missing title" }, 400);
+        }
+        const cfg = loadOrchestratorConfig();
+        if (cfg.enabled && cfg.apiKey && cfg.model) {
+          try {
+            const prompt = `你是一个音乐感悟助手。根据歌曲"${title}"（歌手：${artist || "未知"}），用一句话写出听这首歌的心情感悟，要有诗意，20字以内，不要引号。`;
+            const llmRes = await fetch(cfg.apiUrl + "/chat/completions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
+              body: JSON.stringify({ model: cfg.model, messages: [{ role: "user", content: prompt }], max_tokens: 60, temperature: 0.9 }),
+              signal: AbortSignal.timeout(8000)
+            });
+            const llmData: any = await llmRes.json();
+            const quote = llmData?.choices?.[0]?.message?.content?.trim();
+            if (quote) return sendJson(res, { success: true, quote });
+          } catch (_) {}
+        }
+        const QUOTES = [
+          "音符流淌的瞬间，世界突然变得温柔了起来。",
+          "愿这首歌的旋律，能轻轻抚平你心底所有的褶皱。",
+          "有些话说不出，但音乐已帮你唱完了所有的思绪。",
+          "在旋律的缝隙里，藏着对生活最真挚的热爱与期待。",
+          "音乐是心灵的避难所，今晚就在这旋律中安心放空吧。",
+          "每一个跃动的音符，都是时间写给你的无声情书。",
+          "任凭窗外风雨飘摇，耳机里永远有属于你的晴空。",
+          "生活虽有颠簸，但音乐总会在合适的角落给你拥抱。",
+          "沉浸在旋律里，让那些疲惫在温柔的歌声中渐渐消散。",
+          "每一首歌都是一个漂流瓶，恰好在这个瞬间被你拾起。"
+        ];
+        sendJson(res, { success: true, quote: QUOTES[Math.floor(Math.random() * QUOTES.length)] });
+      } catch (e: any) {
+        sendJson(res, { success: false, error: e.message }, 500);
+      }
+    });
+    return true;
+  }
+
+  // === 歌曲情绪分析接口 ===
+  if (pathname === "/api/music/song-emotion" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk: any) => body += chunk);
+    req.on("end", async () => {
+      try {
+        const { title, artist } = JSON.parse(body);
+        if (!title) {
+          return sendJson(res, { success: false, error: "Missing title" }, 400);
+        }
+        const emotionLabels = ["惬意", "治愈", "温柔", "怀念", "放空", "舒缓", "思念", "平静", "动感", "感动"];
+        const cfg = loadOrchestratorConfig();
+        if (cfg.enabled && cfg.apiKey && cfg.model) {
+          try {
+            const prompt = `你是音乐情绪分析助手。根据歌曲名"${title}"（歌手：${artist || "未知"}），从以下标签选一个最符合的情绪，只输出标签本身，不要解释：${emotionLabels.join("、")}`;
+            const llmRes = await fetch(cfg.apiUrl + "/chat/completions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
+              body: JSON.stringify({ model: cfg.model, messages: [{ role: "user", content: prompt }], max_tokens: 20, temperature: 0.7 }),
+              signal: AbortSignal.timeout(8000)
+            });
+            const llmData: any = await llmRes.json();
+            const raw = llmData?.choices?.[0]?.message?.content?.trim() || "";
+            const matched = emotionLabels.find(e => raw.includes(e));
+            if (matched) return sendJson(res, { success: true, emotion: matched });
+          } catch (_) {}
+        }
+        const t = String(title).toLowerCase();
+        let fallback = "惬意";
+        if (t.includes("晚安") || t.includes("夜")) fallback = "舒缓";
+        else if (t.includes("思念") || t.includes("想你")) fallback = "思念";
+        else if (t.includes("再见") || t.includes("离别")) fallback = "怀念";
+        else if (t.includes("治愈") || t.includes("温暖")) fallback = "治愈";
+        else if (t.includes("快乐") || t.includes("开心")) fallback = "动感";
+        else fallback = emotionLabels[Math.floor(Math.random() * emotionLabels.length)];
+        sendJson(res, { success: true, emotion: fallback });
+      } catch (e: any) {
+        sendJson(res, { success: false, error: e.message }, 500);
       }
     });
     return true;

@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.FEISHU_SCOPES = void 0;
+exports.loadGroups = loadGroups;
 exports.buildEvidenceGateFollowUps = buildEvidenceGateFollowUps;
 exports.createAndQueueTask = createAndQueueTask;
 exports.resumeTaskQueues = resumeTaskQueues;
@@ -57,6 +58,7 @@ const utils_1 = require("../utils");
 const db_1 = require("../db");
 const group_orchestrator_1 = require("./group-orchestrator");
 const agent_runtime_1 = require("../agent-runtime");
+const runtime_tool_sync_1 = require("../runtime-tool-sync");
 const agent_worktree_1 = require("../agent-worktree");
 // === 任务队列系统（支持并行执行）===
 const taskQueues = new Map(); // 每个目标（群聊/Agent）独立队列
@@ -73,6 +75,9 @@ const AGENT_PROBE_SUCCESS_FRESH_MS = 30 * 60 * 1000;
 const AGENT_PROBE_FAILURE_BLOCK_MS = 15 * 60 * 1000;
 const AGENT_RUNNER_DIR = path.join(utils_1.CCM_DIR, "agent-runner");
 const AGENT_PROBE_STATUS_FILE = path.join(AGENT_RUNNER_DIR, "probe-status.json");
+const AGENT_PROBE_TARGET_STATUS_DIR = path.join(AGENT_RUNNER_DIR, "probe-targets");
+const AGENT_QA_FILE = path.join(utils_1.CCM_DIR, "agent-qa.json");
+const AGENT_QA_TIMEOUT_MS = 5 * 60 * 1000;
 let taskWatchdogTimer = null;
 let agentRecoveryMonitorTimer = null;
 let agentRecoveryProbeInFlight = false;
@@ -197,6 +202,111 @@ function saveGroupMessages(groupId, messages) {
     }
     fs.writeFileSync(path.join(utils_1.GROUP_MESSAGES_DIR, `${groupId}.json`), JSON.stringify(messages, null, 2));
 }
+function loadAgentQaItems() {
+    if (!fs.existsSync(AGENT_QA_FILE))
+        return [];
+    try {
+        const data = JSON.parse(fs.readFileSync(AGENT_QA_FILE, "utf-8"));
+        return Array.isArray(data) ? data : [];
+    }
+    catch {
+        return [];
+    }
+}
+function saveAgentQaItems(items) {
+    fs.writeFileSync(AGENT_QA_FILE, JSON.stringify((items || []).slice(-800), null, 2));
+}
+function upsertAgentQaItem(item) {
+    const items = loadAgentQaItems();
+    const idx = items.findIndex((entry) => entry.id === item.id);
+    const existing = idx >= 0 ? items[idx] : {};
+    const now = new Date().toISOString();
+    const next = {
+        created_at: existing.created_at || item.created_at || now,
+        retry_count: Number(existing.retry_count || item.retry_count || 0),
+        manual_takeover: !!(existing.manual_takeover || item.manual_takeover),
+        ...existing,
+        ...item,
+        updated_at: now,
+    };
+    if (idx >= 0)
+        items[idx] = next;
+    else
+        items.push(next);
+    saveAgentQaItems(items);
+    return next;
+}
+function markExpiredAgentQaItems(groupId = "") {
+    const nowMs = Date.now();
+    const items = loadAgentQaItems();
+    let changed = false;
+    const expired = [];
+    for (const item of items) {
+        if (groupId && item.group_id !== groupId)
+            continue;
+        if (!["waiting", "asking", "queued"].includes(String(item.status || "")))
+            continue;
+        const timeoutAt = item.timeout_at ? Date.parse(item.timeout_at) : 0;
+        if (!timeoutAt || timeoutAt > nowMs)
+            continue;
+        item.status = "timeout";
+        item.timed_out_at = new Date().toISOString();
+        item.updated_at = item.timed_out_at;
+        item.audit = [...(Array.isArray(item.audit) ? item.audit : []), { at: item.timed_out_at, type: "timeout", detail: "目标 Agent 未在预期时间内回答" }].slice(-30);
+        expired.push(item);
+        changed = true;
+    }
+    if (changed)
+        saveAgentQaItems(items);
+    return expired;
+}
+function getAgentQaItemsForGroup(groupId, limit = 80) {
+    markExpiredAgentQaItems(groupId || "");
+    return loadAgentQaItems()
+        .filter((item) => !groupId || item.group_id === groupId)
+        .slice(-limit);
+}
+function setAgentQaManualTakeover(id, reason = "") {
+    const current = loadAgentQaItems().find((item) => item.id === id);
+    if (!current)
+        return null;
+    return upsertAgentQaItem({
+        ...current,
+        status: "manual",
+        manual_takeover: true,
+        manual_reason: compactMemoryText(reason || "用户接管该 Agent 问答", 500),
+        manual_at: new Date().toISOString(),
+        audit: [...(Array.isArray(current.audit) ? current.audit : []), { at: new Date().toISOString(), type: "manual_takeover", detail: reason || "用户接管" }].slice(-30),
+    });
+}
+function buildAgentQaMessage(kind, qa, content = "") {
+    const qaContent = content || qa.answer || qa.question || "";
+    return {
+        id: "m" + Date.now().toString(36) + "qa" + crypto.randomBytes(2).toString("hex"),
+        role: "assistant",
+        agent: kind === "answer" ? qa.to_agent : qa.from_agent,
+        type: "agent_qa",
+        content: qaContent,
+        timestamp: new Date().toISOString(),
+        task_id: qa.task_id || undefined,
+        qa: {
+            ...qa,
+            kind,
+            status: kind === "question" ? "waiting" : qa.status || "answered",
+        },
+    };
+}
+function emitAgentQaEvent(streamRes, kind, qa, content = "") {
+    writeSse(streamRes, {
+        type: "agent_qa",
+        kind,
+        qa: {
+            ...qa,
+            kind,
+            content: content || qa.answer || qa.question || "",
+        },
+    });
+}
 function getGroupMemoryFile(groupId) {
     return path.join(GROUP_MEMORY_DIR, `${groupId}.json`);
 }
@@ -210,6 +320,9 @@ function createEmptyGroupMemory(groupId) {
         completed: [],
         blocked: [],
         workerLedger: [],
+        agentMemories: {},
+        messageDigest: "",
+        messageCompression: { enabled: true, recentLimit: 12, olderLimit: 30, totalMessages: 0, compressedMessages: 0, lastCompressedAt: "" },
         openQuestions: [],
         nextActions: [],
         updated_at: new Date().toISOString(),
@@ -277,6 +390,9 @@ function compressGroupMemory(memory) {
     compressList("completed", 10, "历史完成", (item) => `${item.project || "unknown"}:${item.summary || ""}`);
     compressList("blocked", 8, "历史阻塞", (item) => `${item.project || "unknown"}:${item.reason || ""}`);
     compressList("workerLedger", 18, "历史 Worker 通知", (item) => `${item.project || "unknown"}:${item.status || ""}:${item.summary || ""}`);
+    if (!next.agentMemories || !Object.keys(next.agentMemories || {}).length) {
+        next.agentMemories = normalizeAgentMemories({}, next.workerLedger || []);
+    }
     compressList("openQuestions", 6, "历史问题", (item) => String(item.question || item));
     compressList("nextActions", 6, "历史下一步", (item) => String(item.action || item));
     const mergedSummary = [next.summary || "", ...summaryParts].filter(Boolean).join(" | ");
@@ -284,7 +400,7 @@ function compressGroupMemory(memory) {
     return next;
 }
 function buildGroupMemoryContext(memory) {
-    if (!memory || (!memory.goal && !memory.decisions?.length && !memory.completed?.length && !memory.blocked?.length && !memory.workerLedger?.length && !memory.openQuestions?.length && !memory.nextActions?.length)) {
+    if (!memory || (!memory.goal && !memory.decisions?.length && !memory.completed?.length && !memory.blocked?.length && !memory.workerLedger?.length && !Object.keys(memory.agentMemories || {}).length && !memory.openQuestions?.length && !memory.nextActions?.length)) {
         return "";
     }
     const lines = [
@@ -294,6 +410,10 @@ function buildGroupMemoryContext(memory) {
     ];
     if (memory.summary)
         lines.push(`- 压缩摘要：${compactMemoryText(memory.summary, 900)}`);
+    if (memory.messageDigest)
+        lines.push(`- 群聊旧消息压缩：${compactMemoryText(memory.messageDigest, 900)}`);
+    if (memory.messageCompression?.compressedMessages)
+        lines.push(`- 压缩状态：共 ${memory.messageCompression.totalMessages || 0} 条消息，旧消息压缩 ${memory.messageCompression.compressedMessages || 0} 条，近期原文 ${memory.messageCompression.recentLimit || 0} 条。`);
     const addList = (title, items, mapper) => {
         if (!items?.length)
             return;
@@ -309,40 +429,200 @@ function buildGroupMemoryContext(memory) {
     addList("下一步", memory.nextActions || [], (item) => String(item.action || item));
     return lines.join("\n");
 }
+function normalizeAgentMemoryProject(project) {
+    return String(project || "").trim() || "unknown";
+}
+function formatAgentMemoryReceipt(item) {
+    return [
+        `[${item.status || item.receiptStatus || "unknown"}]`,
+        item.summary || "无摘要",
+        item.filesChanged?.length ? `文件：${item.filesChanged.slice(0, 6).join("、")}` : "",
+        item.verification?.length ? `验证：${item.verification.slice(0, 4).join("、")}` : "",
+        item.blockers?.length ? `阻塞：${item.blockers.slice(0, 3).join("、")}` : "",
+        item.needs?.length ? `需要：${item.needs.slice(0, 3).join("、")}` : "",
+    ].filter(Boolean).join("；");
+}
+function createEmptyAgentMemory(project) {
+    return {
+        project: normalizeAgentMemoryProject(project),
+        summary: "",
+        recentReceipts: [],
+        frequentFiles: [],
+        verificationHints: [],
+        blockers: [],
+        needs: [],
+        stats: { totalReceipts: 0, compressedReceipts: 0, recentReceipts: 0, lastUpdatedAt: "" },
+    };
+}
+function upsertAgentMemory(agentMemories = {}, item = {}) {
+    const normalized = normalizeWorkerLedgerItem(item);
+    const project = normalizeAgentMemoryProject(normalized.project);
+    if (!project || project === "unknown")
+        return agentMemories || {};
+    const current = { ...createEmptyAgentMemory(project), ...((agentMemories || {})[project] || {}) };
+    const entry = {
+        time: normalized.time,
+        taskId: normalized.taskId,
+        status: normalized.status,
+        receiptStatus: normalized.receiptStatus,
+        summary: compactMemoryText(normalized.summary, 420),
+        filesChanged: normalized.filesChanged || [],
+        verification: normalized.verification || [],
+        blockers: normalized.blockers || [],
+        needs: normalized.needs || [],
+    };
+    const allReceipts = uniqueByKey([...(current.recentReceipts || []), entry], (x) => [x.taskId || "", x.status || "", x.receiptStatus || "", x.summary || ""].join("|"), 20);
+    const older = allReceipts.slice(0, Math.max(0, allReceipts.length - 8));
+    const recentReceipts = allReceipts.slice(-8);
+    const summaryParts = [current.summary || "", ...older.map((x) => formatAgentMemoryReceipt(x))].filter(Boolean);
+    const files = Array.from(new Set([...(current.frequentFiles || []), ...(entry.filesChanged || [])].filter(Boolean))).slice(-20);
+    const verification = Array.from(new Set([...(current.verificationHints || []), ...(entry.verification || [])].filter(Boolean))).slice(-20);
+    const blockers = Array.from(new Set([...(current.blockers || []), ...(entry.blockers || [])].filter(Boolean))).slice(-20);
+    const needs = Array.from(new Set([...(current.needs || []), ...(entry.needs || [])].filter(Boolean))).slice(-20);
+    const totalReceipts = Math.max(Number(current.stats?.totalReceipts || 0) + 1, recentReceipts.length + Number(current.stats?.compressedReceipts || 0));
+    return {
+        ...(agentMemories || {}),
+        [project]: {
+            project,
+            summary: compactMemoryText(summaryParts.join(" | "), 1800),
+            recentReceipts,
+            frequentFiles: files,
+            verificationHints: verification,
+            blockers,
+            needs,
+            stats: {
+                totalReceipts,
+                compressedReceipts: Math.max(0, totalReceipts - recentReceipts.length),
+                recentReceipts: recentReceipts.length,
+                lastUpdatedAt: new Date().toISOString(),
+            },
+        },
+    };
+}
+function normalizeAgentMemories(agentMemories = {}, workerLedger = []) {
+    let next = { ...(agentMemories || {}) };
+    for (const item of workerLedger || [])
+        next = upsertAgentMemory(next, item);
+    return next;
+}
 function buildAgentMemoryPacket(groupId, targetProject, task = "") {
     const memory = loadGroupMemory(groupId);
-    const ownCompleted = (memory.completed || []).filter((item) => item.project === targetProject).slice(-4);
-    const otherCompleted = (memory.completed || []).filter((item) => item.project !== targetProject).slice(-5);
-    const ownBlocked = (memory.blocked || []).filter((item) => item.project === targetProject).slice(-4);
-    const globalBlocked = (memory.blocked || []).filter((item) => item.project !== targetProject).slice(-4);
-    const ownLedger = (memory.workerLedger || []).filter((item) => item.project === targetProject).slice(-4);
-    const relatedLedger = (memory.workerLedger || []).filter((item) => item.project !== targetProject).slice(-8);
+    const project = normalizeAgentMemoryProject(targetProject);
+    const agentMemory = { ...createEmptyAgentMemory(project), ...((memory.agentMemories || {})[project] || {}) };
+    const ownCompleted = (memory.completed || []).filter((item) => item.project === project).slice(-4);
+    const otherCompleted = (memory.completed || []).filter((item) => item.project !== project).slice(-4);
+    const ownBlocked = (memory.blocked || []).filter((item) => item.project === project).slice(-4);
+    const globalBlocked = (memory.blocked || []).filter((item) => item.project !== project).slice(-3);
+    const relatedLedger = (memory.workerLedger || []).filter((item) => item.project !== project).slice(-5);
     const lines = [
-        "本次任务记忆包（由主 Agent 提供；即使你的底层 Agent 没有长期记忆，也必须以此为准）：",
+        "子 Agent 受控记忆包（平台生成，优先级高于第三方 CLI 自带历史）：",
+        `- 目标子 Agent：${project}`,
         `- 群聊目标：${memory.goal || "未记录"}`,
         `- 当前阶段：${memory.currentPhase || "idle"}`,
+        "- 记忆边界：只以本包、本轮任务、近期原文窗口和明确前置输出为准；不要假定 Claude Code/Cursor/Codex 等第三方 Agent 内部 session 记得旧上下文。",
+        "- 上下文策略：旧消息已由 CCM 平台压缩；如果需要原文，应在回执 needs 中按 message id 请求用户或主 Agent 补充。",
     ];
+    if (agentMemory.stats?.totalReceipts) {
+        lines.push(`- 子 Agent 记忆统计：总回执 ${agentMemory.stats.totalReceipts}，压缩 ${agentMemory.stats.compressedReceipts || 0}，近期保留 ${agentMemory.stats.recentReceipts || 0}。`);
+    }
+    if (agentMemory.summary)
+        lines.push(`- 你的长期压缩摘要：${compactMemoryText(agentMemory.summary, 900)}`);
     if (memory.summary)
-        lines.push(`- 压缩摘要：${compactMemoryText(memory.summary, 700)}`);
+        lines.push(`- 群聊全局压缩摘要：${compactMemoryText(memory.summary, 500)}`);
+    if (memory.messageDigest)
+        lines.push(`- 群聊旧消息压缩：${compactMemoryText(memory.messageDigest, 500)}`);
     if (task)
-        lines.push(`- 你本次任务：${compactMemoryText(task, 700)}`);
-    const addList = (title, items, mapper) => {
-        if (!items.length)
+        lines.push(`- 你本次任务：${compactMemoryText(task, 900)}`);
+    const addList = (title, items, mapper, limit = 6) => {
+        const list = (items || []).filter(Boolean).slice(-limit);
+        if (!list.length)
             return;
         lines.push(`- ${title}：`);
-        for (const item of items)
+        for (const item of list)
             lines.push(`  - ${mapper(item)}`);
     };
-    addList("你之前的完成记录", ownCompleted, (item) => `${item.summary || ""}${item.verification?.length ? `；验证：${item.verification.join("、")}` : ""}`);
-    addList("其他 Agent 已完成", otherCompleted, (item) => `${item.project || "unknown"}：${item.summary || ""}`);
-    addList("协作 scratchpad / 你自己的 Worker 通知", ownLedger, (item) => `[${item.status || "unknown"}] ${item.summary || ""}${item.filesChanged?.length ? `；文件：${item.filesChanged.join("、")}` : ""}`);
-    addList("协作 scratchpad / 其他 Worker 通知", relatedLedger, (item) => `${item.project || "unknown"} [${item.status || "unknown"}]：${item.summary || ""}${item.blockers?.length ? `；阻塞：${item.blockers.join("、")}` : ""}`);
-    addList("与你相关的阻塞", ownBlocked, (item) => `${item.reason || ""}${item.needs?.length ? `；需要：${item.needs.join("、")}` : ""}`);
-    addList("全局阻塞", globalBlocked, (item) => `${item.project || "unknown"}：${item.reason || ""}`);
-    addList("开放问题", memory.openQuestions || [], (item) => String(item.question || item));
-    addList("下一步", memory.nextActions || [], (item) => String(item.action || item));
+    addList("你的近期结构化回执", agentMemory.recentReceipts || [], (item) => formatAgentMemoryReceipt(item), 8);
+    addList("你常涉及的文件", agentMemory.frequentFiles || [], (item) => String(item), 10);
+    addList("你已有验证线索", agentMemory.verificationHints || [], (item) => String(item), 8);
+    addList("你仍需处理的阻塞", [...(agentMemory.blockers || []), ...(agentMemory.needs || [])], (item) => String(item), 8);
+    addList("你之前的完成记录", ownCompleted, (item) => `${item.summary || ""}${item.verification?.length ? `；验证：${item.verification.join("、")}` : ""}`, 4);
+    addList("其他 Agent 已完成", otherCompleted, (item) => `${item.project || "unknown"}：${item.summary || ""}`, 4);
+    addList("其他 Agent 近期回执", relatedLedger, (item) => `${item.project || "unknown"} [${item.status || "unknown"}]：${item.summary || ""}${item.blockers?.length ? `；阻塞：${item.blockers.join("、")}` : ""}`, 5);
+    addList("与你相关的阻塞", ownBlocked, (item) => `${item.reason || ""}${item.needs?.length ? `；需要：${item.needs.join("、")}` : ""}`, 4);
+    addList("全局阻塞", globalBlocked, (item) => `${item.project || "unknown"}：${item.reason || ""}`, 3);
+    addList("开放问题", memory.openQuestions || [], (item) => String(item.question || item), 4);
+    addList("下一步", memory.nextActions || [], (item) => String(item.action || item), 4);
     lines.push("- 回执要求：回复末尾必须包含 CCM_AGENT_RECEIPT；不能编造未执行的验证或文件修改。");
     return lines.join("\n");
+}
+function getGroupMessageMemoryWho(message) {
+    if (message?.role === "user")
+        return `[用户 -> ${message.target || "all"}]`;
+    if (message?.role === "thinking")
+        return "[系统思考]";
+    return `[${message?.agent || "Agent"}]`;
+}
+function buildGroupMessageMemoryLine(message, max = 260) {
+    const time = message?.timestamp ? String(message.timestamp).slice(0, 19).replace("T", " ") : "unknown-time";
+    const id = message?.id ? `#${message.id}` : "#local";
+    const who = getGroupMessageMemoryWho(message);
+    const content = compactMemoryText(message?.content || message?.delivery_summary?.headline || "", max);
+    const extras = [];
+    if (Array.isArray(message?.assignments) && message.assignments.length) {
+        extras.push(`派发:${message.assignments.slice(0, 4).map((item) => `${item.project || item.target || "unknown"}:${item.status || "pending"}`).join(",")}`);
+    }
+    if (message?.fileChanges?.count)
+        extras.push(`文件变更:${message.fileChanges.count}`);
+    if (message?.delivery_summary?.headline)
+        extras.push(`交付:${compactMemoryText(message.delivery_summary.headline, 120)}`);
+    return `- ${time} ${id} ${who} ${content}${extras.length ? `（${extras.join("；")}）` : ""}`;
+}
+function buildCompressedGroupMessageDigest(messages, limit = 30) {
+    const source = (messages || []).filter((message) => !String(message?.content || "").startsWith("📤"));
+    if (!source.length)
+        return "";
+    const omitted = Math.max(0, source.length - limit);
+    const lines = source.slice(-limit).map((message) => buildGroupMessageMemoryLine(message, 220));
+    if (omitted > 0)
+        lines.unshift(`- 更早 ${omitted} 条旧消息已进一步折叠，仅保留在原始群聊记录中，可按 message id 回溯。`);
+    return lines.join("\n");
+}
+function buildGroupContextPacket(groupId, options = {}) {
+    const recentLimit = Math.max(4, Number(options.recentLimit || options.recent_limit || 12));
+    const olderLimit = Math.max(6, Number(options.olderLimit || options.older_limit || 30));
+    const fullCount = Math.max(3, Number(options.fullCount || options.full_count || 5));
+    const allMessages = getGroupMessages(groupId).filter((message) => !String(message?.content || "").startsWith("📤"));
+    const recentMessages = allMessages.slice(-recentLimit);
+    const olderMessages = allMessages.slice(0, Math.max(0, allMessages.length - recentLimit));
+    const digest = buildCompressedGroupMessageDigest(olderMessages, olderLimit);
+    const compression = {
+        enabled: true,
+        recentLimit,
+        olderLimit,
+        totalMessages: allMessages.length,
+        compressedMessages: olderMessages.length,
+        recentMessages: recentMessages.length,
+        lastCompressedAt: new Date().toISOString(),
+    };
+    const memory = saveGroupMemory(groupId, {
+        ...loadGroupMemory(groupId),
+        messageDigest: digest,
+        messageCompression: compression,
+    });
+    const sections = [buildGroupMemoryContext(memory)];
+    if (digest) {
+        sections.push([
+            "群聊旧消息压缩摘要（旧消息不直接塞满上下文；需要回溯时按 message id 查原始记录）：",
+            digest,
+        ].join("\n"));
+    }
+    if (recentMessages.length) {
+        sections.push([
+            `群聊近期原文窗口（最近 ${recentMessages.length}/${allMessages.length} 条，最后 ${Math.min(fullCount, recentMessages.length)} 条保留全文）：`,
+            (0, group_orchestrator_1.buildRecentGroupContext)(recentMessages, fullCount),
+        ].join("\n"));
+    }
+    return sections.filter(Boolean).join("\n\n");
 }
 function buildChildAgentDevelopmentContract(targetProject, taskText = "", options = {}) {
     const requiresCodeChanges = options.requires_code_changes !== false && options.requiresCodeChanges !== false;
@@ -351,10 +631,13 @@ function buildChildAgentDevelopmentContract(targetProject, taskText = "", option
     const verificationHints = Array.isArray(options.verification_hints || options.verificationHints)
         ? (options.verification_hints || options.verificationHints).map((item) => String(item || "").trim()).filter(Boolean)
         : [];
+    const capabilityProfile = options.capability_profile || options.capabilityProfile || getProjectAgentCapabilityProfile(targetProject, options.work_dir || options.workDir || "");
+    const capabilityLines = buildProjectAgentProfileContractLines(capabilityProfile);
     return [
         "子 Agent 开发契约（必须遵守）：",
         `- 你的身份：${targetProject} 项目子 Agent。只在自己的项目职责和工作目录内处理。`,
         source,
+        ...capabilityLines,
         taskText ? `- 本次工作单：${compactMemoryText(taskText, 900)}` : "",
         acceptance ? `- 验收标准：${compactMemoryText(acceptance, 900)}` : "",
         requiresCodeChanges
@@ -363,6 +646,7 @@ function buildChildAgentDevelopmentContract(targetProject, taskText = "", option
         "- 实施要求：先理解上下文，再做最小必要改动；不要改无关模块，不要删除用户已有改动。",
         "- 验证要求：只记录实际运行过的命令或人工核验；未运行的验证必须明确写成建议，不能伪造。",
         verificationHints.length ? `- 推荐优先执行的项目验证：${verificationHints.slice(0, 6).join("；")}` : "",
+        verificationHints.length ? "- 项目验证命令会通过 Claude Code allowed-tools 按项目配置预授权；必须先真实尝试运行，只有看到本轮命令输出确实失败/阻塞时，才能写 blocked 或建议人工补跑。" : "",
         "- 阻塞处理：缺字段、缺权限、接口不明确、环境失败时，status 写 blocked/needs_info，并列出需要谁补什么。",
         "- 回执要求：回复末尾必须包含 JSON 格式 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs。",
     ].filter(Boolean).join("\n");
@@ -492,10 +776,17 @@ function updateGroupMemory(groupId, patch = {}) {
                 needs: item.needs || [],
             }], (x) => `${x.project}|${x.reason}`, 30);
     }
+    if (patch.messageDigest) {
+        next.messageDigest = compactMemoryText([next.messageDigest || "", patch.messageDigest].filter(Boolean).join(" | "), 2400);
+    }
+    if (patch.messageCompression) {
+        next.messageCompression = { ...(next.messageCompression || {}), ...(patch.messageCompression || {}) };
+    }
     if (patch.workerLedger || patch.workerNotification) {
         const item = patch.workerLedger || patch.workerNotification;
         const merged = appendWorkerLedger(next, item);
         next.workerLedger = merged.workerLedger || [];
+        next.agentMemories = upsertAgentMemory(next.agentMemories || {}, item);
     }
     if (patch.openQuestion) {
         next.openQuestions = uniqueByKey([...(next.openQuestions || []), {
@@ -679,6 +970,51 @@ function addTaskLog(taskId, level, message) {
     }
     saveTaskLogs(logs);
     console.log(`[任务日志] [${taskId}] [${level}] ${message.substring(0, 100)}`);
+}
+function appendTaskTimelineEvent(taskId, event = {}) {
+    if (!taskId)
+        return null;
+    try {
+        const tasks = (0, db_1.loadTasks)();
+        const idx = tasks.findIndex((task) => task.id === taskId);
+        if (idx < 0)
+            return null;
+        const now = new Date().toISOString();
+        const current = Array.isArray(tasks[idx].workflow_timeline) ? tasks[idx].workflow_timeline : [];
+        const nextEvent = {
+            id: event.id || `tl_${Date.now().toString(36)}_${crypto.randomBytes(2).toString("hex")}`,
+            at: event.at || now,
+            type: event.type || "event",
+            title: String(event.title || event.message || "任务事件"),
+            detail: String(event.detail || ""),
+            status: event.status || event.level || "info",
+            agent: event.agent || "",
+            phase: event.phase || "",
+            data: event.data || {},
+        };
+        tasks[idx].workflow_timeline = [...current, nextEvent].slice(-160);
+        tasks[idx].updated_at = now;
+        (0, db_1.saveTasks)(tasks);
+        return nextEvent;
+    }
+    catch (e) {
+        console.warn("记录任务时间线失败:", e?.message || e);
+        return null;
+    }
+}
+function getTaskTimeline(task, execution = {}) {
+    const timeline = [
+        ...(Array.isArray(task?.workflow_timeline) ? task.workflow_timeline : []),
+        ...(Array.isArray(execution?.timeline) ? execution.timeline : []),
+    ].filter(Boolean);
+    const seen = new Set();
+    return timeline.filter((item) => {
+        const key = item.id || `${item.at}|${item.type}|${item.title}`;
+        if (seen.has(key))
+            return false;
+        seen.add(key);
+        return true;
+    }).slice(-160);
 }
 function getTaskLogs(taskId, limit = 50) {
     const logs = loadTaskLogs();
@@ -1159,6 +1495,145 @@ function extractActionableMentions(text, group, sourceProject = "") {
     }
     return results;
 }
+function buildAgentQaProtocolInstructions(currentAgent, memberList) {
+    const members = memberList || "暂无可询问成员";
+    return [
+        "",
+        "[Agent-to-Agent 工作中询问协议]",
+        `- 你是 ${currentAgent || "当前子 Agent"}。如果执行中被其他 Agent 的接口、字段、约束、评审结论阻塞，不要臆测，可以向群聊内其他子 Agent 提问。可询问成员：${members}`,
+        "- 首选使用内部工具协议：在回复末尾输出 <tool_call> JSON，系统会记录问题、转交目标 Agent、收到回答后自动把答案注入给你同 Agent 续跑。",
+        "- ask_agent 示例：<tool_call>{\"name\":\"ask_agent\",\"arguments\":{\"target\":\"后端Agent\",\"question\":\"请确认 POST /api/orders 的字段和响应结构\",\"reason\":\"前端联调需要契约\",\"blocking\":true}}</tool_call>",
+        "- request_review 示例：<tool_call>{\"name\":\"request_review\",\"arguments\":{\"target\":\"测试Agent\",\"question\":\"请评审这次变更是否覆盖订单创建失败分支\",\"blocking\":true}}</tool_call>",
+        "- 如果你正在回答其他 Agent 的问题，可以直接自然语言回答；也可以用 reply_agent：<tool_call>{\"name\":\"reply_agent\",\"arguments\":{\"answer\":\"结论...\",\"evidence\":\"接口/文件/验证证据...\"}}</tool_call>",
+        "- 兼容旧格式：CCM_AGENT_REQUESTS [{\"type\":\"ask_agent\",\"target\":\"后端Agent\",\"question\":\"...\",\"reason\":\"...\",\"blocking\":true}]",
+        "- target 必须是群聊成员名；question 要具体到接口、文件、字段、验收点或风险。涉及高风险操作、账号密钥、生产数据、业务方向不明确时，说明需要用户确认，不要让其他 Agent 代替用户拍板。",
+        "- 如果没有阻塞，请不要输出 ask_agent/request_review/CCM_AGENT_REQUESTS。",
+        "",
+    ].join("\n");
+}
+function stripCodeFence(value) {
+    return String(value || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "").trim();
+}
+function parseInternalToolCalls(text) {
+    const calls = [];
+    const rawText = String(text || "");
+    const regex = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi;
+    let match;
+    while ((match = regex.exec(rawText)) !== null) {
+        const body = stripCodeFence(match[1]);
+        try {
+            const parsed = JSON.parse(body);
+            if (Array.isArray(parsed))
+                calls.push(...parsed);
+            else
+                calls.push(parsed);
+        }
+        catch { }
+    }
+    return calls
+        .filter((call) => call && typeof call === "object")
+        .map((call) => ({
+        name: String(call.name || call.tool || call.type || "").trim(),
+        arguments: call.arguments || call.args || call.input || {},
+        raw: call,
+    }));
+}
+function normalizeAgentQaRequest(raw, group, sourceProject = "") {
+    if (!raw || typeof raw !== "object")
+        return null;
+    const targetName = String(raw.target || raw.to || raw.to_agent || raw.agent || raw.project || raw.targetName || "").trim();
+    const question = String(raw.question || raw.message || raw.prompt || raw.request || "").trim();
+    const type = String(raw.type || raw.kind || "ask_agent").trim() || "ask_agent";
+    if (!targetName || !question || question.length < 4)
+        return null;
+    const members = new Set((group.members || []).map((m) => String(m.project || "").trim()).filter(Boolean));
+    if (!members.has(targetName) || targetName === sourceProject)
+        return null;
+    return {
+        type: /review/i.test(type) ? "request_review" : "ask_agent",
+        targetName,
+        question: compactMemoryText(question, 1600),
+        reason: compactMemoryText(String(raw.reason || raw.context || raw.evidence || "").trim(), 500),
+        blocking: raw.blocking !== false,
+    };
+}
+function extractAgentQaRequests(text, group, sourceProject = "") {
+    const rawText = String(text || "");
+    const requests = [];
+    const seen = new Set();
+    const push = (item) => {
+        const normalized = normalizeAgentQaRequest(item, group, sourceProject);
+        if (!normalized)
+            return;
+        const key = `${normalized.type}\n${normalized.targetName}\n${normalizeMentionTask(normalized.question)}`;
+        if (seen.has(key))
+            return;
+        seen.add(key);
+        requests.push(normalized);
+    };
+    for (const call of parseInternalToolCalls(rawText)) {
+        const name = call.name.toLowerCase();
+        if (!["ask_agent", "request_review"].includes(name))
+            continue;
+        push({ ...(call.arguments || {}), type: name });
+    }
+    const markerRegex = /CCM_AGENT_REQUESTS\s*[:：]?\s*([\s\S]*?)(?=\n\s*(?:CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|$))/gi;
+    let markerMatch;
+    while ((markerMatch = markerRegex.exec(rawText)) !== null) {
+        const candidate = stripCodeFence(markerMatch[1]);
+        const arrayMatch = candidate.match(/\[[\s\S]*\]/);
+        const objectMatch = candidate.match(/\{[\s\S]*\}/);
+        const jsonText = arrayMatch?.[0] || objectMatch?.[0] || "";
+        if (!jsonText)
+            continue;
+        try {
+            const parsed = JSON.parse(jsonText);
+            if (Array.isArray(parsed))
+                parsed.forEach(push);
+            else
+                push(parsed);
+        }
+        catch { }
+    }
+    for (const line of rawText.split(/\r?\n/)) {
+        const match = line.match(/^\s*CCM_(?:ASK_AGENT|REQUEST_REVIEW)\s+@([^\s:：]+)\s*[:：]\s*(.+)$/i);
+        if (!match)
+            continue;
+        push({
+            type: /REQUEST_REVIEW/i.test(line) ? "request_review" : "ask_agent",
+            target: match[1],
+            question: match[2],
+            blocking: true,
+        });
+    }
+    return requests;
+}
+function extractAgentQaReplies(text, qaId = "") {
+    const replies = [];
+    for (const call of parseInternalToolCalls(text)) {
+        if (call.name.toLowerCase() !== "reply_agent")
+            continue;
+        const args = call.arguments || {};
+        const answer = [args.answer, args.evidence ? `证据：${args.evidence}` : ""].filter(Boolean).join("\n").trim();
+        if (!answer)
+            continue;
+        const questionId = String(args.question_id || args.qa_id || args.id || "").trim();
+        if (questionId && qaId && questionId !== qaId)
+            continue;
+        replies.push({ answer, questionId });
+    }
+    return replies;
+}
+function stripAgentQaProtocolBlocks(text) {
+    return String(text || "")
+        .replace(/<tool_call>\s*[\s\S]*?\s*<\/tool_call>/gi, (block) => {
+        const calls = parseInternalToolCalls(block);
+        return calls.some(call => ["ask_agent", "request_review", "reply_agent"].includes(call.name.toLowerCase())) ? "" : block;
+    })
+        .replace(/\n?CCM_AGENT_REQUESTS\s*[:：]?\s*[\s\S]*?(?=\n\s*(?:CCM_AGENT_RECEIPT|$))/gi, "")
+        .replace(/^\s*CCM_(?:ASK_AGENT|REQUEST_REVIEW)\s+@[^\n]+\n?/gim, "")
+        .trim();
+}
 function extractStructuredAssignments(result, group, sourceProject = "") {
     const memberNames = new Set((group.members || [])
         .map((m) => String(m.project || "").trim())
@@ -1430,7 +1905,12 @@ function isFailedVerification(value) {
     const text = String(value || "").trim();
     if (!text)
         return false;
-    return /失败|未通过|报错|错误|超时|中断|failed|failure|error|timeout/i.test(text);
+    return /失败|未通过|报错|错误|超时|中断|无法执行|无法自动执行|无法运行|被.*拦截|拦截|阻塞|审批|failed|failure|error|timeout|denied|blocked|not\s+allowed|requires\s+approval|permission/i.test(text);
+}
+function receiptHasOpenNeeds(receipt) {
+    const blockers = splitEvidenceList(receipt?.blockers || []);
+    const needs = splitEvidenceList(receipt?.needs || []);
+    return blockers.length > 0 || needs.length > 0;
 }
 function getVerificationEvidenceGate(receipts = []) {
     const executed = [];
@@ -1710,12 +2190,102 @@ function collectTaskReworkEvidence(task, execution) {
         return true;
     });
 }
+function inferTaskImpactScope(task, assignments = [], mentions = []) {
+    const text = [task?.title, task?.description, task?.business_goal, task?.acceptance_criteria, ...(assignments || []).map((item) => `${item.project || ""} ${item.task || ""}`)].filter(Boolean).join("\n");
+    const projectNames = uniqueStrings(assignments.map((item) => item.project || item.agent), mentions.map((item) => item.targetName || String(item.mention || "").replace(/^@/, "")), [task?.target_project].filter(Boolean)).filter(Boolean);
+    const areas = [];
+    if (/前端|页面|组件|vue|react|css|样式|表单|路由|frontend|web|ui/i.test(text))
+        areas.push("前端页面/组件");
+    if (/后端|接口|api|服务|controller|service|route|数据库|sql|schema|backend/i.test(text))
+        areas.push("后端接口/服务");
+    if (/测试|验证|test|spec|e2e|lint|build/i.test(text))
+        areas.push("测试/构建验证");
+    if (/文档|README|markdown|prd|说明/i.test(text))
+        areas.push("文档/说明");
+    const fileHints = uniqueStrings((text.match(/[\w@./-]+\.(?:vue|tsx?|jsx?|css|scss|json|md|yml|yaml|py|go|rs|java|kt|sql)/gi) || []).slice(0, 20));
+    return {
+        projects: projectNames,
+        areas: areas.length ? areas : ["待主 Agent 按项目结构确认"],
+        file_hints: fileHints,
+        requires_code_changes: taskRequiresCodeChanges(task),
+        requires_verification: taskRequiresVerification(task),
+    };
+}
+function buildTaskSandboxRehearsal(task, group, coordinatorResult = {}, assignments = [], mentions = [], dispatchPolicy = null) {
+    const impact = inferTaskImpactScope(task, assignments, mentions);
+    const targetProjects = impact.projects.length ? impact.projects : (group?.members || []).map((m) => m.project).filter(Boolean).slice(0, 6);
+    const verificationPlan = targetProjects.map((project) => {
+        const config = (0, db_1.getConfigs)().find((item) => item.name === project);
+        const info = config ? (0, db_1.getConfigInfo)(config.path) : [];
+        const workDir = info?.[0]?.workDir || "";
+        return {
+            project,
+            commands: workDir ? buildProjectVerificationHints(project, workDir).slice(0, 5) : [],
+        };
+    });
+    const riskItems = uniqueStrings([
+        dispatchPolicy?.risk,
+        ...(Array.isArray(coordinatorResult?.missingInfo) ? coordinatorResult.missingInfo : []),
+        taskRequiresCodeChanges(task) ? "完成时必须捕获真实文件变更" : "允许无代码变更，但必须说明原因",
+        taskRequiresVerification(task) ? "完成时必须提供已执行验证证据" : "验证可按任务性质降级",
+    ].filter(Boolean));
+    return {
+        id: `sandbox_${Date.now().toString(36)}_${crypto.randomBytes(2).toString("hex")}`,
+        generated_at: new Date().toISOString(),
+        status: dispatchPolicy?.requiresConfirmation ? "needs_user" : "ready",
+        title: task?.title || "任务前沙盘演练",
+        business_goal: task?.business_goal || task?.title || "",
+        dispatch_action: dispatchPolicy?.action || "delegate",
+        dispatch_reason: dispatchPolicy?.reason || "主 Agent 已生成可执行计划",
+        impact_scope: impact,
+        agent_plan: (assignments || []).map((item, index) => ({
+            order: index + 1,
+            project: item.project || item.agent || item.target_project || "未命名 Agent",
+            task: item.task || item.summary || item.description || "等待主 Agent 补全工作单",
+            reason: item.reason || "",
+            depends_on: item.dependsOn || item.depends_on || [],
+        })),
+        verification_plan: verificationPlan,
+        risks: riskItems,
+        gate_requirements: [
+            "主 Agent 计划与派发证据",
+            "子 Agent 结构化回执",
+            taskRequiresCodeChanges(task) ? "真实文件变更" : "代码变更可选",
+            taskRequiresVerification(task) ? "已执行验证记录" : "验证记录可选",
+            "主 Agent 最终验收",
+        ],
+    };
+}
+function buildAcceptanceGate(task, execution, summary, finalStatus) {
+    const checks = [
+        { id: "coordinator_plan", label: "主 Agent 计划", ok: Number(summary.coordination_plan_count || 0) > 0, detail: `计划 ${summary.coordination_plan_count || 0} 条` },
+        { id: "assignment", label: "子 Agent 派发", ok: Number(summary.assignment_count || 0) > 0 || task?.assign_type !== "group", detail: `派发 ${summary.assignment_count || 0} 条` },
+        { id: "worker_receipt", label: "子 Agent 回执", ok: (summary.receipt_statuses || []).some((item) => item.status === "done") || task?.assign_type !== "group", detail: `回执 ${(summary.receipt_statuses || []).length} 条` },
+        { id: "final_review", label: "主 Agent 验收", ok: !!summary.has_final_review || finalStatus === "failed" || task?.assign_type !== "group", detail: summary.review_status || "" },
+        { id: "actual_changes", label: "真实文件变更", ok: !taskRequiresCodeChanges(task) || Number(summary.actual_file_change_count || 0) > 0, detail: `变更 ${summary.actual_file_change_count || 0} 个文件` },
+        { id: "verification", label: "已执行验证", ok: !taskRequiresVerification(task) || Number(summary.verification_executed?.length || 0) > 0, detail: `已执行 ${summary.verification_executed?.length || 0} 条` },
+        { id: "required_verification", label: "项目验证命令覆盖", ok: !taskRequiresVerification(task) || summary.verification_required_gate_passed !== false, detail: summary.verification_required_missing?.length ? `缺 ${summary.verification_required_missing.length} 项` : "已覆盖" },
+        { id: "no_blockers", label: "无开放阻塞", ok: !(summary.blockers || []).length && !(summary.needs || []).length && !(summary.agent_qa_has_open_items), detail: `阻塞 ${(summary.blockers || []).length}，待补 ${(summary.needs || []).length}` },
+        { id: "policy", label: "项目边界", ok: summary.project_policy_gate_passed !== false, detail: summary.project_policy_violations?.length ? `违规 ${summary.project_policy_violations.length} 项` : "通过" },
+    ];
+    const failed = checks.filter(item => !item.ok);
+    return {
+        pass: failed.length === 0,
+        status: failed.length === 0 ? "passed" : finalStatus === "failed" ? "failed" : "blocked",
+        failed_count: failed.length,
+        checks,
+        failed_checks: failed,
+        generated_at: new Date().toISOString(),
+    };
+}
 function taskRequiresCodeChanges(task) {
     if (task?.requires_code_changes === false || task?.requiresCodeChanges === false)
         return false;
     return task?.workflow_type === "daily_dev";
 }
 function buildDeliverySummary(task, execution, finalStatus) {
+    const latestTask = task?.id ? (0, db_1.loadTasks)().find((item) => item.id === task.id) : null;
+    task = latestTask ? { ...task, ...latestTask } : task;
     const executionText = execution?.report || execution?.result || "";
     const receipts = [
         ...(execution?.receipt ? [execution.receipt] : []),
@@ -1735,7 +2305,13 @@ function buildDeliverySummary(task, execution, finalStatus) {
     const verification = uniqueStrings(...receipts.map((receipt) => receipt.verification));
     const verificationGate = getVerificationEvidenceGate(receipts);
     const requiredVerificationCoverage = getRequiredVerificationCoverage(receipts);
+    const projectAgentProfiles = agents
+        .map((agent) => getProjectAgentCapabilityProfile(agent))
+        .filter((profile) => profile.configured);
+    const projectPolicyViolations = collectProjectPolicyViolations(actualFileChanges);
     const blockers = uniqueStrings(...receipts.map((receipt) => receipt.blockers));
+    if (projectPolicyViolations.length)
+        blockers.push(...projectPolicyViolations.map((item) => item.message));
     const needs = uniqueStrings(...receipts.map((receipt) => receipt.needs));
     if (finalStatus !== "done" && execution?.detail && !needs.length && !blockers.length) {
         needs.push(String(execution.detail));
@@ -1758,6 +2334,26 @@ function buildDeliverySummary(task, execution, finalStatus) {
     }));
     const review = execution?.review || null;
     const reviewStatus = review?.status || "";
+    const taskAgentQa = getAgentQaItemsForGroup(String(task?.group_id || task?.groupId || ""), 120)
+        .filter((item) => !task?.id || !item.task_id || item.task_id === task.id)
+        .map((item) => ({
+        id: item.id,
+        from_agent: item.from_agent,
+        to_agent: item.to_agent,
+        type: item.type,
+        status: item.status,
+        question: item.question,
+        answer: item.answer,
+        blocking: item.blocking !== false,
+        arbitration: item.arbitration || null,
+        timeout_at: item.timeout_at || "",
+        injected_at: item.injected_at || "",
+        resumed_at: item.resumed_at || "",
+        retry_count: Number(item.retry_count || 0),
+        manual_takeover: !!item.manual_takeover,
+    }));
+    const openAgentQa = taskAgentQa.filter((item) => ["waiting", "asking", "queued", "needs_user", "timeout", "manual"].includes(String(item.status || "")));
+    const resolvedAgentQa = taskAgentQa.filter((item) => ["answered", "injected", "resumed"].includes(String(item.status || "")));
     const headline = finalStatus === "done"
         ? "主 Agent 已验收完成"
         : finalStatus === "failed"
@@ -1784,6 +2380,9 @@ function buildDeliverySummary(task, execution, finalStatus) {
         requires_code_changes: taskRequiresCodeChanges(task),
         requires_verification: taskRequiresVerification(task),
         agents,
+        project_agent_profiles: projectAgentProfiles,
+        project_policy_violations: projectPolicyViolations,
+        project_policy_gate_passed: projectPolicyViolations.length === 0,
         worker_notifications: workerNotifications,
         worker_notification_count: workerNotifications.length,
         worker_notification_statuses: workerNotifications.map((item) => ({
@@ -1792,6 +2391,13 @@ function buildDeliverySummary(task, execution, finalStatus) {
             receipt_status: item.receipt_status,
             summary: item.summary,
         })),
+        agent_qa: taskAgentQa,
+        agent_qa_count: taskAgentQa.length,
+        agent_qa_open_count: openAgentQa.length,
+        agent_qa_resolved_count: resolvedAgentQa.length,
+        agent_qa_has_open_items: openAgentQa.length > 0,
+        sandbox_rehearsal: task?.workflow_meta?.sandbox_rehearsal || task?.sandbox_rehearsal || execution?.sandbox_rehearsal || null,
+        timeline: getTaskTimeline(task, execution),
         receipt_statuses: receiptStatuses,
         receipts: receiptEvidence,
         actions,
@@ -1815,6 +2421,9 @@ function buildDeliverySummary(task, execution, finalStatus) {
         has_final_review: !!review,
         generated_at: new Date().toISOString(),
     };
+    summary.acceptance_gate = buildAcceptanceGate(task, execution, summary, finalStatus);
+    summary.acceptance_gate_passed = summary.acceptance_gate.pass;
+    summary.timeline_count = Array.isArray(summary.timeline) ? summary.timeline.length : 0;
     summary.user_report = buildUserDeliveryReport(task, summary, finalStatus, execution?.report || execution?.result || execution?.detail || "");
     return summary;
 }
@@ -1903,6 +2512,16 @@ function getGroupTaskExecutionStatus(review, coordinatorResult, outputText, task
         return buildGroupResult("waiting", {
             review,
             detail: `业务开发任务仍有子 Agent 未完成：${pending}`,
+        });
+    }
+    const doneReceiptsWithOpenNeeds = childReceipts.filter((receipt) => receipt.status === "done" && receiptHasOpenNeeds(receipt));
+    if (isDailyDev && doneReceiptsWithOpenNeeds.length > 0) {
+        const open = doneReceiptsWithOpenNeeds
+            .map((receipt) => `${receipt.agent}:${[...(splitEvidenceList(receipt.blockers || [])), ...(splitEvidenceList(receipt.needs || []))].join("；")}`)
+            .join("；");
+        return buildGroupResult("waiting", {
+            review,
+            detail: `业务开发任务子 Agent 回执仍有未解决阻塞/需要补充：${open}`,
         });
     }
     if (isDailyDev && !hasCoordinationPlan) {
@@ -2049,9 +2668,15 @@ function getDailyDevCompletionGateSelfTest() {
     ].join("\n"), task);
     const withActualChange = getGroupTaskExecutionStatus({ status: "complete", content: "主 Agent 复盘完成" }, plannedCoordinatorResult, doneWorkerOutput, taskWithActualChanges);
     const withActualChangeNoCoordinationEvidence = getGroupTaskExecutionStatus({ status: "complete", content: "主 Agent 复盘完成" }, coordinatorResult, doneWorkerOutput, taskWithActualChanges);
-    const waitingExecutionWithCompleteEvidence = { ...withActualChange, status: "waiting", detail: "保守 waiting 但证据齐全" };
+    const waitingExecutionWithCompleteEvidence = { ...withActualChange, status: "waiting", detail: "" };
     const waitingSummaryWithCompleteEvidence = buildDeliverySummary(taskWithActualChanges, waitingExecutionWithCompleteEvidence, "waiting");
     const waitingEvidencePromotesToDone = canCompleteDailyDevFromDeliverySummary(taskWithActualChanges, waitingExecutionWithCompleteEvidence, waitingSummaryWithCompleteEvidence);
+    const blockedVerificationReceipt = { ...doneReceipt, verification: ["mvn test -B -q → 仍需交互审批，命令被沙箱拦截"], blockers: ["mvn test 被沙箱拦截"], needs: ["用户本地补充 mvn test 输出"] };
+    const blockedVerificationOutput = formatCollectedAgentOutput("frontend", "验证被沙箱拦截", blockedVerificationReceipt);
+    const blockedVerificationGate = getVerificationEvidenceGate([blockedVerificationReceipt]);
+    const withDoneReceiptButOpenNeeds = getGroupTaskExecutionStatus({ status: "complete", content: "主 Agent 复盘完成" }, plannedCoordinatorResult, blockedVerificationOutput, taskWithActualChanges);
+    const blockedSummary = buildDeliverySummary(taskWithActualChanges, withDoneReceiptButOpenNeeds, "waiting");
+    const blockedEvidenceDoesNotPromote = !canCompleteDailyDevFromDeliverySummary(taskWithActualChanges, withDoneReceiptButOpenNeeds, blockedSummary);
     const withActualChangeNoExecutedVerification = getGroupTaskExecutionStatus({ status: "complete", content: "主 Agent 复盘完成" }, plannedCoordinatorResult, formatCollectedAgentOutput("frontend", [
         "完成了页面改动",
         "",
@@ -2067,6 +2692,18 @@ function getDailyDevCompletionGateSelfTest() {
         ...doneReceipt,
         verification: ["建议运行 npm test"],
     }), taskWithActualChanges);
+    const runnerMergedReceipt = extractAgentReceipt([
+        "```json",
+        "{\"ccm_receipt\":true,\"status\":\"done\",\"summary\":\"完成测试改动\",\"actions\":[\"修改页面\"],\"filesChanged\":[\"src/App.vue\"],\"verification\":[\"等待外部 runner 验证\"],\"blockers\":[],\"needs\":[]}",
+        "```",
+        "CCM_RUNNER_VERIFICATION",
+        "```json",
+        "{\"ccm_runner_verification\":true,\"status\":\"passed\",\"verification\":[\"npm run check passed by external runner (exit 0)\",\"npm run build passed by external runner (exit 0)\"],\"failed\":[]}",
+        "```",
+    ].join("\n"), "frontend");
+    const runnerVerificationMerged = !!runnerMergedReceipt
+        && runnerMergedReceipt.verification.includes("npm run check passed by external runner (exit 0)")
+        && runnerMergedReceipt.verification.includes("npm run build passed by external runner (exit 0)");
     return {
         noChildReceiptStatus: noChild.status,
         noChildReceiptDetail: noChild.detail,
@@ -2078,15 +2715,23 @@ function getDailyDevCompletionGateSelfTest() {
         withActualChangeNoCoordinationEvidenceStatus: withActualChangeNoCoordinationEvidence.status,
         withActualChangeNoCoordinationEvidenceDetail: withActualChangeNoCoordinationEvidence.detail,
         waitingEvidencePromotesToDone,
+        blockedVerificationFailsGate: blockedVerificationGate.pass === false && blockedVerificationGate.failed.length > 0,
+        doneReceiptWithOpenNeedsStatus: withDoneReceiptButOpenNeeds.status,
+        blockedEvidenceDoesNotPromote,
         withActualChangeNoExecutedVerificationStatus: withActualChangeNoExecutedVerification.status,
         withActualChangeNoExecutedVerificationDetail: withActualChangeNoExecutedVerification.detail,
+        runnerVerificationMerged,
         pass: noChild.status === "waiting"
             && withChild.status === "waiting"
             && withFailedChild.status === "failed"
             && withActualChange.status === "done"
             && waitingEvidencePromotesToDone
+            && blockedVerificationGate.pass === false
+            && withDoneReceiptButOpenNeeds.status === "waiting"
+            && blockedEvidenceDoesNotPromote
             && withActualChangeNoCoordinationEvidence.status === "waiting"
-            && withActualChangeNoExecutedVerification.status === "waiting",
+            && withActualChangeNoExecutedVerification.status === "waiting"
+            && runnerVerificationMerged,
     };
 }
 function buildDailyDevWorkflowRehearsal(payload = {}) {
@@ -2096,6 +2741,8 @@ function buildDailyDevWorkflowRehearsal(payload = {}) {
     const group = groups.find((item) => item.id === groupId) || groups[0] || null;
     const { normalizedGroup, coordinator, routableMembers, readyMembers } = getReadyDailyDevMembers(group, configs);
     const selectedMember = readyMembers[0] || routableMembers[0] || { project: "demo-agent" };
+    const verificationCommands = getConfiguredProjectVerificationCommands(selectedMember.project);
+    const verificationText = verificationCommands[0] || "npm run check";
     const businessGoal = compactFormText(payload.business_goal || payload.businessGoal || "演练：给设置页增加一个业务开发闭环状态提示", "演练：给设置页增加一个业务开发闭环状态提示");
     const description = buildDailyDevTaskDescription({
         business_goal: businessGoal,
@@ -2111,7 +2758,7 @@ function buildDailyDevWorkflowRehearsal(payload = {}) {
         summary: "完成演练改动",
         actions: ["修改演练文件"],
         filesChanged: ["src/daily-dev-rehearsal.ts"],
-        verification: ["npm run check"],
+        verification: [verificationText],
         blockers: [],
         needs: [],
     };
@@ -2124,7 +2771,7 @@ function buildDailyDevWorkflowRehearsal(payload = {}) {
         "- 摘要：完成演练改动",
         "- 动作：修改演练文件",
         "- 文件：src/daily-dev-rehearsal.ts",
-        "- 验证：npm run check",
+        `- 验证：${verificationText}`,
         "- 阻塞：无",
         "- 需要补充：无",
     ].join("\n");
@@ -2142,7 +2789,20 @@ function buildDailyDevWorkflowRehearsal(payload = {}) {
     });
     const rehearsalScratchpadContext = buildGroupMemoryContext(rehearsalMemory);
     const review = { status: "complete", content: "主 Agent 复盘完成，演练满足验收证据。" };
-    const coordinatorResult = { agent: coordinator.project, assignments: [{ project: selectedMember.project, task: "执行演练改动" }], dispatchPolicy: {}, runtime: "rehearsal" };
+    const coordinatorResult = {
+        agent: coordinator.project,
+        assignments: [{ project: selectedMember.project, task: "执行演练改动" }],
+        coordinationPlan: {
+            mode: "cc-style-coordinator",
+            strategy: "research_synthesis_implementation_verification",
+            executionOrder: "parallel",
+            phases: ["理解需求", "研究与综合", "分配任务", "协同执行", "复盘验收"],
+            targets: [selectedMember.project],
+            missingInfo: [],
+        },
+        dispatchPolicy: {},
+        runtime: "rehearsal",
+    };
     const baseTask = {
         id: "daily-dev-rehearsal",
         title: businessGoal,
@@ -2190,7 +2850,7 @@ function buildDailyDevWorkflowRehearsal(payload = {}) {
         && extractTaskNotificationTag(workerNotificationOutput, "status") === "completed";
     const scratchpadPass = rehearsalScratchpadContext.includes("Worker scratchpad")
         && rehearsalScratchpadContext.includes("完成演练改动")
-        && rehearsalScratchpadContext.includes("npm run check");
+        && rehearsalScratchpadContext.includes(verificationText);
     const pass = !!normalizedGroup
         && readyMembers.length > 0
         && coordinatorProtocol.pass
@@ -2411,6 +3071,12 @@ function getDailyDevSmokeStatus(payload = {}) {
     const actualChangeCount = Number(summary.actual_file_change_count || task.file_changes?.count || 0);
     const executedVerificationCount = Number(summary.verification_executed?.length || 0);
     const requiredVerificationPassed = summary.verification_required_gate_passed !== false;
+    const openSmokeGaps = [
+        ...(Array.isArray(summary.blockers) ? summary.blockers : []),
+        ...(Array.isArray(summary.needs) ? summary.needs : []),
+        ...(Array.isArray(summary.verification_failed) ? summary.verification_failed : []),
+        ...(Array.isArray(summary.verification_suggested) ? summary.verification_suggested : []),
+    ].filter(Boolean);
     const pass = task.status === "done"
         && fileExists
         && coordinationPlanCount > 0
@@ -2420,7 +3086,8 @@ function getDailyDevSmokeStatus(payload = {}) {
         && hasDoneReceipt
         && hasFinalReview
         && executedVerificationCount > 0
-        && requiredVerificationPassed;
+        && requiredVerificationPassed
+        && openSmokeGaps.length === 0;
     const missing = [
         task.status === "done" ? "" : "任务尚未完成",
         fileExists ? "" : "目标 smoke 文件不存在",
@@ -2432,6 +3099,7 @@ function getDailyDevSmokeStatus(payload = {}) {
         hasFinalReview ? "" : "缺少主 Agent 最终复盘",
         executedVerificationCount > 0 ? "" : "缺少已执行验证记录",
         requiredVerificationPassed ? "" : "缺少项目配置验证命令证据",
+        openSmokeGaps.length ? `仍有未解决阻塞/补充/失败验证：${openSmokeGaps.slice(0, 3).join("；")}` : "",
     ].filter(Boolean);
     const readiness = getTaskAgentExecutionReadiness(task);
     const status = pass
@@ -2487,15 +3155,29 @@ function getDailyDevSmokeStatus(payload = {}) {
     };
 }
 async function runAgentCliProbe(payload, ctx) {
-    const readiness = getAgentProbeExecutionReadiness();
+    const target = selectDailyDevSmokeTarget(payload);
+    const selectedProject = target.selectedMember.project;
+    const runtime = (0, group_orchestrator_1.resolveMemberRuntime)(selectedProject, target.group, (0, db_1.getConfigs)());
+    if (!runtime?.workDir)
+        throw new Error("未找到探针目标 Agent 的工作目录");
+    const agentType = runtime.agentType || "claudecode";
+    const probeTarget = {
+        group_id: target.group.id,
+        group_name: target.group.name || target.group.id,
+        project: selectedProject,
+        agent_type: agentType,
+        work_dir: runtime.workDir,
+    };
+    const readiness = getAgentProbeExecutionReadiness(probeTarget);
     if (!readiness.ready) {
-        const fixActions = readiness.fix_actions || buildAgentExecutionFixActions({ error: readiness.message, probe: readiness.probe });
+        const fixActions = readiness.fix_actions || buildAgentExecutionFixActions({ error: readiness.message, probe: readiness.probe, agentType });
         const result = {
             success: false,
             blocked: true,
             message: readiness.message,
             error: readiness.message,
             fix_actions: fixActions,
+            target: probeTarget,
             execution_path: readiness.mode,
             expected_marker: "CCM_AGENT_PROBE_OK",
             readiness,
@@ -2503,12 +3185,6 @@ async function runAgentCliProbe(payload, ctx) {
         writeAgentProbeStatus(result);
         return result;
     }
-    const target = selectDailyDevSmokeTarget(payload);
-    const selectedProject = target.selectedMember.project;
-    const runtime = (0, group_orchestrator_1.resolveMemberRuntime)(selectedProject, target.group, (0, db_1.getConfigs)());
-    if (!runtime?.workDir)
-        throw new Error("未找到探针目标 Agent 的工作目录");
-    const agentType = runtime.agentType || "claudecode";
     const started = Date.now();
     const prompt = [
         "这是 cc-connect 执行通道健康探针。",
@@ -2516,7 +3192,7 @@ async function runAgentCliProbe(payload, ctx) {
         "只回复一行：CCM_AGENT_PROBE_OK",
     ].join("\n");
     try {
-        const output = await ctx.callAgent(selectedProject, prompt, runtime.workDir, agentType, Number(payload.timeout_ms || payload.timeoutMs || 45000), {
+        const output = await ctx.callAgent(selectedProject, prompt, runtime.workDir, agentType, Number(payload.timeout_ms || payload.timeoutMs || 120000), {
             tab: "groups",
             groupId: target.group.id,
             project: selectedProject,
@@ -2537,13 +3213,7 @@ async function runAgentCliProbe(payload, ctx) {
             fix_actions: fixActions,
             execution_path: readiness.mode,
             expected_marker: "CCM_AGENT_PROBE_OK",
-            target: {
-                group_id: target.group.id,
-                group_name: target.group.name || target.group.id,
-                project: selectedProject,
-                agent_type: agentType,
-                work_dir: runtime.workDir,
-            },
+            target: probeTarget,
             duration_ms: Date.now() - started,
             output: String(output || "").slice(0, 2000),
             readiness,
@@ -2565,13 +3235,7 @@ async function runAgentCliProbe(payload, ctx) {
             fix_actions: fixActions,
             execution_path: readiness.mode,
             expected_marker: "CCM_AGENT_PROBE_OK",
-            target: {
-                group_id: target.group.id,
-                group_name: target.group.name || target.group.id,
-                project: selectedProject,
-                agent_type: agentType,
-                work_dir: runtime.workDir,
-            },
+            target: probeTarget,
             duration_ms: Date.now() - started,
             output: "",
             readiness,
@@ -2592,6 +3256,39 @@ function normalizeStringArray(value) {
     if (!Array.isArray(value))
         return [];
     return value.map((item) => String(item || "").trim()).filter(Boolean);
+}
+function extractRunnerVerificationEvidence(text) {
+    const raw = String(text || "");
+    const markerIndex = raw.lastIndexOf("CCM_RUNNER_VERIFICATION");
+    if (markerIndex < 0)
+        return null;
+    const searchArea = raw.slice(markerIndex);
+    const fencePattern = new RegExp("```(?:json)?\\s*([\\s\\S]*?)```", "gi");
+    const fenced = ([...searchArea.matchAll(fencePattern)]).map(match => parseJsonCandidate(match[1].trim())).filter(Boolean).pop();
+    const data = fenced && fenced.ccm_runner_verification ? fenced : null;
+    if (!data)
+        return null;
+    return {
+        status: String(data.status || "").trim(),
+        verification: normalizeStringArray(data.verification),
+        failed: normalizeStringArray(data.failed),
+    };
+}
+function mergeRunnerVerificationIntoReceipt(receipt, raw) {
+    if (!receipt)
+        return receipt;
+    const runnerVerification = extractRunnerVerificationEvidence(raw);
+    if (!runnerVerification)
+        return receipt;
+    const passed = runnerVerification.verification || [];
+    const failed = runnerVerification.failed || [];
+    if (!passed.length && !failed.length)
+        return receipt;
+    return {
+        ...receipt,
+        verification: uniqueStrings(receipt.verification || [], passed, failed),
+        blockers: failed.length ? uniqueStrings(receipt.blockers || [], failed) : (receipt.blockers || []),
+    };
 }
 function normalizeAgentReceipt(raw, agent) {
     if (!raw || typeof raw !== "object")
@@ -2619,7 +3316,7 @@ function extractAgentReceipt(response, agent) {
     for (let i = fencedBlocks.length - 1; i >= 0; i--) {
         const receipt = normalizeAgentReceipt(fencedBlocks[i], agent);
         if (receipt)
-            return receipt;
+            return mergeRunnerVerificationIntoReceipt(receipt, raw);
     }
     const markerIndex = raw.lastIndexOf("CCM_AGENT_RECEIPT");
     const searchArea = markerIndex >= 0 ? raw.slice(markerIndex) : raw;
@@ -2628,7 +3325,7 @@ function extractAgentReceipt(response, agent) {
     if (start >= 0 && end > start) {
         const receipt = normalizeAgentReceipt(parseJsonCandidate(searchArea.slice(start, end + 1)), agent);
         if (receipt)
-            return receipt;
+            return mergeRunnerVerificationIntoReceipt(receipt, raw);
     }
     return null;
 }
@@ -2916,6 +3613,8 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
             emitAssignmentStatus(streamRes, groupId, planMessageId, targetName, "failed", summary);
             if (taskId)
                 addTaskLog(taskId, "error", `子 Agent 派发失败：${targetName}；${summary}`);
+            if (taskId)
+                appendTaskTimelineEvent(taskId, { type: "child_agent_failed", title: `子 Agent 派发失败：${targetName}`, detail: summary, status: "fail", phase: "dispatching", agent: targetName, data: { needs } });
             outputs.push(formatCollectedAgentOutput(targetName, content, {
                 agent: targetName,
                 status: "failed",
@@ -3033,6 +3732,8 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
         emitAssignmentStatus(streamRes, groupId, planMessageId, targetName, "running", "执行中");
         if (taskId)
             addTaskLog(taskId, "info", `子 Agent 开始执行：${sourceProject} -> ${targetName}${isContinuation ? "（同 Worker 续跑）" : ""}；工作单：${compactMemoryText(atMessage, 220)}`);
+        if (taskId)
+            appendTaskTimelineEvent(taskId, { type: isContinuation ? "child_agent_rework" : "child_agent_start", title: `${targetName} 开始执行`, detail: compactMemoryText(atMessage, 500), status: "active", phase: isContinuation ? "rework" : "executing", agent: targetName, data: { sourceProject, continuationStrategy, continuationOf } });
         appendGroupMessage(groupId, {
             id: "m" + Date.now().toString(36) + "fwd",
             role: "assistant", agent: sourceProject,
@@ -3043,7 +3744,7 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
         writeSse(streamRes, { type: "status", text: `📨 ${sourceProject} 已 @${targetName}，等待 ${targetName} 回复...`, agent: targetName });
         ctx.setAgentActivity(targetName, "working", `被 ${sourceProject} @ 协作`, { tab: "groups", groupId }, 330000);
         ctx.broadcastPetSpeech(targetName, { role: "status", text: `${sourceProject} @ 我协作，正在处理...`, source: "group" });
-        const tContext = (0, group_orchestrator_1.buildRecentGroupContext)(getGroupMessages(groupId).slice(-15));
+        const tContext = buildGroupContextPacket(groupId, { recentLimit: 15, olderLimit: 30, fullCount: 5 });
         const childTaskText = buildChildAgentTaskText(atMessage, sourceTask);
         const memoryPacket = buildAgentMemoryPacket(groupId, targetName, childTaskText);
         const dependencyOutputPacket = buildDependencyOutputPacket(mention, targetName);
@@ -3116,13 +3817,15 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
             ? (0, group_orchestrator_1.buildCoordinatorCollaborationInstructions)((0, group_orchestrator_1.getRoutableMembers)(group).map((m) => m.project).join(", "))
             : (0, group_orchestrator_1.buildMemberCollaborationInstructions)(targetName, memberList);
         const toolContext = buildAgentToolContext(ctx, group, targetName);
+        const runtimeToolContext = prepareAgentRuntimeTools(groupId, targetName, tWorkDir, tAgentType, toolContext.allowedTools, streamRes);
         const developmentContract = buildChildAgentDevelopmentContract(targetName, childTaskText, {
             source: `${sourceProject} @ 协作`,
             acceptance: sourceTask?.acceptance_criteria || "",
             requires_code_changes: sourceTask ? taskRequiresCodeChanges(sourceTask) : true,
             verification_hints: buildProjectVerificationHints(targetName, tWorkDir),
+            work_dir: tWorkDir,
         });
-        const tPrompt = `你正在 CCM 群聊中被 @ 请求协作。${collaborationInstructions}${toolContext.prompt}
+        const tPrompt = `你正在 CCM 群聊中被 @ 请求协作。${collaborationInstructions}${buildAgentQaProtocolInstructions(targetName, memberList)}${toolContext.prompt}${runtimeToolContext.prompt}
 
 ${developmentContract}
 
@@ -3144,13 +3847,16 @@ ${childTaskText}
         try {
             const responseMessageId = "m" + Date.now().toString(36) + "cross" + crypto.randomBytes(2).toString("hex");
             let targetFileChanges = null;
+            let targetWorkEvents = [];
             const tOutput = await ctx.callAgentForGroupStream(targetName, tPrompt, tWorkDir, tAgentType, {
                 res: streamRes,
                 groupId,
                 timeoutMs: 300000,
                 messageId: responseMessageId,
                 allowedTools: toolContext.allowedTools,
-                onDone: (opts) => { targetFileChanges = opts.fileChanges; }
+                mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+                initialWorkEvents: [runtimeToolContext.workEvent],
+                onDone: (opts) => { targetFileChanges = opts.fileChanges; targetWorkEvents = Array.isArray(opts.workEvents) ? opts.workEvents : []; }
             });
             const targetReceipt = extractAgentReceipt(tOutput, targetName);
             outputs.push(formatCollectedAgentOutput(targetName, tOutput, targetReceipt));
@@ -3158,6 +3864,7 @@ ${childTaskText}
                 const verificationCount = Array.isArray(targetReceipt.verification) ? targetReceipt.verification.length : 0;
                 const fileCount = Array.isArray(targetReceipt.filesChanged) ? targetReceipt.filesChanged.length : 0;
                 addTaskLog(taskId, targetReceipt.status === "done" ? "success" : "warning", `子 Agent 回执：${targetName} status=${targetReceipt.status}，文件 ${fileCount} 个，验证 ${verificationCount} 条；${targetReceipt.summary || "无摘要"}`);
+                appendTaskTimelineEvent(taskId, { type: "child_agent_receipt", title: `${targetName} 提交回执`, detail: targetReceipt.summary || "无摘要", status: targetReceipt.status === "done" ? "ok" : "warn", phase: "executing", agent: targetName, data: { receipt: targetReceipt, fileCount, verificationCount } });
             }
             if (targetReceipt) {
                 if (targetReceipt.status === "done" || targetReceipt.status === "partial") {
@@ -3235,14 +3942,34 @@ ${childTaskText}
                 timestamp: new Date().toISOString(),
                 task_id: taskId || undefined,
                 fileChanges: targetFileChanges,
+                workEvents: targetWorkEvents,
             });
-            const assignmentStatus = getReceiptAssignmentStatus(tOutput, targetReceipt);
+            const qaResult = await handleAgentQaRequests({
+                groupId,
+                group,
+                sourceProject: targetName,
+                sourceOutput: tOutput,
+                originalPrompt: tPrompt,
+                sourceWorkDir: tWorkDir,
+                sourceAgentType: tAgentType,
+                allowedTools: toolContext.allowedTools,
+                mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+                configs,
+                ctx,
+                streamRes,
+                taskId,
+                qaDepth: depth,
+            });
+            if (qaResult.outputs.length)
+                outputs.push(...qaResult.outputs);
+            const downstreamOutput = qaResult.resumedOutput || tOutput;
+            const assignmentStatus = getReceiptAssignmentStatus(downstreamOutput, extractAgentReceipt(downstreamOutput, targetName) || targetReceipt);
             emitAssignmentStatus(streamRes, groupId, planMessageId, targetName, assignmentStatus.status, assignmentStatus.text);
-            const nestedMentions = extractActionableMentions(tOutput, group, targetName);
+            const nestedMentions = extractActionableMentions(downstreamOutput, group, targetName);
             if (nestedMentions.length > 0) {
                 const newMentions = nestedMentions.filter(m => m.targetName !== targetName);
                 if (newMentions.length > 0) {
-                    const nestedOutputs = await processCrossAgents(groupId, group, targetName, tOutput, newMentions, configs, ctx, streamRes, depth + 1, seenMentions, "parallel", "", taskId);
+                    const nestedOutputs = await processCrossAgents(groupId, group, targetName, downstreamOutput, newMentions, configs, ctx, streamRes, depth + 1, seenMentions, "parallel", "", taskId);
                     outputs.push(...nestedOutputs);
                 }
             }
@@ -3364,6 +4091,254 @@ ${childTaskText}
         });
     }
     return collectedOutputs;
+}
+function arbitrateAgentQaRequest(request, group, sourceProject = "") {
+    const text = `${request.question || ""}\n${request.reason || ""}`;
+    const members = new Set((group.members || []).map((m) => String(m.project || "").trim()).filter(Boolean));
+    if (!members.has(request.targetName)) {
+        return { decision: "reject", reason: `目标 Agent 不在当前群聊成员中：${request.targetName}` };
+    }
+    if (request.targetName === sourceProject) {
+        return { decision: "reject", reason: "不能把问题发回给自己" };
+    }
+    if (/用户确认|业务方确认|产品确认|人工确认|生产数据|密钥|token|密码|支付|扣款|删除生产|合规|隐私/i.test(text)) {
+        return { decision: "ask_user", reason: "问题涉及用户/业务/高风险确认，需要主 Agent 暂停并让用户拍板" };
+    }
+    return { decision: "ask_agent", reason: request.reason || "目标 Agent 具备该问题的上下文" };
+}
+async function retryAgentQaItem(id, ctx, streamRes = null) {
+    markExpiredAgentQaItems();
+    const current = loadAgentQaItems().find((item) => item.id === id);
+    if (!current)
+        return { success: false, error: "问答记录不存在" };
+    const group = loadGroups().find((item) => item.id === current.group_id);
+    if (!group)
+        return { success: false, error: "群聊不存在" };
+    const request = {
+        type: current.type || "ask_agent",
+        targetName: current.to_agent,
+        question: current.question,
+        reason: current.reason || "用户触发重试",
+        blocking: current.blocking !== false,
+    };
+    const retryStartedAt = new Date().toISOString();
+    const qa = upsertAgentQaItem({
+        ...current,
+        status: "asking",
+        retry_count: Number(current.retry_count || 0) + 1,
+        timeout_at: new Date(Date.now() + AGENT_QA_TIMEOUT_MS).toISOString(),
+        retry_started_at: retryStartedAt,
+        manual_takeover: false,
+        audit: [...(Array.isArray(current.audit) ? current.audit : []), { at: retryStartedAt, type: "retry", detail: "用户触发重试目标 Agent 回答" }].slice(-30),
+    });
+    appendGroupMessage(current.group_id, buildAgentQaMessage("question", qa, qa.question));
+    emitAgentQaEvent(streamRes, "question", qa, qa.question);
+    const mention = {
+        mention: `@${request.targetName}`,
+        targetName: request.targetName,
+        message: [
+            `【Agent-to-Agent ${request.type === "request_review" ? "评审请求重试" : "询问重试"}】`,
+            `来自：${current.from_agent}`,
+            request.reason ? `原因：${request.reason}` : "",
+            `问题：${request.question}`,
+            "请直接回答该 Agent 的问题；可以自然语言回答，也可以输出 reply_agent 工具调用。",
+        ].filter(Boolean).join("\n"),
+        requestId: qa.id,
+        structured: true,
+    };
+    const outputs = await processCrossAgents(current.group_id, group, current.from_agent, current.question, [mention], (0, db_1.getConfigs)(), ctx, streamRes || null, 1, new Set(), "sequential", "", current.task_id || "");
+    const joined = outputs.join("\n\n---\n\n");
+    const reply = extractAgentQaReplies(joined, qa.id).pop();
+    const answerText = reply?.answer || stripAgentQaProtocolBlocks(joined);
+    const completed = upsertAgentQaItem({
+        ...qa,
+        status: answerText ? "answered" : "failed",
+        answer: compactMemoryText(answerText || "目标 Agent 重试后仍未返回可用回答", 4000),
+        answered_at: new Date().toISOString(),
+        audit: [...(Array.isArray(qa.audit) ? qa.audit : []), { at: new Date().toISOString(), type: answerText ? "answered" : "failed", detail: "重试已完成" }].slice(-30),
+    });
+    appendGroupMessage(current.group_id, buildAgentQaMessage("answer", completed, completed.answer));
+    emitAgentQaEvent(streamRes, "answer", completed, completed.answer);
+    return { success: true, item: completed };
+}
+async function handleAgentQaRequests(input) {
+    markExpiredAgentQaItems(input.groupId);
+    const qaDepth = Number(input.qaDepth || 0);
+    const requests = qaDepth > 0 ? [] : extractAgentQaRequests(input.sourceOutput, input.group, input.sourceProject);
+    if (!requests.length)
+        return { outputs: [], resumedOutput: "" };
+    const outputs = [];
+    const answers = [];
+    for (const request of requests.slice(0, 5)) {
+        const now = new Date().toISOString();
+        const arbitration = arbitrateAgentQaRequest(request, input.group, input.sourceProject);
+        const qaBase = {
+            id: "qa_" + Date.now().toString(36) + "_" + crypto.randomBytes(3).toString("hex"),
+            group_id: input.groupId,
+            task_id: input.taskId || "",
+            from_agent: input.sourceProject,
+            to_agent: request.targetName,
+            type: request.type,
+            question: request.question,
+            reason: request.reason,
+            blocking: request.blocking !== false,
+            status: arbitration.decision === "ask_agent" ? "waiting" : arbitration.decision,
+            timeout_at: new Date(Date.now() + AGENT_QA_TIMEOUT_MS).toISOString(),
+            arbitration,
+            retry_count: 0,
+            manual_takeover: false,
+            created_at: now,
+            updated_at: now,
+            audit: [{ at: now, type: "created", detail: arbitration.reason || "主 Agent 已仲裁" }],
+        };
+        const qa = upsertAgentQaItem(qaBase);
+        appendGroupMessage(input.groupId, buildAgentQaMessage("question", qa, request.question));
+        emitAgentQaEvent(input.streamRes, "question", qa, request.question);
+        safeAddGroupLog(input.groupId, "info", "agent_qa", `${input.sourceProject} 向 ${request.targetName} 提问`, {
+            qa_id: qa.id,
+            from: input.sourceProject,
+            to: request.targetName,
+            question: request.question,
+            arbitration,
+        });
+        if (input.taskId)
+            addTaskLog(input.taskId, "info", `Agent 问答：${input.sourceProject} -> ${request.targetName}；${request.question.slice(0, 220)}`);
+        if (input.taskId)
+            appendTaskTimelineEvent(input.taskId, { type: "agent_qa_question", title: `${input.sourceProject} 向 ${request.targetName} 提问`, detail: request.question, status: "active", phase: "executing", agent: input.sourceProject, data: { qa_id: qa.id, request, arbitration } });
+        if (arbitration.decision === "ask_user") {
+            const needsUser = upsertAgentQaItem({
+                ...qa,
+                status: "needs_user",
+                needs_user_at: new Date().toISOString(),
+                audit: [...(Array.isArray(qa.audit) ? qa.audit : []), { at: new Date().toISOString(), type: "needs_user", detail: arbitration.reason }].slice(-30),
+            });
+            appendGroupMessage(input.groupId, buildAgentQaMessage("answer", needsUser, `主 Agent 仲裁：${arbitration.reason}\n需要用户确认后再继续。`));
+            emitAgentQaEvent(input.streamRes, "answer", needsUser, `主 Agent 仲裁：${arbitration.reason}\n需要用户确认后再继续。`);
+            continue;
+        }
+        if (arbitration.decision !== "ask_agent") {
+            const rejected = upsertAgentQaItem({
+                ...qa,
+                status: "rejected",
+                failed_at: new Date().toISOString(),
+                answer: arbitration.reason,
+                audit: [...(Array.isArray(qa.audit) ? qa.audit : []), { at: new Date().toISOString(), type: "rejected", detail: arbitration.reason }].slice(-30),
+            });
+            appendGroupMessage(input.groupId, buildAgentQaMessage("answer", rejected, arbitration.reason));
+            emitAgentQaEvent(input.streamRes, "answer", rejected, arbitration.reason);
+            continue;
+        }
+        const askingQa = upsertAgentQaItem({ ...qa, status: "asking", asked_at: new Date().toISOString() });
+        const mention = {
+            mention: `@${request.targetName}`,
+            targetName: request.targetName,
+            message: [
+                `【Agent-to-Agent ${request.type === "request_review" ? "评审请求" : "询问"}】`,
+                `来自：${input.sourceProject}`,
+                request.reason ? `原因：${request.reason}` : "",
+                `问题：${request.question}`,
+                "请直接回答该 Agent 的问题；如果涉及接口/字段/文件/验证，请给出可执行、可引用的结论。可以自然语言回答，也可以输出 reply_agent 工具调用。",
+            ].filter(Boolean).join("\n"),
+            requestId: qa.id,
+            structured: true,
+        };
+        const answerOutputs = await processCrossAgents(input.groupId, input.group, input.sourceProject, input.sourceOutput, [mention], input.configs, input.ctx, input.streamRes || null, 1, new Set(), "sequential", "", input.taskId || "");
+        const joinedAnswerText = answerOutputs.join("\n\n---\n\n");
+        const reply = extractAgentQaReplies(joinedAnswerText, qa.id).pop();
+        const answerText = reply?.answer || stripAgentQaProtocolBlocks(joinedAnswerText);
+        const completedQa = upsertAgentQaItem({
+            ...askingQa,
+            status: answerText ? "answered" : "failed",
+            answer: compactMemoryText(answerText || "目标 Agent 未返回可用回答", 4000),
+            answered_at: new Date().toISOString(),
+            audit: [...(Array.isArray(askingQa.audit) ? askingQa.audit : []), { at: new Date().toISOString(), type: answerText ? "answered" : "failed", detail: answerText ? "目标 Agent 已回答" : "目标 Agent 未返回可用回答" }].slice(-30),
+        });
+        appendGroupMessage(input.groupId, buildAgentQaMessage("answer", completedQa, completedQa.answer));
+        emitAgentQaEvent(input.streamRes, "answer", completedQa, completedQa.answer);
+        if (completedQa.status === "answered")
+            answers.push(completedQa);
+        outputs.push(...answerOutputs);
+    }
+    const blockingAnswers = answers.filter(item => item.blocking !== false && item.status === "answered");
+    if (!blockingAnswers.length)
+        return { outputs, resumedOutput: "" };
+    const injectedAt = new Date().toISOString();
+    const injectedAnswers = blockingAnswers.map((item) => upsertAgentQaItem({
+        ...item,
+        status: "injected",
+        injected_at: injectedAt,
+        audit: [...(Array.isArray(item.audit) ? item.audit : []), { at: injectedAt, type: "injected", detail: "回答已注入回原 Agent 续跑上下文" }].slice(-30),
+    }));
+    const resumePrompt = [
+        "你正在 CCM 群聊中继续执行同一轮子 Agent 工作。系统刚刚帮你向其他子 Agent 提问并收到回答。",
+        "请基于这些回答继续原任务，不要重复已经完成的工作；如果答案解除阻塞，请继续实现/验证；如果仍阻塞，请明确写入 CCM_AGENT_RECEIPT.blockers/needs。",
+        "",
+        "【你上一轮原始任务】",
+        compactMemoryText(input.originalPrompt, 1800),
+        "",
+        "【你上一轮输出】",
+        compactMemoryText(stripAgentQaProtocolBlocks(input.sourceOutput), 1800),
+        "",
+        "【其他 Agent 回答】",
+        injectedAnswers.map((item, index) => `#${index + 1} ${item.to_agent} 回答 ${item.from_agent}\n问题：${item.question}\n回答：${compactMemoryText(item.answer, 1800)}`).join("\n\n"),
+        "",
+        "请继续完成你的工作，并在末尾提交新的 CCM_AGENT_RECEIPT。若还需要继续问其他 Agent，可以再次输出 ask_agent/request_review，但本轮系统只会记录，避免无限循环。",
+    ].join("\n");
+    const resumeMessageId = "m" + Date.now().toString(36) + "qar" + crypto.randomBytes(2).toString("hex");
+    const resumedOutput = await input.ctx.callAgentForGroupStream(input.sourceProject, resumePrompt, input.sourceWorkDir, input.sourceAgentType, {
+        res: input.streamRes || null,
+        groupId: input.groupId,
+        timeoutMs: 300000,
+        messageId: resumeMessageId,
+        allowedTools: input.allowedTools,
+        mcpConfigPath: input.mcpConfigPath || "",
+    });
+    const resumedAt = new Date().toISOString();
+    const resumedAnswerIds = injectedAnswers.map((item) => {
+        const updated = upsertAgentQaItem({
+            ...item,
+            status: "resumed",
+            resumed_at: resumedAt,
+            resume_message_id: resumeMessageId,
+            audit: [...(Array.isArray(item.audit) ? item.audit : []), { at: resumedAt, type: "resumed", detail: "原 Agent 已拿到回答并续跑" }].slice(-30),
+        });
+        return updated.id;
+    });
+    appendGroupMessage(input.groupId, {
+        id: resumeMessageId,
+        role: "assistant",
+        agent: input.sourceProject,
+        type: "agent_qa_resume",
+        content: resumedOutput,
+        timestamp: new Date().toISOString(),
+        task_id: input.taskId || undefined,
+        qa: {
+            kind: "resume",
+            from_agent: input.sourceProject,
+            answers: resumedAnswerIds,
+            status: "resumed",
+            injected_at: injectedAt,
+            resumed_at: resumedAt,
+        },
+    });
+    const resumeQa = {
+        id: "qa_resume_" + Date.now().toString(36) + "_" + crypto.randomBytes(2).toString("hex"),
+        group_id: input.groupId,
+        task_id: input.taskId || "",
+        from_agent: input.sourceProject,
+        to_agent: input.sourceProject,
+        status: "resumed",
+        answer: compactMemoryText(resumedOutput, 2000),
+        injected_at: injectedAt,
+        resumed_at: resumedAt,
+    };
+    emitAgentQaEvent(input.streamRes, "resume", resumeQa, resumedOutput);
+    outputs.push(formatCollectedAgentOutput(input.sourceProject, resumedOutput, extractAgentReceipt(resumedOutput, input.sourceProject)));
+    if (input.taskId)
+        addTaskLog(input.taskId, "info", `Agent 问答完成后已续跑：${input.sourceProject}`);
+    if (input.taskId)
+        appendTaskTimelineEvent(input.taskId, { type: "agent_qa_resume", title: `${input.sourceProject} 拿到回答并续跑`, detail: compactMemoryText(resumedOutput, 500), status: "ok", phase: "executing", agent: input.sourceProject, data: { answers: resumedAnswerIds } });
+    return { outputs, resumedOutput };
 }
 async function appendCoordinatorMessage(groupId, agent, content, streamRes = null, suffix = "review", metadata = {}) {
     const messageId = "m" + Date.now().toString(36) + suffix + crypto.randomBytes(2).toString("hex");
@@ -3549,6 +4524,7 @@ async function executeTask(task, ctx) {
             throw new Error("群聊不存在");
         const coordinatorProject = (0, group_orchestrator_1.getCoordinatorMember)(group).project;
         const message = buildQueuedGroupTaskMessage(task);
+        appendTaskTimelineEvent(task.id, { type: "queued_group_task", title: "任务进入群聊主 Agent", detail: task.title || "", status: "active", phase: "intake", agent: coordinatorProject, data: { group_id: task.group_id } });
         appendGroupMessage(task.group_id, {
             id: "m" + Date.now().toString(36) + "task",
             role: "user",
@@ -3568,8 +4544,7 @@ async function executeTask(task, ctx) {
             reason: task.title,
             nextAction: "主 Agent 拆分任务并协调子 Agent",
         });
-        const memoryContext = buildGroupMemoryContext(loadGroupMemory(task.group_id));
-        const context = [memoryContext, (0, group_orchestrator_1.buildRecentGroupContext)(getGroupMessages(task.group_id).slice(-10))].filter(Boolean).join("\n\n");
+        const context = buildGroupContextPacket(task.group_id, { recentLimit: 12, olderLimit: 30, fullCount: 5 });
         const sharedFilesContext = mergeCoordinatorDocumentContexts(buildCoordinatorSharedFilesContext(ctx, group), buildTaskSourceDocumentsContext(task));
         let coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
             group,
@@ -3598,6 +4573,7 @@ async function executeTask(task, ctx) {
             coordinationPlan: coordinatorResult.coordinationPlan || null,
             workflow: workflowMeta,
         });
+        appendTaskTimelineEvent(task.id, { type: "coordinator_plan", title: "主 Agent 生成计划", detail: compactMemoryText(coordinatorOutput, 500), status: planAssignments.length ? "ok" : "warn", phase: "planning", agent: coordinatorProject, data: { assignments: planAssignments, dispatchPolicy, coordinationPlan: coordinatorResult.coordinationPlan || null } });
         let validMentions = getCoordinatorActionMentions(coordinatorResult, group, coordinatorProject);
         if (task.workflow_type === "daily_dev" && validMentions.length === 0 && (0, group_orchestrator_1.getRoutableMembers)(group).length > 0) {
             const repairResult = (0, group_orchestrator_1.runCodedGroupOrchestrator)({
@@ -3655,10 +4631,31 @@ async function executeTask(task, ctx) {
                 addTaskLog(task.id, "warning", "daily_dev 主 Agent 空派发修复未产生可执行目标");
             }
         }
+        const sandboxRehearsal = buildTaskSandboxRehearsal(task, group, coordinatorResult, planAssignments, validMentions, dispatchPolicy);
+        const tasksForRehearsal = (0, db_1.loadTasks)();
+        const rehearsalTaskIndex = tasksForRehearsal.findIndex((item) => item.id === task.id);
+        if (rehearsalTaskIndex >= 0) {
+            tasksForRehearsal[rehearsalTaskIndex].workflow_meta = { ...(tasksForRehearsal[rehearsalTaskIndex].workflow_meta || {}), sandbox_rehearsal: sandboxRehearsal };
+            tasksForRehearsal[rehearsalTaskIndex].sandbox_rehearsal = sandboxRehearsal;
+            (0, db_1.saveTasks)(tasksForRehearsal);
+        }
+        appendTaskTimelineEvent(task.id, { type: "sandbox_rehearsal", title: "任务前沙盘演练", detail: `${sandboxRehearsal.impact_scope.areas.join("、")}；${sandboxRehearsal.agent_plan.length} 个 Agent 计划`, status: sandboxRehearsal.status === "ready" ? "ok" : "warn", phase: "planning", agent: coordinatorProject, data: sandboxRehearsal });
+        appendGroupMessage(task.group_id, {
+            id: "m" + Date.now().toString(36) + "sandbox",
+            role: "assistant",
+            agent: coordinatorProject,
+            type: "task_rehearsal",
+            content: [`任务前沙盘演练：${sandboxRehearsal.title}`, `影响范围：${sandboxRehearsal.impact_scope.areas.join("、")}`, `计划派发：${sandboxRehearsal.agent_plan.map((item) => item.project).join("、") || "待确认"}`, `门禁：${sandboxRehearsal.gate_requirements.join("、")}`].join("\n"),
+            timestamp: new Date().toISOString(),
+            task_id: task.id,
+            taskRehearsal: sandboxRehearsal,
+            workflow: buildWorkflowMeta("planning", "任务前沙盘演练"),
+        });
         let crossOutputs = [];
         let reviewResult = null;
         if (validMentions.length > 0) {
             addTaskLog(task.id, "info", `检测到群聊派发目标: ${validMentions.map(m => m.mention).join(", ")}`);
+            appendTaskTimelineEvent(task.id, { type: "dispatch", title: "主 Agent 派发子 Agent", detail: validMentions.map(m => m.mention).join(", "), status: "active", phase: "dispatching", agent: coordinatorProject, data: { mentions: validMentions } });
             crossOutputs = await processCrossAgents(task.group_id, group, coordinatorProject, coordinatorOutput, validMentions, configs, ctx, null, 0, new Set(), coordinatorResult.executionOrder || "parallel", coordinatorMessageId, task.id);
             reviewResult = await runCoordinatorReviewLoop({
                 groupId: task.group_id,
@@ -3671,6 +4668,7 @@ async function executeTask(task, ctx) {
                 executionOrder: coordinatorResult.executionOrder || "parallel",
                 taskId: task.id,
             });
+            appendTaskTimelineEvent(task.id, { type: "coordinator_review", title: "主 Agent 验收", detail: compactMemoryText(reviewResult?.content || reviewResult?.detail || "", 500), status: reviewResult?.status === "done" ? "ok" : "warn", phase: "reviewing", agent: coordinatorProject, data: { review: reviewResult?.review || reviewResult } });
         }
         const outputText = [...coordinatorTranscript, ...crossOutputs, reviewResult?.content || ""].filter(Boolean).join("\n\n---\n\n");
         return getGroupTaskExecutionStatus(reviewResult, coordinatorResult, outputText, task);
@@ -3679,6 +4677,7 @@ async function executeTask(task, ctx) {
         const config = configs.find(c => c.name === task.target_project);
         if (!config)
             throw new Error("项目配置不存在");
+        appendTaskTimelineEvent(task.id, { type: "direct_task", title: "直接任务进入项目 Agent", detail: task.title || "", status: "active", phase: "dispatching", agent: task.target_project });
         const info = (0, db_1.getConfigInfo)(config.path);
         let workDir = info[0]?.workDir;
         const agentType = info[0]?.agent || "claudecode";
@@ -3691,12 +4690,22 @@ async function executeTask(task, ctx) {
         });
         workDir = preparedWorkDir.workDir;
         const worktreeNotice = (0, agent_worktree_1.buildChildAgentWorktreeNotice)(preparedWorkDir);
+        const runtimeToolContext = prepareAgentRuntimeTools(task.group_id || "", task.target_project, workDir, agentType, toolContext.allowedTools);
         if (preparedWorkDir.mode === "worktree") {
             addTaskLog(task.id, "info", `直接任务已启用 worktree 隔离：${preparedWorkDir.worktreePath}（${preparedWorkDir.worktreeBranch || "branch unknown"}）`);
         }
         else if (preparedWorkDir.requestedMode === "worktree" && preparedWorkDir.warning) {
             addTaskLog(task.id, "warning", `直接任务请求 worktree 隔离但已降级共享目录：${preparedWorkDir.warning}`);
         }
+        const directSandboxRehearsal = buildTaskSandboxRehearsal(task, { members: [{ project: task.target_project }] }, { content: task.description || task.title, dispatchPolicy: { action: "delegate", reason: "直接任务派发给目标项目 Agent" } }, [{ project: task.target_project, task: task.description || task.title, reason: "直接任务" }], [{ targetName: task.target_project, mention: `@${task.target_project}` }], { action: "delegate", reason: "直接任务派发给目标项目 Agent" });
+        const directTasksForRehearsal = (0, db_1.loadTasks)();
+        const directRehearsalTaskIndex = directTasksForRehearsal.findIndex((item) => item.id === task.id);
+        if (directRehearsalTaskIndex >= 0) {
+            directTasksForRehearsal[directRehearsalTaskIndex].workflow_meta = { ...(directTasksForRehearsal[directRehearsalTaskIndex].workflow_meta || {}), sandbox_rehearsal: directSandboxRehearsal };
+            directTasksForRehearsal[directRehearsalTaskIndex].sandbox_rehearsal = directSandboxRehearsal;
+            (0, db_1.saveTasks)(directTasksForRehearsal);
+        }
+        appendTaskTimelineEvent(task.id, { type: "sandbox_rehearsal", title: "任务前沙盘演练", detail: `${directSandboxRehearsal.impact_scope.areas.join("、")}；直接派发给 ${task.target_project}`, status: "ok", phase: "planning", agent: task.target_project, data: directSandboxRehearsal });
         const changeSnapshot = workDir ? ctx.createFileChangeSnapshot(workDir) : null;
         const directTaskText = buildChildAgentTaskText(`${task.title}\n${task.description || ""}`, task);
         const developmentContract = buildChildAgentDevelopmentContract(task.target_project, directTaskText, {
@@ -3704,8 +4713,9 @@ async function executeTask(task, ctx) {
             acceptance: task.acceptance_criteria || "",
             requires_code_changes: task.requires_code_changes,
             verification_hints: buildProjectVerificationHints(task.target_project, workDir),
+            work_dir: workDir,
         });
-        const message = `${toolContext.prompt}\n\n${developmentContract}\n\n${worktreeNotice}\n\n📋 执行任务：${task.title}\n${directTaskText}
+        const message = `${toolContext.prompt}${runtimeToolContext.prompt}\n\n${developmentContract}\n\n${worktreeNotice}\n\n📋 执行任务：${task.title}\n${directTaskText}
 
 请直接完成开发工作。完成后必须追加 CCM_AGENT_RECEIPT 结构化回执，格式如下：
 \`\`\`json
@@ -3720,7 +4730,7 @@ async function executeTask(task, ctx) {
   "needs": ["还需要用户或其他 Agent 补充的内容；没有填空数组"]
 }
 \`\`\``;
-        const output = await ctx.callAgent(task.target_project, message, workDir, agentType, 300000, { allowedTools: toolContext.allowedTools });
+        const output = await ctx.callAgent(task.target_project, message, workDir, agentType, 300000, { allowedTools: toolContext.allowedTools, mcpConfigPath: runtimeToolContext.audit.mcpConfigPath });
         const fileChanges = workDir ? ctx.getFileChanges(task.target_project, changeSnapshot) : null;
         return getTaskExecutionFromReceipt(output, extractAgentReceipt(output, task.target_project), { fileChanges });
     }
@@ -3763,6 +4773,7 @@ async function processTargetQueue(targetKey, ctx) {
             addTaskLog(taskId, "response", `Agent 响应:\n${result.substring(0, 1000)}`);
             if (execution.status === "failed") {
                 const deliverySummary = buildDeliverySummary(task, execution, "failed");
+                appendTaskTimelineEvent(taskId, { type: "acceptance_gate", title: "代码变更验收门禁", detail: `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过`, status: "fail", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
                 const failedTask = updateTask(taskId, {
                     status: "failed",
                     result: result.substring(0, 500),
@@ -3786,6 +4797,7 @@ async function processTargetQueue(targetKey, ctx) {
             const isCompleted = execution.status === "done";
             if (isCompleted) {
                 const deliverySummary = buildDeliverySummary(task, execution, "done");
+                appendTaskTimelineEvent(taskId, { type: "acceptance_gate", title: "代码变更验收门禁", detail: deliverySummary.acceptance_gate_passed ? "门禁通过" : `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过`, status: deliverySummary.acceptance_gate_passed ? "ok" : "warn", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
                 const completedTask = updateTask(taskId, {
                     status: "done",
                     result: result.substring(0, 500),
@@ -3805,6 +4817,7 @@ async function processTargetQueue(targetKey, ctx) {
             }
             else {
                 const deliverySummary = buildDeliverySummary(task, execution, "waiting");
+                appendTaskTimelineEvent(taskId, { type: "acceptance_gate", title: "代码变更验收门禁", detail: deliverySummary.acceptance_gate_passed ? "门禁通过" : `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过，任务继续推进`, status: deliverySummary.acceptance_gate_passed ? "ok" : "warn", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
                 if (canCompleteDailyDevFromDeliverySummary(task, execution, deliverySummary)) {
                     const promotedExecution = {
                         ...execution,
@@ -3812,6 +4825,7 @@ async function processTargetQueue(targetKey, ctx) {
                         detail: "daily_dev 验收证据齐全，系统自动完成",
                     };
                     const promotedSummary = buildDeliverySummary(task, promotedExecution, "done");
+                    appendTaskTimelineEvent(taskId, { type: "acceptance_gate", title: "代码变更验收门禁", detail: promotedSummary.acceptance_gate_passed ? "门禁通过并自动完成" : `${promotedSummary.acceptance_gate?.failed_count || 0} 项未通过`, status: promotedSummary.acceptance_gate_passed ? "ok" : "warn", phase: "reviewing", data: promotedSummary.acceptance_gate || {} });
                     const completedTask = updateTask(taskId, {
                         status: "done",
                         result: result.substring(0, 500),
@@ -3885,7 +4899,7 @@ function enqueueTask(taskId, ctx) {
         addTaskLog(taskId, "info", "任务已暂停，跳过入队");
         return { queued: false, message: "任务已暂停，跳过入队" };
     }
-    const readiness = getAgentExecutionReadiness();
+    const readiness = getTaskAgentExecutionReadiness(task);
     if (!readiness.ready) {
         const message = readiness.message || "Agent CLI 执行通道不可用，任务暂不入队";
         const fixActions = Array.isArray(readiness.fix_actions) ? readiness.fix_actions : [];
@@ -4081,10 +5095,11 @@ function runTaskWatchdog(ctx, options = {}) {
     const results = [];
     const gapResults = [];
     const executionReadiness = getAgentExecutionReadiness();
-    const dailyDevExecutionReadiness = enforceTaskAgentProbeReadiness({ workflow_type: "daily_dev" }, executionReadiness);
-    const recentProbeOk = hasFreshSuccessfulAgentProbe(executionReadiness);
-    const canAutoRetryRuntimeFailures = executionReadiness.ready && recentProbeOk;
-    const canAutoContinueGaps = dailyDevExecutionReadiness.ready === true;
+    const freshRecoveryProbeGroups = getAgentRecoveryProbeGroups()
+        .filter((group) => getAgentProbeHealth(readAgentProbeStatus(group.probe_target)).successFresh);
+    const dailyDevExecutionReadiness = executionReadiness;
+    const canAutoRetryRuntimeFailures = executionReadiness.ready && freshRecoveryProbeGroups.length > 0;
+    const canAutoContinueGaps = executionReadiness.ready === true;
     let blockedRecovery = null;
     let runtimeRetry = null;
     for (const item of recoverable) {
@@ -4107,8 +5122,8 @@ function runTaskWatchdog(ctx, options = {}) {
         addTaskLog(task.id, "warning", patch.status_detail);
         results.push({ task_id: task.id, ...enqueueTask(task.id, ctx) });
     }
-    if (options.recover_agent_blocked !== false && options.recoverAgentBlocked !== false && recentProbeOk) {
-        blockedRecovery = recoverAgentExecutionBlockedTasks(ctx, "Agent CLI 探针通过后立即恢复被执行准入阻塞的任务");
+    if (options.recover_agent_blocked !== false && options.recoverAgentBlocked !== false && freshRecoveryProbeGroups.length > 0) {
+        blockedRecovery = aggregateBlockedRecovery(freshRecoveryProbeGroups.map((group) => recoverAgentExecutionBlockedTasks(ctx, "目标项目 Agent CLI 探针通过后立即恢复任务", { probeTarget: group.probe_target })));
     }
     if (options.continue_gaps !== false && options.continueGaps !== false && canAutoContinueGaps) {
         for (const item of status.gap_rework) {
@@ -4128,10 +5143,11 @@ function runTaskWatchdog(ctx, options = {}) {
         }
     }
     if (options.retry_runtime_failures !== false && canAutoRetryRuntimeFailures && status.runtime_failed.length > 0) {
-        runtimeRetry = retryRuntimeFailedTasks(ctx, {
-            reason: "执行通道恢复后看门狗自动重试",
+        runtimeRetry = aggregateRuntimeRecovery(freshRecoveryProbeGroups.map((group) => retryRuntimeFailedTasks(ctx, {
+            reason: "目标执行通道恢复后看门狗自动重试",
             limit: status.runtime_failed.length,
-        });
+            probeTarget: group.probe_target,
+        })));
     }
     return {
         success: true,
@@ -4150,7 +5166,7 @@ function runTaskWatchdog(ctx, options = {}) {
         gap_continue_skipped_reason: status.gap_rework.length > 0 && !canAutoContinueGaps ? dailyDevExecutionReadiness.message : "",
         runtime_retry: runtimeRetry,
         runtime_retry_skipped_reason: status.runtime_failed.length > 0 && !canAutoRetryRuntimeFailures
-            ? (executionReadiness.ready ? "等待最近一次执行通道探针通过后再自动重试" : executionReadiness.message)
+            ? (executionReadiness.ready ? "等待目标项目 Agent CLI 探针通过后再自动重试" : executionReadiness.message)
             : "",
         execution_readiness: executionReadiness,
         daily_dev_execution_readiness: dailyDevExecutionReadiness,
@@ -4186,8 +5202,77 @@ function getAgentRecoveryWorkSummary() {
         total: blockedPending.length + runtimeFailed.length,
     };
 }
-function recoverAgentExecutionBlockedTasks(ctx, reason = "执行通道恢复后自动重新入队") {
-    const candidates = (0, db_1.loadTasks)().filter(isAgentExecutionBlockedPendingTask);
+function getAgentRecoveryProbePayload(target = {}) {
+    const normalized = normalizeAgentProbeTarget(target);
+    const payload = {};
+    if (normalized.groupId)
+        payload.group_id = normalized.groupId;
+    if (normalized.project)
+        payload.target_member = normalized.project;
+    return payload;
+}
+function taskMatchesAgentProbeTarget(task, target = null) {
+    if (!target)
+        return true;
+    const required = getTaskRequiredProbeTarget(task);
+    const hasRequired = !!(required.groupId || required.project || required.agentType);
+    if (!hasRequired)
+        return false;
+    return doesProbeTargetMatchRequired(target, required);
+}
+function buildAgentRecoveryProbeGroups(tasks) {
+    const groups = new Map();
+    for (const task of tasks) {
+        const probeTarget = getTaskRequiredProbeTarget(task);
+        const key = getAgentProbeTargetStatusKey(probeTarget) || "default";
+        if (!groups.has(key)) {
+            groups.set(key, {
+                key,
+                probe_target: key === "default" ? null : probeTarget,
+                probe_payload: key === "default" ? {} : getAgentRecoveryProbePayload(probeTarget),
+                task_ids: [],
+                blocked_pending: 0,
+                runtime_failed: 0,
+            });
+        }
+        const group = groups.get(key);
+        group.task_ids.push(task.id);
+        if (isAgentExecutionBlockedPendingTask(task))
+            group.blocked_pending += 1;
+        if (isRecoverableRuntimeFailure(task))
+            group.runtime_failed += 1;
+    }
+    return Array.from(groups.values());
+}
+function getAgentRecoveryProbeGroups() {
+    const tasks = (0, db_1.loadTasks)().filter((task) => isAgentExecutionBlockedPendingTask(task) || isRecoverableRuntimeFailure(task));
+    return buildAgentRecoveryProbeGroups(tasks);
+}
+function aggregateBlockedRecovery(results) {
+    const flattened = results.flatMap((item) => Array.isArray(item?.results) ? item.results : []);
+    return {
+        total_blocked: results.reduce((sum, item) => sum + Number(item?.total_blocked || 0), 0),
+        recovered: results.reduce((sum, item) => sum + Number(item?.recovered || 0), 0),
+        results: flattened,
+    };
+}
+function aggregateRuntimeRecovery(results) {
+    const flattened = results.flatMap((item) => Array.isArray(item?.results) ? item.results : []);
+    return {
+        success: true,
+        total_recoverable: results.reduce((sum, item) => sum + Number(item?.total_recoverable || 0), 0),
+        retried: results.reduce((sum, item) => sum + Number(item?.retried || 0), 0),
+        queued: results.reduce((sum, item) => sum + Number(item?.queued || 0), 0),
+        auto_execute: results.some((item) => item?.auto_execute !== false),
+        results: flattened,
+        queue_status: getQueueStatus(),
+    };
+}
+function recoverAgentExecutionBlockedTasks(ctx, reason = "执行通道恢复后自动重新入队", options = {}) {
+    const probeTarget = options.probeTarget || options.probe_target || null;
+    const candidates = (0, db_1.loadTasks)()
+        .filter(isAgentExecutionBlockedPendingTask)
+        .filter((task) => taskMatchesAgentProbeTarget(task, probeTarget));
     const results = [];
     for (const task of candidates) {
         updateTask(task.id, {
@@ -4215,27 +5300,52 @@ function runAgentRecoveryMonitorOnce(ctx, options = {}) {
     }
     agentRecoveryProbeInFlight = true;
     const timeoutMs = Number(options.timeout_ms || options.timeoutMs || AGENT_RECOVERY_PROBE_TIMEOUT_MS);
-    return runAgentCliProbe({ ...options, timeout_ms: timeoutMs, source: "agent-recovery-monitor" }, ctx)
-        .then((probe) => {
+    const probeGroups = getAgentRecoveryProbeGroups();
+    return Promise.all(probeGroups.map(async (group) => {
+        const probe = await runAgentCliProbe({
+            ...options,
+            ...group.probe_payload,
+            timeout_ms: timeoutMs,
+            source: "agent-recovery-monitor",
+        }, ctx);
         if (!probe?.success) {
             return {
                 success: false,
-                skipped: false,
+                group,
                 probe,
-                work,
                 message: probe?.message || "执行通道探针未通过",
             };
         }
-        const blockedRecovery = recoverAgentExecutionBlockedTasks(ctx);
+        const blockedRecovery = recoverAgentExecutionBlockedTasks(ctx, "执行通道自动探针通过后恢复目标任务", { probeTarget: group.probe_target });
         const runtimeRecovery = retryRuntimeFailedTasks(ctx, {
             reason: "执行通道自动探针通过后重试",
-            limit: work.runtime_failed.length || 100,
+            limit: group.runtime_failed || 100,
+            probeTarget: group.probe_target,
         });
         return {
             success: true,
-            skipped: false,
+            group,
             probe,
+            blocked_recovery: blockedRecovery,
+            runtime_recovery: runtimeRecovery,
+        };
+    }))
+        .then((target_results) => {
+        const successes = target_results.filter((item) => item.success);
+        const failures = target_results.filter((item) => !item.success);
+        const blockedRecoveries = successes.map((item) => item.blocked_recovery);
+        const runtimeRecoveries = successes.map((item) => item.runtime_recovery);
+        const blockedRecovery = aggregateBlockedRecovery(blockedRecoveries);
+        const runtimeRecovery = aggregateRuntimeRecovery(runtimeRecoveries);
+        return {
+            success: successes.length > 0,
+            skipped: false,
             work,
+            probe_groups: probeGroups,
+            target_results,
+            failures,
+            message: successes.length > 0 ? "目标执行通道探针通过，已按项目 Agent 恢复任务" : (failures[0]?.message || "执行通道探针未通过"),
+            probe: target_results[0]?.probe || null,
             blocked_recovery: blockedRecovery,
             runtime_recovery: runtimeRecovery,
         };
@@ -4277,6 +5387,9 @@ function startTaskWatchdog(ctx) {
         clearInterval(taskWatchdogTimer);
     const tick = () => {
         try {
+            const expiredQa = markExpiredAgentQaItems();
+            if (expiredQa.length)
+                console.log(`[Agent 问答看门狗] ${expiredQa.length} 个问答已超时`);
             const result = runTaskWatchdog(ctx);
             if (result.total_recoverable > 0) {
                 console.log(`[任务看门狗] 恢复 ${result.recovered}/${result.total_recoverable} 个自动任务`);
@@ -4293,6 +5406,27 @@ function stopTaskWatchdog() {
     if (taskWatchdogTimer)
         clearInterval(taskWatchdogTimer);
     taskWatchdogTimer = null;
+}
+function getRuntimeMonitorControlStatus() {
+    return {
+        task_watchdog_active: !!taskWatchdogTimer,
+        agent_recovery_monitor_active: !!agentRecoveryMonitorTimer,
+        agent_recovery_probe_in_flight: agentRecoveryProbeInFlight,
+    };
+}
+function applyRuntimeMonitorControl(action, ctx) {
+    const normalized = String(action || "status").trim().toLowerCase();
+    if (normalized === "stop" || normalized === "pause") {
+        stopTaskWatchdog();
+        stopAgentRecoveryMonitor();
+        return { success: true, action: "stop", ...getRuntimeMonitorControlStatus() };
+    }
+    if (normalized === "start" || normalized === "resume") {
+        startTaskWatchdog(ctx);
+        startAgentRecoveryMonitor(ctx);
+        return { success: true, action: "start", ...getRuntimeMonitorControlStatus() };
+    }
+    return { success: true, action: "status", ...getRuntimeMonitorControlStatus() };
 }
 function createDiagnosticCheck(id, label, status, message, detail = undefined) {
     return { id, label, status, message, ...(detail !== undefined ? { detail } : {}) };
@@ -4339,20 +5473,91 @@ function getChildProcessCapability() {
 function readRunnerJson(file) {
     return JSON.parse(fs.readFileSync(file, "utf-8").replace(/^\uFEFF/, ""));
 }
-function readAgentProbeStatus() {
+function normalizeAgentProbeTarget(target = {}) {
+    return {
+        groupId: String(target.group_id || target.groupId || "").trim(),
+        project: String(target.project || target.target_member || target.targetMember || "").trim(),
+        agentType: String(target.agent_type || target.agentType || "").trim(),
+    };
+}
+function getAgentProbeTargetStatusKey(target) {
+    const normalized = normalizeAgentProbeTarget(target);
+    if (!normalized.groupId && !normalized.project && !normalized.agentType)
+        return "";
+    const clean = (value, fallback) => String(value || fallback)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9._-]+/gi, "_")
+        .replace(/^_+|_+$/g, "") || fallback;
+    return [
+        clean(normalized.groupId, "any-group"),
+        clean(normalized.project, "any-project"),
+        clean(normalized.agentType, "any-agent"),
+    ].join("__");
+}
+function getAgentProbeTargetStatusFile(target) {
+    const key = getAgentProbeTargetStatusKey(target);
+    return key ? path.join(AGENT_PROBE_TARGET_STATUS_DIR, `${key}.json`) : "";
+}
+function attachAgentProbeAge(data) {
+    if (!data)
+        return null;
+    const checkedAt = data?.checked_at ? Date.parse(data.checked_at) : 0;
+    return {
+        ...data,
+        age_ms: checkedAt ? Date.now() - checkedAt : null,
+    };
+}
+function readAgentProbeStatusFile(file) {
     try {
-        if (!fs.existsSync(AGENT_PROBE_STATUS_FILE))
+        if (!file || !fs.existsSync(file))
             return null;
-        const data = readRunnerJson(AGENT_PROBE_STATUS_FILE);
-        const checkedAt = data?.checked_at ? Date.parse(data.checked_at) : 0;
-        return {
-            ...data,
-            age_ms: checkedAt ? Date.now() - checkedAt : null,
-        };
+        return attachAgentProbeAge(readRunnerJson(file));
     }
     catch {
         return null;
     }
+}
+function doesProbeTargetMatchRequired(probeTarget, requiredTarget) {
+    const required = normalizeAgentProbeTarget(requiredTarget);
+    if (!required.groupId && !required.project && !required.agentType)
+        return true;
+    const target = normalizeAgentProbeTarget(probeTarget);
+    return (!required.groupId || target.groupId === required.groupId)
+        && (!required.project || target.project === required.project)
+        && (!required.agentType || target.agentType === required.agentType);
+}
+function listAgentProbeTargetStatuses(requiredTarget = null) {
+    try {
+        if (!fs.existsSync(AGENT_PROBE_TARGET_STATUS_DIR))
+            return [];
+        return fs.readdirSync(AGENT_PROBE_TARGET_STATUS_DIR)
+            .filter(file => file.endsWith(".json"))
+            .map(file => readAgentProbeStatusFile(path.join(AGENT_PROBE_TARGET_STATUS_DIR, file)))
+            .filter(Boolean)
+            .filter((probe) => !requiredTarget || doesProbeTargetMatchRequired(probe?.target, requiredTarget))
+            .sort((a, b) => Date.parse(b?.checked_at || "") - Date.parse(a?.checked_at || ""));
+    }
+    catch {
+        return [];
+    }
+}
+function readAgentProbeStatus(requiredTarget = null) {
+    const required = normalizeAgentProbeTarget(requiredTarget || {});
+    const hasRequired = !!(required.groupId || required.project || required.agentType);
+    if (hasRequired) {
+        const exactFile = getAgentProbeTargetStatusFile(required);
+        const exact = readAgentProbeStatusFile(exactFile);
+        if (exact)
+            return exact;
+        const matched = listAgentProbeTargetStatuses(required)[0];
+        if (matched)
+            return matched;
+    }
+    const latest = readAgentProbeStatusFile(AGENT_PROBE_STATUS_FILE);
+    if (!hasRequired)
+        return latest;
+    return latest && doesProbeTargetMatchRequired(latest?.target, required) ? latest : null;
 }
 function getAgentProbeHealth(probe) {
     if (!probe) {
@@ -4391,7 +5596,6 @@ function writeAgentProbeStatus(data) {
     try {
         if (!fs.existsSync(AGENT_RUNNER_DIR))
             fs.mkdirSync(AGENT_RUNNER_DIR, { recursive: true });
-        const tmp = `${AGENT_PROBE_STATUS_FILE}.${process.pid}.tmp`;
         const target = data?.target || null;
         const fixActions = Array.isArray(data?.fix_actions) && data.fix_actions.length
             ? data.fix_actions
@@ -4400,7 +5604,7 @@ function writeAgentProbeStatus(data) {
                 agentType: target?.agent_type || data?.readiness?.probe?.target?.agent_type || "",
                 probe: data,
             }));
-        fs.writeFileSync(tmp, JSON.stringify({
+        const payload = {
             success: !!data?.success,
             blocked: !!data?.blocked,
             message: String(data?.message || data?.error || "").slice(0, 1000),
@@ -4419,8 +5623,19 @@ function writeAgentProbeStatus(data) {
             duration_ms: Number(data?.duration_ms || 0),
             readiness_mode: data?.readiness?.mode || "",
             checked_at: new Date().toISOString(),
-        }, null, 2), "utf-8");
-        fs.renameSync(tmp, AGENT_PROBE_STATUS_FILE);
+        };
+        const writeJsonAtomic = (file) => {
+            const dir = path.dirname(file);
+            if (!fs.existsSync(dir))
+                fs.mkdirSync(dir, { recursive: true });
+            const tmp = `${file}.${process.pid}.tmp`;
+            fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), "utf-8");
+            fs.renameSync(tmp, file);
+        };
+        writeJsonAtomic(AGENT_PROBE_STATUS_FILE);
+        const targetFile = getAgentProbeTargetStatusFile(target);
+        if (targetFile)
+            writeJsonAtomic(targetFile);
     }
     catch { }
 }
@@ -4485,9 +5700,9 @@ function getAgentProbeOutputFailure(output) {
         error: compactMemoryText(text, 1000),
     };
 }
-function getAgentExecutionReadiness() {
+function getAgentExecutionReadiness(probeTarget = null) {
     const childProcess = getChildProcessCapability();
-    const probe = readAgentProbeStatus();
+    const probe = readAgentProbeStatus(probeTarget);
     const probeHealth = getAgentProbeHealth(probe);
     if (probeHealth.failureRecent) {
         const externalRunner = getExternalAgentRunnerStatus();
@@ -4525,11 +5740,13 @@ function getAgentExecutionReadiness() {
     const lastResult = externalRunner.last_result || null;
     const lastFailure = lastResult?.success === false;
     const recentFailure = lastFailure && Number(lastResult?.age_ms || 0) < 15 * 60 * 1000;
-    if (externalRunner.active && !recentFailure) {
+    if (externalRunner.active && (!recentFailure || probeHealth.successFresh)) {
         return {
             ready: true,
             mode: "external-runner",
-            message: "Node 直接启动子进程受限，但外部 Agent Runner 在线，子 Agent CLI 将通过 Runner 执行",
+            message: recentFailure && probeHealth.successFresh
+                ? "Node 直接启动子进程受限，外部 Agent Runner 最近有失败记录，但 Agent CLI 探针已新鲜通过，允许继续通过 Runner 执行"
+                : "Node 直接启动子进程受限，但外部 Agent Runner 在线，子 Agent CLI 将通过 Runner 执行",
             fix_actions: [],
             childProcess,
             externalRunner,
@@ -4602,23 +5819,161 @@ function enforceAgentProbeExecutionReadiness(capability = {}) {
         probeHealth,
     };
 }
-function getAgentProbeExecutionReadiness() {
+function getAgentProbeExecutionReadiness(probeTarget = null) {
     return enforceAgentProbeExecutionReadiness({
         childProcess: getChildProcessCapability(),
         externalRunner: getExternalAgentRunnerStatus(),
-        probe: readAgentProbeStatus(),
+        probe: readAgentProbeStatus(probeTarget),
     });
 }
 function taskRequiresFreshAgentProbe(task) {
     return task?.workflow_type === "daily_dev";
 }
+function getTaskRequiredProbeTarget(task) {
+    const meta = task?.workflow_meta || task?.workflowMeta || {};
+    const groupId = String(task?.group_id || task?.groupId || meta.group_id || meta.groupId || "").trim();
+    const targetMember = String(meta.target_member || meta.targetMember || meta.probe_target_project || meta.probeTargetProject || "").trim();
+    const targetProject = String(task?.target_project || task?.targetProject || "").trim();
+    const project = targetMember || (task?.assign_type === "project" || !task?.assign_type ? targetProject : "");
+    const agentType = String(meta.agent_type || meta.agentType || meta.probe_agent_type || meta.probeAgentType || "").trim();
+    return { groupId, project, agentType };
+}
+function getProbeTargetLabel(probe) {
+    const target = probe?.target || {};
+    const project = String(target.project || "").trim();
+    const agentType = String(target.agent_type || target.agentType || "").trim();
+    return [project, agentType].filter(Boolean).join(" / ") || "未知目标";
+}
+function doesProbeMatchTaskTarget(probe, task) {
+    const required = getTaskRequiredProbeTarget(task);
+    if (!required.groupId && !required.project && !required.agentType)
+        return true;
+    return doesProbeTargetMatchRequired(probe?.target, required);
+}
+function taskNeedsGroupWideAgentProbe(task) {
+    if (!taskRequiresFreshAgentProbe(task))
+        return false;
+    const required = getTaskRequiredProbeTarget(task);
+    const assignType = String(task?.assign_type || task?.assignType || "").trim();
+    return !!required.groupId && !required.project && (!assignType || assignType === "group");
+}
+function getExecutableProbeTargetsFromDevGroup(group) {
+    return (group?.members || [])
+        .filter((member) => member.configured && member.workDirExists && member.workDirWritable)
+        .map((member) => ({
+        group_id: group.id,
+        group_name: group.name || group.id,
+        project: member.project,
+        agent_type: member.agentType || member.agent || "claudecode",
+        work_dir: member.workDir || "",
+    }));
+}
+function getExecutableProbeTargetsForTaskGroup(task) {
+    if (!taskNeedsGroupWideAgentProbe(task))
+        return null;
+    const required = getTaskRequiredProbeTarget(task);
+    const groups = loadGroups();
+    const configs = (0, db_1.getConfigs)();
+    const group = groups
+        .map((item) => (0, group_orchestrator_1.normalizeGroupOrchestrator)(item))
+        .find((item) => String(item.id || "").trim() === required.groupId);
+    if (!group)
+        return [];
+    const routableMembers = (0, group_orchestrator_1.getRoutableMembers)(group);
+    const members = routableMembers.map((member) => {
+        const runtime = (0, group_orchestrator_1.resolveMemberRuntime)(member.project, group, configs);
+        const workDirState = runtime?.workDir ? getWorkDirState(runtime.workDir) : null;
+        return {
+            project: member.project,
+            configured: !!runtime,
+            agentType: runtime?.agentType || member.agent || "",
+            workDir: runtime?.workDir || "",
+            workDirExists: !!workDirState?.exists,
+            workDirWritable: !!workDirState?.writable,
+        };
+    });
+    return getExecutableProbeTargetsFromDevGroup({
+        id: group.id,
+        name: group.name || group.id,
+        members,
+    });
+}
+function summarizeAgentProbeTargets(targets, probeResolver = readAgentProbeStatus) {
+    const rows = (targets || []).map((target) => {
+        const probe = probeResolver(target);
+        const probeHealth = getAgentProbeHealth(probe);
+        return {
+            ...target,
+            probe,
+            probeHealth,
+            ready: probeHealth.successFresh === true && doesProbeTargetMatchRequired(probe?.target, target),
+        };
+    });
+    const readyRows = rows.filter((row) => row.ready);
+    const missingRows = rows.filter((row) => row.probeHealth?.status === "missing");
+    const staleRows = rows.filter((row) => row.probeHealth?.status === "stale_ok" || row.probeHealth?.status === "stale_failed");
+    const failedRows = rows.filter((row) => row.probeHealth?.failureRecent);
+    return {
+        total: rows.length,
+        ready: readyRows.length,
+        missing: missingRows.length,
+        stale: staleRows.length,
+        failed_recent: failedRows.length,
+        allReady: rows.length > 0 && readyRows.length === rows.length,
+        rows,
+    };
+}
+function getTaskGroupAgentProbeReadiness(task) {
+    const targets = getExecutableProbeTargetsForTaskGroup(task);
+    if (!targets)
+        return null;
+    const summary = summarizeAgentProbeTargets(targets);
+    const failed = summary.rows.filter((row) => !row.ready);
+    const failedLabels = failed
+        .slice(0, 5)
+        .map((row) => `${row.project || "unknown"}(${row.agent_type || "agent"}:${row.probeHealth?.status || "missing"})`)
+        .join("、");
+    const groupLabel = String(targets[0]?.group_name || getTaskRequiredProbeTarget(task).groupId || "目标群聊").trim();
+    return {
+        ready: summary.allReady,
+        mode: "group-target-agent-cli-probe",
+        message: summary.allReady
+            ? `daily_dev 群聊任务已具备真实执行准入：${groupLabel} 的 ${summary.ready}/${summary.total} 个可执行项目 Agent 探针近期成功`
+            : `daily_dev 群聊任务需要所有可执行项目 Agent 通过真实 CLI 探针：${groupLabel} 当前通过 ${summary.ready}/${summary.total}，未复检 ${summary.missing}，过期 ${summary.stale}，最近失败 ${summary.failed_recent}${failedLabels ? `；未通过：${failedLabels}` : ""}`,
+        summary,
+        fix_actions: [
+            "在设置页的“项目 Agent 执行探针”中点击“复检全部”，让系统实际调用该群聊下每个可执行项目 Agent CLI",
+            "也可以逐个选择项目 Agent 复检；全部通过后再恢复 daily_dev 群聊任务",
+        ],
+    };
+}
 function enforceTaskAgentProbeReadiness(task, readiness) {
     if (!taskRequiresFreshAgentProbe(task) || !readiness.ready)
         return readiness;
+    const groupReadiness = getTaskGroupAgentProbeReadiness(task);
+    if (groupReadiness) {
+        return {
+            ...readiness,
+            ready: groupReadiness.ready,
+            mode: groupReadiness.ready ? readiness.mode : "agent-cli-probe-required",
+            message: groupReadiness.message,
+            fix_actions: groupReadiness.ready ? [] : uniqueStrings([
+                ...groupReadiness.fix_actions,
+                ...(Array.isArray(readiness.fix_actions) ? readiness.fix_actions : []),
+            ]).slice(0, 6),
+            groupProbeReadiness: groupReadiness,
+        };
+    }
     const probeHealth = readiness.probeHealth || getAgentProbeHealth(readiness.probe);
-    if (probeHealth?.successFresh)
+    const probeMatchesTarget = doesProbeMatchTaskTarget(readiness.probe, task);
+    if (probeHealth?.successFresh && probeMatchesTarget)
         return readiness;
-    const message = `daily_dev 任务需要先通过 Agent CLI 真实探针：${probeHealth?.message || "尚未复检模型 CLI/API 连通性"}`;
+    const requiredTarget = getTaskRequiredProbeTarget(task);
+    const targetHint = requiredTarget.groupId || requiredTarget.project || requiredTarget.agentType
+        ? `目标：${[requiredTarget.groupId, requiredTarget.project, requiredTarget.agentType].filter(Boolean).join(" / ")}；当前探针：${getProbeTargetLabel(readiness.probe)}；`
+        : "";
+    const mismatchHint = probeHealth?.successFresh && !probeMatchesTarget ? "已有新鲜探针但目标不匹配；" : "";
+    const message = `daily_dev 任务需要先通过目标项目 Agent CLI 真实探针：${targetHint}${mismatchHint}${probeHealth?.message || "尚未复检模型 CLI/API 连通性"}`;
     return {
         ...readiness,
         ready: false,
@@ -4633,7 +5988,7 @@ function enforceTaskAgentProbeReadiness(task, readiness) {
     };
 }
 function getTaskAgentExecutionReadiness(task) {
-    return enforceTaskAgentProbeReadiness(task, getAgentExecutionReadiness());
+    return enforceTaskAgentProbeReadiness(task, getAgentExecutionReadiness(getTaskRequiredProbeTarget(task)));
 }
 function getExternalAgentRunnerStatus() {
     const runnerDir = path.join(utils_1.CCM_DIR, "agent-runner");
@@ -4659,7 +6014,8 @@ function getExternalAgentRunnerStatus() {
             processAlive = false;
         }
     }
-    const active = !!heartbeat && processAlive && ageMs !== null && ageMs < 15000 && heartbeat.status !== "error";
+    const activeWindowMs = heartbeat?.status === "running" ? 10 * 60 * 1000 : 15000;
+    const active = !!heartbeat && processAlive && ageMs !== null && ageMs < activeWindowMs && heartbeat.status !== "error";
     const listJsonFiles = (dir) => {
         try {
             return fs.existsSync(dir) ? fs.readdirSync(dir).filter(file => file.endsWith(".json")) : [];
@@ -4715,6 +6071,105 @@ function getExternalAgentRunnerStatus() {
         last_result: lastResult,
     };
 }
+function buildAgentProbeMatrix(devGroups) {
+    const targets = devGroups.flatMap((group) => (group.members || []).map((member) => {
+        const target = {
+            group_id: group.id,
+            group_name: group.name || group.id,
+            project: member.project,
+            agent_type: member.agentType || member.agent || "claudecode",
+            work_dir: member.workDir || "",
+        };
+        const probe = member.configured && member.workDirExists && member.workDirWritable
+            ? readAgentProbeStatus(target)
+            : null;
+        const probeHealth = getAgentProbeHealth(probe);
+        const taskReadiness = member.configured && member.workDirExists && member.workDirWritable
+            ? getTaskAgentExecutionReadiness({
+                workflow_type: "daily_dev",
+                group_id: group.id,
+                workflow_meta: { target_member: member.project, agent_type: target.agent_type },
+            })
+            : {
+                ready: false,
+                mode: "member-not-executable",
+                message: !member.configured
+                    ? "项目 Agent 未配置执行器或工作目录"
+                    : (!member.workDirExists ? "项目 Agent 工作目录不存在" : "项目 Agent 工作目录不可写"),
+            };
+        const status = taskReadiness.ready === true
+            ? "ok"
+            : (member.configured && member.workDirExists && member.workDirWritable ? "warn" : "fail");
+        return {
+            key: getAgentProbeTargetStatusKey(target),
+            status,
+            ready: taskReadiness.ready === true,
+            group_id: group.id,
+            group_name: group.name || group.id,
+            project: member.project,
+            role: member.role || "member",
+            agent_type: target.agent_type,
+            command: (0, agent_runtime_1.getAgentCommandLabel)(target.agent_type),
+            configured: !!member.configured,
+            workDir: member.workDir || "",
+            workDirExists: !!member.workDirExists,
+            workDirWritable: !!member.workDirWritable,
+            probe,
+            probeHealth,
+            readiness: {
+                ready: taskReadiness.ready === true,
+                mode: taskReadiness.mode || "",
+                message: taskReadiness.message || probeHealth.message || "",
+                fix_actions: Array.isArray(taskReadiness.fix_actions) ? taskReadiness.fix_actions : [],
+            },
+            checked_at: probe?.checked_at || "",
+            age_ms: probe?.age_ms ?? null,
+            message: taskReadiness.ready === true
+                ? "目标项目 Agent 可执行 daily_dev"
+                : (taskReadiness.message || probeHealth.message || "目标项目 Agent 尚未通过探针"),
+        };
+    }));
+    const executable = targets.filter((target) => target.configured && target.workDirExists && target.workDirWritable);
+    const ready = executable.filter((target) => target.ready);
+    const stale = executable.filter((target) => target.probeHealth?.status === "stale_ok" || target.probeHealth?.status === "stale_failed");
+    const missing = executable.filter((target) => target.probeHealth?.status === "missing");
+    const failedRecent = executable.filter((target) => target.probeHealth?.failureRecent);
+    const groupSummaries = devGroups.map((group) => {
+        const groupTargets = getExecutableProbeTargetsFromDevGroup(group);
+        const summary = summarizeAgentProbeTargets(groupTargets);
+        return {
+            group_id: group.id,
+            group_name: group.name || group.id,
+            orchestratorEnabled: group.orchestratorEnabled !== false,
+            executable: summary.total,
+            ready: summary.ready,
+            missing: summary.missing,
+            stale: summary.stale,
+            failed_recent: summary.failed_recent,
+            all_ready: summary.allReady,
+            targets: summary.rows.map((row) => ({
+                project: row.project,
+                agent_type: row.agent_type,
+                ready: row.ready,
+                probe_status: row.probeHealth?.status || "missing",
+            })),
+        };
+    });
+    const fullyReadyGroups = groupSummaries.filter((group) => group.orchestratorEnabled && group.executable > 0 && group.all_ready);
+    return {
+        total: targets.length,
+        executable: executable.length,
+        ready: ready.length,
+        blocked: targets.filter((target) => !target.ready).length,
+        missing: missing.length,
+        stale: stale.length,
+        failed_recent: failedRecent.length,
+        group_total: groupSummaries.length,
+        group_ready: fullyReadyGroups.length,
+        groups: groupSummaries,
+        targets,
+    };
+}
 function buildDailyDevAgentDiagnostics() {
     const checks = [];
     const config = (0, group_orchestrator_1.loadOrchestratorConfig)();
@@ -4768,6 +6223,7 @@ function buildDailyDevAgentDiagnostics() {
         };
     });
     const groupsWithReadyMembers = devGroups.filter((group) => group.orchestratorEnabled && group.readyMemberCount > 0);
+    const agentProbeMatrix = buildAgentProbeMatrix(devGroups);
     const dailyDevCronJobs = enabledCronJobs.filter((job) => job?.workflow_type === "daily_dev" || job?.workflowType === "daily_dev" || job?.daily_dev || job?.dailyDev);
     const llmConfigured = !!(config.enabled && String(config.apiUrl || "").trim() && String(config.apiKey || "").trim() && String(config.model || "").trim());
     checks.push(createDiagnosticCheck("orchestrator-config", "主 Agent 大模型", llmConfigured ? "ok" : (config.fallbackToRules ? "warn" : "fail"), llmConfigured
@@ -4805,6 +6261,32 @@ function buildDailyDevAgentDiagnostics() {
     const readyMembersForVerification = devGroups.flatMap((group) => group.members
         .filter((member) => member.configured && member.workDirExists && member.workDirWritable)
         .map((member) => ({ group: group.name, ...member })));
+    const projectAgentProfiles = readyMembersForVerification.map((member) => ({
+        group: member.group,
+        project: member.project,
+        profile: getProjectAgentCapabilityProfile(member.project, member.workDir || ""),
+    }));
+    const incompleteProjectAgentProfiles = projectAgentProfiles.filter((item) => {
+        const profile = item.profile || {};
+        return !profile.responsibility || !profile.capabilities?.length || !profile.delivery_contract;
+    });
+    checks.push(createDiagnosticCheck("project-agent-capabilities", "项目 Agent 能力边界", incompleteProjectAgentProfiles.length === 0 && projectAgentProfiles.length > 0 ? "ok" : (projectAgentProfiles.length > 0 ? "warn" : "fail"), projectAgentProfiles.length === 0
+        ? "还没有可检查能力边界的可执行子 Agent"
+        : incompleteProjectAgentProfiles.length === 0
+            ? "可执行子 Agent 均配置了职责、能力标签和交付规范；路径门禁按项目配置启用"
+            : `${incompleteProjectAgentProfiles.length} 个可执行子 Agent 缺少职责、能力标签或交付规范；可在项目管理 -> 项目工具配置中填写`, {
+        total: projectAgentProfiles.length,
+        incomplete: incompleteProjectAgentProfiles.length,
+        members: projectAgentProfiles.map((item) => ({
+            group: item.group,
+            project: item.project,
+            responsibility: item.profile.responsibility,
+            capabilities: item.profile.capabilities,
+            writable_paths: item.profile.writable_paths,
+            forbidden_paths: item.profile.forbidden_paths,
+            has_delivery_contract: !!item.profile.delivery_contract,
+        })),
+    }));
     const missingVerificationMembers = readyMembersForVerification.filter((member) => member.verification?.source === "missing");
     const configuredVerificationMembers = readyMembersForVerification.filter((member) => member.verification?.source === "configured");
     const inferredVerificationMembers = readyMembersForVerification.filter((member) => member.verification?.source === "inferred");
@@ -4824,6 +6306,10 @@ function buildDailyDevAgentDiagnostics() {
             commands: member.verification?.commands || [],
         })),
     }));
+    const runtimeConsistency = getAgentRuntimeConsistencyStatus();
+    checks.push(createDiagnosticCheck("agent-runtime-consistency", "项目 Agent 执行器映射", runtimeConsistency.pass ? "ok" : "fail", runtimeConsistency.pass
+        ? `所有可配置项目 Agent 都有对应执行器：${runtimeConsistency.agents.map((agent) => agent.type).join("、")}`
+        : `存在可配置但不可执行的项目 Agent：${runtimeConsistency.missing.map((agent) => agent.type).join("、")}`, runtimeConsistency));
     const childProcessCapability = getChildProcessCapability();
     const externalRunnerStatus = getExternalAgentRunnerStatus();
     const probeStatus = readAgentProbeStatus();
@@ -4834,8 +6320,23 @@ function buildDailyDevAgentDiagnostics() {
         && Number(externalRunnerStatus.last_result?.age_ms || 0) < 15 * 60 * 1000;
     const runnerFailureBlocks = runnerLastFailure && (!externalRunnerStatus.active || runnerRecentFailure);
     const agentProcessReady = executionReadiness.ready === true;
-    const dailyDevExecutionReadiness = enforceTaskAgentProbeReadiness({ workflow_type: "daily_dev" }, executionReadiness);
-    const dailyDevExecutionReady = dailyDevExecutionReadiness.ready === true;
+    const dailyDevExecutionReady = Number(agentProbeMatrix.group_ready || 0) > 0;
+    const matrixReadinessMessage = agentProbeMatrix.executable > 0
+        ? `daily_dev 群聊接单需要至少一个开发群聊的所有可执行项目 Agent 通过真实 CLI 探针：当前全员通过 ${agentProbeMatrix.group_ready}/${agentProbeMatrix.group_total} 个群聊，项目探针通过 ${agentProbeMatrix.ready}/${agentProbeMatrix.executable}，未复检 ${agentProbeMatrix.missing}，过期 ${agentProbeMatrix.stale}，最近失败 ${agentProbeMatrix.failed_recent}`
+        : "daily_dev 需要先配置至少一个具备可写工作目录的项目 Agent";
+    const baseDailyDevReadiness = enforceTaskAgentProbeReadiness({ workflow_type: "daily_dev" }, executionReadiness);
+    const dailyDevExecutionReadiness = dailyDevExecutionReady
+        ? {
+            ready: true,
+            mode: "group-target-agent-cli-probe",
+            message: `已有 ${agentProbeMatrix.group_ready}/${agentProbeMatrix.group_total} 个开发群聊的可执行项目 Agent 全员通过真实 CLI 探针`,
+            probe_matrix: agentProbeMatrix,
+        }
+        : {
+            ...baseDailyDevReadiness,
+            message: matrixReadinessMessage,
+            probe_matrix: agentProbeMatrix,
+        };
     const executionFixActions = agentProcessReady ? [] : (executionReadiness.fix_actions || buildAgentExecutionFixActions({
         error: externalRunnerStatus.last_result?.error || externalRunnerStatus.last_result?.output || probeStatus?.message || childProcessCapability.error || childProcessCapability.stderr || "",
         childProcess: childProcessCapability,
@@ -4851,18 +6352,22 @@ function buildDailyDevAgentDiagnostics() {
                 : (externalRunnerStatus.active
                     ? `Node 直接启动子进程受限，但外部 Agent Runner 在线，子 Agent CLI 将通过 Runner 执行`
                     : `Node 无法启动子进程，项目 Agent 无法调用 CLI：${childProcessCapability.error || childProcessCapability.stderr || "未知错误"}；可运行 npm run agent-runner:ps 启用外部执行通道`)), { childProcess: childProcessCapability, externalRunner: externalRunnerStatus, probe: probeStatus, probeHealth, readiness: executionReadiness, fix_actions: executionFixActions, runtimes: (0, agent_runtime_1.getPublicAgentRuntimes)() }));
-    checks.push(createDiagnosticCheck("agent-cli-probe", "Agent CLI 连通探针", probeHealth.failureRecent ? "fail" : (probeHealth.successFresh ? "ok" : "warn"), probeHealth.message, {
+    checks.push(createDiagnosticCheck("agent-cli-probe", "Agent CLI 连通探针", agentProbeMatrix.ready > 0 ? "ok" : (agentProbeMatrix.executable > 0 ? "warn" : "fail"), agentProbeMatrix.ready > 0
+        ? `已有 ${agentProbeMatrix.ready}/${agentProbeMatrix.executable} 个项目 Agent 探针新鲜通过`
+        : (agentProbeMatrix.executable > 0 ? `尚无项目 Agent 探针新鲜通过：${probeHealth.message}` : "没有可执行的项目 Agent 可运行探针"), {
         probe: probeStatus,
         probeHealth,
+        probeMatrix: agentProbeMatrix,
         fresh_success_ms: AGENT_PROBE_SUCCESS_FRESH_MS,
         failure_block_ms: AGENT_PROBE_FAILURE_BLOCK_MS,
         fix_actions: probeHealth.failureRecent ? executionFixActions : [],
     }));
     checks.push(createDiagnosticCheck("daily-dev-execution-readiness", "daily_dev 执行准入", dailyDevExecutionReady ? "ok" : "fail", dailyDevExecutionReady
-        ? "daily_dev 任务已具备真实执行准入：Agent CLI 探针近期成功"
-        : dailyDevExecutionReadiness.message, {
+        ? "daily_dev 任务已具备真实执行准入：至少一个开发群聊的可执行项目 Agent 已全员通过真实 CLI 探针"
+        : matrixReadinessMessage, {
         readiness: dailyDevExecutionReadiness,
-        required: ["fresh_agent_cli_probe"],
+        required: ["fresh_target_agent_cli_probe"],
+        probeMatrix: agentProbeMatrix,
         fix_actions: dailyDevExecutionReadiness.fix_actions || [],
     }));
     const queueStatus = getQueueStatus();
@@ -4911,6 +6416,27 @@ function buildDailyDevAgentDiagnostics() {
         deliverySummary: rehearsal.delivery_summary,
     }));
     const smokeStatus = getDailyDevSmokeStatus();
+    const mainAgentCapabilityEvidence = [
+        { id: "business_intake", label: "接收业务描述/文档", ok: cronDailyDevProtocol.pass, evidence: cronDailyDevProtocol.pass ? "任务级业务/接口文档会进入 daily_dev 任务" : "定时/任务入口未稳定写入业务文档" },
+        { id: "configurable_project_agents", label: "读取可配置项目 Agent", ok: configs.length > 0 && groupsWithReadyMembers.length > 0, evidence: `项目配置 ${configs.length} 个，可执行开发群聊 ${groupsWithReadyMembers.length} 个` },
+        { id: "coordinator_plan", label: "主 Agent 计划", ok: coordinatorProtocol.pass, evidence: coordinatorProtocol.pass ? `可生成 ${coordinatorProtocol.coordinationPlan?.phases?.length || 0} 阶段计划` : "协调计划自测失败" },
+        { id: "structured_dispatch", label: "结构化派发", ok: Object.values(collaborationProtocol.structuredAssignmentChecks || {}).every(Boolean), evidence: "assignments 会保留目标、任务、依赖和续跑语义" },
+        { id: "worker_execution_receipt", label: "子 Agent 执行与回执", ok: workerProtocolPass, evidence: workerProtocolPass ? "task-notification、CCM_AGENT_RECEIPT 和 scratchpad 自测通过" : "Worker 通知/回执协议自测失败" },
+        { id: "review_rework", label: "主 Agent 复盘返工", ok: reworkProtocol.pass, evidence: reworkProtocol.pass ? "发现缺口会生成同 Worker 续跑返工工作单" : "返工协议自测失败" },
+        { id: "completion_gate", label: "完成门禁", ok: dailyDevGateSelfTest.pass, evidence: dailyDevGateSelfTest.pass ? "必须有计划、派发、Worker 通知、回执、复盘、实际变更和已执行验证" : "完成门禁自测失败" },
+        { id: "workflow_rehearsal", label: "闭环演练", ok: rehearsal.pass, evidence: rehearsal.pass ? "模拟闭环可闭合" : "闭环演练失败" },
+        { id: "live_execution_probe", label: "真实执行准入", ok: dailyDevExecutionReady, evidence: dailyDevExecutionReady ? `全员探针通过群聊 ${agentProbeMatrix.group_ready}/${agentProbeMatrix.group_total}` : matrixReadinessMessage, liveGate: true },
+    ];
+    const mainAgentCoreReady = mainAgentCapabilityEvidence.filter((item) => !item.liveGate).every((item) => item.ok);
+    checks.push(createDiagnosticCheck("main-agent-capability", "群聊主 Agent 实用性", !mainAgentCoreReady ? "fail" : (dailyDevExecutionReady ? "ok" : "warn"), !mainAgentCoreReady
+        ? "主 Agent 日常开发闭环仍有核心协议缺口，暂不能稳定替你接开发任务"
+        : (dailyDevExecutionReady
+            ? "主 Agent 已具备接收业务任务、计划、派发、验收返工和总结交付的真实执行准入"
+            : "主 Agent 协议闭环已具备，但真实替你干活前还需要目标开发群的项目 Agent 全员 CLI 探针通过"), {
+        core_ready: mainAgentCoreReady,
+        live_ready: dailyDevExecutionReady,
+        evidence: mainAgentCapabilityEvidence,
+    }));
     checks.push(createDiagnosticCheck("daily-dev-smoke-status", "真实试运行", smokeStatus.pass ? "ok" : (smokeStatus.status === "blocked" || smokeStatus.status === "failed" ? "warn" : "warn"), smokeStatus.message, smokeStatus));
     checks.push(createDiagnosticCheck("shared-docs", "业务文档入口", devGroups.some((group) => group.readyBacklogs > 0 || group.sharedFiles > 0) ? "ok" : "warn", devGroups.some((group) => group.readyBacklogs > 0)
         ? "已有 ready 状态的业务需求池文件，定时 daily_dev 可自动认领并派发"
@@ -4933,7 +6459,7 @@ function buildDailyDevAgentDiagnostics() {
     const continuationGapTasks = tasks.filter((task) => hasDailyDevContinuationGaps(task));
     const autopilotNextActions = [];
     if (!dailyDevExecutionReady)
-        autopilotNextActions.push("先点击“复检执行通道”并让 Agent CLI 真实探针通过，再派发或续跑 daily_dev 任务");
+        autopilotNextActions.push("先在设置页对目标开发群点击“复检全部”，至少让一个开发群聊的所有可执行项目 Agent 全员通过真实 CLI 探针");
     if (executableGroups === 0)
         autopilotNextActions.push("创建开发群聊，并加入至少一个具备可写工作目录的项目子 Agent");
     if (missingVerificationMembers.length > 0)
@@ -4986,6 +6512,8 @@ function buildDailyDevAgentDiagnostics() {
             verificationConfigured: configuredVerificationMembers.length,
             verificationInferred: inferredVerificationMembers.length,
             verificationMissing: missingVerificationMembers.length,
+            agentProbeReady: agentProbeMatrix.ready,
+            agentProbeExecutable: agentProbeMatrix.executable,
         },
         next_actions: autopilotNextActions.slice(0, 5),
         recent_cron: dailyDevCronJobs
@@ -5024,9 +6552,98 @@ function buildDailyDevAgentDiagnostics() {
             autoTasks: autoTasks.length,
         },
         autopilot,
+        agent_probe_matrix: agentProbeMatrix,
         checks,
         groups: devGroups,
         queue_status: queueStatus,
+    };
+}
+function getAgentProbeBatchTargets(payload = {}) {
+    const diagnostics = buildDailyDevAgentDiagnostics();
+    const includeReady = !!(payload.include_ready || payload.includeReady);
+    const onlyMissing = !!(payload.only_missing || payload.onlyMissing);
+    const groupId = String(payload.group_id || payload.groupId || "").trim();
+    const requestedTargets = Array.isArray(payload.targets) ? payload.targets : [];
+    const requestedKeys = new Set(requestedTargets.map((target) => [
+        String(target.group_id || target.groupId || "").trim(),
+        String(target.target_member || target.targetMember || target.project || "").trim(),
+    ].filter(Boolean).join("::")).filter(Boolean));
+    const limit = Math.max(1, Math.min(20, Number(payload.limit || requestedTargets.length || 3)));
+    const targets = (diagnostics.agent_probe_matrix?.targets || [])
+        .filter((target) => target.configured && target.workDirExists && target.workDirWritable)
+        .filter((target) => !groupId || target.group_id === groupId)
+        .filter((target) => {
+        if (requestedKeys.size === 0)
+            return true;
+        return requestedKeys.has(`${target.group_id}::${target.project}`) || requestedKeys.has(target.group_id) || requestedKeys.has(target.project);
+    })
+        .filter((target) => includeReady || !target.ready)
+        .filter((target) => !onlyMissing || target.probeHealth?.status === "missing")
+        .slice(0, limit);
+    return { targets, diagnostics, limit, includeReady, onlyMissing };
+}
+async function runAgentCliProbeBatch(payload, ctx) {
+    const selection = getAgentProbeBatchTargets(payload);
+    const timeoutMs = Number(payload.timeout_ms || payload.timeoutMs || 120000);
+    const dryRun = !!(payload.dry_run || payload.dryRun);
+    if (dryRun) {
+        return {
+            success: true,
+            dry_run: true,
+            total: selection.targets.length,
+            passed: 0,
+            failed: 0,
+            skipped: Math.max(0, (selection.diagnostics.agent_probe_matrix?.targets || []).length - selection.targets.length),
+            limit: selection.limit,
+            include_ready: selection.includeReady,
+            only_missing: selection.onlyMissing,
+            targets: selection.targets.map((target) => ({
+                group_id: target.group_id,
+                group_name: target.group_name,
+                project: target.project,
+                agent_type: target.agent_type,
+                command: target.command,
+                probe_status: target.probeHealth?.status || "missing",
+            })),
+            probe_matrix: selection.diagnostics.agent_probe_matrix,
+            message: selection.targets.length === 0 ? "没有需要批量复检的可执行项目 Agent" : `将复检 ${selection.targets.length} 个项目 Agent`,
+        };
+    }
+    const results = [];
+    for (const target of selection.targets) {
+        const result = await runAgentCliProbe({
+            ...payload,
+            group_id: target.group_id,
+            target_member: target.project,
+            timeout_ms: timeoutMs,
+            source: "agent-cli-probe-batch",
+        }, ctx);
+        results.push({
+            group_id: target.group_id,
+            group_name: target.group_name,
+            project: target.project,
+            agent_type: target.agent_type,
+            success: !!result?.success,
+            blocked: !!result?.blocked,
+            message: result?.message || result?.error || "",
+            result,
+        });
+    }
+    const after = buildDailyDevAgentDiagnostics();
+    return {
+        success: results.some((item) => item.success),
+        total: selection.targets.length,
+        passed: results.filter((item) => item.success).length,
+        failed: results.filter((item) => !item.success).length,
+        skipped: Math.max(0, (selection.diagnostics.agent_probe_matrix?.targets || []).length - selection.targets.length),
+        limit: selection.limit,
+        include_ready: selection.includeReady,
+        only_missing: selection.onlyMissing,
+        results,
+        probe_matrix: after.agent_probe_matrix,
+        message: results.length === 0
+            ? "没有需要批量复检的可执行项目 Agent"
+            : `批量复检完成：通过 ${results.filter((item) => item.success).length}/${results.length}`,
     };
 }
 function buildCoordinatorSharedFilesContext(ctx, group) {
@@ -5127,7 +6744,54 @@ function runCollaborationProtocolSelfTest() {
     const readyWithFreshProbe = {
         ...readyWithoutProbe,
         probeHealth: freshOkProbeHealth,
+        probe: { success: true, age_ms: 1000, target: { group_id: "g-dev", project: "backend-service", agent_type: "claudecode" } },
     };
+    const backendProbeKey = getAgentProbeTargetStatusKey({ group_id: "g-dev", project: "backend-service", agent_type: "claudecode" });
+    const webProbeKey = getAgentProbeTargetStatusKey({ group_id: "g-dev", project: "web-app", agent_type: "codex" });
+    const targetMatchPartial = doesProbeTargetMatchRequired({ group_id: "g-dev", project: "web-app", agent_type: "codex" }, { groupId: "g-dev", project: "web-app" });
+    const groupProbeTargets = [
+        { group_id: "g-dev", group_name: "Dev", project: "backend-service", agent_type: "claudecode" },
+        { group_id: "g-dev", group_name: "Dev", project: "web-app", agent_type: "codex" },
+    ];
+    const groupProbeOneMissing = summarizeAgentProbeTargets(groupProbeTargets, (target) => {
+        if (target.project === "backend-service")
+            return { success: true, age_ms: 1000, target };
+        return null;
+    });
+    const groupProbeAllFresh = summarizeAgentProbeTargets(groupProbeTargets, (target) => ({
+        success: true,
+        age_ms: 1000,
+        target,
+    }));
+    const explicitProjectDoesNotNeedGroupProbe = taskNeedsGroupWideAgentProbe({
+        workflow_type: "daily_dev",
+        assign_type: "project",
+        group_id: "g-dev",
+        workflow_meta: { target_member: "backend-service" },
+    }) === false;
+    const recoveryProbeGroups = buildAgentRecoveryProbeGroups([
+        {
+            id: "t-blocked-backend",
+            auto_execute: true,
+            status: "pending",
+            last_queue_blocked_at: new Date().toISOString(),
+            workflow_type: "daily_dev",
+            group_id: "g-dev",
+            workflow_meta: { target_member: "backend-service", agent_type: "claudecode" },
+        },
+        {
+            id: "t-runtime-web",
+            auto_execute: true,
+            status: "failed",
+            status_detail: "Agent Runner 错误: ConnectionRefused",
+            workflow_type: "daily_dev",
+            group_id: "g-dev",
+            workflow_meta: { target_member: "web-app", agent_type: "codex" },
+        },
+    ]);
+    const backendRecoveryGroup = recoveryProbeGroups.find((group) => group.probe_target?.project === "backend-service");
+    const webRecoveryGroup = recoveryProbeGroups.find((group) => group.probe_target?.project === "web-app");
+    const targetRecoveryMatch = taskMatchesAgentProbeTarget({ workflow_type: "daily_dev", group_id: "g-dev", workflow_meta: { target_member: "web-app" } }, { groupId: "g-dev", project: "web-app" });
     const retryProbeAfterRecentFailure = enforceAgentProbeExecutionReadiness({
         childProcess: { ok: true, stdout: "ok" },
         externalRunner: { active: false },
@@ -5139,6 +6803,7 @@ function runCollaborationProtocolSelfTest() {
     const dailyDevProbeRequired = enforceTaskAgentProbeReadiness({ workflow_type: "daily_dev" }, readyWithoutProbe);
     const dailyDevWatchdogGapGate = enforceTaskAgentProbeReadiness({ workflow_type: "daily_dev" }, readyWithoutProbe);
     const dailyDevProbePassed = enforceTaskAgentProbeReadiness({ workflow_type: "daily_dev" }, readyWithFreshProbe);
+    const dailyDevProbeTargetMismatch = enforceTaskAgentProbeReadiness({ workflow_type: "daily_dev", workflow_meta: { target_member: "web-app" } }, readyWithFreshProbe);
     const generalProbeNotRequired = enforceTaskAgentProbeReadiness({ workflow_type: "general" }, readyWithoutProbe);
     const probeHealthChecks = {
         recentFailureBlocks: recentFailedProbeHealth.failureRecent === true && recentFailedProbeHealth.status === "failed",
@@ -5150,6 +6815,15 @@ function runCollaborationProtocolSelfTest() {
         dailyDevRequiresFreshProbe: dailyDevProbeRequired.ready === false && dailyDevProbeRequired.mode === "agent-cli-probe-required",
         dailyDevWatchdogGapsRequireFreshProbe: dailyDevWatchdogGapGate.ready === false && dailyDevWatchdogGapGate.mode === "agent-cli-probe-required",
         dailyDevFreshProbePasses: dailyDevProbePassed.ready === true,
+        dailyDevFreshProbeMustMatchTarget: dailyDevProbeTargetMismatch.ready === false && String(dailyDevProbeTargetMismatch.message || "").includes("目标不匹配"),
+        groupProbeRequiresAllMembers: groupProbeOneMissing.allReady === false && groupProbeOneMissing.ready === 1 && groupProbeOneMissing.total === 2,
+        groupProbeAllMembersPass: groupProbeAllFresh.allReady === true && groupProbeAllFresh.ready === 2,
+        explicitProjectBypassesGroupWideProbe: explicitProjectDoesNotNeedGroupProbe === true,
+        targetProbeKeysAreIsolated: !!backendProbeKey && !!webProbeKey && backendProbeKey !== webProbeKey,
+        targetProbePartialMatchWorks: targetMatchPartial === true,
+        recoveryProbeGroupsAreTargeted: recoveryProbeGroups.length === 2 && !!backendRecoveryGroup && !!webRecoveryGroup,
+        recoveryProbePayloadKeepsTarget: webRecoveryGroup?.probe_payload?.group_id === "g-dev" && webRecoveryGroup?.probe_payload?.target_member === "web-app",
+        recoveryTargetMatchWorks: targetRecoveryMatch === true,
         generalTaskDoesNotRequireProbe: generalProbeNotRequired.ready === true,
     };
     const notifiedOutput = formatCollectedAgentOutput("backend-service", "已实现退款审核接口并运行 npm test。", {
@@ -5322,10 +6996,116 @@ function getProjectExtraConfig(projectName) {
     const configs = (0, db_1.loadProjectConfigs)();
     return configs?.[projectName] || {};
 }
+function normalizeProjectConfigList(value) {
+    if (Array.isArray(value))
+        return value.map((item) => String(item || "").trim()).filter(Boolean);
+    const text = String(value || "").trim();
+    if (!text)
+        return [];
+    return text.split(/\r?\n|[；;]/).map((item) => item.trim()).filter(Boolean);
+}
+function getProjectAgentCapabilityProfile(projectName, workDir = "") {
+    const config = getProjectExtraConfig(projectName);
+    const verification = getProjectVerificationHintDetail(projectName, workDir);
+    const responsibility = String(config.responsibility || config.role_scope || config.roleScope || "").trim();
+    const capabilities = normalizeProjectConfigList(config.capabilities || config.capability_tags || config.capabilityTags);
+    const writablePaths = normalizeProjectConfigList(config.writable_paths || config.writablePaths || config.allowed_paths || config.allowedPaths);
+    const forbiddenPaths = normalizeProjectConfigList(config.forbidden_paths || config.forbiddenPaths || config.blocked_paths || config.blockedPaths);
+    const deliveryContract = String(config.delivery_contract || config.deliveryContract || "").trim();
+    return {
+        project: projectName,
+        configured: !!(responsibility || capabilities.length || writablePaths.length || forbiddenPaths.length || deliveryContract || verification.commands.length),
+        responsibility,
+        capabilities,
+        writable_paths: writablePaths,
+        forbidden_paths: forbiddenPaths,
+        delivery_contract: deliveryContract,
+        verification_source: verification.source,
+        verification_commands: verification.commands,
+        work_dir: workDir || "",
+    };
+}
+function buildProjectAgentProfileContractLines(profile) {
+    if (!profile?.configured)
+        return [];
+    return [
+        profile.responsibility ? `- 项目 Agent 职责范围：${compactMemoryText(profile.responsibility, 500)}` : "",
+        profile.capabilities?.length ? `- 项目 Agent 能力标签：${profile.capabilities.slice(0, 12).join("；")}` : "",
+        profile.writable_paths?.length ? `- 允许写入范围：${profile.writable_paths.slice(0, 12).join("；")}` : "",
+        profile.forbidden_paths?.length ? `- 禁止触碰范围：${profile.forbidden_paths.slice(0, 12).join("；")}` : "",
+        profile.delivery_contract ? `- 项目交付规范：${compactMemoryText(profile.delivery_contract, 700)}` : "",
+        profile.work_dir ? `- 当前工作目录：${profile.work_dir}` : "",
+        profile.writable_paths?.length || profile.forbidden_paths?.length
+            ? "- 路径门禁：若确需越过上述范围，不能直接修改；必须在 blockers/needs 中说明并等待主 Agent 或用户确认。"
+            : "",
+    ].filter(Boolean);
+}
+function normalizePolicyPath(value) {
+    return String(value || "").replace(/\\/g, "/").replace(/^\.\//, "").trim();
+}
+function policyPathMatches(filePath, pattern) {
+    const file = normalizePolicyPath(filePath);
+    const raw = normalizePolicyPath(pattern);
+    if (!raw || raw === "**" || raw === "**/*" || raw === "*")
+        return true;
+    const prefix = raw.replace(/\/\*\*?$/g, "").replace(/\*+$/g, "");
+    return file === prefix || file.startsWith(`${prefix}/`) || file.includes(prefix);
+}
+function collectProjectPolicyViolations(actualFileChanges = []) {
+    const violations = [];
+    for (const change of actualFileChanges || []) {
+        const agent = String(change?.agent || "").trim();
+        const filePath = String(change?.path || "").trim();
+        if (!agent || !filePath)
+            continue;
+        const profile = getProjectAgentCapabilityProfile(agent);
+        const writable = Array.isArray(profile.writable_paths) ? profile.writable_paths : [];
+        const forbidden = Array.isArray(profile.forbidden_paths) ? profile.forbidden_paths : [];
+        const forbiddenMatch = forbidden.find((pattern) => policyPathMatches(filePath, pattern));
+        if (forbiddenMatch) {
+            violations.push({ agent, path: filePath, rule: "forbidden_paths", pattern: forbiddenMatch, message: `${agent} 修改了禁止范围 ${forbiddenMatch}: ${filePath}` });
+            continue;
+        }
+        const hasStrictWritable = writable.length > 0 && !writable.some((pattern) => ["**", "**/*", "*"].includes(normalizePolicyPath(pattern)));
+        if (hasStrictWritable && !writable.some((pattern) => policyPathMatches(filePath, pattern))) {
+            violations.push({ agent, path: filePath, rule: "writable_paths", pattern: writable.join("; "), message: `${agent} 文件变更不在允许写入范围: ${filePath}` });
+        }
+    }
+    return violations;
+}
 function buildAgentToolContext(ctx, group, projectName) {
     const allowedTools = mergeToolSelections(group?.tools || {}, getProjectToolSelection(projectName));
     const prompt = ctx.toolManager.buildToolPrompt(allowedTools);
     return { prompt, allowedTools };
+}
+function prepareAgentRuntimeTools(groupId, projectName, workDir, agentType, allowedTools, streamRes = null) {
+    const audit = (0, runtime_tool_sync_1.syncRuntimeTools)(workDir, agentType, allowedTools);
+    const level = audit.mode === "failed" || audit.missing.mcp.length || audit.missing.skill.length ? "warning" : "info";
+    const missingNames = [...audit.missing.mcp.map(name => `MCP:${name}`), ...audit.missing.skill.map(name => `Skill:${name}`)];
+    const missingSuffix = missingNames.length ? `；未找到或未启用：${missingNames.join("、")}` : "";
+    const warningSuffix = audit.warnings?.length ? `；${audit.warnings.join("；")}` : "";
+    const summary = audit.mode === "native-and-proxy"
+        ? `${projectName} (${audit.runtime}/${audit.isolation || "project-scope"}) 已同步原生工具：MCP ${audit.synced.mcp.length}，Skill ${audit.synced.skill.length}${missingSuffix}${warningSuffix}`
+        : audit.mode === "ccm-proxy-only"
+            ? `${projectName} (${audit.runtime}) 使用 CCM 工具代理模式`
+            : `${projectName} Runtime 工具同步失败：${audit.errors.join("；") || "未知错误"}`;
+    (0, runtime_tool_sync_1.recordRuntimeToolSyncAudit)(audit, projectName, groupId);
+    if (groupId)
+        safeAddGroupLog(groupId, level, "runtime-tool-sync", summary, audit);
+    const workEvent = {
+        id: "we" + Date.now().toString(36) + crypto.randomBytes(2).toString("hex"),
+        time: new Date().toISOString(),
+        agent: projectName,
+        kind: audit.mode === "failed" ? "error" : "tool",
+        text: summary,
+        runtimeToolSync: audit,
+    };
+    if (streamRes) {
+        writeSse(streamRes, { type: "agent_work_event", agent: projectName, event: workEvent });
+        if (audit.mode === "failed")
+            writeSse(streamRes, { type: "status", text: `工具同步提示：${summary}` });
+    }
+    return { audit, workEvent, prompt: (0, runtime_tool_sync_1.buildRuntimeToolSyncPrompt)(audit) };
 }
 function normalizeVerificationCommands(value) {
     if (Array.isArray(value))
@@ -5383,6 +7163,26 @@ function inferProjectVerificationCommands(workDir = "") {
     if (fs.existsSync(path.join(dir, "Cargo.toml")))
         hints.push("cargo test");
     return uniqueStrings(hints).slice(0, 6);
+}
+function getAgentRuntimeConsistencyStatus() {
+    const runtimes = (0, agent_runtime_1.getPublicAgentRuntimes)();
+    const runtimeKeys = new Set();
+    for (const runtime of runtimes) {
+        runtimeKeys.add(String(runtime.id || "").toLowerCase());
+        for (const alias of runtime.aliases || [])
+            runtimeKeys.add(String(alias || "").toLowerCase());
+    }
+    const agents = (db_1.AGENTS || []).map((agent) => ({
+        type: String(agent.type || "").trim(),
+        name: String(agent.name || agent.type || "").trim(),
+    })).filter((agent) => agent.type);
+    const missing = agents.filter((agent) => !runtimeKeys.has(agent.type.toLowerCase()));
+    return {
+        pass: missing.length === 0 && agents.length > 0,
+        agents,
+        runtimes: runtimes.map((runtime) => ({ id: runtime.id, aliases: runtime.aliases, commandLabel: runtime.commandLabel })),
+        missing,
+    };
 }
 function getProjectVerificationHintDetail(projectName, workDir = "") {
     const configured = getConfiguredProjectVerificationCommands(projectName);
@@ -5835,7 +7635,7 @@ function runDailyDevAutopilotOnce(ctx, options = {}) {
     const limit = Math.max(1, Math.min(100, Number(options.limit || 20)));
     const gapContinueLimit = Math.max(1, Math.min(50, Number(options.gap_continue_limit || options.gapContinueLimit || 5)));
     const autoExecute = options.auto_execute !== false && options.autoExecute !== false;
-    const dailyDevExecutionReadiness = getTaskAgentExecutionReadiness({ workflow_type: "daily_dev" });
+    const dailyDevExecutionReadiness = getAgentExecutionReadiness();
     const canAutoExecuteDailyDev = !autoExecute || dailyDevExecutionReadiness.ready === true;
     const gapContinueResult = !canAutoExecuteDailyDev
         ? { success: true, skipped: true, skip_reason: dailyDevExecutionReadiness.message, total_candidates: 0, continued: 0, queued: 0, blocked: 0, failed: 0, results: [] }
@@ -6175,7 +7975,13 @@ function canCompleteDailyDevFromDeliverySummary(task, execution, summary) {
     const coordinationPlanCount = Number(summary.coordination_plan_count || 0);
     const assignmentCount = Number(summary.assignment_count || 0);
     const workerNotificationCount = Number(summary.worker_notification_count || 0);
-    if (hasBlockingReceipt)
+    const openSummaryItems = [
+        ...(Array.isArray(summary.blockers) ? summary.blockers : []),
+        ...(Array.isArray(summary.needs) ? summary.needs : []),
+        ...(Array.isArray(summary.verification_failed) ? summary.verification_failed : []),
+        ...(Array.isArray(summary.verification_suggested) ? summary.verification_suggested : []),
+    ].filter(Boolean);
+    if (hasBlockingReceipt || openSummaryItems.length > 0)
         return false;
     if (coordinationPlanCount <= 0 || assignmentCount <= 0 || workerNotificationCount <= 0)
         return false;
@@ -6224,6 +8030,14 @@ function validateTaskManualStatusUpdate(current, updates) {
         missing.push("系统实际捕获的代码变更");
     if (requiresVerification && executedVerificationCount <= 0)
         missing.push("已执行验证记录");
+    if (Array.isArray(summary?.blockers) && summary.blockers.length > 0)
+        missing.push("未解决阻塞项");
+    if (Array.isArray(summary?.needs) && summary.needs.length > 0)
+        missing.push("仍需补充事项");
+    if (Array.isArray(summary?.verification_failed) && summary.verification_failed.length > 0)
+        missing.push("失败验证记录");
+    if (Array.isArray(summary?.verification_suggested) && summary.verification_suggested.length > 0)
+        missing.push("仅建议/未执行验证记录");
     if (requiresVerification && summary?.verification_required_gate_passed === false)
         missing.push("项目配置验证命令执行证据");
     if (missing.length === 0)
@@ -6353,6 +8167,175 @@ function hasDailyDevContinuationGaps(task) {
         || Number(summary.assignment_count || 0) <= 0
         || Number(summary.worker_notification_count || 0) <= 0;
     return hasSummaryGaps || hasReceiptGaps || hasWorkerNotificationGaps || hasCoordinationEvidenceGaps;
+}
+function taskNeedsUserIntervention(task) {
+    const summary = task?.delivery_summary || {};
+    return task?.status === "failed"
+        || isAgentExecutionBlockedPendingTask(task)
+        || [
+            summary.blockers,
+            summary.needs,
+            summary.verification_failed,
+            summary.verification_required_missing,
+            summary.project_policy_violations,
+        ].some((items) => Array.isArray(items) && items.length > 0)
+        || [
+            ...(Array.isArray(summary.receipts) ? summary.receipts : []),
+            ...(Array.isArray(summary.receipt_statuses) ? summary.receipt_statuses : []),
+        ].some((item) => ["failed", "blocked", "partial", "needs_info", "missing_receipt"].includes(String(item?.status || "")));
+}
+function getTaskExecutionPhase(task) {
+    if (task?.status === "done")
+        return "done";
+    if (runningTaskIds.has(task?.id) || task?.status === "in_progress")
+        return "running";
+    if (taskNeedsUserIntervention(task))
+        return "blocked";
+    if (isTaskQueuedInMemory(task?.id))
+        return "queued";
+    if (task?.status === "pending")
+        return "pending";
+    return task?.status || "unknown";
+}
+function getDashboardWorkerRows(task) {
+    const summary = task?.delivery_summary || {};
+    const assignments = Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : [];
+    const receipts = [
+        ...(Array.isArray(summary.receipts) ? summary.receipts : []),
+        ...(Array.isArray(summary.receipt_statuses) ? summary.receipt_statuses : []),
+    ];
+    const notifications = Array.isArray(summary.worker_notifications) ? summary.worker_notifications : [];
+    const names = uniqueStrings([
+        ...assignments.map((item) => item.project || item.agent || item.target_project),
+        ...receipts.map((item) => item.agent || item.project || item.target_project),
+        ...notifications.map((item) => item.task_id || item.agent || item.project),
+    ].filter(Boolean)).slice(0, 12);
+    return names.map((name) => {
+        const matchName = (item) => String(item?.project || item?.agent || item?.target_project || item?.task_id || "").toLowerCase() === name.toLowerCase();
+        const assignment = assignments.find(matchName) || {};
+        const receipt = receipts.find(matchName) || {};
+        const notification = notifications.find(matchName) || {};
+        return {
+            agent: name,
+            task: assignment.task || assignment.summary || notification.task || "",
+            status: receipt.status || notification.receipt_status || notification.status || assignment.status || (task?.status === "in_progress" ? "running" : "pending"),
+            summary: receipt.summary || notification.summary || assignment.reason || "",
+            files_changed: Array.isArray(receipt.filesChanged || receipt.files_changed || receipt.files) ? (receipt.filesChanged || receipt.files_changed || receipt.files) : [],
+            verification: Array.isArray(receipt.verification || receipt.tests) ? (receipt.verification || receipt.tests) : [],
+            blockers: [
+                ...(Array.isArray(receipt.blockers) ? receipt.blockers : []),
+                ...(Array.isArray(receipt.needs) ? receipt.needs : []),
+            ].filter(Boolean),
+        };
+    });
+}
+function getTaskDashboardActions(task, phase) {
+    const actions = [];
+    if (task?.status !== "done") {
+        actions.push({ id: "supplement", label: "补充说明", kind: "continue", tone: "primary" });
+        actions.push({ id: "replan", label: "重新规划", kind: "continue", tone: "outline" });
+        actions.push({ id: "redispatch", label: "重派", kind: "retry", tone: "outline" });
+    }
+    if (hasDailyDevContinuationGaps(task)) {
+        actions.push({ id: "gap_continue", label: "按缺口返工", kind: "gap_continue", tone: "warning" });
+    }
+    if (task?.status === "pending" && !isTaskQueuedInMemory(task?.id) && !isAgentExecutionBlockedPendingTask(task)) {
+        actions.push({ id: "queue", label: "加入队列", kind: "queue", tone: "primary" });
+    }
+    if (task?.delivery_summary)
+        actions.push({ id: "pipeline", label: "协作看板", kind: "view_pipeline", tone: "outline" });
+    if (task?.delivery_summary || task?.final_report || task?.result || task?.receipt || task?.review) {
+        actions.push({ id: "report", label: "执行报告", kind: "view_report", tone: "outline" });
+    }
+    if (task?.status !== "done" && canCompleteDailyDevFromDeliverySummary(task, {}, task?.delivery_summary)) {
+        actions.push({ id: "confirm_done", label: "人工确认完成", kind: "confirm_done", tone: "success" });
+    }
+    if (phase === "blocked" && isAgentExecutionBlockedPendingTask(task)) {
+        actions.unshift({ id: "probe", label: "复检执行通道", kind: "probe", tone: "warning" });
+    }
+    return actions;
+}
+function buildExecutionDashboard(limit = 12) {
+    const tasks = (0, db_1.loadTasks)()
+        .slice()
+        .sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || "")));
+    const queueStatus = getQueueStatus();
+    const phaseCounts = { pending: 0, queued: 0, running: 0, blocked: 0, done: 0, failed: 0, unknown: 0 };
+    const rows = tasks.map((task) => {
+        const summary = task.delivery_summary || {};
+        const phase = getTaskExecutionPhase(task);
+        phaseCounts[phase] = Number(phaseCounts[phase] || 0) + 1;
+        const latestPlan = summary.latest_coordination_plan || {};
+        const blockers = [
+            ...(Array.isArray(summary.blockers) ? summary.blockers : []),
+            ...(Array.isArray(summary.needs) ? summary.needs : []),
+            ...(Array.isArray(summary.verification_failed) ? summary.verification_failed.map((item) => `验证失败：${String(item)}`) : []),
+            ...(Array.isArray(summary.verification_required_missing) ? summary.verification_required_missing.map((item) => `${item?.agent || "未知 Agent"} 缺验证：${Array.isArray(item?.required) ? item.required.join(" / ") : "项目配置命令"}`) : []),
+            ...(Array.isArray(summary.project_policy_violations) ? summary.project_policy_violations : []),
+        ].filter(Boolean);
+        return {
+            id: task.id,
+            title: task.title,
+            status: task.status,
+            phase,
+            priority: task.priority || "normal",
+            workflow_type: task.workflow_type || "",
+            assign_type: task.assign_type || "",
+            target_project: task.target_project || "",
+            group_id: task.group_id || "",
+            created_at: task.created_at,
+            updated_at: task.updated_at,
+            status_detail: task.status_detail || "",
+            headline: summary.headline || task.final_report || task.result || "",
+            execution_readiness: task.execution_readiness || null,
+            main_plan: {
+                count: Number(summary.coordination_plan_count || (Array.isArray(summary.coordination_plans) ? summary.coordination_plans.length : 0) || (latestPlan?.phases?.length ? 1 : 0)),
+                strategy: latestPlan.strategy || "",
+                phases: Array.isArray(latestPlan.phases) ? latestPlan.phases.slice(0, 8) : [],
+            },
+            assignments: Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence.slice(0, 12) : [],
+            workers: getDashboardWorkerRows(task),
+            evidence: {
+                actual_file_change_count: Number(summary.actual_file_change_count || task.file_changes?.count || 0),
+                actual_file_changes: Array.isArray(summary.actual_file_changes) ? summary.actual_file_changes.slice(0, 12) : [],
+                verification_executed: Array.isArray(summary.verification_executed) ? summary.verification_executed.slice(0, 12) : [],
+                verification_failed: Array.isArray(summary.verification_failed) ? summary.verification_failed.slice(0, 12) : [],
+                verification_required_missing: Array.isArray(summary.verification_required_missing) ? summary.verification_required_missing.slice(0, 12) : [],
+                has_final_review: !!summary.has_final_review || !!task.review,
+                receipt_count: Number(summary.receipt_count || (Array.isArray(summary.receipts) ? summary.receipts.length : 0) || (Array.isArray(summary.receipt_statuses) ? summary.receipt_statuses.length : 0)),
+            },
+            rework_records: [
+                ...(Array.isArray(summary.rework_evidence) ? summary.rework_evidence : []),
+                ...(Array.isArray(task.followups) ? task.followups.map((item) => ({
+                    time: item.time,
+                    source: item.source || "user",
+                    summary: item.message || item.summary || "用户补充说明",
+                })) : []),
+            ].slice(0, 12),
+            blockers: blockers.slice(0, 12),
+            recent_logs: getTaskLogs(task.id, 5),
+            actions: getTaskDashboardActions(task, phase),
+            raw_task: task,
+        };
+    });
+    const activeRows = rows.filter((item) => item.phase !== "done").slice(0, limit);
+    const recentDoneRows = rows.filter((item) => item.phase === "done").slice(0, Math.max(0, limit - activeRows.length));
+    return {
+        success: true,
+        generated_at: new Date().toISOString(),
+        queue_status: queueStatus,
+        summary: {
+            total: tasks.length,
+            active: activeRows.length,
+            queued: Number(phaseCounts.queued || 0),
+            running: Number(phaseCounts.running || 0),
+            blocked: Number(phaseCounts.blocked || 0),
+            pending: Number(phaseCounts.pending || 0),
+            done: Number(phaseCounts.done || 0),
+        },
+        phase_counts: phaseCounts,
+        items: [...activeRows, ...recentDoneRows],
+    };
 }
 function continueDailyDevTasksFromGaps(ctx, options = {}) {
     const groupId = String(options.group_id || options.groupId || "").trim();
@@ -6493,8 +8476,10 @@ function retryRuntimeFailedTasks(ctx, options = {}) {
     const autoExecute = options.auto_execute !== false && options.autoExecute !== false;
     const dryRun = !!(options.dry_run || options.dryRun);
     const limit = Math.max(1, Math.min(100, Number(options.limit || 100)));
+    const probeTarget = options.probeTarget || options.probe_target || null;
     const candidates = (0, db_1.loadTasks)()
         .filter(isRecoverableRuntimeFailure)
+        .filter((task) => taskMatchesAgentProbeTarget(task, probeTarget))
         .sort((a, b) => Date.parse(a.updated_at || a.created_at || "") - Date.parse(b.updated_at || b.created_at || ""))
         .slice(0, limit);
     if (dryRun) {
@@ -6540,6 +8525,11 @@ function deleteTask(id) {
     (0, db_1.saveTasks)(tasks);
 }
 function handleCollaborationApi(pathname, req, res, parsed, ctx) {
+    if (pathname === "/api/tasks/execution-dashboard" && req.method === "GET") {
+        const limit = Math.max(1, Math.min(50, Number(parsed.query.limit || 12)));
+        (0, utils_1.sendJson)(res, buildExecutionDashboard(limit));
+        return true;
+    }
     if (pathname === "/api/tasks" && req.method === "GET") {
         (0, utils_1.sendJson)(res, { tasks: (0, db_1.loadTasks)() });
         return true;
@@ -7027,6 +9017,26 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
         }
         return true;
     }
+    if (pathname === "/api/orchestrator/runtime-monitors") {
+        if (req.method === "GET") {
+            (0, utils_1.sendJson)(res, applyRuntimeMonitorControl("status", ctx));
+            return true;
+        }
+        if (req.method === "POST") {
+            let body = "";
+            req.on("data", (chunk) => body += chunk);
+            req.on("end", () => {
+                try {
+                    const payload = body ? JSON.parse(body) : {};
+                    (0, utils_1.sendJson)(res, applyRuntimeMonitorControl(payload.action || "status", ctx));
+                }
+                catch (e) {
+                    (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
+                }
+            });
+            return true;
+        }
+    }
     if (pathname === "/api/orchestrator/daily-dev-autopilot/run" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);
@@ -7121,6 +9131,21 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/orchestrator/agent-cli-probe/batch" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", async () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const result = await runAgentCliProbeBatch(payload, ctx);
+                (0, utils_1.sendJson)(res, result);
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 500);
             }
         });
         return true;
@@ -7413,13 +9438,52 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
         });
         return true;
     }
+    if (pathname === "/api/agent-qa/manual-takeover" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = JSON.parse(body || "{}");
+                const item = setAgentQaManualTakeover(String(payload.id || payload.qa_id || ""), String(payload.reason || ""));
+                if (!item)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "问答记录不存在" }, 404);
+                (0, utils_1.sendJson)(res, { success: true, item });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/agent-qa/retry" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", async () => {
+            try {
+                const payload = JSON.parse(body || "{}");
+                const result = await retryAgentQaItem(String(payload.id || payload.qa_id || ""), ctx, null);
+                (0, utils_1.sendJson)(res, result, result.success ? 200 : 400);
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/agent-qa/list" && req.method === "GET") {
+        const groupId = parsed.query.group_id || parsed.query.id || "";
+        const limit = parseInt(parsed.query.limit) || 100;
+        (0, utils_1.sendJson)(res, { success: true, items: getAgentQaItemsForGroup(String(groupId || ""), limit) });
+        return true;
+    }
     if (pathname === "/api/groups/messages" && req.method === "GET") {
         const groupId = parsed.query.id;
         if (!groupId)
             return (0, utils_1.sendJson)(res, { error: "缺少群聊 ID" }, 400);
         const limit = parseInt(parsed.query.limit) || 100;
         const messages = getGroupMessages(groupId).slice(-limit);
-        (0, utils_1.sendJson)(res, { messages });
+        const memory = saveGroupMemory(String(groupId), loadGroupMemory(String(groupId)));
+        (0, utils_1.sendJson)(res, { messages, memory, agentQa: getAgentQaItemsForGroup(String(groupId), 100) });
         return true;
     }
     if (pathname === "/api/groups/memory" && req.method === "GET") {
@@ -7568,9 +9632,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                         reason: routing.targetLabel,
                         nextAction: "主 Agent 先判断是否需要派发子 Agent",
                     });
-                    const recentMsgs = getGroupMessages(group_id).slice(-20);
-                    const memoryContext = buildGroupMemoryContext(loadGroupMemory(group_id));
-                    const context = [memoryContext, (0, group_orchestrator_1.buildRecentGroupContext)(recentMsgs)].filter(Boolean).join("\n\n");
+                    const context = buildGroupContextPacket(group_id, { recentLimit: 20, olderLimit: 36, fullCount: 6 });
                     const sharedFilesContext = buildCoordinatorSharedFilesContext(ctx, group);
                     const coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
                         group,
@@ -7664,11 +9726,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                         ctx.broadcastPetSpeech(member.project, { role: "status", text: "群聊协作中，正在思考...", source: "group" });
                     }
                     const getAgentPrompt = (member) => {
-                        const recentMsgs = getGroupMessages(group_id).slice(-10);
-                        const context = recentMsgs.map((m) => {
-                            const who = m.role === "user" ? `[用户 → ${m.target}]` : `[${m.agent || "Agent"}]`;
-                            return `${who} ${m.content}`;
-                        }).join("\n");
+                        const context = buildGroupContextPacket(group_id, { recentLimit: 10, olderLimit: 24, fullCount: 5 });
                         const memberList = group.members.map((m) => m.project).filter((p) => p !== member.project && p !== "coordinator").join(", ");
                         const collaborationInstructions = (0, group_orchestrator_1.buildMemberCollaborationInstructions)(member.project, memberList);
                         const sharedFilesContext = ctx.buildFilesContext(group.shared_files || [], "以下是群聊中的共享文件：");
@@ -7679,9 +9737,10 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                         const developmentContract = buildChildAgentDevelopmentContract(member.project, messageForAgent, {
                             source: "群聊广播",
                             verification_hints: buildProjectVerificationHints(member.project, memberWorkDir),
+                            work_dir: memberWorkDir,
                         });
                         return {
-                            prompt: `${collaborationInstructions}${toolContext.prompt}${sharedFilesContext}\n${developmentContract}\n\n${memoryPacket}\n\n以下是群聊最近的消息记录：\n${context}\n\n用户刚才把这条消息发给了群聊所有成员，请从 ${member.project} 的职责视角回复：${messageForAgent}`,
+                            prompt: `${collaborationInstructions}${buildAgentQaProtocolInstructions(member.project, memberList)}${toolContext.prompt}${sharedFilesContext}\n${developmentContract}\n\n${memoryPacket}\n\n以下是群聊最近的消息记录：\n${context}\n\n用户刚才把这条消息发给了群聊所有成员，请从 ${member.project} 的职责视角回复：${messageForAgent}`,
                             allowedTools: toolContext.allowedTools,
                         };
                     };
@@ -7697,15 +9756,19 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                             const agentType = info[0]?.agent || "claudecode";
                             const agentPrompt = getAgentPrompt(member);
                             try {
+                                const runtimeToolContext = prepareAgentRuntimeTools(group_id, member.project, workDir, agentType, agentPrompt.allowedTools, res);
                                 const responseMessageId = "m" + Date.now().toString(36) + member.project + crypto.randomBytes(2).toString("hex");
                                 let memberFileChanges = null;
-                                const text = await ctx.callAgentForGroupStream(member.project, agentPrompt.prompt, workDir, agentType, {
+                                let memberWorkEvents = [];
+                                const text = await ctx.callAgentForGroupStream(member.project, `${agentPrompt.prompt}${runtimeToolContext.prompt}`, workDir, agentType, {
                                     res,
                                     groupId: group_id,
                                     timeoutMs: 300000,
                                     messageId: responseMessageId,
                                     allowedTools: agentPrompt.allowedTools,
-                                    onDone: (opts) => { memberFileChanges = opts.fileChanges; }
+                                    mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+                                    initialWorkEvents: [runtimeToolContext.workEvent],
+                                    onDone: (opts) => { memberFileChanges = opts.fileChanges; memberWorkEvents = Array.isArray(opts.workEvents) ? opts.workEvents : []; }
                                 });
                                 appendGroupMessage(group_id, {
                                     id: responseMessageId,
@@ -7713,6 +9776,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                                     content: text,
                                     timestamp: new Date().toISOString(),
                                     fileChanges: memberFileChanges,
+                                    workEvents: memberWorkEvents,
                                 });
                                 const validMentions = extractActionableMentions(text, group, member.project);
                                 if (validMentions.length > 0) {
@@ -7750,8 +9814,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                         reason: target_project_actual,
                         nextAction: "主 Agent 判断是否直接答复或派发子 Agent",
                     });
-                    const memoryContext2 = buildGroupMemoryContext(loadGroupMemory(group_id));
-                    const context = [memoryContext2, (0, group_orchestrator_1.buildRecentGroupContext)(getGroupMessages(group_id).slice(-20))].filter(Boolean).join("\n\n");
+                    const context = buildGroupContextPacket(group_id, { recentLimit: 20, olderLimit: 36, fullCount: 6 });
                     const coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
                         group,
                         message: messageForAgent,
@@ -7841,11 +9904,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                     return (0, utils_1.sendJson)(res, { error: "项目配置不存在" }, 400);
                 const workDir = runtime.workDir;
                 const agentType = runtime.agentType;
-                const recentMsgs = getGroupMessages(group_id).slice(-10);
-                const context = recentMsgs.map((m) => {
-                    const who = m.role === "user" ? `[用户 → ${m.target}]` : `[${m.agent || "Agent"}]`;
-                    return `${who} ${m.content}`;
-                }).join("\n");
+                const context = buildGroupContextPacket(group_id, { recentLimit: 10, olderLimit: 24, fullCount: 5 });
                 const memberList = group.members.map((m) => m.project).filter((p) => p !== target_project_actual).join(", ");
                 let atInstructions = "";
                 if (target_project_actual === coordinatorProject) {
@@ -7856,6 +9915,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                 }
                 let sharedFilesContext = ctx.buildFilesContext(group.shared_files || [], "以下是群聊中的共享文件：");
                 const toolContext = buildAgentToolContext(ctx, group, target_project_actual);
+                const runtimeToolContext = prepareAgentRuntimeTools(group_id, target_project_actual, workDir, agentType, toolContext.allowedTools, useStream ? res : null);
                 const projectConfig = getProjectExtraConfig(target_project_actual);
                 if (projectConfig.shared_files && projectConfig.shared_files.length > 0) {
                     sharedFilesContext += ctx.buildFilesContext(projectConfig.shared_files, "[项目共享文件]");
@@ -7864,8 +9924,9 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                 const developmentContract = buildChildAgentDevelopmentContract(target_project_actual, messageForAgent, {
                     source: "群聊点名",
                     verification_hints: buildProjectVerificationHints(target_project_actual, workDir),
+                    work_dir: workDir,
                 });
-                const fullPrompt = `${atInstructions}${toolContext.prompt}${sharedFilesContext}\n${developmentContract}\n\n${memoryPacket}\n\n以下是群聊最近的消息记录：\n${context}\n\n请回复用户刚才发给你的消息：${messageForAgent}`;
+                const fullPrompt = `${atInstructions}${buildAgentQaProtocolInstructions(target_project_actual, memberList)}${toolContext.prompt}${runtimeToolContext.prompt}${sharedFilesContext}\n${developmentContract}\n\n${memoryPacket}\n\n以下是群聊最近的消息记录：\n${context}\n\n请回复用户刚才发给你的消息：${messageForAgent}`;
                 if (useStream) {
                     const responseMessageId = "m" + Date.now().toString(36) + "a" + crypto.randomBytes(2).toString("hex");
                     const startedAt = Date.now();
@@ -7881,13 +9942,16 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                     ctx.broadcastPetSpeech(target_project_actual, { role: "status", text: "Agent 正在思考...", source: "group" });
                     try {
                         let targetFileChanges = null;
+                        let targetWorkEvents = [];
                         const outputText = await ctx.callAgentForGroupStream(target_project_actual, fullPrompt, workDir, agentType, {
                             res,
                             groupId: group_id,
                             timeoutMs: 300000,
                             messageId: responseMessageId,
                             allowedTools: toolContext.allowedTools,
-                            onDone: (opts) => { targetFileChanges = opts.fileChanges; }
+                            mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+                            initialWorkEvents: [runtimeToolContext.workEvent],
+                            onDone: (opts) => { targetFileChanges = opts.fileChanges; targetWorkEvents = Array.isArray(opts.workEvents) ? opts.workEvents : []; }
                         });
                         appendGroupMessage(group_id, {
                             id: responseMessageId,
@@ -7895,17 +9959,35 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                             content: outputText.trim(),
                             timestamp: new Date().toISOString(),
                             fileChanges: targetFileChanges,
+                            workEvents: targetWorkEvents,
                         });
                         addGroupLog(group_id, "success", "response", `Agent ${target_project_actual} 回复完成`, {
                             agent: target_project_actual,
                             response_length: outputText.length,
                             response_preview: outputText.substring(0, 300)
                         });
-                        const validMentions = extractActionableMentions(outputText, group, target_project_actual);
+                        const qaResult = await handleAgentQaRequests({
+                            groupId: group_id,
+                            group,
+                            sourceProject: target_project_actual,
+                            sourceOutput: outputText,
+                            originalPrompt: fullPrompt,
+                            sourceWorkDir: workDir,
+                            sourceAgentType: agentType,
+                            allowedTools: toolContext.allowedTools,
+                            mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+                            configs,
+                            ctx,
+                            streamRes: res,
+                            taskId: "",
+                            qaDepth: 0,
+                        });
+                        const downstreamOutput = qaResult.resumedOutput || outputText;
+                        const validMentions = extractActionableMentions(downstreamOutput, group, target_project_actual);
                         if (validMentions.length > 0) {
                             writeSse(res, { type: "status", text: "🧩 主 Agent 正在分配任务..." });
                             try {
-                                await processCrossAgents(group_id, group, target_project_actual, outputText, validMentions, configs, ctx, res);
+                                await processCrossAgents(group_id, group, target_project_actual, downstreamOutput, validMentions, configs, ctx, res);
                             }
                             catch (err) {
                                 writeSse(res, { type: "error", text: `跨 Agent 协作失败: ${err.message}` });
@@ -7929,7 +10011,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                     return;
                 }
                 // 非流式
-                const output = await ctx.callAgent(target_project_actual, fullPrompt, workDir, agentType, 300000, { tab: "groups", groupId: group_id, allowedTools: toolContext.allowedTools });
+                const output = await ctx.callAgent(target_project_actual, fullPrompt, workDir, agentType, 300000, { tab: "groups", groupId: group_id, allowedTools: toolContext.allowedTools, mcpConfigPath: runtimeToolContext.audit.mcpConfigPath });
                 appendGroupMessage(group_id, {
                     id: "m" + Date.now().toString(36) + "a",
                     role: "assistant", agent: target_project_actual,
@@ -7999,21 +10081,19 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                     const info = (0, db_1.getConfigInfo)(config.path);
                     const workDir = info[0]?.workDir;
                     const agentType = info[0]?.agent || "claudecode";
-                    const recentMsgs = getGroupMessages(group_id).slice(-10);
-                    const context = recentMsgs.map((m) => {
-                        const who = m.role === "user" ? `[用户 → ${m.target}]` : `[${m.agent || "Agent"}]`;
-                        return `${who} ${m.content}`;
-                    }).join("\n");
+                    const context = buildGroupContextPacket(group_id, { recentLimit: 10, olderLimit: 24, fullCount: 5 });
                     const sharedFilesContext = ctx.buildFilesContext(group.shared_files || [], "以下是群聊中的共享文件：");
                     const toolContext = buildAgentToolContext(ctx, group, member.project);
+                    const runtimeToolContext = prepareAgentRuntimeTools(group_id, member.project, workDir, agentType, toolContext.allowedTools);
                     const memberList = group.members.map((m) => m.project).filter((p) => p !== member.project && p !== "coordinator").join(", ");
                     const memberInstructions = (0, group_orchestrator_1.buildMemberCollaborationInstructions)(member.project, memberList);
                     const memoryPacket = buildAgentMemoryPacket(group_id, member.project, message);
-                    const fullPrompt = `${memberInstructions}${toolContext.prompt}${sharedFilesContext}\n${memoryPacket}\n\n群聊记录：\n${context}\n\n请从 ${member.project} 的职责视角回复：${message}`;
+                    const fullPrompt = `${memberInstructions}${buildAgentQaProtocolInstructions(member.project, memberList)}${toolContext.prompt}${runtimeToolContext.prompt}${sharedFilesContext}\n${memoryPacket}\n\n群聊记录：\n${context}\n\n请从 ${member.project} 的职责视角回复：${message}`;
                     const output = await ctx.callAgent(member.project, fullPrompt, workDir, agentType, 300000, {
                         tab: "groups",
                         groupId: group_id,
                         allowedTools: toolContext.allowedTools,
+                        mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
                     });
                     appendGroupMessage(group_id, {
                         id: "m" + Date.now().toString(36) + member.project,
@@ -8105,8 +10185,9 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
 \`\`\``;
                 const group = group_id ? loadGroups().find(g => g.id === group_id) : null;
                 const toolContext = buildAgentToolContext(ctx, group, task.target_project);
+                const runtimeToolContext = prepareAgentRuntimeTools(group_id || "", task.target_project, workDir, agentType, toolContext.allowedTools);
                 const changeSnapshot = workDir ? ctx.createFileChangeSnapshot(workDir) : null;
-                const taskResult = await ctx.callAgent(task.target_project, `${toolContext.prompt}\n\n${executePrompt}`, workDir, agentType, 300000, { tab: group_id ? "groups" : "projects", groupId: group_id, project: task.target_project, allowedTools: toolContext.allowedTools });
+                const taskResult = await ctx.callAgent(task.target_project, `${toolContext.prompt}${runtimeToolContext.prompt}\n\n${executePrompt}`, workDir, agentType, 300000, { tab: group_id ? "groups" : "projects", groupId: group_id, project: task.target_project, allowedTools: toolContext.allowedTools, mcpConfigPath: runtimeToolContext.audit.mcpConfigPath });
                 const fileChanges = workDir ? ctx.getFileChanges(task.target_project, changeSnapshot) : null;
                 const execution = getTaskExecutionFromReceipt(taskResult, extractAgentReceipt(taskResult, task.target_project), { fileChanges });
                 const isCompleted = execution.status === "done";
@@ -8212,7 +10293,8 @@ ${diff}
                     const agentType = info[0]?.agent || "claudecode";
                     try {
                         const toolContext = buildAgentToolContext(ctx, reviewGroup, reviewer);
-                        const result = await ctx.callAgent(reviewer, `${toolContext.prompt}\n\n${reviewPrompt}`, workDir, agentType, 120000, { tab: group_id ? "groups" : "projects", groupId: group_id, project: reviewer, allowedTools: toolContext.allowedTools });
+                        const runtimeToolContext = prepareAgentRuntimeTools(group_id || "", reviewer, workDir, agentType, toolContext.allowedTools);
+                        const result = await ctx.callAgent(reviewer, `${toolContext.prompt}${runtimeToolContext.prompt}\n\n${reviewPrompt}`, workDir, agentType, 120000, { tab: group_id ? "groups" : "projects", groupId: group_id, project: reviewer, allowedTools: toolContext.allowedTools, mcpConfigPath: runtimeToolContext.audit.mcpConfigPath });
                         reviewResults.push({ reviewer, result });
                     }
                     catch (e) {
