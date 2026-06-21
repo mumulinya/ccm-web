@@ -1,0 +1,20 @@
+{
+  "name": "mcp-feishu-source",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Feishu MCP integration source for CCM",
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "ccm": "file:../..",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

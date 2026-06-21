@@ -1,61 +1,28 @@
 {
-  "name": "@mumulinya167/cc-web",
-  "version": "1.0.8",
-  "description": "cc-web - cc-connect 的 Web 管理界面，支持多 Agent 协作、任务派发、代码变更查看等",
-  "main": "dist/server.js",
-  "bin": {
-    "cc-web": "bin/ccm.js",
-    "ccm": "bin/ccm.js"
-  },
-  "files": [
-    "bin/",
-    "dist/",
-    "public/",
-    "pet/main.js",
-    "pet/preload.js",
-    "pet/package.json",
-    "pet/renderer/",
-    "pet/assets/",
-    "mcp-feishu/dist/",
-    "mcp-feishu/package.json",
-    "mcp-feishu/.env.example",
-    "configs/",
-    "templates/",
-    "scripts/",
-    "README.md"
-  ],
+  "name": "ccm",
+  "private": true,
+  "version": "1.0.0",
+  "description": "CCM development workspace",
   "scripts": {
-    "build": "tsc",
-    "build:vue": "cd ../ccm-web-vue && npm run build",
-    "build:all": "npm run build:vue && npm run build",
-    "start": "node dist/server.js",
-    "agent-runner": "node dist/agent-runner.js --watch",
-    "agent-runner:ps": "powershell -ExecutionPolicy Bypass -File bin/agent-runner.ps1 -Watch",
-    "test:coordinator": "npm run build && node scripts/coordinator-smoke.js",
-    "dev": "npm run build && node dist/server.js",
-    "check": "tsc --noEmit",
-    "prepublishOnly": "npm run build:all"
+    "dev:frontend": "npm --prefix frontend run dev",
+    "start": "node ccm-package/dist/server.js",
+    "check": "tsc -p backend/tsconfig.json --noEmit && tsc -p integrations/mcp-feishu/tsconfig.json --noEmit",
+    "build:backend": "tsc -p backend/tsconfig.json",
+    "build:frontend": "npm --prefix frontend run build",
+    "build:mcp-feishu": "tsc -p integrations/mcp-feishu/tsconfig.json",
+    "build": "npm run build:frontend && npm run build:mcp-feishu && npm run build:backend",
+    "test:coordinator": "npm run build:backend && node ccm-package/scripts/coordinator-smoke.js",
+    "pack": "npm pack ./ccm-package"
   },
-  "keywords": [
-    "cc-connect",
-    "claude-code",
-    "ai-agent",
-    "feishu",
-    "multi-agent",
-    "web-console"
-  ],
-  "author": "",
-  "license": "MIT",
-  "engines": {
-    "node": ">=18.0.0"
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
     "typescript": "^6.0.3"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "electron": "^35.7.5",
-    "zod": "^3.25.76"
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

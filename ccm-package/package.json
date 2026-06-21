@@ -1,0 +1,52 @@
+{
+  "name": "@mumulinya167/cc-web",
+  "version": "1.0.8",
+  "description": "cc-web - cc-connect 的 Web 管理界面，支持多 Agent 协作、任务派发、代码变更查看等",
+  "main": "dist/server.js",
+  "bin": {
+    "cc-web": "bin/ccm.js",
+    "ccm": "bin/ccm.js"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "public/",
+    "pet/main.js",
+    "pet/preload.js",
+    "pet/package.json",
+    "pet/renderer/",
+    "pet/assets/",
+    "mcp-feishu/dist/",
+    "mcp-feishu/package.json",
+    "mcp-feishu/.env.example",
+    "configs/",
+    "templates/",
+    "scripts/",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node dist/server.js",
+    "agent-runner": "node dist/agent-runner.js --watch",
+    "agent-runner:ps": "powershell -ExecutionPolicy Bypass -File bin/agent-runner.ps1 -Watch",
+    "prepack": "npm --prefix .. run build"
+  },
+  "keywords": [
+    "cc-connect",
+    "claude-code",
+    "ai-agent",
+    "feishu",
+    "multi-agent",
+    "web-console"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ccm": "file:..",
+    "electron": "^35.7.5",
+    "zod": "^3.25.76"
+  }
+}
