@@ -1310,6 +1310,17 @@ function startServer(port) {
         console.log(`╚══════════════════════════════════════╝\n`);
         console.log(`  地址: http://localhost:${port}`);
         console.log(`  按 Ctrl+C 停止\n`);
+        try {
+            const feishuConfig = (0, db_1.loadFeishuConfig)();
+            const hasControlBotCredentials = !!((feishuConfig.control_bot_app_id || feishuConfig.app_id) && (feishuConfig.control_bot_app_secret || feishuConfig.app_secret));
+            if (feishuConfig.control_bot_enabled === true && hasControlBotCredentials) {
+                const result = (0, projects_1.startControlBotConnection)(port);
+                console.log(`[飞书控制机器人] ${result.message || "长连接已启动"}${result.pid ? ` (PID: ${result.pid})` : ""}`);
+            }
+        }
+        catch (error) {
+            console.warn(`[飞书控制机器人] 自动启动失败：${error?.message || error}`);
+        }
     });
     return server;
 }

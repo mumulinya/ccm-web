@@ -399,6 +399,31 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         });
         return true;
     }
+    // === 原生文件夹选择 API ===
+    if (pathname === "/api/filesystem/native-browse" && req.method === "GET") {
+        try {
+            const psCommand = `
+        Add-Type -AssemblyName System.Windows.Forms
+        $d = New-Object System.Windows.Forms.FolderBrowserDialog
+        $d.Description = 'Select Project Directory'
+        $d.ShowNewFolderButton = $true
+        if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+          Write-Output $d.SelectedPath
+        }
+      `.replace(/\n/g, '; ');
+            const out = (0, child_process_1.execSync)(`powershell -WindowStyle Normal -Sta -NoProfile -Command "${psCommand}"`, { encoding: 'utf-8' }).trim();
+            if (out && require('fs').existsSync(out)) {
+                (0, utils_1.sendJson)(res, { success: true, path: out });
+            }
+            else {
+                (0, utils_1.sendJson)(res, { success: false, error: 'No directory selected' });
+            }
+        }
+        catch (e) {
+            (0, utils_1.sendJson)(res, { success: false, error: e.message }, 500);
+        }
+        return true;
+    }
     // === 文件浏览器 API ===
     if (pathname === "/api/filesystem/browse" && req.method === "GET") {
         const dir = parsed.query.dir || os.homedir();

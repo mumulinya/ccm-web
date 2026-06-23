@@ -53,8 +53,29 @@ const WBI_MIXIN_TABLE = [
     22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52
 ];
 const MUSIC_DIR = path.join(utils_1.CCM_DIR, "music");
+const MUSIC_REMOTE_COMMAND_FILE = path.join(utils_1.CCM_DIR, "music-remote-command.json");
 if (!fs.existsSync(MUSIC_DIR))
     fs.mkdirSync(MUSIC_DIR, { recursive: true });
+function saveMusicRemoteCommand(command) {
+    const payload = {
+        id: `music_${Date.now().toString(36)}_${crypto.randomBytes(2).toString("hex")}`,
+        created_at: new Date().toISOString(),
+        consumed: false,
+        ...command,
+    };
+    fs.writeFileSync(MUSIC_REMOTE_COMMAND_FILE, JSON.stringify(payload, null, 2), "utf-8");
+    return payload;
+}
+function loadMusicRemoteCommand() {
+    try {
+        if (!fs.existsSync(MUSIC_REMOTE_COMMAND_FILE))
+            return null;
+        return JSON.parse(fs.readFileSync(MUSIC_REMOTE_COMMAND_FILE, "utf-8"));
+    }
+    catch {
+        return null;
+    }
+}
 function loadMusicAgentConfig() {
     const llm = (0, group_orchestrator_1.loadOrchestratorConfig)();
     const music = (0, db_1.loadMusicConfig)();
@@ -748,6 +769,39 @@ async function callAnthropicNative(cfg, system, messages, tools, res) {
 function handleMusicApi(pathname, req, res, parsed, ctx) {
     if (!pathname.startsWith("/api/music"))
         return false;
+    if (pathname === "/api/music/remote-command" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const keyword = String(payload.keyword || payload.query || "").trim();
+                if (!keyword)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "缺少音乐关键词" }, 400);
+                const command = saveMusicRemoteCommand({ type: "play", keyword, source: payload.source || "global-agent" });
+                (0, utils_1.sendJson)(res, { success: true, command });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { success: false, error: e.message || "创建音乐播放指令失败" }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/music/remote-command" && req.method === "GET") {
+        const command = loadMusicRemoteCommand();
+        (0, utils_1.sendJson)(res, { success: true, command: command && !command.consumed ? command : null });
+        return true;
+    }
+    if (pathname === "/api/music/remote-command/consume" && req.method === "POST") {
+        const command = loadMusicRemoteCommand();
+        if (command) {
+            command.consumed = true;
+            command.consumed_at = new Date().toISOString();
+            fs.writeFileSync(MUSIC_REMOTE_COMMAND_FILE, JSON.stringify(command, null, 2), "utf-8");
+        }
+        (0, utils_1.sendJson)(res, { success: true });
+        return true;
+    }
     if (pathname === "/api/music/pet-state" && req.method === "GET") {
         (0, utils_1.sendJson)(res, { success: true, agent: ctx.getMusicPetAgent() });
         return true;

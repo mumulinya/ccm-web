@@ -1,4 +1,19 @@
 export declare function getLogs(projectName: string, lines?: number): string;
+export declare function startControlBotConnection(port?: number): {
+    success: boolean;
+    running: boolean;
+    pid: number;
+    config_path: string;
+    message: string;
+    log_file?: undefined;
+} | {
+    success: boolean;
+    running: boolean;
+    pid: number;
+    config_path: string;
+    log_file: string;
+    message: string;
+};
 declare function startProject(projectName: string, agentType: string, port: number): {
     success: boolean;
     error: string;

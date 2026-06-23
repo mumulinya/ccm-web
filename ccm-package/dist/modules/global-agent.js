@@ -43,6 +43,145 @@ const utils_1 = require("../utils");
 const group_orchestrator_1 = require("./group-orchestrator");
 const db_1 = require("../db");
 const collaboration_1 = require("./collaboration");
+const GLOBAL_AGENT_HISTORY_FILE = path.join(utils_1.CCM_DIR, "global-agent-history.json");
+const GLOBAL_AGENT_BRIDGE_FILE = path.join(utils_1.CCM_DIR, "global-agent-bridge.json");
+const GLOBAL_AGENT_HISTORY_LIMIT = 80;
+const GLOBAL_AGENT_SESSION_LIMIT = 30;
+function normalizeGlobalAgentMessages(messages = []) {
+    return messages
+        .filter((item) => item && ["user", "assistant"].includes(String(item.role || "")) && String(item.content || "").trim())
+        .map((item) => ({
+        role: String(item.role),
+        content: String(item.content || "").slice(0, 8000),
+        timestamp: item.timestamp || new Date().toISOString(),
+    }))
+        .slice(-GLOBAL_AGENT_HISTORY_LIMIT);
+}
+function loadGlobalAgentHistoryStore() {
+    try {
+        if (fs.existsSync(GLOBAL_AGENT_HISTORY_FILE)) {
+            const data = JSON.parse(fs.readFileSync(GLOBAL_AGENT_HISTORY_FILE, "utf-8"));
+            return { sessions: [], ...data };
+        }
+    }
+    catch { }
+    return { current_session_id: "", sessions: [] };
+}
+function saveGlobalAgentHistoryStore(store) {
+    const sessions = Array.isArray(store.sessions) ? store.sessions : [];
+    store.sessions = sessions
+        .map((session) => ({
+        ...session,
+        messages: normalizeGlobalAgentMessages(session.messages || []),
+        updatedAt: session.updatedAt || new Date().toISOString(),
+    }))
+        .filter((session) => session.id && session.messages.length > 0)
+        .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+        .slice(0, GLOBAL_AGENT_SESSION_LIMIT);
+    fs.writeFileSync(GLOBAL_AGENT_HISTORY_FILE, JSON.stringify(store, null, 2), "utf-8");
+}
+function syncGlobalAgentWebHistory(payload) {
+    const sessions = Array.isArray(payload.sessions) ? payload.sessions : [];
+    const store = loadGlobalAgentHistoryStore();
+    const byId = new Map();
+    for (const session of store.sessions || [])
+        byId.set(String(session.id), session);
+    for (const session of sessions) {
+        const id = String(session.id || "").trim();
+        if (!id)
+            continue;
+        byId.set(id, {
+            id,
+            name: session.name || "全局 Agent 会话",
+            source: "web",
+            createdAt: session.createdAt || new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            messages: normalizeGlobalAgentMessages(session.messages || []),
+        });
+    }
+    store.sessions = Array.from(byId.values());
+    if (payload.currentSessionId)
+        store.current_session_id = String(payload.currentSessionId);
+    saveGlobalAgentHistoryStore(store);
+    return store;
+}
+function getBaseGlobalAgentMessages(store) {
+    const sessions = Array.isArray(store.sessions) ? store.sessions : [];
+    const current = sessions.find((item) => item.id === store.current_session_id && item.source !== "feishu")
+        || sessions.find((item) => item.source === "web")
+        || sessions[0];
+    return normalizeGlobalAgentMessages(current?.messages || []);
+}
+function getGlobalAgentConversationMessages(sessionId) {
+    const store = loadGlobalAgentHistoryStore();
+    const existing = (store.sessions || []).find((item) => item.id === sessionId);
+    if (existing)
+        return normalizeGlobalAgentMessages(existing.messages || []);
+    return getBaseGlobalAgentMessages(store);
+}
+function appendGlobalAgentConversationMessage(sessionId, role, content, source = "feishu") {
+    const store = loadGlobalAgentHistoryStore();
+    const sessions = Array.isArray(store.sessions) ? store.sessions : [];
+    let session = sessions.find((item) => item.id === sessionId);
+    if (!session) {
+        session = {
+            id: sessionId,
+            name: source === "feishu" ? "飞书全局 Agent" : "全局 Agent 会话",
+            source,
+            createdAt: new Date().toISOString(),
+            messages: getBaseGlobalAgentMessages(store),
+        };
+        sessions.unshift(session);
+    }
+    session.messages = normalizeGlobalAgentMessages([...(session.messages || []), { role, content, timestamp: new Date().toISOString() }]);
+    session.updatedAt = new Date().toISOString();
+    store.sessions = sessions;
+    saveGlobalAgentHistoryStore(store);
+}
+function buildFeishuConversationId(payload) {
+    const raw = payload?.session_id || payload?.sessionId || payload?.sessionKey || payload?.conversation_id || payload?.conversationId || payload?.message?.session_id || payload?.data?.session_id || "default";
+    return "feishu:" + String(raw || "default").replace(/[^a-zA-Z0-9:_@.-]/g, "_").slice(0, 120);
+}
+function loadGlobalAgentBridgeStore() {
+    try {
+        if (fs.existsSync(GLOBAL_AGENT_BRIDGE_FILE))
+            return JSON.parse(fs.readFileSync(GLOBAL_AGENT_BRIDGE_FILE, "utf-8"));
+    }
+    catch { }
+    return { requests: [] };
+}
+function saveGlobalAgentBridgeStore(store) {
+    const cutoff = Date.now() - 30 * 60 * 1000;
+    store.requests = (Array.isArray(store.requests) ? store.requests : [])
+        .filter((item) => item.status === "pending" || Date.parse(item.updated_at || item.created_at || 0) > cutoff)
+        .slice(-100);
+    fs.writeFileSync(GLOBAL_AGENT_BRIDGE_FILE, JSON.stringify(store, null, 2), "utf-8");
+}
+function createGlobalAgentBridgeRequest(text, sessionId) {
+    const store = loadGlobalAgentBridgeStore();
+    const request = {
+        id: "gab_" + Date.now().toString(36) + "_" + crypto.randomBytes(3).toString("hex"),
+        status: "pending",
+        text,
+        session_id: sessionId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+    };
+    store.requests = [...(store.requests || []), request];
+    saveGlobalAgentBridgeStore(store);
+    return request;
+}
+async function waitForGlobalAgentBridgeResult(id, timeoutMs = 10 * 60 * 1000) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+        const store = loadGlobalAgentBridgeStore();
+        const request = (store.requests || []).find((item) => item.id === id);
+        if (request && request.status !== "pending")
+            return request;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    return { id, status: "timeout", reply: "Web 全局 Agent 控制台暂未响应，请确认 CCM 页面处于打开状态后重试。" };
+}
 const processedFeishuMessageIds = new Set();
 const GLOBAL_MANAGEMENT_ACTIONS = {
     manage_cron: { label: "定时任务管理", operations: ["list", "create", "update", "enable", "disable", "run", "delete"], destructive: ["delete"] },
@@ -205,6 +344,33 @@ function buildLocalDevelopmentTargets(message, projects, groups) {
         ? [{ type: "project", project: projects[0], reason: "用户未指定执行目标，交由默认项目 Agent分析", task: message }]
         : [];
 }
+function chineseNumberToInt(value) {
+    const text = String(value || "").trim();
+    if (!text)
+        return NaN;
+    if (/^\d+$/.test(text))
+        return Number(text);
+    const map = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+    if (text === "十")
+        return 10;
+    const tenIdx = text.indexOf("十");
+    if (tenIdx >= 0) {
+        const left = text.slice(0, tenIdx);
+        const right = text.slice(tenIdx + 1);
+        return (left ? map[left] || 0 : 1) * 10 + (right ? map[right] || 0 : 0);
+    }
+    return map[text] ?? NaN;
+}
+function normalizeCronHour(raw, text) {
+    let hour = chineseNumberToInt(raw);
+    if (Number.isNaN(hour))
+        return NaN;
+    if (/下午|晚上|傍晚/.test(text) && hour < 12)
+        hour += 12;
+    if (/中午/.test(text) && hour < 11)
+        hour += 12;
+    return Math.max(0, Math.min(23, hour));
+}
 function guessCronSchedule(message) {
     const text = normalizeText(message);
     const everyHour = /每(个)?小时|每小时/.test(text);
@@ -213,20 +379,19 @@ function guessCronSchedule(message) {
     const minuteMatch = text.match(/每(?:隔)?(\d{1,2})\s*分钟/);
     if (minuteMatch)
         return `*/${Math.max(1, Math.min(59, Number(minuteMatch[1])))} * * * *`;
-    const dayHourMatch = text.match(/每天(?:早上|上午|中午|下午|晚上)?\s*(\d{1,2})\s*(?:点|:00)/);
+    const dayHourMatch = text.match(/(?:每天|每日)(?:早上|上午|中午|下午|晚上|傍晚)?\s*([零〇一二两三四五六七八九十\d]{1,3})\s*(?:点|:00)/)
+        || text.match(/(?:早上|上午|中午|下午|晚上|傍晚)\s*([零〇一二两三四五六七八九十\d]{1,3})\s*(?:点|:00)/);
     if (dayHourMatch) {
-        let hour = Number(dayHourMatch[1]);
-        if (/下午|晚上/.test(text) && hour < 12)
-            hour += 12;
-        return `0 ${Math.max(0, Math.min(23, hour))} * * *`;
+        const hour = normalizeCronHour(dayHourMatch[1], text);
+        if (!Number.isNaN(hour))
+            return `0 ${hour} * * *`;
     }
     const weekMap = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 0, 天: 0 };
-    const weekMatch = text.match(/每(?:周|星期)([一二三四五六日天])(?:早上|上午|中午|下午|晚上)?\s*(\d{1,2})\s*(?:点|:00)/);
+    const weekMatch = text.match(/每(?:周|星期)([一二三四五六日天])(?:早上|上午|中午|下午|晚上|傍晚)?\s*([零〇一二两三四五六七八九十\d]{1,3})\s*(?:点|:00)/);
     if (weekMatch) {
-        let hour = Number(weekMatch[2]);
-        if (/下午|晚上/.test(text) && hour < 12)
-            hour += 12;
-        return `0 ${Math.max(0, Math.min(23, hour))} * * ${weekMap[weekMatch[1]]}`;
+        const hour = normalizeCronHour(weekMatch[2], text);
+        if (!Number.isNaN(hour))
+            return `0 ${hour} * * ${weekMap[weekMatch[1]]}`;
     }
     const cronMatch = text.match(/(?:cron|表达式)\s*[:：]?\s*([0-9*,/\-?]+\s+[0-9*,/\-?]+\s+[0-9*,/\-?]+\s+[0-9*,/\-?]+\s+[0-9*,/\-?]+)/i);
     if (cronMatch)
@@ -248,7 +413,7 @@ function inferLocalGlobalAction(message, projects, groups, resources = {}) {
     const matchedTask = tasks.find((item) => text.includes(String(item.id || "")) || (item.title && text.includes(String(item.title))));
     const matchedMcp = mcpTools.find((item) => item.name && text.includes(String(item.name)));
     const matchedSkill = skills.find((item) => item.name && text.includes(String(item.name)));
-    if (/(系统状态|运行状态|健康状态|检查系统|系统概况|当前状态)/.test(text)) {
+    if (/(系统状态|运行状态|健康状态|检查系统|系统概况|当前状态)/.test(text) && !/(定时任务|计划任务|定时执行|每天|每日|每周|每小时|创建|新建|添加)/.test(text)) {
         return {
             reply: "我会检查项目、群聊、任务队列、定时调度和工具运行状态。",
             action: { type: "system_status", params: { operation: "inspect" } }
@@ -527,6 +692,39 @@ function extractFeishuMessageText(payload) {
         .replace(/<at[^>]*>.*?<\/at>/gi, "")
         .trim();
 }
+function extractCcConnectHookText(payload) {
+    const candidates = [
+        payload?.message?.text,
+        payload?.message?.content,
+        payload?.message,
+        payload?.text,
+        payload?.content,
+        payload?.prompt,
+        payload?.data?.message?.text,
+        payload?.data?.message?.content,
+        payload?.data?.text,
+        payload?.data?.content,
+        payload?.event?.message?.text,
+        payload?.event?.message?.content,
+    ];
+    for (const item of candidates) {
+        if (typeof item === "string" && item.trim()) {
+            let text = item.trim();
+            if (/^\{/.test(text)) {
+                try {
+                    const parsed = JSON.parse(text);
+                    text = String(parsed.text || parsed.content || text).trim();
+                }
+                catch { }
+            }
+            return text
+                .replace(/@_user_\d+/g, "")
+                .replace(/<at[^>]*>.*?<\/at>/gi, "")
+                .trim();
+        }
+    }
+    return "";
+}
 function getRequestBaseUrl(req) {
     const port = Number(req.socket?.localPort || 3080);
     return `http://127.0.0.1:${port}`;
@@ -551,9 +749,17 @@ function formatMissionStatus() {
     if (!missions.length)
         return "当前还没有全局开发任务。";
     const rows = missions.slice(-8).reverse().map((mission) => {
-        const children = Array.isArray(mission.children) ? mission.children : [];
-        const completed = children.filter((item) => item.status === "completed").length;
-        return `- ${mission.title || mission.id}：${mission.status || "unknown"}（${completed}/${children.length}）\n  ID: ${mission.id}`;
+        const summary = mission.mission_summary || {};
+        const total = Number(summary.total || mission.child_task_ids?.length || 0);
+        const completed = Number(summary.completed || 0);
+        const failed = Number(summary.failed || 0);
+        const blocked = Number(summary.blocked || 0);
+        const details = [`${completed}/${total} 已完成`];
+        if (failed > 0)
+            details.push(`${failed} 失败`);
+        if (blocked > 0)
+            details.push(`${blocked} 阻塞`);
+        return `- ${mission.title || mission.id}：${mission.status || "unknown"}（${details.join("，")}）\n  ID: ${mission.id}`;
     });
     return `最近的全局开发任务：\n${rows.join("\n")}`;
 }
@@ -571,9 +777,38 @@ function formatSystemStatus() {
         `- 定时任务：${cronJobs.length} 个，启用 ${cronJobs.filter((item) => item.enabled !== false).length} 个`,
     ].join("\n");
 }
-async function executeFeishuManagementAction(baseUrl, action) {
-    const params = { ...(action.params || {}) };
+async function queueMusicPlayback(baseUrl, keyword) {
+    if (!keyword)
+        return "缺少要播放的歌曲或歌手关键词。";
+    const result = await postLocalApi(baseUrl, "/api/music/remote-command", { keyword, source: "feishu-global-agent" });
+    return `已把「${keyword}」发送给音乐播放器。请保持 CCM 音乐播放器页面打开，它会在后台自动检索并播放。${result.command?.id ? `\n- 指令 ID：${result.command.id}` : ""}`;
+}
+function fillCronParams(params, originalText, groups = [], projects = []) {
+    const schedule = params.schedule || params.cron || guessCronSchedule(originalText);
+    const namedFromText = (originalText.match(/(?:名字|名称|标题)(?:叫|为|是)?[「\"']?([^，。,.\n「\"']+)/)?.[1] || "").trim();
+    const explicitName = namedFromText || String(params.name || params.title || "").trim();
+    const cleanedPrompt = originalText
+        .replace(/(?:名字|名称|标题)(?:叫|为|是)?[「\"']?([^，。,.\n「\"']+)/g, "")
+        .replace(/创建|新建|添加|一个|定时任务|计划任务/g, "")
+        .replace(/^[：:，,\s]+/, "")
+        .trim();
+    const paramPrompt = String(params.prompt || params.message || params.command || "").trim();
+    const prompt = (paramPrompt && !/名字|名称|标题/.test(paramPrompt) ? paramPrompt : "") || cleanedPrompt || originalText;
+    const name = explicitName || prompt.slice(0, 28) || "全局助手定时任务";
+    const targetType = params.target_type || params.targetType || (params.group_id || params.groupId ? "group" : (params.project ? "project" : (groups[0] ? "group" : "project")));
+    const groupId = params.group_id || params.groupId || (targetType === "group" ? groups[0]?.id : undefined);
+    const project = params.project || params.projectName || (targetType === "project" ? projects[0] : undefined);
+    return { ...params, operation: params.operation || "create", name, schedule, prompt, target_type: targetType, group_id: groupId, project, workflow_type: params.workflow_type || params.workflowType || "general", enabled: params.enabled !== false };
+}
+async function executeFeishuManagementAction(baseUrl, action, originalText = "") {
+    let params = { ...(action.params || {}) };
+    const groups = (0, collaboration_1.loadGroups)();
+    const projects = (0, db_1.getConfigs)().map(c => c.name);
     const operation = params.operation || (action.type === "system_status" ? "inspect" : "");
+    if (action.type === "manage_cron" && operation === "create") {
+        params = fillCronParams(params, originalText, groups, projects);
+        action = { ...action, params, needs_user_input: false, validated: true, missing_params: [] };
+    }
     if (action.requires_confirmation || ["delete", "remove_member"].includes(operation)) {
         return "这是一条高风险操作，控制机器人不会直接执行。请到 CCM 全局助手界面确认后操作。";
     }
@@ -587,7 +822,7 @@ async function executeFeishuManagementAction(baseUrl, action) {
         if (operation === "list")
             result = await callLocalApi(baseUrl, "/api/cron");
         else if (operation === "create")
-            result = await postLocalApi(baseUrl, "/api/cron/create", params);
+            result = await postLocalApi(baseUrl, "/api/cron/create", fillCronParams(params, originalText, groups, projects));
         else if (operation === "update")
             result = await postLocalApi(baseUrl, "/api/cron/update", params);
         else if (operation === "enable" || operation === "disable")
@@ -652,15 +887,37 @@ async function executeFeishuManagementAction(baseUrl, action) {
     }
     if (!result)
         throw new Error(`暂不支持从飞书执行 ${action.type}/${operation}`);
+    if (action.type === "manage_cron" && operation === "create") {
+        const cronParams = fillCronParams(params, originalText, (0, collaboration_1.loadGroups)(), (0, db_1.getConfigs)().map(c => c.name));
+        return `定时任务已创建：${result.job?.name || cronParams.name || "未命名任务"}\n- Cron：${result.job?.schedule || cronParams.schedule}\n- 提示词：${result.job?.prompt || cronParams.prompt}`;
+    }
     const count = result.jobs?.length ?? result.tasks?.length ?? result.projects?.length ?? result.groups?.length;
     return count === undefined ? `操作已完成：${action.type}/${operation}` : `查询完成：${count} 条记录。`;
 }
-async function executeFeishuAction(baseUrl, action) {
+async function executeFeishuAction(baseUrl, action, originalText = "") {
     if (!action?.type)
-        return "我理解了消息，但没有识别到可执行动作。请明确说明目标项目/群聊和要完成的工作。";
+        return "";
     if (GLOBAL_MANAGEMENT_ACTIONS[action.type])
-        return executeFeishuManagementAction(baseUrl, action);
+        return executeFeishuManagementAction(baseUrl, action, originalText);
     const params = action.params || {};
+    if (action.type === "play_music") {
+        return queueMusicPlayback(baseUrl, params.keyword || params.query || params.song || originalText);
+    }
+    if (action.type === "toggle_pet") {
+        const operation = params.action || params.operation || "open";
+        const result = await postLocalApi(baseUrl, operation === "close" ? "/api/pets/close" : "/api/pets/launch", {});
+        return result.success === false ? `桌面宠物控制失败：${result.error || "未知错误"}` : `桌面宠物已${operation === "close" ? "关闭" : "打开"}。`;
+    }
+    if (action.type === "navigate") {
+        return `页面跳转「${params.tab || params.page || ""}」只能在 Web 控制台内执行；飞书端已记录该意图，请在 CCM 页面切换查看。`;
+    }
+    if (action.type === "create_cron_task") {
+        const groups = (0, collaboration_1.loadGroups)();
+        const projects = (0, db_1.getConfigs)().map(c => c.name);
+        const cronParams = fillCronParams(params, originalText, groups, projects);
+        const result = await postLocalApi(baseUrl, "/api/cron/create", cronParams);
+        return `定时任务已创建：${result.job?.name || cronParams.name || "未命名任务"}\n- Cron：${cronParams.schedule}\n- 提示词：${cronParams.prompt}`;
+    }
     if (action.type === "orchestrate_development") {
         const result = await postLocalApi(baseUrl, "/api/global-agent/orchestrate", {
             ...params,
@@ -703,35 +960,147 @@ async function executeFeishuAction(baseUrl, action) {
     }
     return `已识别动作 ${action.type}，但它不适合从飞书远程执行。`;
 }
-async function processFeishuGlobalAgentMessage(baseUrl, text, payload) {
+async function processFeishuGlobalAgentMessage(baseUrl, text, payload, options = {}) {
+    const sendReport = options.sendReport !== false;
+    const conversationId = buildFeishuConversationId(payload);
+    const historyBeforeUser = getGlobalAgentConversationMessages(conversationId);
+    appendGlobalAgentConversationMessage(conversationId, "user", text, "feishu");
     const auditBase = {
         source: "feishu-control-bot",
-        sender_id: payload?.event?.sender?.sender_id?.open_id || payload?.event?.sender?.sender_id?.user_id || "unknown",
-        message_id: payload?.event?.message?.message_id || "",
+        sender_id: payload?.event?.sender?.sender_id?.open_id || payload?.event?.sender?.sender_id?.user_id || payload?.sender?.id || "unknown",
+        message_id: payload?.event?.message?.message_id || payload?.message?.id || "",
     };
     try {
         if (/^(帮助|help|\/help)$/i.test(text)) {
-            await (0, collaboration_1.sendFeishuReportMessage)({ title: "全局 Agent 使用帮助", markdown: "可以直接发送业务需求，也可以说：\n- 查看任务状态\n- 检查系统状态\n- 给某个群聊/项目 Agent 下发指令\n- 每天 9 点执行某项任务\n- 暂停、恢复或重试指定任务\n\n删除等高风险操作必须回到 CCM 界面确认。" });
-            return;
+            const markdown = "可以直接发送业务需求，也可以说：\n- 查看任务状态\n- 检查系统状态\n- 给某个群聊/项目 Agent 下发指令\n- 每天 9 点执行某项任务\n- 暂停、恢复或重试指定任务\n\n删除等高风险操作必须回到 CCM 界面确认。";
+            if (sendReport)
+                await (0, collaboration_1.sendFeishuReportMessage)({ title: "全局 Agent 使用帮助", markdown });
+            appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
+            return markdown;
         }
         if (/^(任务状态|查看任务状态|全局任务|最近任务|\/status)$/i.test(text)) {
             const markdown = formatMissionStatus();
             appendGlobalActionAudit({ ...auditBase, action: { type: "mission_status", params: { message: text } }, status: "success", result: { summary: markdown } });
-            await (0, collaboration_1.sendFeishuReportMessage)({ title: "全局任务状态", markdown });
-            return;
+            if (sendReport)
+                await (0, collaboration_1.sendFeishuReportMessage)({ title: "全局任务状态", markdown });
+            appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
+            return markdown;
         }
-        const chat = await postLocalApi(baseUrl, "/api/global-agent/chat", { message: text, history: [] });
+        const chat = await postLocalApi(baseUrl, "/api/global-agent/chat", { message: text, history: historyBeforeUser.map((item) => ({ role: item.role, content: item.content })) });
         const action = chat.action ? annotateGlobalAction(chat.action) : null;
-        const result = await executeFeishuAction(baseUrl, action);
+        if (!action?.type) {
+            const markdown = chat.reply || "已收到。";
+            appendGlobalActionAudit({ ...auditBase, action: { type: "conversation", params: { message: text } }, status: "success", result: { summary: markdown } });
+            appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
+            if (sendReport)
+                await (0, collaboration_1.sendFeishuReportMessage)({ title: "全局 Agent 回复", markdown });
+            return markdown;
+        }
+        const result = await executeFeishuAction(baseUrl, action, text);
+        const markdown = `${chat.reply || "已收到指令。"}\n\n${result}`;
         appendGlobalActionAudit({ ...auditBase, action: action || { type: "unrecognized", params: { message: text } }, status: "success", result: { summary: result } });
-        await (0, collaboration_1.sendFeishuReportMessage)({ title: "全局 Agent 执行回执", markdown: `${chat.reply || "已收到指令。"}\n\n${result}` });
+        appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
+        if (sendReport)
+            await (0, collaboration_1.sendFeishuReportMessage)({ title: "全局 Agent 执行回执", markdown });
+        return markdown;
     }
     catch (error) {
+        const markdown = `指令：${text}\n\n错误：${error?.message || String(error)}`;
         appendGlobalActionAudit({ ...auditBase, action: { type: "feishu_command", params: { message: text } }, status: "failed", result: { error: error?.message || String(error) } });
-        await (0, collaboration_1.sendFeishuReportMessage)({ title: "全局 Agent 执行失败", markdown: `指令：${text}\n\n错误：${error?.message || String(error)}` });
+        appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
+        if (sendReport)
+            await (0, collaboration_1.sendFeishuReportMessage)({ title: "全局 Agent 执行失败", markdown });
+        return markdown;
     }
 }
 function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
+    if (pathname === "/api/global-agent/history" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const store = syncGlobalAgentWebHistory(payload);
+                (0, utils_1.sendJson)(res, { success: true, sessions: store.sessions?.length || 0, current_session_id: store.current_session_id || "" });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || "全局 Agent 历史同步失败" }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/global-agent/history" && req.method === "GET") {
+        const store = loadGlobalAgentHistoryStore();
+        (0, utils_1.sendJson)(res, { success: true, ...store });
+        return true;
+    }
+    if (pathname === "/api/global-agent/bridge/pending" && req.method === "GET") {
+        const store = loadGlobalAgentBridgeStore();
+        const pending = (store.requests || []).filter((item) => item.status === "pending").sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))[0] || null;
+        (0, utils_1.sendJson)(res, { success: true, request: pending });
+        return true;
+    }
+    if (pathname === "/api/global-agent/bridge/result" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const store = loadGlobalAgentBridgeStore();
+                const request = (store.requests || []).find((item) => item.id === payload.id);
+                if (!request)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "桥接请求不存在" }, 404);
+                request.status = payload.success === false ? "failed" : "done";
+                request.reply = String(payload.reply || payload.error || "已完成");
+                request.error = payload.error || "";
+                request.updated_at = new Date().toISOString();
+                saveGlobalAgentBridgeStore(store);
+                (0, utils_1.sendJson)(res, { success: true });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || "桥接结果保存失败" }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/feishu/control-bot/message" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", async () => {
+            try {
+                const isAcp = req.headers["x-ccm-acp"] === "1";
+                const config = (0, db_1.loadFeishuConfig)();
+                if (!isAcp) {
+                    const expected = String(config.control_bot_hook_token || "").trim();
+                    const actual = String(parsed.query.token || req.headers["x-ccm-token"] || "").trim();
+                    if (!expected || actual !== expected) {
+                        (0, utils_1.sendJson)(res, { success: false, error: "控制机器人 Hook Token 校验失败" }, 401);
+                        return;
+                    }
+                }
+                const payload = body ? JSON.parse(body) : {};
+                const text = extractCcConnectHookText(payload);
+                if (!text) {
+                    (0, utils_1.sendJson)(res, { success: false, error: "未从控制机器人载荷中识别到文本消息" }, 400);
+                    return;
+                }
+                if (isAcp) {
+                    const conversationId = buildFeishuConversationId(payload);
+                    const request = createGlobalAgentBridgeRequest(text, conversationId);
+                    const result = await waitForGlobalAgentBridgeResult(request.id);
+                    (0, utils_1.sendJson)(res, { success: result.status !== "failed", message: "控制机器人消息已桥接到 Web 全局 Agent", reply: result.reply || result.error || "已处理" });
+                    return;
+                }
+                const reply = await processFeishuGlobalAgentMessage(getRequestBaseUrl(req), text, payload, { sendReport: true });
+                (0, utils_1.sendJson)(res, { success: true, message: "控制机器人消息已处理", reply });
+            }
+            catch (error) {
+                if (!res.headersSent)
+                    (0, utils_1.sendJson)(res, { success: false, error: error?.message || "控制机器人消息处理失败" }, 400);
+            }
+        });
+        return true;
+    }
     if (pathname === "/api/feishu/bot/test" && req.method === "POST") {
         const config = (0, db_1.loadFeishuConfig)();
         const publicBaseUrl = String(config.control_bot_public_base_url || "").trim().replace(/\/$/, "");

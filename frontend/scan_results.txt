@@ -1,0 +1,221 @@
+﻿Found 220 potential items:
+AgentMetrics.vue:186: .stat-card { background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(25px); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 12px; padding: 16px; text-align: center; transition: all 0.3s ease; box-shadow: 0 8px 32px 0 rgba(15, 23, 42, 0.04); }
+AgentMetrics.vue:191: .section-card { background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(25px); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 14px; margin-bottom: 16px; overflow: hidden; box-shadow: 0 8px 32px 0 rgba(15, 23, 42, 0.04); }
+AgentMetrics.vue:203: .agent-card { background: rgba(255, 255, 255, 0.35); border: 1px solid rgba(0, 0, 0, 0.04); border-radius: 10px; padding: 16px; transition: border-color 0.25s; }
+CodeChanges.vue:240: .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: rgba(255, 255, 255, 0.25); border-bottom: 1px solid rgba(0, 0, 0, 0.05); flex-wrap: wrap; gap: 8px; }
+CodeChanges.vue:241: .select { padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.85); color: var(--text-primary); font-size: 13px; outline: none; }
+CodeChanges.vue:249: .sidebar { width: 300px; background: rgba(255, 255, 255, 0.15); border-right: 1px solid rgba(0, 0, 0, 0.05); display: flex; flex-direction: column; }
+CodeChanges.vue:274: .commit-bar { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid rgba(0, 0, 0, 0.05); background: rgba(255, 255, 255, 0.45); }
+CodeChanges.vue:275: .commit-input { flex: 1; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.85); color: var(--text-primary); font-size: 13px; outline: none; }
+CodeChanges.vue:278: .modal { background: rgba(255, 255, 255, 0.75) !important; backdrop-filter: blur(30px) !important; border: 1px solid rgba(0, 0, 0, 0.06) !important; border-radius: 16px !important; width: 90%; max-width: 700px; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08), 0 0 30px rgba(59, 130, 246, 0.04) !important; position: relative; }
+CronJobs.vue:432: .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 20px; background: rgba(255, 255, 255, 0.25); border-bottom: 1px solid rgba(0, 0, 0, 0.05); }
+CronJobs.vue:439: .scheduler-pill { padding: 5px 10px; border-radius: 999px; border: 1px solid rgba(148, 163, 184, 0.25); color: var(--text-muted); font-size: 12px; background: rgba(255,255,255,0.45); }
+CronJobs.vue:471: .modal { background: rgba(255, 255, 255, 0.75) !important; backdrop-filter: blur(30px) !important; border: 1px solid rgba(0, 0, 0, 0.06) !important; border-radius: 16px !important; padding: 28px; min-width: 480px; max-width: 560px; width: min(560px, calc(100vw - 32px)); position: relative; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08), 0 0 30px rgba(59, 130, 246, 0.04) !important; }
+CronJobs.vue:478: .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.8); color: var(--text-primary); font-size: 13px; outline: none; }
+Dashboard.vue:234: <textarea v-model="decomposeRequirement" rows="5" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(255,255,255,0.85);color:var(--text-primary);font-size:13px;resize:vertical;outline:none" placeholder="��������������磺ʵ���û�ͷ���ϴ����ܣ�������˽ӿ� and ǰ��ҳ��"></textarea>
+Dashboard.vue:256: <textarea v-model="reviewDiff" rows="8" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(255,255,255,0.85);color:var(--text-primary);font-family:monospace;font-size:12px;resize:vertical;outline:none" placeholder="ճ�� git diff �������"></textarea>
+Dashboard.vue:269: .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; background: rgba(255, 255, 255, 0.25); border-bottom: 1px solid rgba(0, 0, 0, 0.05); }
+Dashboard.vue:272: .stat-card { background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(25px); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 14px; padding: 20px; display: flex; align-items: center; gap: 16px; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 8px 32px 0 rgba(15, 23, 42, 0.04); }
+Dashboard.vue:277: .card { background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(25px); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 14px; padding: 20px; box-shadow: 0 8px 32px 0 rgba(15, 23, 42, 0.04); }
+Dashboard.vue:281: .progress-fill { height: 100%; background: linear-gradient(90deg, #3b82f6 0%, #6366f1 100%); border-radius: 8px; transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1); display: flex; align-items: center; justify-content: center; color: #ffffff; font-weight: 700; font-size: 10px; font-family: 'Share Tech Mono', monospace; }
+Dashboard.vue:283: .btn-primary { background: var(--gradient-blue); color: #ffffff; font-weight: 600; }
+Dashboard.vue:288: .modal { background: rgba(255, 255, 255, 0.75) !important; backdrop-filter: blur(30px) !important; border: 1px solid rgba(0, 0, 0, 0.06) !important; border-radius: 16px !important; padding: 28px; min-width: 420px; position: relative; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08), 0 0 30px rgba(59, 130, 246, 0.04) !important; }
+Dashboard.vue:292: .form-group select { width: 100%; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.8); color: var(--text-primary); font-size: 13px; outline: none; }
+GroupChat.vue:1047: .toolbar { display: flex; align-items: center; padding: 14px 20px; background: rgba(255, 255, 255, 0.25); border-bottom: 1px solid rgba(0, 0, 0, 0.05); gap: 12px; }
+GroupChat.vue:1053: .group-card { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: rgba(255, 255, 255, 0.45); border: 1px solid rgba(0, 0, 0, 0.06); border-radius: 10px; cursor: pointer; white-space: nowrap; transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); font-size: 13px; color: var(--text-secondary); }
+GroupChat.vue:1068: .message.assistant .bubble { background: rgba(255, 255, 255, 0.55); backdrop-filter: blur(25px); border: 1px solid rgba(0, 0, 0, 0.06); color: var(--text-secondary); border-bottom-left-radius: 4px; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04); }
+GroupChat.vue:1073: .chat-bar { display: flex; padding: 16px 20px; border-top: 1px solid rgba(0, 0, 0, 0.05); background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(25px); gap: 10px; align-items: flex-end; }
+GroupChat.vue:1075: .attach-btn { width: 44px; min-width: 44px; height: 44px; padding: 0; font-size: 16px; border-radius: 10px; border-color: rgba(0, 0, 0, 0.06); background: rgba(255, 255, 255, 0.8); }
+GroupChat.vue:1086: background: rgba(255, 255, 255, 0.85);
+GroupChat.vue:1105: background: rgba(255, 255, 255, 0.85);
+GroupChat.vue:1121: background: #ffffff;
+GroupChat.vue:1123: .select { padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.8); color: var(--text-primary); font-size: 13px; outline: none; }
+GroupChat.vue:1124: .mention-dropdown { position: absolute; bottom: 100%; left: 0; right: 0; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); border: 1px solid rgba(0, 0, 0, 0.08); border-radius: 10px; max-height: 200px; overflow-y: auto; z-index: 10001; box-shadow: var(--shadow-lg); margin-bottom: 6px; padding: 6px; }
+GroupChat.vue:1186: .btn-primary { background: var(--gradient-blue); color: #ffffff; font-weight: 600; }
+GroupChat.vue:1192: .modal { background: rgba(255, 255, 255, 0.75) !important; backdrop-filter: blur(30px) !important; border: 1px solid rgba(0, 0, 0, 0.06) !important; border-radius: 16px !important; padding: 28px; min-width: 420px; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08), 0 0 30px rgba(59, 130, 246, 0.04) !important; }
+GroupChat.vue:1196: .form-group input { width: 100%; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.8); color: var(--text-primary); font-size: 13px; outline: none; }
+GroupChat.vue:1236: background: rgba(255, 255, 255, 0.85) !important;
+GroupChat.vue:1242: background: rgba(255, 255, 255, 0.5);
+GroupChat.vue:1278: .diff-line.context { color: rgba(255, 255, 255, 0.7); }
+GroupChat.vue:1295: background: rgba(255, 255, 255, 0.85);
+GroupChat.vue:1308: border-bottom-color: rgba(255, 255, 255, 0.05) !important;
+GroupChat.vue:1313: border-color: rgba(255, 255, 255, 0.05) !important;
+GroupChat.vue:1329: background: rgba(255, 255, 255, 0.05) !important;
+GroupChat.vue:1334: border-bottom-color: rgba(255, 255, 255, 0.05) !important;
+GroupChat.vue:1339: border-color: rgba(255, 255, 255, 0.05) !important;
+GroupChat.vue:1346: border-top-color: rgba(255, 255, 255, 0.05) !important;
+GroupChat.vue:1351: border-color: rgba(255, 255, 255, 0.08) !important;
+GroupChat.vue:1363: border-color: rgba(255, 255, 255, 0.05) !important;
+GroupChat.vue:1368: border-color: rgba(255, 255, 255, 0.08) !important;
+GroupChat.vue:1380: border-color: rgba(255, 255, 255, 0.08) !important;
+GroupChat.vue:1397: border-bottom-color: rgba(255, 255, 255, 0.05) !important;
+GroupChat.vue:1402: border-color: rgba(255, 255, 255, 0.05) !important;
+MenuManager.vue:233: .group-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border-color); background: rgba(255,255,255,0.02); }
+MusicPlayer.vue:1360: background: repeating-linear-gradient(to bottom, transparent 0, transparent 2px, rgba(255,255,255,0.006) 2px, rgba(255,255,255,0.006) 3px);
+MusicPlayer.vue:1377: border: 1px solid rgba(255, 255, 255, 0.05);
+MusicPlayer.vue:1381: box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+MusicPlayer.vue:1389: background: transparent; border: 1px solid rgba(255, 255, 255, 0.03); color: #64748b;
+MusicPlayer.vue:1393: .aura-top-mode-switch button:hover { color: #a9b7c6; border-color: rgba(255, 255, 255, 0.1); }
+MusicPlayer.vue:1407: border: 1px solid rgba(255, 255, 255, 0.05);
+MusicPlayer.vue:1411: box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+MusicPlayer.vue:1482: box-shadow: 0 6px 15px rgba(0, 0, 0, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.1);
+MusicPlayer.vue:1483: border: 1px solid rgba(255, 255, 255, 0.02);
+MusicPlayer.vue:1494: box-shadow: inset 0 0 8px rgba(255, 255, 255, 0.05);
+MusicPlayer.vue:1502: border: 1px dashed rgba(255, 255, 255, 0.015);
+MusicPlayer.vue:1553: border: 1px solid rgba(255, 255, 255, 0.1);
+MusicPlayer.vue:1596: color: rgba(255, 255, 255, 0.35);
+MusicPlayer.vue:1614: color: rgba(255, 255, 255, 0.2);
+MusicPlayer.vue:1629: .playing-indicator.stopped .indicator-tag { color: #64748b; border-color: rgba(255,255,255,0.05); background: transparent; }
+MusicPlayer.vue:1638: .danmaku-tag-btn { background: transparent; border: 1px solid rgba(255,255,255,0.08); color: #64748b; font-size: 9px; font-weight: bold; padding: 2px 6px; border-radius: 3px; cursor: pointer; transition: all 0.2s; }
+MusicPlayer.vue:1639: .danmaku-tag-btn:hover { color: #a9b7c6; border-color: rgba(255,255,255,0.15); }
+MusicPlayer.vue:1646: background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.04); color: #a9b7c6;
+MusicPlayer.vue:1655: .volume-slider-bar { height: 3px; background: rgba(255, 255, 255, 0.05); flex: 1; border-radius: 2px; position: relative; }
+MusicPlayer.vue:1661: .aura-progress-track { height: 2px; background: rgba(255,255,255,0.06); flex: 1; border-radius: 1px; position: relative; }
+MusicPlayer.vue:1681: width: 100%; padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.04);
+MusicPlayer.vue:1703: .queue-item:hover { background: rgba(255,255,255,0.03); }
+MusicPlayer.vue:1735: border: 1px solid rgba(255, 255, 255, 0.05);
+MusicPlayer.vue:1739: box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+MusicPlayer.vue:1741: .agent-header-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); background: rgba(0, 0, 0, 0.1); }
+MusicPlayer.vue:1749: .status-tag.standby { background: rgba(255,255,255,0.02); color: #64748b; border: 1px solid rgba(255,255,255,0.04); }
+MusicPlayer.vue:1751: .settings-btn-icon { background: transparent; border: 1px solid rgba(255,255,255,0.04); color: #64748b; width: 22px; height: 22px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; transition: all 0.2s; }
+MusicPlayer.vue:1760: background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.02); border-radius: 5px;
+MusicPlayer.vue:1784: background: rgba(255, 255, 255, 0.015);
+MusicPlayer.vue:1785: border: 1px solid rgba(255, 255, 255, 0.03);
+MusicPlayer.vue:1794: background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.03); border-radius: 6px;
+MusicPlayer.vue:1797: .tracks-card-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.03); background: rgba(255,255,255,0.005); }
+MusicPlayer.vue:1803: .track-list-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.02); }
+MusicPlayer.vue:1817: .aura-add-btn.added { color: #64748b; border-color: rgba(255,255,255,0.03); background: rgba(255,255,255,0.005); cursor: default; }
+MusicPlayer.vue:1821: .agent-input-container { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid rgba(255, 255, 255, 0.04); background: rgba(0,0,0,0.1); }
+MusicPlayer.vue:1824: flex: 1; padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.04);
+MusicPlayer.vue:1829: .aura-send-btn-micro { background: transparent; border: 1px solid rgba(255,255,255,0.04); color: #64748b; font-size: 10px; font-weight: bold; padding: 8px 14px; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+MusicPlayer.vue:1835: border: 1px solid rgba(255, 255, 255, 0.04);
+MusicPlayer.vue:1846: .footer-divider { color: rgba(255,255,255,0.03); }
+MusicPlayer.vue:1850: .settings-modal { background: rgba(15,15,20,0.85); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; width: min(460px, calc(100vw - 28px)); max-height: calc(100vh - 48px); overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.6); display: flex; flex-direction: column; }
+MusicPlayer.vue:1851: .settings-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; color: #6feee1; font-weight: bold; }
+MusicPlayer.vue:1856: .field input, .config-select { width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); background: rgba(0,0,0,0.2); color: #e2e8f0; font-size: 12px; font-family: 'JetBrains Mono', monospace; outline: none; box-sizing: border-box; }
+MusicPlayer.vue:1859: .settings-footer { display: flex; gap: 8px; justify-content: flex-end; padding: 14px 18px; border-top: 1px solid rgba(255,255,255,0.05); }
+MusicPlayer.vue:1873: border: 1px solid rgba(255, 255, 255, 0.08);
+MusicPlayer.vue:1885: border: 1px dashed rgba(255, 255, 255, 0.08);
+MusicPlayer.vue:1938: border: 1px solid rgba(255, 255, 255, 0.05);
+MusicPlayer.vue:1985: border: 1px solid rgba(255, 255, 255, 0.05);
+MusicPlayer.vue:1988: box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+MusicPlayer.vue:2012: background: rgba(255, 255, 255, 0.08);
+MusicPlayer.vue:2031: background: #fff;
+MusicPlayer.vue:2074: background: rgba(255, 255, 255, 0.03);
+MusicPlayer.vue:2075: border: 1px solid rgba(255, 255, 255, 0.05);
+MusicPlayer.vue:2194: border: 1px solid rgba(255, 255, 255, 0.1);
+MusicPlayer.vue:2196: box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+MusicPlayer.vue:2204: background: linear-gradient(to bottom, rgba(255,255,255,0.15), transparent);
+MusicPlayer.vue:2253: background: rgba(255, 255, 255, 0.05);
+MusicPlayer.vue:2269: background: #fff;
+MusicPlayer.vue:2362: box-shadow: 0 16px 36px rgba(59, 130, 246, 0.075), inset 0 1px 0 rgba(255, 255, 255, 0.78);
+MusicPlayer.vue:2387: background: rgba(255, 255, 255, 0.58);
+MusicPlayer.vue:2389: box-shadow: 0 12px 32px rgba(15, 23, 42, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.75);
+MusicPlayer.vue:2466: background: rgba(255, 255, 255, 0.68);
+MusicPlayer.vue:2468: box-shadow: 0 -8px 32px rgba(15, 23, 42, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.75);
+MusicPlayer.vue:2515: background: rgba(255, 255, 255, 0.6);
+MusicPlayer.vue:2673: background: rgba(255, 255, 255, 0.55);
+MusicPlayer.vue:2685: background: rgba(255, 255, 255, 0.66);
+MusicPlayer.vue:2744: background: rgba(255, 255, 255, 0.82) !important;
+MusicPlayer.vue:2872: background: rgba(255, 255, 255, 0.34);
+MusicPlayer.vue:2915: background: rgba(255, 255, 255, 0.68);
+MusicPlayer.vue:2922: background: rgba(255, 255, 255, 0.74);
+MusicPlayer.vue:2959: background: rgba(255, 255, 255, 0.34);
+MusicPlayer.vue:2983: background: rgba(255, 255, 255, 0.88);
+MusicPlayer.vue:3013: background: rgba(255, 255, 255, 0.05);
+MusicPlayer.vue:3017: background: rgba(255, 255, 255, 0.12);
+MusicPlayer.vue:3033: box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
+MusicPlayer.vue:3039: box-shadow: 0 -8px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.03) !important;
+MusicPlayer.vue:3044: border-color: rgba(255, 255, 255, 0.05) !important;
+MusicPlayer.vue:3050: border-color: rgba(255, 255, 255, 0.05) !important;
+MusicPlayer.vue:3058: border-color: rgba(255, 255, 255, 0.08) !important;
+MusicPlayer.vue:3072: background: rgba(255, 255, 255, 0.1) !important;
+MusicPlayer.vue:3078: border-color: rgba(255, 255, 255, 0.08) !important;
+MusicPlayer.vue:3091: border-bottom-color: rgba(255, 255, 255, 0.05) !important;
+MusicPlayer.vue:3100: border-color: rgba(255, 255, 255, 0.05) !important;
+MusicPlayer.vue:3105: border-color: rgba(255, 255, 255, 0.05) !important;
+MusicPlayer.vue:3111: border-color: rgba(255, 255, 255, 0.05) !important;
+MusicPlayer.vue:3116: border-bottom-color: rgba(255, 255, 255, 0.05) !important;
+MusicPlayer.vue:3122: border-top-color: rgba(255, 255, 255, 0.05) !important;
+MusicPlayer.vue:3137: border-color: rgba(255, 255, 255, 0.05) !important;
+MusicPlayer.vue:3143: border-color: rgba(255, 255, 255, 0.08) !important;
+MusicPlayer.vue:3148: border-color: rgba(255, 255, 255, 0.05) !important;
+ProjectManager.vue:1157: <textarea v-model="editFileContent" rows="10" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(255,255,255,0.85);color:var(--text-primary);font-family:monospace;font-size:13px;resize:vertical;outline:none" placeholder="�����ļ�����..."></textarea>
+ProjectManager.vue:1173: <textarea v-model="editFileContent" rows="15" style="width:100%;padding:12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(255,255,255,0.85);color:var(--text-primary);font-family:monospace;font-size:13px;resize:vertical;outline:none"></textarea>
+ProjectManager.vue:1198: background: rgba(255, 255, 255, 0.45);
+ProjectManager.vue:1237: background: rgba(255, 255, 255, 0.7);
+ProjectManager.vue:1290: background: rgba(255, 255, 255, 0.85);
+ProjectManager.vue:1301: background: #ffffff;
+ProjectManager.vue:1322: background: rgba(255, 255, 255, 0.25);
+ProjectManager.vue:1354: background: rgba(255, 255, 255, 0.45);
+ProjectManager.vue:1403: background: rgba(255, 255, 255, 0.8);
+ProjectManager.vue:1496: background: rgba(255, 255, 255, 0.6);
+ProjectManager.vue:1594: background: rgba(255, 255, 255, 0.45);
+ProjectManager.vue:1596: box-shadow: 0 12px 32px rgba(15, 23, 42, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+ProjectManager.vue:1619: background: rgba(255, 255, 255, 0.8);
+ProjectManager.vue:1646: background: rgba(255, 255, 255, 0.95);
+ProjectManager.vue:1680: background: rgba(255, 255, 255, 0.6);
+ProjectManager.vue:1697: background: #ffffff;
+ProjectManager.vue:1723: background: rgba(255, 255, 255, 0.85) !important;
+ProjectManager.vue:1730: background: rgba(255, 255, 255, 0.5);
+ProjectManager.vue:1777: border-right: 1px solid rgba(255, 255, 255, 0.05);
+ProjectManager.vue:1797: color: rgba(255, 255, 255, 0.7);
+ProjectManager.vue:2035: background: rgba(255, 255, 255, 0.75) !important;
+ProjectManager.vue:2100: background: rgba(255, 255, 255, 0.8);
+ProjectManager.vue:2134: background: rgba(255, 255, 255, 0.4);
+ProjectManager.vue:2161: background: rgba(255, 255, 255, 0.65);
+Settings.vue:240: .card { background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(25px); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 12px; padding: 24px; box-shadow: 0 8px 32px 0 rgba(15, 23, 42, 0.04); }
+Settings.vue:252: .form-group input[type="password"] { width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.8); color: var(--text-primary); font-size: 13px; outline: none; transition: all 0.25s; }
+Settings.vue:258: .qr-area { width: 200px; height: 200px; border: 2px dashed rgba(0, 0, 0, 0.08); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: pointer; transition: all 0.2s; background: rgba(255, 255, 255, 0.45); }
+Settings.vue:265: .info-item { padding: 12px; background: rgba(255, 255, 255, 0.35); border: 1px solid rgba(0, 0, 0, 0.04); border-radius: 8px; }
+Settings.vue:269: .btn-primary { background: var(--gradient-blue); color: #ffffff; font-weight: 600; }
+TaskManager.vue:256: <textarea v-model="newTask.description" rows="3" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border-color);background:rgba(255,255,255,0.85);color:var(--text-primary);font-size:13px;resize:vertical;outline:none" placeholder="��ѡ����ϸ������������"></textarea>
+TaskManager.vue:327: <div style="flex:1;overflow-y:auto;background:rgba(255,255,255,0.85);border-radius:8px;border:1px solid var(--border-color);padding:12px;font-family:monospace;font-size:12px;line-height:1.6;color:var(--text-primary)">
+TaskManager.vue:348: .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: rgba(255, 255, 255, 0.25); border-bottom: 1px solid rgba(0, 0, 0, 0.05); flex-wrap: wrap; gap: 12px; }
+TaskManager.vue:376: .status-select { background: rgba(255, 255, 255, 0.85); color: var(--text-primary); border: 1px solid rgba(0, 0, 0, 0.08); padding: 4px 8px; border-radius: 6px; font-size: 11px; outline: none; transition: border-color 0.2s; }
+TaskManager.vue:386: .modal { background: rgba(255, 255, 255, 0.75) !important; backdrop-filter: blur(30px) !important; border: 1px solid rgba(0, 0, 0, 0.06) !important; border-radius: 16px !important; padding: 28px; min-width: 420px; position: relative; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08), 0 0 30px rgba(59, 130, 246, 0.04) !important; }
+TaskManager.vue:393: .form-group input, .form-group select { width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.8); color: var(--text-primary); font-size: 13px; outline: none; }
+Templates.vue:97: .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: rgba(255, 255, 255, 0.25); border-bottom: 1px solid rgba(0, 0, 0, 0.05); }
+Templates.vue:98: .select { padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.85); color: var(--text-primary); font-size: 13px; outline: none; }
+Templates.vue:99: .search-input { padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.85); color: var(--text-primary); font-size: 13px; outline: none; min-width: 200px; }
+Templates.vue:102: .template-card { background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(25px); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 12px; padding: 20px; transition: all 0.2s; box-shadow: 0 8px 32px 0 rgba(15, 23, 42, 0.04); }
+Terminal.vue:165: .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; background: rgba(255, 255, 255, 0.25); border-bottom: 1px solid rgba(0, 0, 0, 0.05); }
+Terminal.vue:166: .select { padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.85); color: var(--text-primary); font-size: 13px; outline: none; }
+Terminal.vue:168: .terminal-header { display: flex; align-items: center; padding: 10px 16px; background: rgba(255, 255, 255, 0.03); border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+Terminal.vue:180: .terminal-input-bar { display: flex; align-items: center; padding: 10px 16px; border-top: 1px solid rgba(255,255,255,0.03); background: rgba(255, 255, 255, 0.005); }
+Terminal.vue:184: .btn-primary { background: var(--gradient-blue); color: #ffffff; font-weight: 600; }
+Toast.vue:52: background: rgba(255, 255, 255, 0.9);
+ToolsConfig.vue:254: <div v-if="currentFilter === 'marketplace'" class="marketplace-source-selector" style="display:flex;align-items:center;gap:12px;margin-bottom:8px;background:rgba(255,255,255,0.45);padding:10px 16px;border-radius:12px;border:1px solid rgba(0,0,0,0.04);flex-wrap:wrap">
+ToolsConfig.vue:256: <select v-model="selectedSource" @change="onSourceChange" style="padding:6px 12px;border-radius:8px;border:1px solid rgba(0,0,0,0.08);background:#ffffff;font-size:12px;color:var(--text-primary);outline:none;cursor:pointer;font-weight:500">
+ToolsConfig.vue:275: background: marketplaceFilter === 'all' ? '#ffffff' : 'transparent',
+ToolsConfig.vue:290: background: marketplaceFilter === 'mcp' ? '#ffffff' : 'transparent',
+ToolsConfig.vue:305: background: marketplaceFilter === 'skill' ? '#ffffff' : 'transparent',
+ToolsConfig.vue:312: <input v-model="customSourceUrl" placeholder="������Զ�� JSON ���õ� URL ����..." style="flex:1;padding:6px 10px;border-radius:8px;border:1px solid rgba(0,0,0,0.08);background:#ffffff;font-size:12px;outline:none" @keyup.enter="loadTools">
+ToolsConfig.vue:318: <div v-if="currentFilter === 'marketplace' && selectedSource === 'smithery' && needSmitheryKey" class="smithery-activation-card" style="margin-bottom:12px;background:rgba(255,255,255,0.45);backdrop-filter:blur(25px);border:1px solid rgba(59,130,246,0.18);border-radius:12px;padding:20px;box-shadow:0 8px 30px rgba(59,130,246,0.04);width:100%">
+ToolsConfig.vue:327: <input v-model="smitheryKey" type="password" placeholder="���������� Smithery Bearer API Key..." style="flex:1;padding:8px 12px;border-radius:10px;border:1px solid rgba(0,0,0,0.08);background:#ffffff;font-size:12.5px;outline:none" @keyup.enter="saveSmitheryKey">
+ToolsConfig.vue:445: .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; background: rgba(255, 255, 255, 0.25); border-bottom: 1px solid rgba(0, 0, 0, 0.05); flex-wrap: wrap; gap: 8px; }
+ToolsConfig.vue:448: .sidebar { width: 200px; background: rgba(255, 255, 255, 0.15); border-right: 1px solid rgba(0, 0, 0, 0.05); }
+ToolsConfig.vue:458: .tool-card { background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(25px); border: 1px solid rgba(0, 0, 0, 0.05); border-radius: 12px; padding: 16px; transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+ToolsConfig.vue:470: .modal { background: rgba(255, 255, 255, 0.75) !important; backdrop-filter: blur(30px) !important; border: 1px solid rgba(0, 0, 0, 0.06) !important; border-radius: 16px !important; padding: 28px; width: 90%; max-width: 480px; position: relative; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08), 0 0 30px rgba(59, 130, 246, 0.04) !important; }
+ToolsConfig.vue:475: .form-group input, .form-group textarea { width: 100%; padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(0, 0, 0, 0.08); background: rgba(255, 255, 255, 0.8); color: var(--text-primary); font-size: 13px; outline: none; font-family: inherit; }
+ToolsConfig.vue:480: .btn-primary { background: var(--gradient-blue); color: #ffffff; font-weight: 600; }
+pets\PetManager.vue:93: background: rgba(255, 255, 255, 0.85);
+pets\PetMenu.vue:718: background: rgba(255, 255, 255, 0.45);
+pets\PetMenu.vue:771: background: rgba(255, 255, 255, 0.45);
+pets\PetMenu.vue:793: background: rgba(255, 255, 255, 0.8);
+pets\PetMenu.vue:832: background: rgba(255, 255, 255, 0.6);
+pets\PetMenu.vue:904: background: rgba(255, 255, 255, 0.5);
+pets\PetMenu.vue:951: background: rgba(255, 255, 255, 0.4);
+pets\PetMenu.vue:960: background: rgba(255, 255, 255, 0.8);
+pets\PetMenu.vue:1003: background: rgba(255, 255, 255, 0.4);
+pets\PetMenu.vue:1026: background: rgba(255, 255, 255, 0.8);
+pets\PetMenu.vue:1059: background: rgba(255, 255, 255, 0.4);
+pets\PetMenu.vue:1067: background: rgba(255, 255, 255, 0.6);
+pets\PetMenu.vue:1073: background: rgba(255, 255, 255, 0.8);
+pets\PetMenu.vue:1113: background: rgba(255, 255, 255, 0.42);
+pets\PetMenu.vue:1159: background: rgba(255, 255, 255, 0.42);
+pets\PetMenu.vue:1225: background: rgba(255, 255, 255, 0.78);
+pets\PetMenu.vue:1245: background: rgba(255, 255, 255, 0.42);
+pets\PetMenu.vue:1268: background: rgba(255, 255, 255, 0.85);
+pets\PetMenu.vue:1294: background: rgba(255, 255, 255, 0.42);
+pets\PetMenu.vue:1304: background: rgba(255, 255, 255, 0.82);

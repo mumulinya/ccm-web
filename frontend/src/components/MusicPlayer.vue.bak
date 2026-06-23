@@ -1,0 +1,2360 @@
+<script setup>
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+
+// === 状态 ===
+const mode = ref('cloud') // local | cloud(B站)
+const tracks = ref([])
+const playlist = ref([])
+const currentIndex = ref(-1)
+const currentTrack = computed(() => playlist.value[currentIndex.value] || null)
+const isPlaying = ref(false)
+const currentTime = ref(0)
+const duration = ref(0)
+const volume = ref(0.7)
+const playMode = ref('list') // list | random | single
+const filterText = ref('')
+const audioEl = ref(null)
+
+// === 歌词状态 ===
+const lyrics = ref([])
+const currentLyricIndex = ref(-1)
+let lastPetLyricIndex = -1
+let musicPetSpeechQueue = Promise.resolve()
+
+const lyricsOffset = computed(() => {
+  const lineH = 22
+  const wrapH = 70
+  if (currentLyricIndex.value < 0) return 0
+  return (wrapH / 2) - (currentLyricIndex.value * lineH) - (lineH / 2)
+})
+
+const formatTrackLabel = (track) => {
+  if (!track) return '等待播放'
+  return [track.title, track.artist].filter(Boolean).join(' - ') || track.filename || '未知曲目'
+}
+
+const toPetTrack = (track) => {
+  if (!track) return null
+  return {
+    filename: track.filename || '',
+    title: track.title || track.filename || '未知曲目',
+    artist: track.artist || '未知艺术家',
+    bvid: track.bvid || ''
+  }
+}
+
+const notifyMusicPet = (state, detail = '', track = currentTrack.value) => {
+  fetch('/api/music/pet-state', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      state,
+      detail: detail || formatTrackLabel(track),
+      track: toPetTrack(track)
+    })
+  }).catch(() => {})
+}
+
+const notifyMusicPetSpeech = (text, options = {}) => {
+  const content = String(text || '')
+  if (!content.trim() && !options.final) return
+  musicPetSpeechQueue = musicPetSpeechQueue.catch(() => {}).then(() => fetch('/api/music/pet-speech', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      role: options.role || 'assistant',
+      text: content,
+      mode: options.mode || 'replace',
+      final: !!options.final,
+      source: options.source || 'music'
+    })
+  }).catch(() => {}))
+  return musicPetSpeechQueue
+}
+
+const notifyMusicPetPlaying = (track = currentTrack.value) => {
+  notifyMusicPet('juggling', `正在播放：${formatTrackLabel(track)}`, track)
+}
+
+const notifyMusicPetIdle = (detail = '音乐播放器待命', track = currentTrack.value) => {
+  notifyMusicPet('idle', detail, track)
+}
+
+const startAudioPlayback = (track = currentTrack.value) => {
+  if (!audioEl.value) return
+  const playResult = audioEl.value.play()
+  isPlaying.value = true
+  lastPetLyricIndex = -1
+  notifyMusicPetPlaying(track)
+  if (playResult && typeof playResult.catch === 'function') {
+    playResult.catch((err) => {
+      isPlaying.value = false
+      notifyMusicPet('error', `播放失败：${err?.message || '无法开始播放'}`, track)
+    })
+  }
+}
+
+// 频谱
+const audioCtx = ref(null)
+const analyser = ref(null)
+const canvasRef = ref(null)
+const dataArray = ref(null)
+let animFrame = null
+
+// 弹幕
+const danmakuCanvas = ref(null)
+const danmakuItems = ref([])
+const danmakuEnabled = ref(true)
+let danmakuFrame = null
+const activeDanmaku = ref([])
+
+// === 原版 AuraPlayer 专属时钟状态 ===
+const currentTimeStr = ref('00:00')
+const currentDateStr = ref('FRIDAY May 22, 2026')
+let clockTimer = null
+
+// === 原版 AuraPlayer 专属系统负载 Mock 状态 ===
+const cpuLoad = ref(8)
+const memUsed = ref(12.4)
+const packetLoss = ref(0.0)
+let statsTimer = null
+
+const updateClock = () => {
+  const now = new Date()
+  const hh = String(now.getHours()).padStart(2, '0')
+  const mm = String(now.getMinutes()).padStart(2, '0')
+  currentTimeStr.value = `${hh}:${mm}`
+  
+  const weekdays = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY']
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const weekday = weekdays[now.getDay()]
+  const month = months[now.getMonth()]
+  const day = now.getDate()
+  const year = now.getFullYear()
+  currentDateStr.value = `${weekday}  ${month} ${day}, ${year}`
+}
+
+const updateSystemStats = () => {
+  cpuLoad.value = Math.max(2, Math.min(99, Math.floor(cpuLoad.value + (Math.random() - 0.5) * 4)))
+  memUsed.value = Math.max(8.0, Math.min(24.0, parseFloat((memUsed.value + (Math.random() - 0.5) * 0.1).toFixed(1))))
+  if (Math.random() > 0.95) {
+    packetLoss.value = parseFloat((Math.random() * 0.5).toFixed(2))
+  }
+}
+
+// Agent 对话
+const agentMessages = ref([])
+const agentInput = ref('')
+const agentLoading = ref(false)
+
+const loadChatMessages = () => {
+  try {
+    const saved = localStorage.getItem('aura-music-chat-messages')
+    if (saved) {
+      const msgs = JSON.parse(saved)
+      if (Array.isArray(msgs) && msgs.length > 0) {
+        agentMessages.value = msgs
+        return
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load chat messages:', e)
+  }
+  agentMessages.value = [
+    { role: 'agent', content: '你好！我是你的音乐助手\n告诉我你想听什么，我帮你找。\n\n支持：\n• B站音乐搜索与转码播放\n• 本地音乐库播放\n• 播放时歌词同步给音乐宠物', time: '00:00:00' }
+  ]
+}
+
+const saveChatMessages = () => {
+  try {
+    const limitMsgs = agentMessages.value.slice(-100)
+    localStorage.setItem('aura-music-chat-messages', JSON.stringify(limitMsgs))
+  } catch (e) {
+    console.error('Failed to save chat messages:', e)
+  }
+}
+
+const clearChatHistory = () => {
+  if (confirm('确定要清除聊天历史记录吗？')) {
+    agentMessages.value = [
+      { role: 'agent', content: '你好！我是你的音乐助手\n告诉我你想听什么，我帮你找。\n\n支持：\n• B站音乐搜索与转码播放\n• 本地音乐库播放\n• 播放时歌词同步给音乐宠物', time: formatTimeHHMMSS() }
+    ]
+    saveChatMessages()
+  }
+}
+
+watch(agentMessages, () => {
+  saveChatMessages()
+}, { deep: true })
+
+// 下载状态
+const converting = ref({})
+const uploading = ref(false)
+
+// 上传音乐文件
+const uploadFiles = async (e) => {
+  const files = e.target.files
+  if (!files || files.length === 0) return
+  uploading.value = true
+  const formData = new FormData()
+  for (const file of files) formData.append('file', file)
+  try {
+    const res = await fetch('/api/music/upload', { method: 'POST', body: formData })
+    const data = await res.json()
+    if (data.success && data.uploaded?.length > 0) {
+      loadTracks()
+    }
+  } catch {}
+  uploading.value = false
+  e.target.value = ''
+}
+
+// Agent 配置
+const showSettings = ref(false)
+const agentConfig = ref({
+  apiUrl: 'https://api.anthropic.com',
+  apiKey: '',
+  model: 'claude-sonnet-4-20250514',
+  format: 'auto',
+  proxy: '',
+  hasKey: false
+})
+const agentConfigLoaded = ref(false)
+
+const loadAgentConfig = async () => {
+  try {
+    const res = await fetch('/api/music/config')
+    const data = await res.json()
+    if (data.success) {
+      agentConfig.value = { ...agentConfig.value, ...data.config }
+      agentConfigLoaded.value = true
+    }
+  } catch {}
+}
+
+const saveAgentConfig = async () => {
+  try {
+    await fetch('/api/music/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        apiUrl: agentConfig.value.apiUrl,
+        apiKey: agentConfig.value.apiKey,
+        model: agentConfig.value.model,
+        format: agentConfig.value.format,
+        proxy: agentConfig.value.proxy
+      })
+    })
+    agentConfig.value.hasKey = !!agentConfig.value.apiKey
+    showSettings.value = false
+  } catch {}
+}
+
+// === 音乐列表 ===
+const loadTracks = async () => {
+  try {
+    const res = await fetch('/api/music/list')
+    const data = await res.json()
+    tracks.value = data.tracks || []
+    playlist.value = tracks.value
+  } catch {}
+}
+
+const deleteTrack = async (track) => {
+  if (!confirm(`确定要物理删除该歌曲吗？\n${track.title}`)) return
+  try {
+    const res = await fetch('/api/music/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: track.filename })
+    })
+    const data = await res.json()
+    if (data.success) {
+      if (currentTrack.value && currentTrack.value.filename === track.filename) {
+        stopPlayback()
+        currentIndex.value = -1
+        currentTime.value = 0
+        duration.value = 0
+      }
+      await loadTracks()
+    } else {
+      alert(`删除失败: ${data.error || '未知错误'}`)
+    }
+  } catch (err) {
+    alert(`删除出错: ${err.message}`)
+  }
+}
+
+const filteredTracks = computed(() => {
+  if (!filterText.value) return tracks.value
+  const q = filterText.value.toLowerCase()
+  return tracks.value.filter(t => t.title.toLowerCase().includes(q) || (t.artist && t.artist.toLowerCase().includes(q)))
+})
+
+const updateCurrentLyrics = () => {
+  if (lyrics.value.length === 0) return
+  let activeIdx = -1
+  for (let i = 0; i < lyrics.value.length; i++) {
+    if (currentTime.value >= lyrics.value[i].time) {
+      activeIdx = i
+    } else {
+      break
+    }
+  }
+  currentLyricIndex.value = activeIdx
+  if (isPlaying.value && activeIdx >= 0 && activeIdx !== lastPetLyricIndex) {
+    const lyricText = lyrics.value[activeIdx]?.text?.trim()
+    if (lyricText) {
+      lastPetLyricIndex = activeIdx
+      notifyMusicPetSpeech(lyricText, { role: 'assistant', mode: 'replace', source: 'music-lyrics' })
+    }
+  }
+}
+
+// === 歌词加载 ===
+const loadLyrics = async (track) => {
+  if (!track) {
+    lyrics.value = []
+    currentLyricIndex.value = -1
+    return
+  }
+  try {
+    const res = await fetch(`/api/music/lyric?filename=${encodeURIComponent(track.filename || '')}&bvid=${encodeURIComponent(track.bvid || '')}&title=${encodeURIComponent(track.title || '')}`)
+    const data = await res.json()
+    if (data.success && data.lyrics) {
+      lyrics.value = data.lyrics
+    } else {
+      lyrics.value = []
+    }
+  } catch (err) {
+    console.error('Failed to load lyrics:', err)
+    lyrics.value = []
+  }
+  currentLyricIndex.value = -1
+  lastPetLyricIndex = -1
+}
+
+// === 播放控制 ===
+const play = (track) => {
+  if (!track) return
+  const idx = playlist.value.findIndex(t => t.filename === track.filename)
+  if (idx !== -1) currentIndex.value = idx
+  const src = `/api/music/stream?file=${encodeURIComponent(track.filename)}`
+  if (audioEl.value) {
+    audioEl.value.src = src
+    audioEl.value.volume = volume.value
+    startAudioPlayback(track)
+    initAnalyser()
+    lastPetLyricIndex = -1
+    // 加载弹幕
+    if (track.bvid) loadDanmaku(track.bvid)
+    // 加载歌词
+    loadLyrics(track)
+  }
+}
+
+const togglePlay = () => {
+  if (!audioEl.value || !currentTrack.value) {
+    if (playlist.value.length) play(playlist.value[0])
+    return
+  }
+  if (isPlaying.value) {
+    audioEl.value.pause()
+    isPlaying.value = false
+    notifyMusicPetIdle(`已暂停：${formatTrackLabel(currentTrack.value)}`)
+  } else {
+    startAudioPlayback(currentTrack.value)
+  }
+}
+
+const stopPlayback = () => {
+  if (audioEl.value) {
+    audioEl.value.pause()
+    audioEl.value.currentTime = 0
+    isPlaying.value = false
+    notifyMusicPetIdle('已停止播放', currentTrack.value)
+    // 清空歌词
+    lyrics.value = []
+    currentLyricIndex.value = -1
+    lastPetLyricIndex = -1
+  }
+}
+
+const nextTrack = () => {
+  if (!playlist.value.length) return
+  if (playMode.value === 'random') {
+    play(playlist.value[Math.floor(Math.random() * playlist.value.length)])
+  } else {
+    const next = playMode.value === 'single' ? currentIndex.value : (currentIndex.value + 1) % playlist.value.length
+    play(playlist.value[next])
+  }
+}
+
+const prevTrack = () => {
+  if (!playlist.value.length) return
+  const prev = (currentIndex.value - 1 + playlist.value.length) % playlist.value.length
+  play(playlist.value[prev])
+}
+
+const seekTo = (e) => {
+  if (!audioEl.value || !duration.value) return
+  const rect = e.currentTarget.getBoundingClientRect()
+  audioEl.value.currentTime = ((e.clientX - rect.left) / rect.width) * duration.value
+}
+
+const setVolume = (e) => {
+  const rect = e.currentTarget.getBoundingClientRect()
+  volume.value = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+  if (audioEl.value) audioEl.value.volume = volume.value
+}
+
+const onTimeUpdate = () => {
+  if (audioEl.value) {
+    currentTime.value = audioEl.value.currentTime
+    duration.value = audioEl.value.duration || 0
+    updateCurrentLyrics()
+  }
+}
+
+const onEnded = () => {
+  if (!playlist.value.length) notifyMusicPetIdle('播放结束', currentTrack.value)
+  nextTrack()
+}
+
+// === 频谱 ===
+const initAnalyser = () => {
+  if (audioCtx.value) return
+  try {
+    audioCtx.value = new (window.AudioContext || window.webkitAudioContext)()
+    analyser.value = audioCtx.value.createAnalyser()
+    analyser.value.fftSize = 128
+    const source = audioCtx.value.createMediaElementSource(audioEl.value)
+    source.connect(analyser.value)
+    analyser.value.connect(audioCtx.value.destination)
+    dataArray.value = new Uint8Array(analyser.value.frequencyBinCount)
+  } catch {}
+}
+
+// === 弹幕 ===
+const loadDanmaku = async (bvid) => {
+  if (!bvid) return
+  try {
+    const res = await fetch(`/api/music/danmaku?bvid=${bvid}`)
+    const data = await res.json()
+    danmakuItems.value = data.danmaku || []
+  } catch { danmakuItems.value = [] }
+}
+
+const drawDanmaku = () => {
+  if (!danmakuCanvas.value) return
+  const ctx = danmakuCanvas.value.getContext('2d')
+  const draw = () => {
+    danmakuFrame = requestAnimationFrame(draw)
+    const w = danmakuCanvas.value.parentElement.clientWidth
+    const h = danmakuCanvas.value.parentElement.clientHeight
+    if (danmakuCanvas.value.width !== w || danmakuCanvas.value.height !== h) {
+      danmakuCanvas.value.width = w
+      danmakuCanvas.value.height = h
+    }
+    ctx.clearRect(0, 0, w, h)
+    if (!danmakuEnabled.value || !isPlaying.value) return
+    const now = currentTime.value
+    // 添加新弹幕
+    for (const item of danmakuItems.value) {
+      if (Math.abs(item.time - now) < 0.5 && !activeDanmaku.value.find(d => d.content === item.content && Math.abs(d.startTime - item.time) < 1)) {
+        activeDanmaku.value.push({
+          ...item,
+          x: w,
+          y: 15 + Math.random() * (h - 35),
+          speed: 1.2 + Math.random() * 1.5,
+          startTime: item.time
+        })
+      }
+    }
+    // 绘制和移动
+    activeDanmaku.value = activeDanmaku.value.filter(d => {
+      d.x -= d.speed
+      ctx.font = '13px "JetBrains Mono", monospace'
+      ctx.fillStyle = d.color || '#6feee1'
+      ctx.globalAlpha = 0.85
+      ctx.shadowColor = 'rgba(0,0,0,0.6)'
+      ctx.shadowBlur = 3
+      ctx.fillText(d.content, d.x, d.y)
+      ctx.shadowBlur = 0
+      ctx.globalAlpha = 1
+      return d.x > -250
+    })
+  }
+  draw()
+}
+
+onMounted(() => {
+  loadTracks()
+  loadAgentConfig()
+  loadChatMessages()
+  
+  // 开启大时钟与系统监控
+  updateClock()
+  clockTimer = setInterval(updateClock, 1000)
+  
+  updateSystemStats()
+  statsTimer = setInterval(updateSystemStats, 2000)
+  
+  drawDanmaku()
+  notifyMusicPetIdle('音乐播放器待命')
+  
+  nextTick(() => {
+    const el = document.getElementById('agent-chat-end')
+    if (el) el.scrollIntoView({ behavior: 'smooth' })
+  })
+})
+
+onUnmounted(() => {
+  if (animFrame) cancelAnimationFrame(animFrame)
+  if (danmakuFrame) cancelAnimationFrame(danmakuFrame)
+  if (clockTimer) clearInterval(clockTimer)
+  if (statsTimer) clearInterval(statsTimer)
+  notifyMusicPetIdle('音乐播放器已关闭')
+})
+
+// === Agent 对话 ===
+const formatTimeHHMMSS = () => {
+  const d = new Date()
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
+}
+
+const sendAgentMessage = async () => {
+  const msg = agentInput.value.trim()
+  if (!msg || agentLoading.value) return
+  agentInput.value = ''
+  
+  const time = formatTimeHHMMSS()
+  agentMessages.value.push({ role: 'operator', content: msg, time })
+  notifyMusicPetSpeech(msg, { role: 'user', mode: 'replace', final: true, source: 'music-chat' })
+  
+  // 模拟 Bash 抓取输出以匹配原版终端风格
+  const mockBashCmd = mode.value === 'cloud'
+    ? `{"command":"curl -s -G 'http://localhost:3080/api/music/search?q=${encodeURIComponent(msg)}' --data-urlencode"}`
+    : `{"command":"find_local_tracks --query '${msg}' --library '~/.cc-connect/music'"}`;
+  agentMessages.value.push({ role: 'bash', content: mockBashCmd, time })
+  
+  agentLoading.value = true
+  notifyMusicPet(isPlaying.value ? 'juggling' : 'thinking', isPlaying.value ? `正在播放：${formatTrackLabel(currentTrack.value)}` : '音乐助手正在找歌', currentTrack.value)
+  notifyMusicPetSpeech('音乐助手正在思考...', { role: 'status', mode: 'replace', source: 'music-chat' })
+  await nextTick()
+  scrollChat()
+
+  // 检查是否配置了 API Key
+  if (agentConfig.value.hasKey) {
+    await sendToClaudeAgent(msg)
+  } else {
+    await sendToSimpleAgent(msg)
+  }
+
+  agentLoading.value = false
+  if (isPlaying.value) notifyMusicPetPlaying(currentTrack.value)
+  else notifyMusicPetIdle('音乐助手待命', currentTrack.value)
+  await nextTick()
+  scrollChat()
+}
+
+const scrollChat = () => {
+  const el = document.getElementById('agent-chat-end')
+  if (el) el.scrollIntoView({ behavior: 'smooth' })
+}
+
+const sendToClaudeAgent = async (msg) => {
+  const agentMsg = { role: 'agent', content: '', time: formatTimeHHMMSS() }
+  agentMessages.value.push(agentMsg)
+  let petStreamStarted = false
+  let petStreamHadError = false
+  try {
+    const res = await fetch('/api/music/agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, mode: mode.value, history: agentMessages.value.slice(-10) })
+    })
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value)
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const data = JSON.parse(line.slice(6))
+          if (data.type === 'text') {
+            agentMsg.content += data.text
+            agentMessages.value = [...agentMessages.value] // 触发响应式
+            notifyMusicPetSpeech(data.text, {
+              role: 'assistant',
+              mode: petStreamStarted ? 'append' : 'replace',
+              source: 'music-chat'
+            })
+            petStreamStarted = true
+          } else if (data.type === 'error') {
+            agentMsg.content += `\n❌ ${data.text}`
+            petStreamHadError = true
+            notifyMusicPetSpeech(data.text, { role: 'error', mode: 'replace', final: true, source: 'music-chat' })
+          }
+        } catch {}
+      }
+    }
+    if (petStreamStarted && !petStreamHadError) {
+      notifyMusicPetSpeech('', { role: 'assistant', mode: 'append', final: true, source: 'music-chat' })
+    }
+  } catch {
+    agentMsg.content = '❌ 连接失败，请检查 API 配置'
+    notifyMusicPetSpeech('连接失败，请检查 API 配置', { role: 'error', mode: 'replace', final: true, source: 'music-chat' })
+  }
+}
+
+const sendToSimpleAgent = async (msg) => {
+  try {
+    const res = await fetch('/api/music/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, mode: mode.value, history: agentMessages.value.slice(-10) })
+    })
+    const data = await res.json()
+    if (data.success) {
+      const replyText = data.reply || '...'
+      agentMessages.value.push({
+        role: 'agent',
+        content: replyText,
+        time: formatTimeHHMMSS(),
+        results: [
+          ...(data.localResults || []).map(t => ({ type: 'local', track: t })),
+          ...(data.biliResults || []).map(r => ({ type: 'bilibili', ...r }))
+        ].slice(0, 5) || []
+      })
+      notifyMusicPetSpeech(replyText, { role: 'assistant', mode: 'replace', final: true, source: 'music-chat' })
+      if (data.autoPlay && data.localResults?.length > 0) play(data.localResults[0])
+    } else {
+      const errorText = `出错: ${data.error}`
+      agentMessages.value.push({ role: 'agent', content: errorText, time: formatTimeHHMMSS() })
+      notifyMusicPetSpeech(errorText, { role: 'error', mode: 'replace', final: true, source: 'music-chat' })
+    }
+  } catch {
+    const errorText = '请求失败，请稍后再试。'
+    agentMessages.value.push({ role: 'agent', content: errorText, time: formatTimeHHMMSS() })
+    notifyMusicPetSpeech(errorText, { role: 'error', mode: 'replace', final: true, source: 'music-chat' })
+  }
+}
+
+const playLocalTrack = (track) => { play(track) }
+
+const convertAndPlay = async (item) => {
+  converting.value = { ...converting.value, [item.bvid]: true }
+  const time = formatTimeHHMMSS()
+  agentMessages.value.push({ role: 'system', content: `⏳ 正在转码: ${item.title.replace(/<[^>]*>/g, '')}...`, time })
+  try {
+    const res = await fetch('/api/music/convert', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bvid: item.bvid, title: item.title.replace(/<[^>]*>/g, ''), author: item.author })
+    })
+    const data = await res.json()
+    if (data.success) {
+      await loadTracks()
+      const newTrack = tracks.value.find(t => t.filename === data.filename)
+      if (newTrack) {
+        newTrack.bvid = item.bvid
+        play(newTrack)
+        agentMessages.value.push({ role: 'agent', content: `✅ 转码完成，开始播放：${item.title.replace(/<[^>]*>/g, '')}`, time: formatTimeHHMMSS() })
+      }
+    } else {
+      agentMessages.value.push({ role: 'agent', content: `❌ 转码失败: ${data.error}`, time: formatTimeHHMMSS() })
+    }
+  } catch {
+    agentMessages.value.push({ role: 'agent', content: '❌ 转码出错，请确保已安装 yt-dlp 和 ffmpeg', time: formatTimeHHMMSS() })
+  }
+  converting.value = { ...converting.value, [item.bvid]: false }
+}
+
+const isTrackAdded = (bvid) => {
+  return tracks.value.some(t => t.bvid === bvid || t.filename.includes(bvid))
+}
+
+const playAddedTrack = (bvid) => {
+  const track = tracks.value.find(t => t.bvid === bvid || t.filename.includes(bvid))
+  if (track) play(track)
+}
+
+const addAllTracks = (results) => {
+  if (!results || results.length === 0) return
+  results.forEach(r => {
+    if (r.type === 'bilibili') {
+      convertAndPlay(r)
+    } else if (r.type === 'local') {
+      playLocalTrack(r.track)
+    }
+  })
+}
+
+// === 工具 ===
+const formatTime = (s) => {
+  if (!s || isNaN(s)) return '0:00'
+  return `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`
+}
+
+const parseMessageTracks = (content) => {
+  if (!content) return null;
+  const FENCED_RE = /```(?:tracks|json)?\s*\n([\s\S]*?)```/g;
+  let match;
+  FENCED_RE.lastIndex = 0;
+  while ((match = FENCED_RE.exec(content)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1].trim());
+      const tracks = Array.isArray(parsed) ? parsed : (parsed.tracks || []);
+      if (Array.isArray(tracks)) {
+        return tracks.map(t => {
+          if (t.bvid) {
+            return {
+              type: 'bilibili',
+              bvid: t.bvid,
+              title: t.title,
+              author: t.author || t.artist || '未知UP主',
+              duration: t.duration || ''
+            };
+          } else {
+            return {
+              type: 'local',
+              track: {
+                filename: t.filename,
+                title: t.title,
+                artist: t.artist || t.author || '未知歌手'
+              }
+            };
+          }
+        });
+      }
+    } catch {}
+  }
+  return null;
+}
+
+const displayMessageContent = (content) => {
+  if (!content) return '';
+  return content.replace(/```(?:tracks|json)?\s*\n[\s\S]*?```/g, '').trim();
+}
+
+const getMessageResults = (msg) => {
+  if (msg.results && msg.results.length > 0) return msg.results;
+  return parseMessageTracks(msg.content);
+}
+</script>
+
+<template>
+  <div class="aura-player scanline-overlay dot-matrix-bg" :class="{ 'is-playing': isPlaying }">
+    <!-- 深夜极光氛围背景流光 -->
+    <div class="aurora-glow aurora-glow-1"></div>
+    <div class="aurora-glow aurora-glow-2"></div>
+    <div class="aurora-glow aurora-glow-3"></div>
+
+    <!-- 主窗口 -->
+    <div class="aura-main-container">
+      <div class="listening-atmosphere" aria-hidden="true">
+        <span
+          v-for="i in 24"
+          :key="i"
+          :style="{
+            '--left': `${(i - 1) * 4.18}%`,
+            '--height': `${18 + ((i * 17) % 52)}px`,
+            '--delay': `${(i % 8) * -0.16}s`
+          }"
+        ></span>
+      </div>
+      
+      <!-- 顶部 Header 栏 -->
+      <header class="aura-header">
+        <div class="aura-logo-area">
+          <div class="aura-logo-badge">🧬</div>
+          <div class="aura-logo-copy">
+            <span class="aura-logo-text">音乐播放工作台</span>
+            <span class="aura-logo-sub">Aura Music</span>
+          </div>
+        </div>
+        <div class="aura-top-mode-switch">
+          <button :class="{ active: mode === 'local' }" @click="mode = 'local'">LOCAL</button>
+          <button :class="{ active: mode === 'cloud' }" @click="mode = 'cloud'">BILI</button>
+        </div>
+      </header>
+
+      <!-- 中间主体两栏布局 -->
+      <div class="aura-body">
+        
+        <!-- 左侧栏 -->
+        <aside class="aura-left-panel">
+          
+          <!-- 1. 黑胶唱片机拟物模块 -->
+          <div class="aura-card turntable-card">
+            <!-- 状态与微型时钟 -->
+            <div class="turntable-header">
+              <div class="card-header-status">
+                <span class="pulse-dot-green"></span>
+                <span class="status-text-green">LIVE FEED</span>
+                <span class="status-subtext-blue">SYNC: OK</span>
+              </div>
+              <div class="micro-clock">
+                <span class="clock-time">{{ currentTimeStr }}</span>
+                <span class="clock-date">{{ currentDateStr }}</span>
+              </div>
+            </div>
+            
+            <!-- 唱片机主体 -->
+            <div class="player-deck">
+              <!-- 左侧：唱机区 -->
+              <div class="deck-left">
+                <!-- 旋转唱片盘 -->
+                <div class="vinyl-record-wrap">
+                  <div class="vinyl-record" :class="{ playing: isPlaying }">
+                    <!-- 唱片黑胶纹理与封面图 -->
+                    <div class="vinyl-grooves"></div>
+                    <div class="vinyl-cover">
+                      <!-- 唱片盘中心音符 -->
+                      <div class="cover-placeholder">🎵</div>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- 唱针 -->
+                <div class="tonearm-arm" :class="{ 'play-stylus': isPlaying }">
+                  <div class="tonearm-base"></div>
+                  <div class="tonearm-shaft"></div>
+                  <div class="tonearm-head"></div>
+                </div>
+              </div>
+
+              <!-- 右侧：歌词展示区 -->
+              <div class="deck-right">
+                <div class="turntable-lyrics-wrap">
+                  <div class="turntable-lyrics-list" :style="{ transform: `translateY(${lyricsOffset}px)` }">
+                    <div v-for="(line, idx) in lyrics" :key="idx" 
+                      class="lyric-line" 
+                      :class="{ active: currentLyricIndex === idx }">
+                      {{ line.text }}
+                    </div>
+                    <div v-if="lyrics.length === 0" class="lyric-empty">
+                      Aura Music
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. 正在播放模块 -->
+          <div class="aura-card player-card">
+            <div class="np-title-area">
+              <span class="np-title-text">{{ currentTrack ? currentTrack.title : 'NO TRACK' }}</span>
+              <span class="np-author-text">{{ currentTrack ? (currentTrack.artist || 'UNKNOWN') : '选择一首歌曲开始播放' }}</span>
+            </div>
+            <div class="player-status-row">
+              <div v-if="isPlaying" class="playing-indicator">
+                <span class="indicator-tag">PLAYING</span>
+                <span class="indicator-wave">
+                  <span class="wave-bar bar-1"></span>
+                  <span class="wave-bar bar-2"></span>
+                  <span class="wave-bar bar-3"></span>
+                </span>
+              </div>
+              <div v-else class="playing-indicator stopped">
+                <span class="indicator-tag">STOPPED</span>
+              </div>
+              
+              <button class="danmaku-tag-btn" :class="{ active: danmakuEnabled }" @click="danmakuEnabled = !danmakuEnabled">
+                DANMAKU
+              </button>
+            </div>
+
+            <!-- 控制按钮和音量 -->
+            <div class="controls-row">
+              <div class="control-buttons">
+                <button class="aura-btn-icon" @click="prevTrack" title="上一首">⏮</button>
+                <button class="aura-btn-icon play" @click="togglePlay" title="播放/暂停">
+                  {{ isPlaying ? '⏸' : '▶' }}
+                </button>
+                <button class="aura-btn-icon" @click="nextTrack" title="下一首">⏭</button>
+                <button class="aura-btn-icon" @click="stopPlayback" title="停止">⏹</button>
+              </div>
+              
+              <!-- 音量控制 -->
+              <div class="volume-control-area" @click="setVolume">
+                <span class="volume-icon">🔊</span>
+                <div class="volume-slider-bar">
+                  <div class="volume-slider-fill" :style="{ width: volume * 100 + '%' }"></div>
+                  <div class="volume-slider-head" :style="{ left: volume * 100 + '%' }"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 进度条 -->
+            <div class="progress-section" @click="seekTo">
+              <div class="time-label current">{{ formatTime(currentTime) }}</div>
+              <div class="aura-progress-track">
+                <div class="aura-progress-fill" :style="{ width: duration ? (currentTime / duration * 100) + '%' : '0%' }"></div>
+                <!-- 像素滑块 -->
+                <div class="aura-progress-ship" :style="{ left: duration ? (currentTime / duration * 100) + '%' : '0%' }">
+                  👾
+                </div>
+              </div>
+              <div class="time-label duration">{{ formatTime(duration) }}</div>
+            </div>
+            
+            <audio ref="audioEl" @timeupdate="onTimeUpdate" @ended="onEnded" preload="auto"></audio>
+          </div>
+
+          <!-- 3. 播放队列模块 (ACTIVE_QUEUE.LOG) -->
+          <div class="aura-card queue-card">
+            <div class="queue-header">
+              <div class="queue-heading">
+                <span class="queue-title-log">本地歌曲库</span>
+                <span class="queue-count">{{ filteredTracks.length }} 首</span>
+              </div>
+              <div class="queue-tools">
+                <input v-model="filterText" class="queue-filter-input" placeholder="搜索歌曲 / 艺术家..." />
+                <label class="upload-btn" title="上传音乐文件">
+                  ⬆ 上传
+                  <input type="file" accept=".mp3,.wav,.ogg,.m4a,.flac,.aac" multiple @change="uploadFiles" style="display:none" />
+                </label>
+              </div>
+            </div>
+            <div v-if="uploading" class="upload-status">
+              <span class="upload-spinner">⏳</span> 上传中...
+            </div>
+            <div v-if="filteredTracks.length > 0" class="queue-list-head">
+              <span>#</span>
+              <span>歌曲</span>
+              <span>大小</span>
+              <span></span>
+            </div>
+            <div class="queue-list">
+              <div v-for="(track, i) in filteredTracks" :key="track.filename"
+                class="queue-item"
+                :class="{ active: currentTrack?.filename === track.filename }"
+                @click="play(track)">
+                <span class="qi-num">{{ i + 1 }}</span>
+                <div class="qi-cover">🎵</div>
+                <div class="qi-info">
+                  <span class="qi-title">{{ track.title }}</span>
+                  <span class="qi-artist">{{ track.artist || '未知艺术家' }}</span>
+                </div>
+                <span class="qi-size">{{ track.size ? (track.size / 1024 / 1024).toFixed(1) + 'M' : '' }}</span>
+                <button class="qi-del" @click.stop="deleteTrack(track)" title="删除">✕</button>
+              </div>
+              <div v-if="filteredTracks.length === 0" class="empty-queue">
+                <span>🎵</span>
+                <span>暂无本地音乐</span>
+                <span class="empty-hint">上传 MP3 或让 AI 搜索 B站音乐</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 弹幕层（覆盖整个左侧面板） -->
+          <div class="danmaku-container-parent">
+            <canvas ref="danmakuCanvas" class="danmaku-canvas-layer"></canvas>
+          </div>
+        </aside>
+
+        <!-- 右侧栏 (AI Agent 对话) -->
+        <main class="aura-right-panel">
+          <div class="agent-header-row">
+            <div class="agent-title-area">
+              <span class="pulse-dot-cyan"></span>
+              <span class="agent-title-text">NEURAL_AGENT</span>
+            </div>
+            <div class="agent-status-tags">
+              <span class="status-tag standby">STANDBY</span>
+              <span class="status-tag ok">SESSION_OK</span>
+              <button class="settings-btn-icon" @click="clearChatHistory" title="清除聊天历史" style="margin-right: 4px;">🧹</button>
+              <button class="settings-btn-icon" @click="showSettings = true" title="Agent 设置">⚙️</button>
+            </div>
+          </div>
+
+          <div class="agent-chat-messages" id="agent-chat">
+            <div v-for="(msg, i) in agentMessages" :key="i" class="aura-chat-row" :class="msg.role">
+              
+              <!-- BASH 调试框 -->
+              <div v-if="msg.role === 'bash'" class="bash-log-box">
+                <span class="bash-arrow">▶</span>
+                <span class="bash-tag">[BASH]</span>
+                <span class="bash-code">{{ msg.content }}</span>
+              </div>
+
+              <!-- 消息气泡 -->
+              <div v-else class="chat-bubble-container">
+                <div class="chat-meta">
+                  <span class="meta-role">{{ msg.role === 'agent' ? 'AGENT_01' : msg.role === 'operator' ? 'OPERATOR' : 'SYS' }}</span>
+                  <span class="meta-time">{{ msg.time || '00:00:00' }}</span>
+                </div>
+                <div class="chat-body-text">{{ displayMessageContent(msg.content) }}</div>
+                
+                <!-- 推荐歌曲卡片列表 -->
+                <div v-if="getMessageResults(msg)" class="tracks-card-box">
+                  <div class="tracks-card-header">
+                    <span class="tracks-count">[{{ getMessageResults(msg).length }} TRACKS]</span>
+                    <button class="tracks-action-btn" @click="addAllTracks(getMessageResults(msg))">ADD_ALL</button>
+                  </div>
+                  <div class="tracks-list-container">
+                    <div v-for="(r, j) in getMessageResults(msg)" :key="j" class="track-list-item">
+                      <div class="t-info">
+                        <span class="t-title">{{ r.type === 'local' ? r.track.title : (r.title || '').replace(/<[^>]*>/g, '') }}</span>
+                        <span class="t-meta">
+                          {{ r.type === 'local' ? r.track.artist : (r.author + ' · ' + r.duration) }}
+                        </span>
+                      </div>
+                      <div class="t-actions">
+                        <button v-if="r.type === 'local'" class="aura-add-btn added" @click="playLocalTrack(r.track)">ADDED</button>
+                        <template v-else>
+                          <button v-if="isTrackAdded(r.bvid)" class="aura-add-btn added" @click="playAddedTrack(r.bvid)">ADDED</button>
+                          <button v-else class="aura-add-btn" @click="convertAndPlay(r)" :disabled="converting[r.bvid]">
+                            {{ converting[r.bvid] ? '⏳' : '+ ADD' }}
+                          </button>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+            
+            <div v-if="agentLoading" class="aura-chat-row agent">
+              <div class="chat-bubble-container">
+                <div class="chat-meta">
+                  <span class="meta-role">AGENT_01</span>
+                </div>
+                <div class="chat-body-text blink-cursor">SEARCHING_NEURAL_DATABASE...</div>
+              </div>
+            </div>
+            <div id="agent-chat-end"></div>
+          </div>
+
+          <!-- 输入栏 -->
+          <div class="agent-input-container">
+            <span class="prompt-arrow">▶</span>
+            <input v-model="agentInput" class="aura-command-input" placeholder="Hi, 告诉我你想听什么..." @keydown.enter="sendAgentMessage" />
+            <button class="aura-send-btn-micro" @click="sendAgentMessage" :disabled="agentLoading">EXEC</button>
+          </div>
+        </main>
+
+      </div>
+
+      <!-- 底部状态栏 -->
+      <footer class="aura-footer-bar">
+        <div class="footer-left">
+          <span class="status-indicator-dot"></span>
+          <span class="footer-tag-text">SYSTEM_ONLINE</span>
+          <span class="footer-divider">|</span>
+          <span class="footer-metric">MEM: {{ memUsed }}GB / 32GB</span>
+          <span class="footer-divider">|</span>
+          <span class="footer-metric">CPU_LOAD: {{ cpuLoad }}%</span>
+        </div>
+        <div class="footer-right">
+          <span class="footer-metric">PACKET_LOSS: {{ packetLoss.toFixed(2) }}%</span>
+          <span class="footer-divider">|</span>
+          <span class="footer-metric">SYNC_STATUS: VERIFIED</span>
+          <span class="footer-divider">|</span>
+          <span class="footer-metric">NODE_VERSION: 1.0.4-BETA</span>
+        </div>
+      </footer>
+
+    </div>
+
+    <!-- Agent 配置弹窗 -->
+    <div v-if="showSettings" class="settings-overlay" @click.self="showSettings = false">
+      <div class="settings-modal">
+        <div class="settings-header">
+          <span>⚙️ Agent 配置</span>
+          <button class="close-btn" @click="showSettings = false">&times;</button>
+        </div>
+        <div class="settings-body">
+          <div class="field">
+            <label>API URL</label>
+            <input v-model="agentConfig.apiUrl" placeholder="https://api.anthropic.com" />
+            <span class="hint">Anthropic API 或兼容接口地址</span>
+          </div>
+          <div class="field">
+            <label>API Key</label>
+            <input v-model="agentConfig.apiKey" type="password" placeholder="sk-ant-..." />
+            <span class="hint">Anthropic API Key（配置后启用 Claude Agent 模式）</span>
+          </div>
+          <div class="field">
+            <label>模型</label>
+            <input v-model="agentConfig.model" placeholder="claude-sonnet-4-20250514" />
+            <span class="hint">推荐: claude-sonnet-4-20250514</span>
+          </div>
+          <div class="field">
+            <label>API 格式</label>
+            <select v-model="agentConfig.format" class="config-select">
+              <option value="auto">自动检测</option>
+              <option value="openai">OpenAI 兼容（DeepSeek/中转站）</option>
+              <option value="anthropic">Anthropic 原生</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>HTTP 代理（可选）</label>
+            <input v-model="agentConfig.proxy" placeholder="http://127.0.0.1:7890" />
+            <span class="hint">B站搜索被封时配置代理，支持 http/socks5</span>
+          </div>
+        </div>
+        <div class="settings-footer">
+          <button class="btn-aura" @click="showSettings = false">取消</button>
+          <button class="btn-aura btn-primary" @click="saveAgentConfig">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+/* === 极光流光背景与磨砂玻璃视觉系统 === */
+.aura-player {
+  height: 100%; width: 100%;
+  background: #040406; color: #a9b7c6;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* 霓虹极光柔和背景光 */
+.aurora-glow {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(130px);
+  pointer-events: none;
+  opacity: 0.6;
+  z-index: 0;
+}
+.aurora-glow-1 {
+  width: 380px; height: 380px;
+  background: rgba(111, 238, 225, 0.12); /* 亮青 */
+  top: -10%; left: 10%;
+  animation: auroraFlow1 25s infinite alternate ease-in-out;
+}
+.aurora-glow-2 {
+  width: 450px; height: 450px;
+  background: rgba(255, 107, 129, 0.09); /* 亮粉 */
+  bottom: -15%; right: 5%;
+  animation: auroraFlow2 28s infinite alternate ease-in-out;
+}
+.aurora-glow-3 {
+  width: 400px; height: 400px;
+  background: rgba(79, 70, 229, 0.09); /* 靛蓝 */
+  bottom: 15%; left: -5%;
+  animation: auroraFlow3 22s infinite alternate ease-in-out;
+}
+
+@keyframes auroraFlow1 {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(50px, 40px) scale(1.15); }
+}
+@keyframes auroraFlow2 {
+  0% { transform: translate(0, 0) scale(1.1); }
+  100% { transform: translate(-60px, -50px) scale(0.9); }
+}
+@keyframes auroraFlow3 {
+  0% { transform: translate(0, 0) scale(0.95); }
+  100% { transform: translate(40px, -40px) scale(1.1); }
+}
+
+.scanline-overlay::after {
+  content: ''; position: absolute; inset: 0; z-index: 999; pointer-events: none;
+  background: repeating-linear-gradient(to bottom, transparent 0, transparent 2px, rgba(255,255,255,0.006) 2px, rgba(255,255,255,0.006) 3px);
+  animation: scanline 10s linear infinite;
+  will-change: transform;
+}
+@keyframes scanline { from { transform: translateY(0); } to { transform: translateY(600px); } }
+
+/* 主容器 */
+.aura-main-container {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  padding: 14px; box-sizing: border-box;
+  z-index: 1;
+}
+
+/* 顶部 Header */
+.aura-header {
+  height: 42px; display: flex; align-items: center; justify-content: space-between;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(14, 14, 18, 0.45);
+  backdrop-filter: blur(20px) saturate(140%);
+  padding: 0 18px; border-radius: 8px; margin-bottom: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.aura-logo-area { display: flex; align-items: center; gap: 8px; }
+.aura-logo-badge { font-size: 15px; text-shadow: 0 0 8px #6feee1; }
+.aura-logo-text { font-size: 14px; font-weight: 700; color: #6feee1; letter-spacing: 0.12em; text-transform: uppercase; text-shadow: 0 0 10px rgba(111,238,225,0.4); }
+
+.aura-top-mode-switch { display: flex; gap: 4px; }
+.aura-top-mode-switch button {
+  background: transparent; border: 1px solid rgba(255, 255, 255, 0.03); color: #64748b;
+  padding: 4px 14px; font-size: 10px; font-weight: 700; border-radius: 4px;
+  cursor: pointer; font-family: inherit; transition: all 0.25s;
+}
+.aura-top-mode-switch button:hover { color: #a9b7c6; border-color: rgba(255, 255, 255, 0.1); }
+.aura-top-mode-switch button.active {
+  color: #6feee1; border-color: rgba(111,238,225,0.3);
+  background: rgba(111,238,225,0.08); box-shadow: 0 0 10px rgba(111,238,225,0.15);
+}
+
+/* 中间两栏 */
+.aura-body { flex: 1; display: flex; gap: 12px; min-height: 0; overflow: hidden; }
+
+/* 左侧栏 */
+.aura-left-panel { width: 42%; display: flex; flex-direction: column; gap: 12px; min-width: 320px; position: relative; }
+
+/* 磨砂玻璃卡片 */
+.aura-card {
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(15, 15, 20, 0.6);
+  backdrop-filter: blur(24px) saturate(150%);
+  border-radius: 10px; padding: 14px 18px; box-sizing: border-box;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* 1. 黑胶唱片机卡片 */
+.turntable-card {
+  height: 155px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+.turntable-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 2;
+}
+.card-header-status { display: flex; align-items: center; gap: 6px; font-size: 9px; letter-spacing: 0.1em; }
+.pulse-dot-green { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #52c41a; box-shadow: 0 0 6px #52c41a; animation: clockPulse 2s infinite; }
+@keyframes clockPulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.status-text-green { color: #52c41a; font-weight: 700; }
+.status-subtext-blue { color: #1890ff; font-weight: 700; margin-left: 2px; }
+
+.micro-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-family: monospace;
+}
+.clock-time { font-size: 15px; font-weight: 700; color: #6feee1; text-shadow: 0 0 6px rgba(111,238,225,0.5); }
+.clock-date { font-size: 8.5px; color: #64748b; margin-top: 1px; }
+
+/* 唱片盘和唱针底座 */
+.player-deck {
+  flex: 1;
+  display: flex;
+  position: relative;
+  margin-top: 6px;
+  z-index: 1;
+  width: 100%;
+}
+
+.deck-left {
+  width: 50%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 12px; /* 留出底部呼吸空间，防止唱片贴底 */
+  box-sizing: border-box;
+}
+
+.deck-right {
+  width: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding-bottom: 12px;
+}
+
+/* 旋转唱片盘 */
+.vinyl-record-wrap {
+  width: 84px; height: 84px; /* 从 96px 缩小到 84px */
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.02);
+}
+.vinyl-record {
+  width: 78px; height: 78px; /* 从 90px 缩小到 78px */
+  border-radius: 50%;
+  /* 仿真黑胶同心圆刻痕 */
+  background: radial-gradient(circle, #2a2a2e 0%, #0c0c0e 25%, #1c1c20 35%, #08080a 50%, #151518 68%, #030304 100%);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: inset 0 0 8px rgba(255, 255, 255, 0.05);
+}
+.vinyl-record.playing {
+  animation: rotate-disc 12s linear infinite;
+}
+.vinyl-grooves {
+  position: absolute; inset: 2px;
+  border-radius: 50%;
+  border: 1px dashed rgba(255, 255, 255, 0.015);
+  pointer-events: none;
+}
+.vinyl-cover {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #1f2937, #111827);
+  border: 2px solid #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+.vinyl-cover::after {
+  content: '';
+  position: absolute; width: 4px; height: 4px;
+  background: #6feee1; border-radius: 50%;
+  box-shadow: 0 0 4px #6feee1;
+}
+.cover-placeholder {
+  font-size: 11px;
+  color: rgba(111, 238, 225, 0.7);
+  text-shadow: 0 0 4px rgba(111,238,225,0.4);
+}
+
+@keyframes rotate-disc {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 拟物唱针 */
+.tonearm-arm {
+  position: absolute;
+  top: -10px; right: 20px;
+  width: 40px; height: 80px;
+  pointer-events: none;
+  transform-origin: 20px 15px;
+  transform: rotate(0deg);
+  transition: transform 0.8s cubic-bezier(0.25, 1, 0.5, 1);
+}
+.tonearm-arm.play-stylus {
+  transform: rotate(24deg);
+}
+.tonearm-base {
+  position: absolute;
+  top: 5px; left: 10px;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #3f3f3f 0%, #18181b 80%);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+}
+.tonearm-shaft {
+  position: absolute;
+  top: 15px; left: 19px;
+  width: 2px; height: 50px;
+  background: linear-gradient(to bottom, #d4d4d8, #71717a);
+  transform: rotate(-10deg);
+  transform-origin: top center;
+  border-radius: 1px;
+}
+.tonearm-head {
+  position: absolute;
+  bottom: 8px; left: 7px;
+  width: 8px; height: 14px;
+  background: #27272a;
+  border: 1px solid #3f3f46;
+  border-radius: 2px;
+  transform: rotate(10deg);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+
+/* 歌词展示区 */
+.turntable-lyrics-wrap {
+  width: 100%;
+  height: 70px;
+  overflow: hidden;
+  position: relative;
+  /* 上下边缘淡入淡出遮罩 */
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 20%, #000 80%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 20%, #000 80%, transparent 100%);
+}
+.turntable-lyrics-list {
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.35s cubic-bezier(0.25, 1, 0.5, 1);
+  will-change: transform;
+}
+.lyric-line {
+  height: 22px;
+  line-height: 22px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+  padding: 0 8px;
+}
+.lyric-line.active {
+  color: #6feee1;
+  font-weight: bold;
+  font-size: 11.5px;
+  text-shadow: 0 0 8px rgba(111, 238, 225, 0.6);
+}
+.lyric-empty {
+  height: 70px;
+  line-height: 70px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.2);
+  text-align: center;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* 2. 正在播放卡片 */
+.player-card { display: flex; flex-direction: column; height: 180px; position: relative; flex-shrink: 0; }
+.np-title-area { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.np-title-text { font-size: 13px; font-weight: 700; color: #f1f5f9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-author-text { font-size: 10.5px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.player-status-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.playing-indicator { display: flex; align-items: center; gap: 6px; }
+.indicator-tag { font-size: 9px; font-weight: bold; color: #6feee1; border: 1px solid rgba(111,238,225,0.3); padding: 1px 5px; border-radius: 3px; background: rgba(111,238,225,0.04); }
+.playing-indicator.stopped .indicator-tag { color: #64748b; border-color: rgba(255,255,255,0.05); background: transparent; }
+
+.indicator-wave { display: flex; align-items: flex-end; gap: 2px; height: 10px; }
+.wave-bar { width: 2px; background: #6feee1; animation: bounce 0.8s ease-in-out infinite alternate; }
+.wave-bar.bar-1 { height: 10px; animation-delay: 0.1s; }
+.wave-bar.bar-2 { height: 6px; animation-delay: 0.3s; }
+.wave-bar.bar-3 { height: 8px; animation-delay: 0.5s; }
+@keyframes bounce { from { height: 2px; } to { height: 12px; } }
+
+.danmaku-tag-btn { background: transparent; border: 1px solid rgba(255,255,255,0.08); color: #64748b; font-size: 9px; font-weight: bold; padding: 2px 6px; border-radius: 3px; cursor: pointer; transition: all 0.2s; }
+.danmaku-tag-btn:hover { color: #a9b7c6; border-color: rgba(255,255,255,0.15); }
+.danmaku-tag-btn.active { color: #6feee1; border-color: rgba(111,238,225,0.3); background: rgba(111,238,225,0.06); }
+
+/* 控制与音量 */
+.controls-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.control-buttons { display: flex; gap: 6px; }
+.aura-btn-icon {
+  background: rgba(255, 255, 255, 0.02); border: 1px solid rgba(255, 255, 255, 0.04); color: #a9b7c6;
+  width: 28px; height: 28px; border-radius: 5px; font-size: 11px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; transition: all 0.2s;
+}
+.aura-btn-icon:hover { color: #6feee1; border-color: rgba(111, 238, 225, 0.5); box-shadow: 0 0 8px rgba(111, 238, 225, 0.25); }
+.aura-btn-icon.play { color: #6feee1; border-color: rgba(111, 238, 225, 0.3); }
+
+.volume-control-area { display: flex; align-items: center; gap: 8px; flex: 1; max-width: 120px; cursor: pointer; }
+.volume-icon { font-size: 11px; color: #64748b; }
+.volume-slider-bar { height: 3px; background: rgba(255, 255, 255, 0.05); flex: 1; border-radius: 2px; position: relative; }
+.volume-slider-fill { height: 100%; background: #6feee1; border-radius: 2px; }
+
+/* 进度条 */
+.progress-section { display: flex; align-items: center; gap: 8px; cursor: pointer; margin-top: auto; }
+.time-label { font-size: 9px; color: #64748b; font-family: monospace; min-width: 30px; }
+.aura-progress-track { height: 2px; background: rgba(255,255,255,0.06); flex: 1; border-radius: 1px; position: relative; }
+.aura-progress-fill { height: 100%; background: #6feee1; border-radius: 1px; }
+.aura-progress-ship {
+  position: absolute; top: -6px; transform: translateX(-50%);
+  font-size: 11px; cursor: pointer; text-shadow: 0 0 6px #6feee1;
+  transition: left 0.1s;
+}
+
+/* 弹幕层 */
+.danmaku-container-parent { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.danmaku-canvas-layer { width: 100%; height: 100%; }
+
+/* 3. 播放队列卡片 */
+.queue-card { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.queue-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.queue-title-log { font-size: 11.5px; font-weight: bold; color: #6feee1; letter-spacing: 0.05em; }
+.queue-count { font-size: 10px; color: #475569; }
+
+.queue-filter-row { margin-bottom: 10px; }
+.queue-filter-input {
+  width: 100%; padding: 6px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.25); color: #e2e8f0; font-size: 11px; font-family: inherit;
+  outline: none; transition: border-color 0.2s; box-sizing: border-box;
+}
+.queue-filter-input:focus { border-color: rgba(111, 238, 225, 0.3); }
+
+.upload-btn {
+  padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(111,238,225,0.3);
+  background: rgba(111,238,225,0.06); color: #6feee1; font-size: 11px; cursor: pointer;
+  font-family: inherit; transition: all 0.15s;
+}
+.upload-btn:hover { background: rgba(111,238,225,0.15); }
+.upload-status { font-size: 11px; color: #6feee1; padding: 6px 0; display: flex; align-items: center; gap: 6px; }
+.upload-spinner { animation: spin 1s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.queue-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.queue-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: 8px; cursor: pointer;
+  transition: background 0.15s;
+}
+.queue-item:hover { background: rgba(255,255,255,0.03); }
+.queue-item.active { background: rgba(111,238,225,0.06); }
+.qi-num { width: 20px; text-align: center; font-size: 10px; color: #475569; flex-shrink: 0; }
+.queue-item.active .qi-num { color: #6feee1; }
+.qi-cover {
+  width: 32px; height: 32px; border-radius: 6px;
+  background: rgba(111,238,225,0.08); display: flex;
+  align-items: center; justify-content: center;
+  font-size: 14px; flex-shrink: 0;
+}
+.queue-item.active .qi-cover { background: rgba(111,238,225,0.15); }
+.qi-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.qi-title { font-size: 12px; color: #e2e8f0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.queue-item.active .qi-title { color: #6feee1; text-shadow: 0 0 3px rgba(111,238,225,0.2); }
+.qi-artist { font-size: 10px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qi-size { font-size: 10px; color: #475569; flex-shrink: 0; }
+.qi-del {
+  background: transparent; border: none; color: #475569;
+  cursor: pointer; font-size: 12px; padding: 4px; border-radius: 4px;
+  opacity: 0; transition: all 0.15s;
+}
+.queue-item:hover .qi-del { opacity: 1; }
+.qi-del:hover { color: #ff5252; }
+.empty-queue {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 40px 20px; color: #475569; font-size: 12px;
+}
+.empty-hint { font-size: 10px; color: #3c4947; }
+
+/* 右侧面板 (Neural Agent) */
+.aura-right-panel {
+  flex: 1; display: flex; flex-direction: column; min-width: 360px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(15, 15, 20, 0.6);
+  backdrop-filter: blur(24px) saturate(150%);
+  border-radius: 10px; overflow: hidden;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.agent-header-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); background: rgba(0, 0, 0, 0.1); }
+.agent-title-area { display: flex; align-items: center; gap: 8px; }
+.pulse-dot-cyan { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #6feee1; box-shadow: 0 0 6px #6feee1; animation: agentPulse 2.4s infinite; }
+@keyframes agentPulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.agent-title-text { font-size: 11px; font-weight: 700; color: #6feee1; letter-spacing: 0.1em; text-transform: uppercase; text-shadow: 0 0 8px rgba(111,238,225,0.25); }
+
+.agent-status-tags { display: flex; align-items: center; gap: 6px; }
+.status-tag { font-size: 9px; font-weight: bold; padding: 2px 6px; border-radius: 3px; letter-spacing: 0.05em; }
+.status-tag.standby { background: rgba(255,255,255,0.02); color: #64748b; border: 1px solid rgba(255,255,255,0.04); }
+.status-tag.ok { background: rgba(82, 196, 26, 0.06); color: #52c41a; border: 1px solid rgba(82, 196, 26, 0.2); }
+.settings-btn-icon { background: transparent; border: 1px solid rgba(255,255,255,0.04); color: #64748b; width: 22px; height: 22px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 11px; transition: all 0.2s; }
+.settings-btn-icon:hover { color: #6feee1; border-color: rgba(111,238,225,0.3); }
+
+.agent-chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; background: rgba(0, 0, 0, 0.15); min-height: 0; }
+.aura-chat-row { display: flex; flex-direction: column; width: 100%; }
+
+/* BASH 调试日志 */
+.bash-log-box {
+  display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.02); border-radius: 5px;
+  font-family: 'JetBrains Mono', monospace; font-size: 10px; margin: 4px 0;
+  max-width: 100%; box-sizing: border-box; overflow-x: auto;
+}
+.bash-arrow { color: #64748b; }
+.bash-tag { color: #1890ff; font-weight: bold; }
+.bash-code { color: #a9b7c6; white-space: nowrap; }
+
+/* 聊天气泡 */
+.chat-bubble-container { display: flex; flex-direction: column; max-width: 85%; }
+.aura-chat-row.operator { align-items: flex-end; }
+.aura-chat-row.operator .chat-bubble-container { align-items: flex-end; }
+.aura-chat-row.agent .chat-bubble-container { align-items: flex-start; max-width: 90%; }
+
+.chat-meta { display: flex; gap: 8px; font-size: 9px; color: #475569; margin-bottom: 4px; }
+.meta-role { font-weight: bold; letter-spacing: 0.05em; }
+.aura-chat-row.operator .meta-role { color: #6feee1; }
+.aura-chat-row.agent .meta-role { color: #86a39f; }
+.meta-time { color: #3c4947; }
+
+.chat-body-text { font-size: 12px; line-height: 1.6; word-break: break-word; white-space: pre-wrap; }
+.aura-chat-row.operator .chat-body-text { color: #e2e8f0; text-align: right; }
+.aura-chat-row.agent .chat-body-text {
+  color: #a9b7c6; padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  border-left: 3px solid rgba(111, 238, 225, 0.4);
+  border-radius: 8px; border-top-left-radius: 1px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+}
+
+/* 推荐音轨 (TRACKS) */
+.tracks-card-box {
+  margin-top: 10px; width: 100%; max-width: 420px;
+  background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.03); border-radius: 6px;
+  overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+}
+.tracks-card-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.03); background: rgba(255,255,255,0.005); }
+.tracks-count { font-size: 10px; font-weight: bold; color: #64748b; letter-spacing: 0.05em; }
+.tracks-action-btn { background: transparent; border: 1px solid rgba(111,238,225,0.2); color: #6feee1; font-size: 9px; font-weight: bold; padding: 2px 8px; border-radius: 4px; cursor: pointer; transition: all 0.2s; }
+.tracks-action-btn:hover { background: rgba(111,238,225,0.08); border-color: #6feee1; }
+
+.tracks-list-container { display: flex; flex-direction: column; }
+.track-list-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.02); }
+.track-list-item:last-child { border-bottom: none; }
+.t-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.t-title { font-size: 11px; color: #e2e8f0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.t-meta { font-size: 9.5px; color: #64748b; }
+.t-actions { flex-shrink: 0; }
+
+.aura-add-btn {
+  background: transparent; border: 1px solid rgba(111,238,225,0.3); color: #6feee1;
+  padding: 3px 10px; font-size: 10px; font-weight: bold; border-radius: 4px;
+  cursor: pointer; transition: all 0.2s;
+}
+.aura-add-btn:hover { background: rgba(111,238,225,0.1); border-color: #6feee1; box-shadow: 0 0 6px rgba(111,238,225,0.2); }
+.aura-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.aura-add-btn.added { color: #64748b; border-color: rgba(255,255,255,0.03); background: rgba(255,255,255,0.005); cursor: default; }
+.aura-add-btn.added:hover { box-shadow: none; }
+
+/* 输入区 */
+.agent-input-container { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid rgba(255, 255, 255, 0.04); background: rgba(0,0,0,0.1); }
+.prompt-arrow { color: #6feee1; font-weight: bold; font-size: 12px; text-shadow: 0 0 4px #6feee1; }
+.aura-command-input {
+  flex: 1; padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.25); color: #e2e8f0; font-size: 12px; font-family: inherit;
+  outline: none; transition: border-color 0.2s;
+}
+.aura-command-input:focus { border-color: rgba(111, 238, 225, 0.3); }
+.aura-send-btn-micro { background: transparent; border: 1px solid rgba(255,255,255,0.04); color: #64748b; font-size: 10px; font-weight: bold; padding: 8px 14px; border-radius: 6px; cursor: pointer; transition: all 0.2s; }
+.aura-send-btn-micro:hover { color: #6feee1; border-color: #6feee1; }
+
+/* 底部状态栏 */
+.aura-footer-bar {
+  height: 24px; display: flex; align-items: center; justify-content: space-between;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(14, 14, 18, 0.45);
+  backdrop-filter: blur(20px);
+  padding: 0 16px; border-radius: 6px; margin-top: 10px;
+  font-size: 9.5px; color: #64748b; font-family: monospace; letter-spacing: 0.05em;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+}
+.footer-left, .footer-right { display: flex; align-items: center; gap: 8px; }
+.status-indicator-dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: #6feee1; box-shadow: 0 0 5px #6feee1; animation: footerPulse 2s infinite; }
+@keyframes footerPulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+.footer-tag-text { color: #6feee1; font-weight: bold; }
+.footer-divider { color: rgba(255,255,255,0.03); }
+.footer-metric { color: #64748b; }
+
+.settings-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 10000; backdrop-filter: blur(4px); }
+.settings-modal { background: rgba(15,15,20,0.85); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; width: min(460px, calc(100vw - 28px)); max-height: calc(100vh - 48px); overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.6); display: flex; flex-direction: column; }
+.settings-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; color: #6feee1; font-weight: bold; }
+.close-btn { background: none; border: none; color: #64748b; font-size: 20px; cursor: pointer; }
+.settings-body { padding: 18px; overflow-y: auto; }
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 10px; color: #64748b; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: bold; }
+.field input, .config-select { width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); background: rgba(0,0,0,0.2); color: #e2e8f0; font-size: 12px; font-family: 'JetBrains Mono', monospace; outline: none; box-sizing: border-box; }
+.field input:focus, .config-select:focus { border-color: rgba(111, 238, 225, 0.4); }
+.field .hint { font-size: 9px; color: #475569; margin-top: 4px; display: block; }
+.settings-footer { display: flex; gap: 8px; justify-content: flex-end; padding: 14px 18px; border-top: 1px solid rgba(255,255,255,0.05); }
+.btn-primary { background: rgba(111,238,225,0.08) !important; border-color: rgba(111,238,225,0.3) !important; }
+
+/* === 浅色工作台适配 === */
+.aura-player {
+  background: transparent;
+  color: var(--text-primary);
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.scanline-overlay::after {
+  display: none;
+}
+
+.aurora-glow {
+  display: none;
+}
+
+.aura-main-container {
+  padding: 24px;
+}
+
+.listening-atmosphere {
+  position: absolute;
+  inset: 82px 24px 48px;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: 18px;
+  opacity: 0.58;
+  background:
+    linear-gradient(115deg, rgba(59, 130, 246, 0.08), rgba(16, 185, 129, 0.055) 45%, rgba(99, 102, 241, 0.06)),
+    repeating-linear-gradient(90deg, rgba(59, 130, 246, 0.04) 0 1px, transparent 1px 22px);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 82%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 16%, #000 82%, transparent 100%);
+}
+
+.listening-atmosphere::before,
+.listening-atmosphere::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.34), transparent);
+  transform: translateX(-35%);
+  animation: atmosphereSweep 7s ease-in-out infinite;
+}
+
+.listening-atmosphere::before {
+  top: 32%;
+}
+
+.listening-atmosphere::after {
+  top: 66%;
+  animation-delay: -3.2s;
+}
+
+.listening-atmosphere span {
+  position: absolute;
+  left: var(--left);
+  bottom: 12%;
+  width: 6px;
+  height: var(--height);
+  border-radius: 999px;
+  background: linear-gradient(to top, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.34), rgba(16, 185, 129, 0.2));
+  transform: scaleY(0.45);
+  transform-origin: bottom;
+  opacity: 0.2;
+  animation: listeningWave 1.8s ease-in-out infinite;
+  animation-delay: var(--delay);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.aura-player.is-playing .listening-atmosphere span {
+  opacity: 0.52;
+  animation-duration: 1.05s;
+}
+
+.aura-player:not(.is-playing) .listening-atmosphere span {
+  animation-play-state: paused;
+}
+
+.aura-player.is-playing .turntable-card,
+.aura-player.is-playing .player-card {
+  border-color: rgba(59, 130, 246, 0.14);
+  box-shadow: 0 16px 36px rgba(59, 130, 246, 0.075), inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+@keyframes listeningWave {
+  0%, 100% { transform: scaleY(0.42); }
+  45% { transform: scaleY(1.12); }
+  70% { transform: scaleY(0.72); }
+}
+
+@keyframes atmosphereSweep {
+  0%, 100% { transform: translateX(-38%); opacity: 0.1; }
+  50% { transform: translateX(38%); opacity: 0.55; }
+}
+
+.aura-header,
+.aura-body,
+.aura-footer-bar {
+  position: relative;
+  z-index: 1;
+}
+
+.aura-header,
+.aura-footer-bar,
+.aura-card,
+.aura-right-panel {
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(0, 0, 0, 0.055);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.045), inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(28px) saturate(160%);
+}
+
+.aura-header {
+  height: 54px;
+  padding: 0 18px;
+  border-radius: 14px;
+  margin-bottom: 14px;
+}
+
+.aura-logo-area {
+  gap: 10px;
+}
+
+.aura-logo-badge {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.12);
+  text-shadow: none;
+}
+
+.aura-logo-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.aura-logo-text {
+  font-family: var(--font-tech);
+  font-size: 14px;
+  color: var(--text-primary);
+  letter-spacing: 0;
+  text-transform: none;
+  text-shadow: none;
+}
+
+.aura-logo-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.aura-top-mode-switch {
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.035);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.aura-top-mode-switch button {
+  min-width: 58px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.aura-top-mode-switch button:hover {
+  color: var(--accent-blue);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.aura-top-mode-switch button.active {
+  color: #fff;
+  background: var(--gradient-blue);
+  box-shadow: 0 6px 14px rgba(59, 130, 246, 0.18);
+  border-color: transparent;
+}
+
+.aura-body {
+  display: grid;
+  grid-template-columns: minmax(560px, 43%) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.aura-left-panel {
+  width: auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 0.96fr) minmax(0, 1fr);
+  grid-template-rows: minmax(152px, 168px) minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+.turntable-card,
+.player-card {
+  height: auto;
+  min-height: 0;
+}
+
+.turntable-card {
+  grid-column: 1;
+}
+
+.player-card {
+  grid-column: 2;
+}
+
+.queue-card {
+  grid-column: 1 / -1;
+  min-height: 0;
+  padding: 16px;
+}
+
+.aura-card {
+  border-radius: 14px;
+  padding: 14px;
+}
+
+.card-header-status,
+.agent-title-text,
+.queue-title-log {
+  font-family: var(--font-tech);
+  letter-spacing: 0;
+}
+
+.status-text-green,
+.status-subtext-blue,
+.clock-time,
+.agent-title-text,
+.queue-title-log,
+.footer-tag-text {
+  color: var(--accent-blue);
+  text-shadow: none;
+}
+
+.pulse-dot-green,
+.pulse-dot-cyan,
+.status-indicator-dot {
+  background: var(--accent-green);
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.45);
+}
+
+.clock-date,
+.np-author-text,
+.queue-count,
+.footer-metric,
+.footer-divider,
+.meta-time,
+.qi-artist,
+.qi-size,
+.status-tag.standby,
+.settings-btn-icon {
+  color: var(--text-muted);
+}
+
+.turntable-card {
+  justify-content: flex-start;
+}
+
+.turntable-header {
+  margin-bottom: 4px;
+}
+
+.player-deck {
+  align-items: center;
+  margin-top: 0;
+}
+
+.deck-left,
+.deck-right {
+  padding-bottom: 0;
+}
+
+.deck-left {
+  width: 46%;
+}
+
+.deck-right {
+  width: 54%;
+}
+
+.turntable-lyrics-wrap {
+  height: 64px;
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.72);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.lyric-line {
+  color: var(--text-muted);
+}
+
+.lyric-line.active {
+  color: var(--accent-blue);
+  text-shadow: none;
+}
+
+.lyric-empty {
+  color: var(--text-muted);
+}
+
+.np-title-text {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.player-status-row {
+  margin-bottom: 9px;
+}
+
+.controls-row {
+  margin-bottom: 9px;
+}
+
+.indicator-tag,
+.danmaku-tag-btn.active {
+  color: var(--accent-blue);
+  border-color: rgba(59, 130, 246, 0.22);
+  background: rgba(59, 130, 246, 0.07);
+}
+
+.playing-indicator.stopped .indicator-tag,
+.danmaku-tag-btn {
+  color: var(--text-muted);
+  border-color: rgba(0, 0, 0, 0.06);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.wave-bar,
+.volume-slider-fill,
+.aura-progress-fill {
+  background: var(--accent-blue);
+}
+
+.aura-btn-icon,
+.settings-btn-icon,
+.aura-send-btn-micro {
+  background: rgba(255, 255, 255, 0.66);
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  color: var(--text-secondary);
+  border-radius: 8px;
+}
+
+.aura-btn-icon:hover,
+.settings-btn-icon:hover,
+.aura-send-btn-micro:hover {
+  color: var(--accent-blue);
+  border-color: rgba(59, 130, 246, 0.25);
+  box-shadow: 0 6px 14px rgba(59, 130, 246, 0.1);
+}
+
+.aura-btn-icon.play {
+  color: #fff;
+  background: var(--gradient-blue);
+  border-color: rgba(59, 130, 246, 0.25);
+}
+
+.volume-slider-bar,
+.aura-progress-track {
+  background: rgba(15, 23, 42, 0.08);
+}
+
+.aura-progress-ship {
+  text-shadow: none;
+}
+
+.queue-header {
+  margin-bottom: 10px;
+  gap: 12px;
+}
+
+.queue-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.queue-title-log {
+  font-size: 14px;
+}
+
+.queue-count {
+  font-size: 12px;
+}
+
+.queue-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: min(340px, 54%);
+  justify-content: flex-end;
+}
+
+.queue-filter-input,
+.aura-command-input {
+  background: rgba(255, 255, 255, 0.82) !important;
+  color: var(--text-primary) !important;
+  border-color: rgba(0, 0, 0, 0.075) !important;
+  font-family: inherit;
+}
+
+.queue-filter-input {
+  width: min(260px, 100%);
+  height: 34px;
+  padding: 7px 11px !important;
+  font-size: 12.5px !important;
+}
+
+.queue-filter-input:focus,
+.aura-command-input:focus {
+  border-color: rgba(59, 130, 246, 0.35) !important;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
+}
+
+.upload-btn {
+  color: var(--accent-blue);
+  background: rgba(59, 130, 246, 0.07);
+  border-color: rgba(59, 130, 246, 0.22);
+  border-radius: 8px;
+  white-space: nowrap;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.upload-btn:hover {
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.upload-status {
+  color: var(--accent-blue);
+}
+
+.queue-list-head {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 58px 30px;
+  gap: 10px;
+  align-items: center;
+  padding: 0 10px 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.045);
+}
+
+.queue-list {
+  gap: 3px;
+  padding-top: 5px;
+}
+
+.queue-item {
+  display: grid;
+  grid-template-columns: 34px 30px minmax(0, 1fr) 58px 28px;
+  gap: 9px;
+  padding: 5px 10px;
+  min-height: 40px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+
+.queue-item:hover {
+  background: rgba(59, 130, 246, 0.045);
+  border-color: rgba(59, 130, 246, 0.09);
+}
+
+.queue-item.active {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.16);
+}
+
+.qi-num {
+  width: auto;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.queue-item.active .qi-num,
+.queue-item.active .qi-title {
+  color: var(--accent-blue);
+  text-shadow: none;
+}
+
+.qi-cover {
+  width: 28px;
+  height: 28px;
+  background: rgba(59, 130, 246, 0.08);
+  font-size: 13px;
+}
+
+.queue-item.active .qi-cover {
+  background: rgba(59, 130, 246, 0.14);
+}
+
+.qi-title {
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+
+.qi-del {
+  opacity: 1;
+  color: var(--text-muted);
+}
+
+.qi-del:hover {
+  color: var(--accent-red);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.empty-queue {
+  color: var(--text-muted);
+}
+
+.empty-hint {
+  color: var(--text-muted);
+}
+
+.aura-right-panel {
+  border-radius: 14px;
+}
+
+.agent-header-row {
+  padding: 14px 16px;
+  border-bottom-color: rgba(0, 0, 0, 0.055);
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.status-tag.standby {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(0, 0, 0, 0.05);
+}
+
+.status-tag.ok {
+  background: rgba(16, 185, 129, 0.08);
+  color: #047857;
+  border-color: rgba(16, 185, 129, 0.18);
+}
+
+.agent-chat-messages {
+  background: rgba(248, 250, 252, 0.34);
+  gap: 14px;
+}
+
+.bash-log-box {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(0, 0, 0, 0.04);
+}
+
+.bash-code {
+  color: var(--text-secondary);
+}
+
+.meta-role {
+  color: var(--text-muted);
+}
+
+.aura-chat-row.operator .meta-role,
+.aura-chat-row.agent .meta-role {
+  color: var(--accent-blue);
+}
+
+.aura-chat-row.operator .chat-body-text {
+  color: var(--text-primary);
+}
+
+.aura-chat-row.agent .chat-body-text {
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.68);
+  border-color: rgba(0, 0, 0, 0.055);
+  border-left-color: rgba(59, 130, 246, 0.55);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+}
+
+.tracks-card-box {
+  background: rgba(255, 255, 255, 0.74);
+  border-color: rgba(0, 0, 0, 0.055);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+}
+
+.tracks-card-header {
+  border-bottom-color: rgba(0, 0, 0, 0.045);
+  background: rgba(59, 130, 246, 0.035);
+}
+
+.tracks-action-btn,
+.aura-add-btn {
+  color: var(--accent-blue);
+  border-color: rgba(59, 130, 246, 0.24);
+  background: rgba(59, 130, 246, 0.045);
+}
+
+.tracks-action-btn:hover,
+.aura-add-btn:hover {
+  background: rgba(59, 130, 246, 0.09);
+  box-shadow: 0 6px 14px rgba(59, 130, 246, 0.08);
+}
+
+.track-list-item {
+  border-bottom-color: rgba(0, 0, 0, 0.04);
+}
+
+.t-title {
+  color: var(--text-primary);
+}
+
+.t-meta {
+  color: var(--text-muted);
+}
+
+.agent-input-container {
+  border-top-color: rgba(0, 0, 0, 0.055);
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.prompt-arrow {
+  color: var(--accent-blue);
+  text-shadow: none;
+}
+
+.aura-send-btn-micro {
+  padding: 9px 16px;
+}
+
+.aura-footer-bar {
+  height: 30px;
+  border-radius: 12px;
+  margin-top: 14px;
+  color: var(--text-muted);
+}
+
+.settings-overlay {
+  background: rgba(15, 23, 42, 0.24);
+}
+
+.settings-modal {
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(0, 0, 0, 0.06);
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.18);
+}
+
+.settings-header,
+.settings-footer {
+  border-color: rgba(0, 0, 0, 0.055);
+  color: var(--text-primary);
+}
+
+.field label,
+.field .hint {
+  color: var(--text-muted);
+}
+
+.field input,
+.config-select {
+  font-family: inherit;
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+@media (max-width: 768px) {
+  .aura-body { flex-direction: column; }
+  .aura-left-panel { width: 100%; }
+  .aura-right-panel { width: 100%; }
+}
+</style>
