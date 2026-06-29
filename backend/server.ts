@@ -86,7 +86,7 @@ import { handleMusicApi } from "./modules/music";
 import { handleCollaborationApi, resumeTaskQueues, startAgentRecoveryMonitor, startTaskWatchdog, stopAgentRecoveryMonitor, stopTaskWatchdog } from "./modules/collaboration";
 import { startReliabilityDrillScheduler, stopReliabilityDrillScheduler } from "./reliability-drills";
 import { resumeSoakTest, shutdownSoakMonitor } from "./soak-test";
-import { handleGlobalAgentApi } from "./modules/global-agent";
+import { bootstrapGlobalAgentMemoryForServer, handleGlobalAgentApi, resumeGlobalAgentLoopsForServer, startGlobalMissionSupervisionForServer, stopGlobalMissionSupervisionForServer } from "./modules/global-agent";
 import { handleRagApi } from "./modules/rag";
 
 import { getSessions } from "./modules/sessions";
@@ -1345,6 +1345,10 @@ function startServer(port: number) {
   startCronScheduler(startupCollabCtx);
   startTaskWatchdog(startupCollabCtx);
   startAgentRecoveryMonitor(startupCollabCtx);
+  const globalMemoryBootstrap = bootstrapGlobalAgentMemoryForServer();
+  if (globalMemoryBootstrap.total > 0) console.log(`[全局记忆] 启动迁移/同步 ${globalMemoryBootstrap.migrated}/${globalMemoryBootstrap.total} 个历史会话`);
+  const missionSupervisor = startGlobalMissionSupervisionForServer(startupCollabCtx);
+  if (missionSupervisor.resumed > 0) console.log(`[全局任务监工] 启动恢复 ${missionSupervisor.resumed} 个异步监督任务`);
   startReliabilityDrillScheduler();
   const soakResume = resumeSoakTest();
   if (soakResume.resumed) console.log("[Soak Test] 已恢复未完成的稳定性浸泡测试");
@@ -1357,6 +1361,7 @@ function startServer(port: number) {
     stopCronScheduler();
     stopTaskWatchdog();
     stopAgentRecoveryMonitor();
+    stopGlobalMissionSupervisionForServer();
     stopReliabilityDrillScheduler();
     shutdownSoakMonitor();
   });
@@ -1366,6 +1371,9 @@ function startServer(port: number) {
     console.log(`╚══════════════════════════════════════╝\n`);
     console.log(`  地址: http://localhost:${port}`);
     console.log(`  按 Ctrl+C 停止\n`);
+    void resumeGlobalAgentLoopsForServer(startupCollabCtx, port)
+      .then(result => { if (result.total > 0) console.log(`[全局 Agent] 启动恢复 ${result.resumed}/${result.total} 个运行`); })
+      .catch(error => console.warn(`[全局 Agent] 启动恢复失败：${error?.message || error}`));
     try {
       const feishuConfig = loadFeishuConfig();
       const hasControlBotCredentials = !!((feishuConfig.control_bot_app_id || feishuConfig.app_id) && (feishuConfig.control_bot_app_secret || feishuConfig.app_secret));

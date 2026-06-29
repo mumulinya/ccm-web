@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { toast, confirmDialog } from '../utils/toast.js'
 
 const loading = ref(false)
-const overview = ref({ groups: [], projects: [], alerts: [], totals: {}, metrics: { rates: {}, counters: {}, events: [] } })
+const overview = ref({ groups: [], projects: [], globals: [], alerts: [], totals: {}, metrics: { rates: {}, counters: {}, events: [] } })
 const selectedScope = ref('')
 const selectedId = ref('')
 const detail = ref(null)
@@ -17,6 +17,7 @@ const editState = ref(null)
 const operationState = ref(null)
 
 const scopes = computed(() => [
+  ...(overview.value.globals || []).map(item => ({ ...item, scope: 'global' })),
   ...(overview.value.groups || []).map(item => ({ ...item, scope: 'group' })),
   ...(overview.value.projects || []).map(item => ({ ...item, scope: 'project' }))
 ])
@@ -57,7 +58,9 @@ const metricCards = computed(() => {
 const typeLabels = {
   persistentRequirements: '用户约束', factAnchors: '事实锚点', decisions: '架构决策',
   conclusions: '任务结论', completed: '已完成', blocked: '阻塞事项', workerLedger: 'Agent 回执',
-  openQuestions: '开放问题', nextActions: '下一步', decisionsArchive: '历史决策', conclusionsArchive: '历史结论'
+  openQuestions: '开放问题', nextActions: '下一步', decisionsArchive: '历史决策', conclusionsArchive: '历史结论',
+  user: '用户画像', feedback: '工作偏好', authorization: '授权边界', missions: '全局任务结论',
+  unresolved: '未完成事项', references: '资源索引', sessionArchives: '加密会话归档'
 }
 
 const formatNumber = value => Number(value || 0).toLocaleString('zh-CN')
@@ -161,6 +164,9 @@ const openEvidence = async item => {
   try {
     const params = new URLSearchParams()
     if (ref.groupId) params.set('group_id', ref.groupId)
+    if (selectedScope.value === 'global') params.set('scope', 'global')
+    if (ref.sessionId) params.set('session_id', ref.sessionId)
+    if (ref.missionId) params.set('mission_id', ref.missionId)
     if (ref.messageId) params.set('message_id', ref.messageId)
     if (ref.taskId) params.set('task_id', ref.taskId)
     const data = await requestJson(`/api/memory-center/evidence?${params}`)
@@ -172,7 +178,12 @@ const openEvidence = async item => {
 }
 
 const openOperation = operation => {
-  operationState.value = { operation, reason: '' }
+  operationState.value = { operation, reason: '', pattern: '' }
+}
+
+const removeBlockedPattern = async pattern => {
+  operationState.value = { operation: 'remove_block_pattern', reason: '用户删除禁记规则', pattern }
+  await runOperation()
 }
 
 const runOperation = async () => {
@@ -186,9 +197,9 @@ const runOperation = async () => {
   try {
     await requestJson('/api/memory-center/operation', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ scope: selectedScope.value, scope_id: selectedId.value, operation: state.operation, reason: state.reason })
+      body: JSON.stringify({ scope: selectedScope.value, scope_id: selectedId.value, operation: state.operation, reason: state.reason, pattern: state.pattern })
     })
-    toast.success(state.operation === 'compact' ? '手动压缩完成' : state.operation === 'rebuild' ? '记忆已从原始数据重建' : '已从备份回滚')
+    toast.success(state.operation === 'compact' ? '手动压缩完成' : state.operation === 'rebuild' ? '记忆已从原始数据重建' : state.operation === 'disable' ? '全局记忆写入已禁用' : state.operation === 'enable' ? '全局记忆写入已启用' : state.operation === 'block_pattern' ? '禁记规则已添加' : state.operation === 'remove_block_pattern' ? '禁记规则已删除' : '已从备份回滚')
     operationState.value = null
     await loadOverview(true)
   } catch (error) {
@@ -271,8 +282,8 @@ onMounted(() => loadOverview(false))
         </div>
         <div class="scope-list">
           <button v-for="item in scopes" :key="`${item.scope}:${item.id}`" class="scope-item" :class="{ active: item.scope === selectedScope && item.id === selectedId }" @click="selectScope(item)">
-            <span class="scope-mark" :class="[item.scope, item.health]">{{ item.scope === 'group' ? 'G' : 'P' }}</span>
-            <span class="scope-copy"><strong>{{ item.label }}</strong><small>{{ item.scope === 'group' ? '群聊上下文' : '项目长期记忆' }}</small></span>
+            <span class="scope-mark" :class="[item.scope, item.health]">{{ item.scope === 'global' ? 'A' : item.scope === 'group' ? 'G' : 'P' }}</span>
+            <span class="scope-copy"><strong>{{ item.label }}</strong><small>{{ item.scope === 'global' ? '全局 Agent 记忆' : item.scope === 'group' ? '群聊上下文' : '项目长期记忆' }}</small></span>
             <span v-if="item.alerts" class="alert-count">{{ item.alerts }}</span>
             <span v-else class="health-dot"></span>
           </button>
@@ -283,15 +294,22 @@ onMounted(() => loadOverview(false))
         <template v-if="detail">
           <div class="detail-header">
             <div>
-              <div class="scope-meta"><span :class="['status-pill', detail.summary.health]">{{ detail.summary.health === 'healthy' ? '健康' : detail.summary.health === 'warning' ? '需关注' : '严重' }}</span><span>{{ selectedScope === 'group' ? '群聊记忆' : '项目记忆' }}</span></div>
+              <div class="scope-meta"><span :class="['status-pill', detail.summary.health]">{{ detail.summary.health === 'healthy' ? '健康' : detail.summary.health === 'warning' ? '需关注' : '严重' }}</span><span>{{ selectedScope === 'global' ? '全局 Agent 记忆' : selectedScope === 'group' ? '群聊记忆' : '项目记忆' }}</span></div>
               <h3>{{ selectedSummary?.label || selectedId }}</h3>
-              <p>{{ selectedScope === 'group' ? (detail.memory.goal || '尚未记录整体目标') : (detail.memory.architecture || '尚未记录架构描述') }}</p>
+              <p>{{ selectedScope === 'global' ? `已加密保存 ${detail.memory.sessions?.length || 0} 个会话，${detail.memory.archives?.length || 0} 个压缩归档` : selectedScope === 'group' ? (detail.memory.goal || '尚未记录整体目标') : (detail.memory.architecture || '尚未记录架构描述') }}</p>
             </div>
             <div class="maintenance-actions">
-              <button v-if="selectedScope === 'group'" class="btn btn-sm" @click="openOperation('compact')">手动压缩</button>
+              <button v-if="selectedScope === 'group' || selectedScope === 'global'" class="btn btn-sm" @click="openOperation('compact')">手动压缩</button>
               <button class="btn btn-sm btn-outline" @click="openOperation('rebuild')">从原始数据重建</button>
+              <button v-if="selectedScope === 'global'" class="btn btn-sm btn-outline" @click="openOperation(detail.policy?.disabled ? 'enable' : 'disable')">{{ detail.policy?.disabled ? '启用记忆' : '禁用记忆' }}</button>
+              <button v-if="selectedScope === 'global'" class="btn btn-sm btn-outline" @click="openOperation('block_pattern')">添加禁记规则</button>
               <button class="btn btn-sm btn-danger" :disabled="!detail.backupExists" @click="openOperation('rollback')">备份回滚</button>
             </div>
+          </div>
+
+          <div v-if="selectedScope === 'global' && detail.policy?.blockedPatterns?.length" class="memory-policy-strip">
+            <span>禁记规则</span>
+            <button v-for="pattern in detail.policy.blockedPatterns" :key="pattern" @click="removeBlockedPattern(pattern)">{{ pattern }} ×</button>
           </div>
 
           <div v-if="detail.alerts?.length" class="alerts-block">
@@ -332,11 +350,11 @@ onMounted(() => loadOverview(false))
                   <div class="item-footer">
                     <span>{{ item.evidence?.messageId ? `消息 #${item.evidence.messageId}` : item.evidence?.taskId ? `任务 ${item.evidence.taskId}` : '结构化状态' }}</span>
                     <div class="item-actions">
-                      <button @click="controlItem(item, item.pinned ? 'unpin' : 'pin')">{{ item.pinned ? '取消固定' : '固定' }}</button>
-                      <button @click="openEdit(item, 'edit')">修改</button>
-                      <button v-if="!item.deprecated" @click="openEdit(item, 'deprecate')">废弃</button>
-                      <button v-else @click="controlItem(item, 'restore', { reason: '用户恢复原始记忆' })">恢复</button>
-                      <button :disabled="!item.evidence?.messageId && !item.evidence?.taskId" @click="openEvidence(item)">查看证据</button>
+                      <button v-if="item.type !== 'sessionArchives'" @click="controlItem(item, item.pinned ? 'unpin' : 'pin')">{{ item.pinned ? '取消固定' : '固定' }}</button>
+                      <button v-if="item.type !== 'sessionArchives'" @click="openEdit(item, 'edit')">修改</button>
+                      <button v-if="item.type !== 'sessionArchives' && !item.deprecated" @click="openEdit(item, 'delete')">删除</button>
+                      <button v-else-if="item.type !== 'sessionArchives'" @click="controlItem(item, 'restore', { reason: '用户恢复原始记忆' })">恢复</button>
+                      <button :disabled="!item.evidence?.messageId && !item.evidence?.taskId && !item.evidence?.sessionId && !item.evidence?.missionId" @click="openEvidence(item)">查看证据</button>
                     </div>
                   </div>
                 </article>
@@ -347,16 +365,16 @@ onMounted(() => loadOverview(false))
 
           <section v-else-if="activeView === 'context'" class="context-view">
             <div class="boundary-grid">
-              <article><span>压缩策略</span><strong>{{ detail.memory.messageCompression?.strategy || (selectedScope === 'project' ? 'lossless-project-archive-v2' : '尚未压缩') }}</strong></article>
-              <article><span>摘要边界</span><strong>{{ detail.memory.compactBoundary?.summarizedThroughMessageId || '无' }}</strong></article>
-              <article><span>已压缩消息</span><strong>{{ formatNumber(detail.memory.compaction?.compactedMessageCount || detail.memory.compression?.compressedConclusions) }}</strong></article>
-              <article><span>保留原文</span><strong>{{ formatNumber(detail.memory.compaction?.preservedRecentMessages || detail.memory.conclusions?.length) }}</strong></article>
-              <article><span>事实校验</span><strong>{{ detail.memory.compaction?.validation?.pass === false ? '失败' : '通过' }}</strong></article>
+              <article><span>压缩策略</span><strong>{{ selectedScope === 'global' ? 'CC-style session-memory + encrypted transcript' : detail.memory.messageCompression?.strategy || (selectedScope === 'project' ? 'lossless-project-archive-v2' : '尚未压缩') }}</strong></article>
+              <article><span>摘要边界</span><strong>{{ selectedScope === 'global' ? `${detail.memory.compaction?.boundaries?.length || 0} 个边界` : detail.memory.compactBoundary?.summarizedThroughMessageId || '无' }}</strong></article>
+              <article><span>已压缩消息</span><strong>{{ formatNumber(selectedScope === 'global' ? detail.memory.archives?.reduce((sum, item) => sum + Number(item.count || 0), 0) : detail.memory.compaction?.compactedMessageCount || detail.memory.compression?.compressedConclusions) }}</strong></article>
+              <article><span>保留原文</span><strong>{{ selectedScope === 'global' ? 'AES-256-GCM 加密转录' : formatNumber(detail.memory.compaction?.preservedRecentMessages || detail.memory.conclusions?.length) }}</strong></article>
+              <article><span>事实校验</span><strong>{{ detail.memory.integrity?.pass === false || detail.memory.compaction?.validation?.pass === false ? '失败' : '通过' }}</strong></article>
               <article><span>最近压缩</span><strong>{{ formatTime(detail.memory.compaction?.lastCompactedAt || detail.memory.compression?.lastCompactedAt) }}</strong></article>
             </div>
             <div class="summary-preview">
               <div class="preview-heading"><h4>Agent 当前接收到的核心摘要</h4><span>{{ detail.memory.compaction?.summaryChecksum || '项目结构化记忆' }}</span></div>
-              <pre>{{ JSON.stringify(detail.memory.conversationSummary || { architecture: detail.memory.architecture, techStack: detail.memory.techStack, recentConclusions: detail.memory.conclusions?.slice(-3), decisions: detail.memory.decisions?.slice(-8) }, null, 2) }}</pre>
+              <pre>{{ JSON.stringify(selectedScope === 'global' ? { sessions: detail.memory.sessions?.map(item => ({ sessionId: item.sessionId, summary: item.summary, boundary: item.boundary })), recentMissions: detail.memory.missions?.slice(-5), unresolved: detail.memory.unresolved?.slice(-8) } : detail.memory.conversationSummary || { architecture: detail.memory.architecture, techStack: detail.memory.techStack, recentConclusions: detail.memory.conclusions?.slice(-3), decisions: detail.memory.decisions?.slice(-8) }, null, 2) }}</pre>
             </div>
           </section>
 
@@ -389,19 +407,20 @@ onMounted(() => loadOverview(false))
 
     <div v-if="editState" class="mc-modal-overlay" @click.self="editState = null">
       <div class="mc-modal">
-        <div><span class="panel-kicker">MEMORY CORRECTION</span><h3>{{ editState.mode === 'edit' ? '修改这条记忆' : '废弃这条记忆' }}</h3></div>
+        <div><span class="panel-kicker">MEMORY CORRECTION</span><h3>{{ editState.mode === 'edit' ? '修改这条记忆' : '删除这条记忆' }}</h3></div>
         <label v-if="editState.mode === 'edit'">修正后的内容<textarea v-model="editState.text" rows="5"></textarea></label>
         <label>操作原因<textarea v-model="editState.reason" rows="3" placeholder="说明为什么需要纠正，便于以后审计"></textarea></label>
-        <div class="modal-actions"><button class="btn" @click="editState = null">取消</button><button class="btn" :class="editState.mode === 'deprecate' ? 'btn-danger' : 'btn-primary'" :disabled="!editState.reason.trim() || (editState.mode === 'edit' && !editState.text.trim())" @click="submitEdit">确认</button></div>
+        <div class="modal-actions"><button class="btn" @click="editState = null">取消</button><button class="btn" :class="editState.mode === 'delete' ? 'btn-danger' : 'btn-primary'" :disabled="!editState.reason.trim() || (editState.mode === 'edit' && !editState.text.trim())" @click="submitEdit">确认</button></div>
       </div>
     </div>
 
     <div v-if="operationState" class="mc-modal-overlay" @click.self="operationState = null">
       <div class="mc-modal">
-        <div><span class="panel-kicker">MEMORY MAINTENANCE</span><h3>{{ operationState.operation === 'compact' ? '手动压缩' : operationState.operation === 'rebuild' ? '从原始数据重建' : '从备份回滚' }}</h3></div>
-        <p class="modal-note">{{ operationState.operation === 'compact' ? '按照当前压缩边界收敛上下文，不删除原始消息。' : operationState.operation === 'rebuild' ? '忽略旧摘要边界，重新从原始消息或项目状态生成记忆。' : '使用最近有效备份替换主记忆，并保留回滚前快照。' }}</p>
+        <div><span class="panel-kicker">MEMORY MAINTENANCE</span><h3>{{ operationState.operation === 'compact' ? '手动压缩' : operationState.operation === 'rebuild' ? '从原始数据重建' : operationState.operation === 'disable' ? '禁用全局记忆' : operationState.operation === 'enable' ? '启用全局记忆' : operationState.operation === 'block_pattern' ? '添加禁记规则' : '从备份回滚' }}</h3></div>
+        <p class="modal-note">{{ operationState.operation === 'compact' ? '按照当前压缩边界收敛上下文，不删除加密原始转录。' : operationState.operation === 'rebuild' ? '忽略旧摘要边界，从加密原始转录重新生成全局记忆。' : operationState.operation === 'disable' ? '停止新的长期记忆写入与提取，已有记忆仍可查看和删除。' : operationState.operation === 'enable' ? '恢复长期记忆写入、压缩和按需召回。' : operationState.operation === 'block_pattern' ? '匹配此文本或正则表达式的内容不会进入长期记忆。' : '使用最近有效备份替换主记忆，并保留回滚前快照。' }}</p>
+        <label v-if="operationState.operation === 'block_pattern'">文本或正则规则<input v-model="operationState.pattern" placeholder="例如：客户手机号|内部代号" /></label>
         <label>操作原因<textarea v-model="operationState.reason" rows="3" placeholder="建议记录本次维护的原因"></textarea></label>
-        <div class="modal-actions"><button class="btn" @click="operationState = null">取消</button><button class="btn" :class="operationState.operation === 'rollback' ? 'btn-danger' : 'btn-primary'" :disabled="operationState.operation === 'rollback' && !operationState.reason.trim()" @click="runOperation">执行</button></div>
+        <div class="modal-actions"><button class="btn" @click="operationState = null">取消</button><button class="btn" :class="['rollback','disable'].includes(operationState.operation) ? 'btn-danger' : 'btn-primary'" :disabled="!operationState.reason.trim() || (operationState.operation === 'block_pattern' && !operationState.pattern.trim())" @click="runOperation">执行</button></div>
       </div>
     </div>
 
@@ -435,4 +454,6 @@ onMounted(() => loadOverview(false))
 @media(max-width:1100px){.summary-strip{grid-template-columns:repeat(3,1fr)}.memory-groups{grid-template-columns:1fr}.workspace-grid{grid-template-columns:220px minmax(0,1fr)}}
 @media(max-width:760px){.memory-center{padding:10px}.mc-header,.detail-header,.feedback-panel{flex-direction:column}.summary-strip{grid-template-columns:repeat(2,1fr)}.workspace-grid{grid-template-columns:1fr}.scope-panel{max-height:240px}.detail-panel{padding:13px}.maintenance-actions{justify-content:flex-start}.memory-toolbar{flex-direction:column}.memory-search{width:100%}.boundary-grid,.metrics-grid{grid-template-columns:repeat(2,1fr)}.audit-item{grid-template-columns:1fr}.counter-table{grid-template-columns:repeat(2,1fr)}}
 :global([data-theme='dark']) .memory-center .aura-card,:global([data-theme='dark']) .summary-card,:global([data-theme='dark']) .memory-group,:global([data-theme='dark']) .memory-item,:global([data-theme='dark']) .boundary-grid article,:global([data-theme='dark']) .metrics-grid article{background:rgba(15,23,42,.54)}:global([data-theme='dark']) .mc-modal{background:rgba(15,23,42,.94)}
+.scope-mark.global{background:linear-gradient(135deg,var(--accent-purple),var(--accent-blue))}
+.memory-policy-strip{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 0 12px;font-size:10px;color:var(--text-muted)}.memory-policy-strip button{border:1px solid rgba(239,68,68,.18);background:rgba(239,68,68,.06);color:var(--accent-red);border-radius:14px;padding:4px 8px;cursor:pointer}
 </style>

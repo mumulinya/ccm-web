@@ -1993,6 +1993,18 @@ const applyRecommendation = () => {
                     <span class="item-label">开放问答</span>
                     <span class="item-value">{{ mainAgentStatus?.open_qa_count || groupAgentQa.filter(q => ['waiting','asking','queued','needs_user','timeout','manual'].includes(q.status)).length || 0 }} 个</span>
                   </div>
+                  <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary?.lifecycle">
+                    <span class="item-label">任务阶段</span>
+                    <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.lifecycle.state }} · {{ mainAgentStatus.latest_delivery_summary.lifecycle.terminal ? '终态' : '会话保留' }}</span>
+                  </div>
+                  <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary?.session_continuity?.length">
+                    <span class="item-label">执行器 / 会话</span>
+                    <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.session_continuity.slice(0, 3).map(s => `${s.project}:${s.executor}/${s.resume_mode}#${s.turn_count}`).join('；') }}</span>
+                  </div>
+                  <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary">
+                    <span class="item-label">文件 / 验证</span>
+                    <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.actual_file_change_count || 0 }} 个文件 · {{ mainAgentStatus.latest_delivery_summary.external_runner_verification_count || 0 }} 条外部验证</span>
+                  </div>
                   <div class="main-agent-status-item warning" v-if="mainAgentStatus?.failed_gates?.length">
                     <span class="item-label">未过门禁</span>
                     <span class="item-value">{{ mainAgentStatus.failed_gates.map(g => g.label || g.id).join('、') }}</span>
@@ -2037,7 +2049,7 @@ const applyRecommendation = () => {
                   <div v-if="getTaskRuntime(msg)" class="inline-task-runtime">
                     <div class="inline-runtime-head">
                       <strong>{{ taskRuntimeStatusLabel(getTaskRuntime(msg).status) }}</strong>
-                      <span>{{ getTaskRuntime(msg).statusText || '主 Agent 正在协调任务' }}</span>
+                      <span>{{ getTaskRuntime(msg).lifecycle?.state || getTaskRuntime(msg).statusText || '主 Agent 正在协调任务' }} · {{ getTaskRuntime(msg).lifecycle?.keepsSession ? '会话保留' : '终态关闭' }}</span>
                     </div>
                     <div class="inline-runtime-counts">
                       <span>执行 {{ getTaskRuntime(msg).counts?.running || 0 }}</span>
@@ -2118,7 +2130,7 @@ const applyRecommendation = () => {
                   <div v-if="getTaskRuntime(msg)" class="inline-task-runtime compact">
                     <div class="inline-runtime-head">
                       <strong>{{ taskRuntimeStatusLabel(getTaskRuntime(msg).status) }}</strong>
-                      <span>{{ getTaskRuntime(msg).counts?.running || 0 }} 执行 · {{ getTaskRuntime(msg).counts?.reviewing || 0 }} 验收 · {{ getTaskRuntime(msg).counts?.failed || 0 }} 失败</span>
+                      <span>{{ getTaskRuntime(msg).lifecycle?.state || 'workflow' }} · {{ getTaskRuntime(msg).counts?.running || 0 }} 执行 · {{ getTaskRuntime(msg).counts?.reviewing || 0 }} 验收 · {{ getTaskRuntime(msg).counts?.failed || 0 }} 失败</span>
                     </div>
                     <div v-if="getTaskRuntime(msg).agents?.length" class="inline-runtime-agents">
                       <span v-for="agent in getTaskRuntime(msg).agents.slice(0, 6)" :key="`${agent.project}:${agent.state}`" :class="['inline-agent-state', agent.state]">

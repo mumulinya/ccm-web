@@ -101,9 +101,12 @@ function openTaskAgentSession(input) {
         && item.project === input.project
         && item.agentType === runtime);
     if (existing) {
-        if (existing.resumeMode !== "native" && (0, agent_runtime_1.getAgentRuntime)(runtime).capabilities.sessionResume && !Number(existing.nativeCaptureFailures || 0)) {
+        if (existing.resumeMode !== "native" && (0, agent_runtime_1.getAgentRuntime)(runtime).capabilities.sessionResume && Number(existing.nativeCaptureFailures || 0) < 3) {
             existing.resumeMode = "native";
             existing.nativeSessionId = "";
+            existing.nativeRecoveryAttempts = Number(existing.nativeRecoveryAttempts || 0) + 1;
+            existing.lastNativeRecoveryAt = new Date().toISOString();
+            existing.lastError = "正在重新尝试捕获原生 session ID";
             saveStore(store);
         }
         return existing;
@@ -126,6 +129,9 @@ function openTaskAgentSession(input) {
         closedAt: "",
         closeReason: "",
         nativeCaptureFailures: 0,
+        nativeRecoveryAttempts: 0,
+        nativeSessionHistory: [],
+        lastNativeRecoveryAt: "",
         lastError: "",
     };
     store.sessions.push(session);
@@ -144,19 +150,25 @@ function recordTaskAgentSessionTurn(sessionId, result = {}) {
     return next;
 }
 function advanceTaskAgentSession(current, result = {}) {
+    const errorText = String(result.error || "");
+    const invalidNativeSession = result.nativeSessionInvalid === true || /(?:session|thread).*(?:not found|invalid|expired|不存在|无效|过期)|无法恢复.*(?:session|会话)/i.test(errorText);
     const capturedNativeId = String(result.nativeSessionId || current.nativeSessionId || "").trim();
     const requiresCapturedId = current.resumeMode === "native"
         && (0, agent_runtime_1.getAgentRuntime)(current.agentType).capabilities.sessionResume
         && (0, agent_runtime_1.normalizeAgentRuntimeId)(current.agentType) !== "claudecode";
     const captureFailed = result.success !== false && requiresCapturedId && !capturedNativeId;
+    const previousIds = [...new Set([...(current.nativeSessionHistory || []), current.nativeSessionId].filter(Boolean))].slice(-10);
     const next = {
         ...current,
-        nativeSessionId: capturedNativeId,
-        resumeMode: captureFailed ? "scratchpad" : current.resumeMode,
+        nativeSessionId: invalidNativeSession ? "" : capturedNativeId,
+        resumeMode: captureFailed ? "scratchpad" : invalidNativeSession && (0, agent_runtime_1.getAgentRuntime)(current.agentType).capabilities.sessionResume ? "native" : current.resumeMode,
         nativeCaptureFailures: Number(current.nativeCaptureFailures || 0) + (captureFailed ? 1 : 0),
+        nativeRecoveryAttempts: Number(current.nativeRecoveryAttempts || 0) + (invalidNativeSession ? 1 : 0),
+        nativeSessionHistory: previousIds,
+        lastNativeRecoveryAt: invalidNativeSession ? new Date().toISOString() : current.lastNativeRecoveryAt || "",
         turnCount: Number(current.turnCount || 0) + 1,
         lastTurnSucceeded: result.success !== false,
-        lastError: result.success === false ? "Agent 执行失败" : captureFailed ? "CLI 未返回原生 session ID，已安全降级为 scratchpad 续跑" : "",
+        lastError: invalidNativeSession ? "原生会话已失效，下轮将创建恢复会话并承接工作区" : result.success === false ? (errorText || "Agent 执行失败") : captureFailed ? "CLI 未返回原生 session ID，已安全降级为 scratchpad 续跑" : "",
         lastUsedAt: new Date().toISOString(),
     };
     return next;
@@ -196,6 +208,8 @@ function getTaskAgentSessionContinuity(session) {
         degraded: session.resumeMode === "scratchpad" && (0, agent_runtime_1.getAgentRuntime)(session.agentType).capabilities.sessionResume,
         reason: session.lastError || "",
         turnCount: session.turnCount,
+        recoveryAttempts: Number(session.nativeRecoveryAttempts || 0),
+        previousNativeSessionIds: session.nativeSessionHistory || [],
     };
 }
 function listTaskAgentSessions(filter = {}) {
@@ -220,6 +234,7 @@ function runTaskAgentSessionSelfTest() {
     const options = getTaskAgentSessionOptions(claude);
     const cursorWithoutCapturedId = advanceTaskAgentSession({ ...claude, id: "cursor-test", agentType: "cursor", nativeSessionId: "", turnCount: 0 }, { success: true });
     const codexWithCapturedId = advanceTaskAgentSession({ ...claude, id: "codex-test", agentType: "codex", nativeSessionId: "", turnCount: 0 }, { success: true, nativeSessionId: "codex-thread-1" });
+    const invalidCursor = advanceTaskAgentSession({ ...claude, id: "cursor-invalid", agentType: "cursor", nativeSessionId: "cursor-thread-old", turnCount: 2 }, { success: false, error: "session not found" });
     const checks = {
         persistsNativeSession: options.persistSession,
         resumesAfterFirstTurn: options.resumeSession,
@@ -230,6 +245,7 @@ function runTaskAgentSessionSelfTest() {
         conversationalTaskClosesAfterReview: shouldCloseTaskAgentSessions({ reviewStatus: "complete" }),
         missingNativeIdCanDegradeSafely: cursorWithoutCapturedId.resumeMode === "scratchpad" && cursorWithoutCapturedId.nativeCaptureFailures === 1,
         capturedNativeIdStaysResumable: codexWithCapturedId.resumeMode === "native" && getTaskAgentSessionOptions(codexWithCapturedId).resumeSession,
+        invalidNativeSessionCreatesRecoveryPath: invalidCursor.resumeMode === "native" && invalidCursor.nativeSessionId === "" && invalidCursor.nativeSessionHistory?.includes("cursor-thread-old") && invalidCursor.nativeRecoveryAttempts === 1,
     };
     return { pass: Object.values(checks).every(Boolean), checks };
 }

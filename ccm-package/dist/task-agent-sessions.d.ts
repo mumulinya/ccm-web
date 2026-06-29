@@ -15,6 +15,9 @@ export type TaskAgentSession = {
     closedAt: string;
     closeReason: string;
     nativeCaptureFailures?: number;
+    nativeRecoveryAttempts?: number;
+    nativeSessionHistory?: string[];
+    lastNativeRecoveryAt?: string;
     lastError?: string;
 };
 export declare function openTaskAgentSession(input: {
@@ -27,10 +30,14 @@ export declare function openTaskAgentSession(input: {
 export declare function recordTaskAgentSessionTurn(sessionId: string, result?: {
     nativeSessionId?: string;
     success?: boolean;
+    error?: string;
+    nativeSessionInvalid?: boolean;
 }): TaskAgentSession;
 export declare function advanceTaskAgentSession(current: TaskAgentSession, result?: {
     nativeSessionId?: string;
     success?: boolean;
+    error?: string;
+    nativeSessionInvalid?: boolean;
 }): TaskAgentSession;
 export declare function closeTaskAgentSessions(input: {
     scopeId?: string;
@@ -48,6 +55,8 @@ export declare function getTaskAgentSessionContinuity(session: TaskAgentSession)
     degraded: boolean;
     reason: string;
     turnCount: number;
+    recoveryAttempts: number;
+    previousNativeSessionIds: string[];
 };
 export declare function listTaskAgentSessions(filter?: {
     scopeId?: string;
@@ -73,5 +82,6 @@ export declare function runTaskAgentSessionSelfTest(): {
         conversationalTaskClosesAfterReview: boolean;
         missingNativeIdCanDegradeSafely: boolean;
         capturedNativeIdStaysResumable: boolean;
+        invalidNativeSessionCreatesRecoveryPath: boolean;
     };
 };

@@ -161,7 +161,42 @@ const executingAction = ref(null)
 const chatBody = ref(null)
 const chatContentInner = ref(null)
 const isPinnedToBottom = ref(true)
+const qualitySnapshot = ref(null)
+const qualityLoading = ref(false)
+const qualityExpanded = ref(false)
 let globalAgentResizeObserver = null
+
+const loadQualitySnapshot = async () => {
+  qualityLoading.value = true
+  try {
+    const res = await fetch('/api/global-agent/quality')
+    const data = await res.json()
+    if (data.success) qualitySnapshot.value = data.quality
+  } catch {} finally {
+    qualityLoading.value = false
+  }
+}
+
+const toggleShadowMode = async () => {
+  if (!qualitySnapshot.value) return
+  qualityLoading.value = true
+  try {
+    const next = !qualitySnapshot.value.policy?.shadowMode
+    const res = await fetch('/api/global-agent/quality', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shadowMode: next, reason: next ? '用户在评测中心启用影子模式' : '用户在评测中心关闭影子模式' })
+    })
+    const data = await res.json()
+    if (!data.success) throw new Error(data.error || '更新失败')
+    qualitySnapshot.value = data.quality
+    toast.success(next ? '影子模式已启用：写工具只记录不执行' : '影子模式已关闭')
+  } catch (error) {
+    toast.error(error.message || '影子模式更新失败')
+  } finally {
+    qualityLoading.value = false
+  }
+}
 
 // 附件上传与预览管理
 const selectedFiles = ref([])
@@ -417,6 +452,17 @@ const stopMissionTracking = (missionId) => {
   missionPollTimers.delete(missionId)
 }
 
+const formatMissionDeliveryReport = (report, fallback) => {
+  if (!report) return fallback
+  const section = (label, values, empty) => `\n\n${label}：${values?.length ? `\n- ${values.join('\n- ')}` : empty}`
+  return (report.summary || fallback)
+    + section('修改文件', report.files_modified, '无')
+    + section('验证结果', report.verification_results, '无已执行验证证据')
+    + section('合并结果', report.merge_commits, '无需独立 worktree 合并')
+    + section('风险', report.risks, '未发现已知风险')
+    + section('遗留项', report.remaining_items, '无')
+}
+
 const trackGlobalMission = (missionId, sessionId) => {
   if (!missionId || missionPollTimers.has(missionId)) return
   const refresh = async () => {
@@ -426,16 +472,31 @@ const trackGlobalMission = (missionId, sessionId) => {
       if (!res.ok || data.success === false) return
       const session = sessions.value.find(item => item.id === sessionId)
       if (!session) return
-      const message = session.messages.find(item => item.type === 'global_mission' && item.globalMission?.id === missionId)
+      const message = session.messages.find(item =>
+        (item.type === 'global_mission' && item.globalMission?.id === missionId) || item.agenticRun?.mission_id === missionId
+      )
       if (!message) return
       message.globalMission = data.mission
       message.globalMissionChildren = (data.children || []).map(task => ({ task, target: task.mission_target || null }))
+      message.globalMissionSupervisor = data.supervisor || message.globalMissionSupervisor
+      if (message.agenticRun?.id) {
+        try {
+          const runRes = await fetch('/api/global-agent/runs?id=' + encodeURIComponent(message.agenticRun.id))
+          const runData = await runRes.json()
+          if (runRes.ok && runData.run) {
+            message.agenticRun = runData.run
+            if (runData.run.status === 'completed' && runData.run.final_reply) message.content = runData.run.final_reply
+          }
+        } catch {}
+      }
       if (data.mission?.status === 'done' && !message.finalNotified) {
+        if (message.agenticRun?.id && message.agenticRun.status !== 'completed') return
+        if (data.supervisor && data.supervisor.status !== 'completed') return
         message.finalNotified = true
         session.messages.push({
           role: 'assistant',
           type: 'global_mission_complete',
-          content: '全局任务已通过全部交付门禁：' + (data.mission.title || missionId),
+          content: message.agenticRun?.final_reply || formatMissionDeliveryReport(data.supervisor?.final_report, '全局任务已通过全部交付门禁：' + (data.mission.title || missionId)),
           globalMission: data.mission,
           globalMissionChildren: (data.children || []).map(task => ({ task, target: task.mission_target || null })),
           timestamp: new Date().toISOString()
@@ -533,26 +594,28 @@ const sendMessage = async () => {
       files: []
     }
     let agentMsgAdded = false
-    let pendingAction = null
+    const requestId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     
     let res
     if (attachedFiles.length > 0) {
       const formData = new FormData()
       formData.append('message', userText)
       formData.append('history', JSON.stringify(historyPayload))
+      formData.append('session_id', currentSessionId.value)
+      formData.append('request_id', requestId)
       formData.append('stream', 'true')
       attachedFiles.forEach((f, idx) => {
         formData.append(`file_${idx}`, f.file)
       })
-      res = await fetch('/api/global-agent/chat?stream=true', {
+      res = await fetch('/api/global-agent/run?stream=true', {
         method: 'POST',
         body: formData
       })
     } else {
-      res = await fetch('/api/global-agent/chat', {
+      res = await fetch('/api/global-agent/run?stream=true', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-        body: JSON.stringify({ message: userText, history: historyPayload, stream: true })
+        body: JSON.stringify({ message: userText, history: historyPayload, session_id: currentSessionId.value, request_id: requestId, stream: true })
       })
     }
 
@@ -581,9 +644,22 @@ const sendMessage = async () => {
           }
           agentMsg.content += data.text
           scrollToBottom()
-        } else if (data.type === 'action') {
-          pendingAction = data.action
+        } else if (data.type === 'result') {
+          if (!agentMsgAdded) {
+            currentSession.value.messages.push(agentMsg)
+            agentMsgAdded = true
+          }
+          const run = data.run || {}
+          const confirmationHint = run.status === 'waiting_confirmation'
+            ? `\n\n⚠️ 等待确认：${run.pending_tool?.name || '写入操作'}。请使用下方按钮决定是否继续。`
+            : ''
+          agentMsg.content = (run.final_reply || '已处理。') + confirmationHint
           agentMsg.files = data.files || []
+          agentMsg.agenticRun = run
+          if (run.status === 'supervising' && run.mission_id) trackGlobalMission(run.mission_id, currentSessionId.value)
+          for (const effect of (run.client_effects || [])) {
+            if (effect?.type === 'navigate' && effect.params?.tab) emit('switch-tab', effect.params.tab)
+          }
         } else if (data.type === 'error') {
           if (!agentMsgAdded) {
             currentSession.value.messages.push(agentMsg)
@@ -610,9 +686,6 @@ const sendMessage = async () => {
 
     saveHistory()
 
-    if (pendingAction) {
-      await executeAction(pendingAction, agentMsg.files || [])
-    }
   } catch (err) {
     currentSession.value.messages.push({
       role: 'assistant',
@@ -641,27 +714,28 @@ const processBridgeRequest = async (request) => {
   isSending.value = true
   try {
     const historyPayload = currentSession.value.messages.slice(0, -1).map(m => ({ role: m.role, content: m.content }))
-    const res = await fetch('/api/global-agent/chat', {
+    const res = await fetch('/api/global-agent/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: userText, history: historyPayload })
+      body: JSON.stringify({ message: userText, history: historyPayload, session_id: request.session_id || currentSessionId.value, request_id: request.id })
     })
     const data = await res.json()
     if (data.error) throw new Error(data.error)
+    const run = data.run || {}
     currentSession.value.messages.push({
       role: 'assistant',
-      content: data.reply,
+      content: run.final_reply || '已处理。',
       timestamp: new Date().toISOString(),
       files: data.files || [],
-      source: 'feishu-control-bot'
+      source: 'feishu-control-bot',
+      agenticRun: run
     })
     saveHistory()
-    if (data.action) await executeAction(data.action, data.files || [])
     const assistantReplies = currentSession.value.messages.slice(startIndex).filter(m => m.role === 'assistant').map(m => m.content).filter(Boolean)
     await postJson('/api/global-agent/bridge/result', {
       id: request.id,
       success: true,
-      reply: assistantReplies.join('\n\n') || data.reply || '已完成'
+      reply: assistantReplies.join('\n\n') || run.final_reply || '已完成'
     })
   } catch (err) {
     const message = err?.message || '全局 Agent 控制台处理飞书消息失败'
@@ -704,6 +778,34 @@ const postJson = (url, body = {}) => requestJson(url, {
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(body)
 })
+
+const controlAgenticRun = async (msg, operation, approved = true) => {
+  const runId = msg?.agenticRun?.id
+  if (!runId || msg.agenticRunLoading) return
+  msg.agenticRunLoading = true
+  try {
+    const endpoint = operation === 'confirm'
+      ? '/api/global-agent/runs/confirm'
+      : `/api/global-agent/runs/${operation}`
+    const data = await postJson(endpoint, { id: runId, approved })
+    const run = data.run || {}
+    msg.agenticRun = run
+    msg.content = run.final_reply || (run.status === 'paused' ? '全局 Agent 运行已暂停。' : '全局 Agent 运行状态已更新。')
+    if (run.status === 'waiting_confirmation') {
+      msg.content += `\n\n⚠️ 等待确认：${run.pending_tool?.name || '写入操作'}。请使用下方按钮决定是否继续。`
+    }
+    for (const effect of (run.client_effects || [])) {
+      if (effect?.type === 'navigate' && effect.params?.tab) emit('switch-tab', effect.params.tab)
+    }
+    saveHistory()
+    toast.success(operation === 'confirm' ? (approved ? '已确认，Agent 继续执行' : '已取消操作') : '运行状态已更新')
+  } catch (error) {
+    toast.error(error?.message || '全局 Agent 运行控制失败')
+  } finally {
+    msg.agenticRunLoading = false
+    scrollToBottom()
+  }
+}
 
 const recordManagementAudit = async (action, status, result = {}) => {
   try {
@@ -943,7 +1045,8 @@ const executeAction = async (action, actionFiles = []) => {
         {
           type: 'global_mission',
           globalMission: missionData.mission,
-          globalMissionChildren: childRows
+          globalMissionChildren: childRows,
+          globalMissionSupervisor: missionData.supervisor || null
         }
       )
       toast.success('全局任务已派发给 ' + childRows.length + ' 个执行目标')
@@ -1214,11 +1317,15 @@ const executeAction = async (action, actionFiles = []) => {
 
 onMounted(() => {
   loadHistory()
+  loadQualitySnapshot()
   saveHistory()
   for (const session of sessions.value) {
     for (const message of session.messages || []) {
       if (message.type === 'global_mission' && message.globalMission?.id && message.globalMission?.status !== 'done') {
         trackGlobalMission(message.globalMission.id, session.id)
+      }
+      if (message.agenticRun?.mission_id && !['completed', 'failed', 'cancelled'].includes(message.agenticRun.status)) {
+        trackGlobalMission(message.agenticRun.mission_id, session.id)
       }
     }
   }
@@ -1390,7 +1497,27 @@ const handleGitCommitCardSubmit = async (msg) => {
             <span class="message-count" v-if="messages.length > 1">(已保存 {{ messages.length - 1 }} 条对话)</span>
           </p>
         </div>
+        <div class="quality-header-actions">
+          <span :class="['quality-mode', qualitySnapshot?.policy?.shadowMode ? 'shadow' : 'live']">{{ qualitySnapshot?.policy?.shadowMode ? '影子模式' : '真实执行' }}</span>
+          <button class="btn btn-outline" :disabled="qualityLoading" @click="qualityExpanded = !qualityExpanded; qualityExpanded && loadQualitySnapshot()">决策评测</button>
+        </div>
       </div>
+      <section v-if="qualityExpanded && qualitySnapshot" class="quality-center-card">
+        <div class="quality-center-head">
+          <div><span>AGENT QUALITY CENTER</span><strong>决策与真实交付质量</strong></div>
+          <button class="btn btn-outline" :disabled="qualityLoading" @click="toggleShadowMode">{{ qualitySnapshot.policy?.shadowMode ? '关闭影子模式' : '启用影子模式' }}</button>
+        </div>
+        <div class="quality-metrics">
+          <div><span>误派发率</span><strong>{{ qualitySnapshot.rates?.misdispatch_rate || 0 }}%</strong></div>
+          <div><span>漏执行率</span><strong>{{ qualitySnapshot.rates?.missed_execution_rate || 0 }}%</strong></div>
+          <div><span>未授权写入</span><strong>{{ qualitySnapshot.rates?.unauthorized_write_rate || 0 }}%</strong></div>
+          <div><span>虚假完成</span><strong>{{ qualitySnapshot.rates?.false_completion_rate || 0 }}%</strong></div>
+          <div><span>原生会话恢复</span><strong>{{ qualitySnapshot.rates?.native_session_recovery_rate || 0 }}%</strong></div>
+          <div><span>冲突处理</span><strong>{{ qualitySnapshot.rates?.conflict_handling_rate || 0 }}%</strong></div>
+          <div><span>一次交付</span><strong>{{ qualitySnapshot.rates?.first_pass_delivery_rate || 0 }}%</strong></div>
+        </div>
+        <p>写操作置信度门槛 {{ qualitySnapshot.policy?.minWriteConfidence }}；目标必须来自当前消息、模型的当前上下文引用或读取结果。影子模式下所有写工具只记录拟调用，不产生副作用。</p>
+      </section>
       
       <div class="chat-body" ref="chatBody" @scroll="updateScrollState">
         <div ref="chatContentInner" style="display: flex; flex-direction: column; gap: 24px; width: 100%;">
@@ -1441,6 +1568,7 @@ const handleGitCommitCardSubmit = async (msg) => {
                       <span>目标 {{ msg.globalMission?.mission_summary?.total || msg.globalMissionChildren?.length || 0 }}</span>
                       <span>通过 {{ msg.globalMission?.mission_summary?.passed || 0 }}</span>
                       <span v-if="msg.globalMission?.mission_summary?.blocked">阻塞 {{ msg.globalMission.mission_summary.blocked }}</span>
+                      <span v-if="msg.globalMissionSupervisor">监工 {{ msg.globalMissionSupervisor.status }} · 第 {{ msg.globalMissionSupervisor.cycle_count || 0 }} 轮</span>
                     </div>
                   </div>
                   <div class="global-mission-targets">
@@ -1528,6 +1656,45 @@ const handleGitCommitCardSubmit = async (msg) => {
                         🚀 确认提交
                       </button>
                     </div>
+                  </div>
+                </div>
+
+                <div v-else-if="msg.agenticRun" class="agentic-run-card" :class="'run-' + msg.agenticRun.status">
+                  <div class="agentic-run-head">
+                    <div>
+                      <span>Agentic Loop</span>
+                      <strong>{{ msg.agenticRun.phase || msg.agenticRun.status }}</strong>
+                    </div>
+                    <code>{{ msg.agenticRun.id }}</code>
+                  </div>
+                  <div class="bubble-content">{{ msg.content }}</div>
+                  <div class="agentic-run-metrics">
+                    <span>状态 {{ msg.agenticRun.status }}</span>
+                    <span v-if="msg.agenticRun.supervision_state">监工 {{ msg.agenticRun.supervision_state }}</span>
+                    <span v-if="msg.agenticRun.mission_id">任务 {{ msg.agenticRun.mission_id }}</span>
+                    <span>步骤 {{ msg.agenticRun.steps?.length || 0 }}/{{ msg.agenticRun.max_steps || 0 }}</span>
+                    <span>模型 {{ msg.agenticRun.model_calls || 0 }}</span>
+                    <span>工具 {{ msg.agenticRun.tool_calls || 0 }}</span>
+                  </div>
+                  <div v-if="msg.agenticRun.decision_summary?.intent" class="agentic-decision-summary">
+                    <span>意图 {{ msg.agenticRun.decision_summary.intent.category }}</span>
+                    <span>置信度 {{ Math.round((msg.agenticRun.decision_summary.intent.confidence || 0) * 100) }}%</span>
+                    <span>授权 {{ msg.agenticRun.decision_summary.authorizationBasis || 'none' }}</span>
+                    <p>{{ msg.agenticRun.decision_summary.intent.reason }}</p>
+                  </div>
+                  <div v-if="msg.agenticRun.status === 'waiting_confirmation'" class="agentic-run-actions">
+                    <button class="btn btn-outline" :disabled="msg.agenticRunLoading" @click="controlAgenticRun(msg, 'confirm', false)">取消</button>
+                    <button class="btn btn-primary" :disabled="msg.agenticRunLoading" @click="controlAgenticRun(msg, 'confirm', true)">确认并继续</button>
+                  </div>
+                  <div v-else-if="msg.agenticRun.status === 'waiting_clarification'" class="agentic-clarification">{{ msg.agenticRun.clarification_question || msg.content }}</div>
+                  <div v-else-if="msg.agenticRun.status === 'supervising'" class="agentic-run-actions">
+                    <button v-if="['waiting_user', 'manual_takeover'].includes(msg.agenticRun.supervision_state)" class="btn btn-primary" :disabled="msg.agenticRunLoading" @click="controlAgenticRun(msg, 'resume')">恢复自动监工</button>
+                    <button class="btn btn-outline" :disabled="msg.agenticRunLoading" @click="controlAgenticRun(msg, 'pause')">暂停监工</button>
+                    <button class="btn btn-outline" :disabled="msg.agenticRunLoading" @click="controlAgenticRun(msg, 'cancel')">取消任务</button>
+                  </div>
+                  <div v-else-if="msg.agenticRun.status === 'paused'" class="agentic-run-actions">
+                    <button class="btn btn-primary" :disabled="msg.agenticRunLoading" @click="controlAgenticRun(msg, 'resume')">继续运行</button>
+                    <button class="btn btn-outline" :disabled="msg.agenticRunLoading" @click="controlAgenticRun(msg, 'cancel')">取消运行</button>
                   </div>
                 </div>
 
@@ -2909,6 +3076,35 @@ const handleGitCommitCardSubmit = async (msg) => {
 @keyframes scaleUp {
   to { transform: scale(1); }
 }
+.quality-header-actions{margin-left:auto;display:flex;align-items:center;gap:8px}.quality-mode{font-size:11px;padding:4px 8px;border-radius:999px;background:rgba(34,197,94,.12);color:#22c55e}.quality-mode.shadow{background:rgba(245,158,11,.14);color:#f59e0b}.quality-center-card{margin:10px 18px 0;padding:14px;border:1px solid var(--border-color);border-radius:12px;background:var(--surface);position:relative;z-index:2}.quality-center-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.quality-center-head>div{display:flex;flex-direction:column;gap:3px}.quality-center-head span{font-size:9px;letter-spacing:.12em;color:var(--text-muted)}.quality-center-head strong{font-size:15px}.quality-metrics{display:grid;grid-template-columns:repeat(7,minmax(90px,1fr));gap:7px;margin-top:11px}.quality-metrics>div{padding:9px;border-radius:8px;background:var(--bg-primary);display:flex;flex-direction:column;gap:4px}.quality-metrics span{font-size:9px;color:var(--text-muted)}.quality-metrics strong{font-size:16px}.quality-center-card>p{margin:10px 0 0;font-size:10px;color:var(--text-muted)}
+
+.agentic-run-card {
+  width: 100%;
+  padding: 16px;
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.45);
+}
+.agentic-run-card.run-waiting_confirmation { border-color: rgba(245, 158, 11, 0.55); }
+.agentic-run-card.run-supervising { border-color: rgba(59, 130, 246, 0.58); box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.08) inset; }
+.agentic-run-card.run-failed { border-color: rgba(239, 68, 68, 0.55); }
+.agentic-run-card.run-completed { border-color: rgba(34, 197, 94, 0.42); }
+.agentic-run-head,
+.agentic-run-actions,
+.agentic-run-metrics {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.agentic-run-head { justify-content: space-between; margin-bottom: 12px; }
+.agentic-run-head > div { display: flex; flex-direction: column; gap: 3px; }
+.agentic-run-head span { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.agentic-run-head code { color: var(--text-muted); font-size: 11px; }
+.agentic-run-metrics { flex-wrap: wrap; margin-top: 12px; color: var(--text-muted); font-size: 12px; }
+.agentic-run-metrics span { padding: 4px 7px; border-radius: 5px; background: rgba(255,255,255,.05); }
+.agentic-decision-summary{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding:9px;border-radius:7px;background:rgba(59,130,246,.07)}.agentic-decision-summary span{font-size:10px;color:var(--text-muted)}.agentic-decision-summary p{width:100%;margin:2px 0 0;font-size:11px;color:var(--text-secondary)}.agentic-clarification{margin-top:10px;padding:10px;border-radius:7px;background:rgba(245,158,11,.1);color:#f59e0b;font-size:12px;line-height:1.5}
+@media (max-width:1100px){.quality-metrics{grid-template-columns:repeat(4,minmax(90px,1fr))}}
+.agentic-run-actions { justify-content: flex-end; margin-top: 14px; }
 
 .skeleton-line {
   background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);

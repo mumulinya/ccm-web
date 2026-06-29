@@ -1,4 +1,9 @@
 export declare function loadGroups(): any[];
+export declare function deriveTaskLifecycle(task: any, executions?: any[]): {
+    state: string;
+    terminal: boolean;
+    keepsSession: boolean;
+};
 export declare function runGroupMemoryStorageRecoverySelfTest(): {
     pass: boolean;
     checks: {
@@ -433,6 +438,35 @@ export declare function getGlobalDevelopmentMission(id: string): {
     mission: any;
     children: any[];
 };
+export declare function superviseGlobalDevelopmentMissionCycle(id: string, ctx: CollabCtx, options?: any): {
+    success: boolean;
+    error: string;
+    terminal: boolean;
+    mission?: undefined;
+    children?: undefined;
+    waiting_user?: undefined;
+    actions?: undefined;
+} | {
+    success: boolean;
+    mission: any;
+    children: any[];
+    terminal: boolean;
+    waiting_user: any[];
+    actions: any[];
+    error?: undefined;
+};
+export declare function controlGlobalDevelopmentMission(id: string, operation: string, ctx: CollabCtx, payload?: any): Promise<{
+    success: boolean;
+    status: number;
+    error: string;
+} | {
+    mission: any;
+    children: any[];
+    success: boolean;
+    operation: string;
+    status?: undefined;
+    error?: undefined;
+}>;
 export declare function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx): {
     success: boolean;
     duplicate: boolean;

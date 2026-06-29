@@ -1336,6 +1336,12 @@ function startServer(port) {
     (0, cron_1.startCronScheduler)(startupCollabCtx);
     (0, collaboration_1.startTaskWatchdog)(startupCollabCtx);
     (0, collaboration_1.startAgentRecoveryMonitor)(startupCollabCtx);
+    const globalMemoryBootstrap = (0, global_agent_1.bootstrapGlobalAgentMemoryForServer)();
+    if (globalMemoryBootstrap.total > 0)
+        console.log(`[全局记忆] 启动迁移/同步 ${globalMemoryBootstrap.migrated}/${globalMemoryBootstrap.total} 个历史会话`);
+    const missionSupervisor = (0, global_agent_1.startGlobalMissionSupervisionForServer)(startupCollabCtx);
+    if (missionSupervisor.resumed > 0)
+        console.log(`[全局任务监工] 启动恢复 ${missionSupervisor.resumed} 个异步监督任务`);
     (0, reliability_drills_1.startReliabilityDrillScheduler)();
     const soakResume = (0, soak_test_1.resumeSoakTest)();
     if (soakResume.resumed)
@@ -1349,6 +1355,7 @@ function startServer(port) {
         (0, cron_1.stopCronScheduler)();
         (0, collaboration_1.stopTaskWatchdog)();
         (0, collaboration_1.stopAgentRecoveryMonitor)();
+        (0, global_agent_1.stopGlobalMissionSupervisionForServer)();
         (0, reliability_drills_1.stopReliabilityDrillScheduler)();
         (0, soak_test_1.shutdownSoakMonitor)();
     });
@@ -1358,6 +1365,10 @@ function startServer(port) {
         console.log(`╚══════════════════════════════════════╝\n`);
         console.log(`  地址: http://localhost:${port}`);
         console.log(`  按 Ctrl+C 停止\n`);
+        void (0, global_agent_1.resumeGlobalAgentLoopsForServer)(startupCollabCtx, port)
+            .then(result => { if (result.total > 0)
+            console.log(`[全局 Agent] 启动恢复 ${result.resumed}/${result.total} 个运行`); })
+            .catch(error => console.warn(`[全局 Agent] 启动恢复失败：${error?.message || error}`));
         try {
             const feishuConfig = (0, db_1.loadFeishuConfig)();
             const hasControlBotCredentials = !!((feishuConfig.control_bot_app_id || feishuConfig.app_id) && (feishuConfig.control_bot_app_secret || feishuConfig.app_secret));

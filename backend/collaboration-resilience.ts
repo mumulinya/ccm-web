@@ -1,0 +1,216 @@
+import * as crypto from "crypto";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { spawnSync } from "child_process";
+import { classifyExecutionFailure } from "./execution-kernel";
+import { normalizeAgentRuntimeId, type AgentRuntimeId } from "./agent-runtime";
+import { prepareChildAgentWorkDir } from "./agent-worktree";
+
+const RUNTIME_COMMANDS: Record<string, string[]> = {
+  claudecode: ["claude"],
+  codex: ["codex"],
+  cursor: ["cursor-agent", "agent"],
+  gemini: ["gemini"],
+  qoder: ["qodercli"],
+};
+
+const DEFAULT_FALLBACK_ORDER: Record<string, AgentRuntimeId[]> = {
+  claudecode: ["codex", "cursor"],
+  codex: ["claudecode", "cursor"],
+  cursor: ["codex", "claudecode"],
+  gemini: ["codex", "claudecode", "cursor"],
+  qoder: ["codex", "claudecode", "cursor"],
+};
+
+function unique<T>(items: T[]) { return Array.from(new Set(items)); }
+
+export function isRuntimeCommandAvailable(agentType: string) {
+  const runtime = normalizeAgentRuntimeId(agentType);
+  const commands = RUNTIME_COMMANDS[runtime] || [];
+  return commands.some(command => {
+    const probe = process.platform === "win32"
+      ? spawnSync("where.exe", [command], { windowsHide: true, stdio: "ignore" })
+      : spawnSync("sh", ["-lc", `command -v ${command}`], { stdio: "ignore" });
+    return probe.status === 0;
+  });
+}
+
+export function buildRuntimeRecoveryCandidates(primary: string, configured: any = [], availability: (runtime: string) => boolean = isRuntimeCommandAvailable) {
+  const normalizedPrimary = normalizeAgentRuntimeId(primary);
+  const explicit = (Array.isArray(configured) ? configured : String(configured || "").split(/[;,\s]+/))
+    .map(item => normalizeAgentRuntimeId(String(item || "")))
+    .filter(item => item !== normalizedPrimary);
+  const ordered = unique([normalizedPrimary, ...explicit, ...(DEFAULT_FALLBACK_ORDER[normalizedPrimary] || [])]);
+  return ordered.filter((runtime, index) => index === 0 || availability(runtime));
+}
+
+export function shouldSwitchRuntime(error: any) {
+  const failure = classifyExecutionFailure(error);
+  const runtimeFailureSignal = /Agent Runner|Agent 错误|Agent 进程退出|spawn|exitCode|command not found|not recognized|ENOENT|ECONNREFUSED|429|provider|网关|响应超时/i.test(failure.message);
+  return {
+    ...failure,
+    switchRuntime: (failure.recoverable || (failure.failureClass === "unknown" && runtimeFailureSignal))
+      && ["timeout", "provider", "gateway_routing", "infra", "tool_runtime", "mcp_startup", "mcp_handshake", "plugin_startup", "unknown"].includes(failure.failureClass),
+  };
+}
+
+export function buildRuntimeRecoveryPrompt(input: { originalPrompt: string; previousOutput?: string; previousReceipt?: any; failure?: any; fromRuntime: string; toRuntime: string; attempt: number }) {
+  const failure = shouldSwitchRuntime(input.failure || input.previousOutput || "运行时失败");
+  const receipt = input.previousReceipt ? JSON.stringify(input.previousReceipt, null, 2).slice(0, 5000) : "无可用结构化回执";
+  return [
+    `[CCM 执行器恢复｜第 ${input.attempt} 次尝试]`,
+    `上一执行器：${input.fromRuntime}`,
+    `当前执行器：${input.toRuntime}`,
+    `失败分类：${failure.failureClass}`,
+    `失败原因：${failure.message.slice(0, 1200)}`,
+    "",
+    "恢复规则：",
+    "- 这是同一任务的续跑，不是新任务；先核对工作区已有修改和上一轮回执，禁止从零重复实现。",
+    "- 已存在且正确的文件修改必须保留；只补齐失败点、缺口和验证。",
+    "- 最后重新提交完整 CCM_AGENT_RECEIPT，并注明本轮使用了执行器切换恢复。",
+    "",
+    "上一轮结构化回执：",
+    receipt,
+    input.previousOutput ? `\n上一轮输出摘要：\n${String(input.previousOutput).slice(-5000)}` : "",
+    "",
+    "原始任务：",
+    input.originalPrompt,
+  ].filter(Boolean).join("\n");
+}
+
+function normalizeScope(value: any) {
+  return String(value || "").trim().replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/\*\*?$/g, "").replace(/\*+$/g, "").replace(/\/$/, "");
+}
+
+export function inferTaskPathScopes(task: string) {
+  const scopes = new Set<string>();
+  const text = String(task || "");
+  const pattern = /(?:^|[\s`'"（(])((?:src|app|apps|backend|frontend|server|client|packages|modules|components|pages|api|lib|test|tests)[\\/][a-zA-Z0-9._@+\-/\\*]+)/g;
+  for (const match of text.matchAll(pattern)) {
+    const value = normalizeScope(match[1].replace(/[),，。；;：:]+$/g, ""));
+    if (value) scopes.add(value);
+  }
+  return Array.from(scopes).slice(0, 30);
+}
+
+function getRepoKey(workDir: string) {
+  const resolved = path.resolve(String(workDir || process.cwd()));
+  const result = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: resolved, encoding: "utf-8", windowsHide: true });
+  return path.resolve(result.status === 0 ? String(result.stdout || "").trim() : resolved).toLowerCase();
+}
+
+function scopesOverlap(left: string[], right: string[]) {
+  if (!left.length || !right.length) return true;
+  return left.some(a => right.some(b => !a || !b || a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)));
+}
+
+export type ConflictLaneInput = { key: string; project: string; task: string; workDir: string; writablePaths?: string[] };
+
+export function buildCollaborationConflictPlan(inputs: ConflictLaneInput[], requestedOrder = "parallel") {
+  const lanes = inputs.map((input, index) => ({
+    ...input,
+    index,
+    repoKey: getRepoKey(input.workDir),
+    scopes: unique([...(input.writablePaths || []).map(normalizeScope).filter(Boolean), ...inferTaskPathScopes(input.task)]),
+  }));
+  const parent = lanes.map((_, index) => index);
+  const find = (index: number): number => parent[index] === index ? index : (parent[index] = find(parent[index]));
+  const join = (a: number, b: number) => { const pa = find(a); const pb = find(b); if (pa !== pb) parent[pb] = pa; };
+  const conflicts: any[] = [];
+  for (let i = 0; i < lanes.length; i++) {
+    for (let j = i + 1; j < lanes.length; j++) {
+      const left = lanes[i];
+      const right = lanes[j];
+      if (left.repoKey !== right.repoKey) continue;
+      const overlap = left.project === right.project || scopesOverlap(left.scopes, right.scopes);
+      if (!overlap) continue;
+      join(i, j);
+      conflicts.push({
+        projects: [left.project, right.project],
+        reason: left.project === right.project ? "同一项目收到多个并发工作单" : "多个 Agent 指向同一仓库且修改范围可能重叠",
+        scopes: unique([...left.scopes, ...right.scopes]),
+        repoKey: left.repoKey,
+      });
+    }
+  }
+  const clusterIds = new Map<number, string>();
+  const plannedLanes = lanes.map((lane, index) => {
+    const root = find(index);
+    const members = lanes.filter((_, itemIndex) => find(itemIndex) === root);
+    if (members.length < 2) return { ...lane, conflictWorkspaceKey: "", conflictGroup: "", mergeOwner: true };
+    if (!clusterIds.has(root)) clusterIds.set(root, `conflict-${crypto.createHash("sha1").update(`${lane.repoKey}:${root}`).digest("hex").slice(0, 10)}`);
+    const conflictGroup = clusterIds.get(root)!;
+    return { ...lane, conflictWorkspaceKey: conflictGroup, conflictGroup, mergeOwner: members[0].index === index };
+  });
+  return {
+    requestedOrder,
+    effectiveOrder: conflicts.length && requestedOrder === "parallel" ? "sequential" : requestedOrder,
+    conflicts,
+    lanes: plannedLanes,
+    protected: conflicts.length > 0,
+  };
+}
+
+export function runCollaborationResilienceSelfTest() {
+  const candidates = buildRuntimeRecoveryCandidates("cursor", ["codex"], runtime => ["codex", "claudecode"].includes(runtime));
+  const conflict = buildCollaborationConflictPlan([
+    { key: "a", project: "frontend-a", task: "修改 src/payment/index.ts", workDir: process.cwd(), writablePaths: ["src/payment"] },
+    { key: "b", project: "frontend-b", task: "调整 src/payment/form.ts", workDir: process.cwd(), writablePaths: ["src/payment"] },
+  ], "parallel");
+  const separate = buildCollaborationConflictPlan([
+    { key: "a", project: "a", task: "修改 src/a.ts", workDir: path.join(process.cwd(), "a") },
+    { key: "b", project: "b", task: "修改 src/b.ts", workDir: path.join(process.cwd(), "b") },
+  ], "parallel");
+  const checks = {
+    keepsPrimaryRuntimeFirst: candidates[0] === "cursor",
+    usesConfiguredFallbackNext: candidates[1] === "codex",
+    classifiesProviderFailureForSwitch: shouldSwitchRuntime("provider API 429 unavailable").switchRuntime,
+    nonzeroExitSwitchesWithoutReadableStderr: shouldSwitchRuntime("Agent 进程退出：������").switchRuntime,
+    serializesOverlappingRepoLanes: conflict.protected && conflict.effectiveOrder === "sequential" && conflict.lanes.every(item => !!item.conflictWorkspaceKey),
+    keepsSeparateReposParallel: !separate.protected && separate.effectiveOrder === "parallel",
+    recoveryPromptPreservesOriginalTask: buildRuntimeRecoveryPrompt({ originalPrompt: "实现支付功能", fromRuntime: "cursor", toRuntime: "codex", attempt: 2, failure: "provider unavailable" }).includes("实现支付功能"),
+  };
+  return { pass: Object.values(checks).every(Boolean), checks };
+}
+
+export function runCollaborationResilienceIntegrationSelfTest() {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-resilience-"));
+  const git = (args: string[], cwd = repo) => {
+    const result = spawnSync("git", args, { cwd, encoding: "utf-8", windowsHide: true });
+    if (result.status !== 0) throw new Error(String(result.stderr || result.stdout || "git failed"));
+    return String(result.stdout || "").trim();
+  };
+  let worktreePath = "";
+  let worktreeBranch = "";
+  try {
+    git(["init"]);
+    git(["config", "user.email", "ccm-resilience@example.invalid"]);
+    git(["config", "user.name", "CCM Resilience Test"]);
+    fs.mkdirSync(path.join(repo, "src", "payment"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "src", "payment", "base.ts"), "export const base = true;\n", "utf-8");
+    git(["add", "."]);
+    git(["commit", "-m", "initial"]);
+    const plan = buildCollaborationConflictPlan([
+      { key: "one", project: "agent-a", task: "修改 src/payment/base.ts", workDir: repo, writablePaths: ["src/payment"] },
+      { key: "two", project: "agent-b", task: "修改 src/payment/form.ts", workDir: repo, writablePaths: ["src/payment"] },
+    ], "parallel");
+    const key = plan.lanes[0].conflictWorkspaceKey;
+    const first = prepareChildAgentWorkDir(repo, { mode: "worktree", failClosed: true, taskId: "resilience-test", agentName: key, sourceProject: "coordinator", reuseKey: key });
+    worktreePath = first.worktreePath || "";
+    worktreeBranch = first.worktreeBranch || "";
+    fs.writeFileSync(path.join(first.workDir, "src", "payment", "first.ts"), "export const first = true;\n", "utf-8");
+    const second = prepareChildAgentWorkDir(repo, { mode: "worktree", failClosed: true, taskId: "resilience-test", agentName: key, sourceProject: "coordinator", reuseKey: key });
+    const checks = {
+      conflictBecomesSequential: plan.effectiveOrder === "sequential",
+      agentsShareConflictWorktree: first.workDir === second.workDir && second.reused === true,
+      downstreamSeesUpstreamChanges: fs.existsSync(path.join(second.workDir, "src", "payment", "first.ts")),
+      singleMergeOwner: plan.lanes.filter(item => item.mergeOwner).length === 1,
+    };
+    return { pass: Object.values(checks).every(Boolean), checks };
+  } finally {
+    if (worktreePath) spawnSync("git", ["worktree", "remove", "--force", worktreePath], { cwd: repo, windowsHide: true, stdio: "ignore" });
+    if (worktreeBranch) spawnSync("git", ["branch", "-D", worktreeBranch], { cwd: repo, windowsHide: true, stdio: "ignore" });
+    try { fs.rmSync(repo, { recursive: true, force: true }); } catch {}
+  }
+}

@@ -1,5 +1,5 @@
-type MemoryScope = "group" | "project";
-type MemoryAction = "pin" | "unpin" | "edit" | "deprecate" | "restore";
+export type MemoryScope = "group" | "project" | "global";
+type MemoryAction = "pin" | "unpin" | "lock" | "unlock" | "edit" | "deprecate" | "delete" | "restore";
 export declare function getMemoryItemId(itemType: string, item: any, index?: number): string;
 export declare function applyMemoryControls(scope: MemoryScope, scopeId: string, source: any): any;
 export declare function updateMemoryControl(input: {
@@ -77,6 +77,21 @@ export declare function buildMemoryCenterOverview(): {
         afterTokens: number;
         updatedAt: any;
     }[];
+    globals: {
+        scope: MemoryScope;
+        id: string;
+        label: string;
+        health: string;
+        alerts: number;
+        pinned: any;
+        edited: any;
+        deprecated: any;
+        tokenPressure: number;
+        preCompactPressure: number;
+        beforeTokens: number;
+        afterTokens: number;
+        updatedAt: any;
+    }[];
     alerts: any[];
     totals: {
         scopes: number;
@@ -90,6 +105,7 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
     id: string;
     file: string;
     backupExists: boolean;
+    policy: any;
     summary: {
         scope: MemoryScope;
         id: string;
@@ -112,10 +128,13 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
 };
 export declare function listMemoryAudit(limit?: number, filters?: any): any[];
 export declare function findMemoryEvidence(input: {
+    scope?: string;
     groupId?: string;
     messageId?: string;
     taskId?: string;
-}): any[];
+    sessionId?: string;
+    missionId?: string;
+}): any;
 export declare function rollbackMemory(scope: MemoryScope, scopeId: string, reason: string, actor?: string): {
     restored: boolean;
     snapshot: string;
@@ -123,5 +142,15 @@ export declare function rollbackMemory(scope: MemoryScope, scopeId: string, reas
     memory: any;
 };
 export declare function recordMemoryOperation(input: any): any;
+export declare function runGlobalMemoryControlSelfTest(): {
+    pass: boolean;
+    checks: {
+        globalScopePins: boolean;
+        globalScopeEdits: boolean;
+        globalScopeDeletes: boolean;
+        globalScopeRestores: boolean;
+        operationsAreAudited: boolean;
+    };
+};
 export declare function handleMemoryCenterApi(pathname: string, req: any, res: any, parsed: any): boolean;
 export {};

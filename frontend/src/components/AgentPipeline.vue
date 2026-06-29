@@ -87,6 +87,9 @@ const executedVerification = computed(() => asArray(summary.value.verification_e
 const failedVerification = computed(() => asArray(summary.value.verification_failed))
 const missingVerification = computed(() => asArray(summary.value.verification_required_missing))
 const blockers = computed(() => [...asArray(summary.value.blockers), ...asArray(summary.value.needs)])
+const sessionRows = computed(() => asArray(summary.value.session_continuity))
+const lifecycle = computed(() => summary.value.lifecycle || { state: props.taskStatus || 'pending', terminal: false })
+const verificationSources = computed(() => asArray(summary.value.verification_sources))
 
 const fileChangeCount = computed(() => {
   return summary.value.actual_file_change_count || props.fileChanges?.count || changedFiles.value.length || 0
@@ -99,7 +102,8 @@ const overviewItems = computed(() => [
   { key: 'notify', label: '子 Agent', value: notificationRows.value.length || assignmentRows.value.length || 0 },
   { key: 'qa', label: '问答', value: agentQaRows.value.length || summary.value.agent_qa_count || 0 },
   { key: 'receipt', label: '回执', value: receiptRows.value.length || summary.value.receipt_count || 0 },
-  { key: 'verify', label: '已验证', value: executedVerification.value.length }
+  { key: 'verify', label: '已验证', value: executedVerification.value.length },
+  { key: 'session', label: '任务会话', value: sessionRows.value.length }
 ])
 
 const workerRows = computed(() => {
@@ -452,6 +456,23 @@ function formatListItem(item) {
       </div>
       <p v-else class="empty-note">本次任务暂无子 Agent 工作中问答。</p>
     </section>
+    <section class="panel session-panel">
+      <div class="panel-head">
+        <h5>执行器与任务会话</h5>
+        <span class="subtle">生命周期 {{ lifecycle.state }} · {{ lifecycle.terminal ? '终态' : '保留上下文' }}</span>
+      </div>
+      <div v-if="sessionRows.length" class="session-list">
+        <div v-for="session in sessionRows" :key="session.id" class="session-row">
+          <div>
+            <strong>{{ session.project || '未知项目' }}</strong>
+            <span :class="['status-pill', session.degraded ? 'warn' : session.status === 'closed' ? 'muted' : 'ok']">{{ session.executor }} · {{ session.resume_mode }}</span>
+          </div>
+          <p>会话 {{ session.native_session_id || session.id }} · {{ session.turn_count }} 轮 · {{ session.status === 'closed' ? '已在最终验收后关闭' : '任务未终结，继续保留' }}</p>
+          <small v-if="session.reason">{{ session.reason }}</small>
+        </div>
+      </div>
+      <p v-else class="empty-note">本任务尚未建立项目 Agent 会话。</p>
+    </section>
     <section class="panel delivery-panel">
       <div class="panel-head">
         <h5>验收与交付证据</h5>
@@ -466,7 +487,7 @@ function formatListItem(item) {
       </div>
       <div class="delivery-grid">
         <div>
-          <span class="section-label">已执行验证</span>
+          <span class="section-label">已执行验证 <small v-if="verificationSources.length">· 来源 {{ verificationSources.join(' / ') }}</small></span>
           <ul v-if="executedVerification.length" class="fact-list">
             <li v-for="item in executedVerification.slice(0, 6)" :key="formatListItem(item)">{{ formatListItem(item) }}</li>
           </ul>
@@ -672,7 +693,8 @@ function formatListItem(item) {
 .phase-list,
 .assignment-list,
 .worker-list,
-.qa-list {
+.qa-list,
+.session-list {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -700,7 +722,8 @@ function formatListItem(item) {
 .phase-body,
 .assignment-item,
 .worker-row,
-.qa-row {
+.qa-row,
+.session-row {
   min-width: 0;
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -711,7 +734,8 @@ function formatListItem(item) {
 .phase-body:hover,
 .assignment-item:hover,
 .worker-row:hover,
-.qa-row:hover {
+.qa-row:hover,
+.session-row:hover {
   transform: translateX(2px);
   background: var(--bg-secondary);
 }
@@ -753,9 +777,15 @@ function formatListItem(item) {
 
 .assignment-item,
 .worker-row,
-.qa-row {
+.qa-row,
+.session-row {
   padding: 10px 12px;
 }
+
+.session-row > div { display:flex;align-items:center;justify-content:space-between;gap:10px }
+.session-row strong { font-size:13px }
+.session-row p { margin:7px 0 0;font-size:11.5px;color:var(--text-secondary);overflow-wrap:anywhere }
+.session-row small { display:block;margin-top:6px;color:var(--text-muted);font-size:10.5px }
 
 .muted-line {
   color: var(--text-muted) !important;

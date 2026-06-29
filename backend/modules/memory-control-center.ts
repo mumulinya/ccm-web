@@ -3,15 +3,16 @@ import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR, GROUP_MESSAGES_DIR } from "../utils";
 
-type MemoryScope = "group" | "project";
-type MemoryAction = "pin" | "unpin" | "edit" | "deprecate" | "restore";
+export type MemoryScope = "group" | "project" | "global";
+type MemoryAction = "pin" | "unpin" | "lock" | "unlock" | "edit" | "deprecate" | "delete" | "restore";
 
-const CONTROL_DIR = path.join(CCM_DIR, "memory-control");
+const CONTROL_DIR = process.env.CCM_MEMORY_CONTROL_DIR || path.join(CCM_DIR, "memory-control");
 const CONTROL_FILE = path.join(CONTROL_DIR, "overrides.json");
 const AUDIT_FILE = path.join(CONTROL_DIR, "audit.jsonl");
 const METRICS_FILE = path.join(CONTROL_DIR, "metrics.json");
 const GROUP_MEMORY_DIR = path.join(CCM_DIR, "group-memory");
 const PROJECT_MEMORY_DIR = path.join(CCM_DIR, "project-memory");
+const GLOBAL_MEMORY_FILE = path.join(CCM_DIR, "global-agent-memory", "memory.json");
 
 function now() { return new Date().toISOString(); }
 
@@ -64,6 +65,7 @@ function editableField(itemType: string, item: any) {
   if (itemType === "blocked") return "reason";
   if (itemType === "openQuestions") return typeof item === "string" ? "value" : "question";
   if (itemType === "nextActions") return typeof item === "string" ? "value" : "action";
+  if (["user", "feedback", "authorization", "missions", "unresolved", "references"].includes(itemType)) return "text";
   return item?.text !== undefined ? "text" : item?.summary !== undefined ? "summary" : "value";
 }
 
@@ -98,7 +100,7 @@ function applyListControls(scope: MemoryScope, scopeId: string, itemType: string
     }
     return { id, value, control };
   }).filter((entry: any) => !entry.control?.deprecated);
-  mapped.sort((a: any, b: any) => Number(!!a.control?.pinned) - Number(!!b.control?.pinned));
+  mapped.sort((a: any, b: any) => Number(!!b.control?.pinned) - Number(!!a.control?.pinned));
   return mapped.map((entry: any) => entry.value);
 }
 
@@ -106,7 +108,7 @@ export function applyMemoryControls(scope: MemoryScope, scopeId: string, source:
   const memory = JSON.parse(JSON.stringify(source || {}));
   const keys = scope === "group"
     ? ["factAnchors", "persistentRequirements", "decisions", "completed", "blocked", "workerLedger", "openQuestions", "nextActions"]
-    : ["conclusions", "decisions"];
+    : scope === "project" ? ["conclusions", "decisions"] : ["user", "feedback", "authorization", "decisions", "missions", "unresolved", "references"];
   for (const key of keys) memory[key] = applyListControls(scope, scopeId, key, memory[key]);
   if (scope === "project") {
     for (const archiveKey of ["conclusionArchives", "decisionArchives"]) {
@@ -123,14 +125,14 @@ export function updateMemoryControl(input: {
   scope: MemoryScope; scopeId: string; itemType: string; itemId: string; action: MemoryAction;
   text?: string; reason?: string; actor?: string;
 }) {
-  const scope = input.scope === "project" ? "project" : "group";
+  const scope: MemoryScope = input.scope === "project" ? "project" : input.scope === "global" ? "global" : "group";
   const scopeId = String(input.scopeId || "").trim();
   const itemType = cleanId(input.itemType);
   const itemId = cleanId(input.itemId);
   const action = input.action;
   if (!scopeId || !itemType || !itemId) throw new Error("缺少记忆定位信息");
-  if (!["pin", "unpin", "edit", "deprecate", "restore"].includes(action)) throw new Error("不支持的记忆操作");
-  if ((action === "edit" || action === "deprecate") && !String(input.reason || "").trim()) throw new Error("修改或废弃记忆时必须填写原因");
+  if (!["pin", "unpin", "lock", "unlock", "edit", "deprecate", "delete", "restore"].includes(action)) throw new Error("不支持的记忆操作");
+  if ((action === "edit" || action === "deprecate" || action === "delete") && !String(input.reason || "").trim()) throw new Error("修改或删除记忆时必须填写原因");
   if (action === "edit" && !String(input.text || "").trim()) throw new Error("修改后的记忆不能为空");
 
   const state = getControlsState();
@@ -138,10 +140,10 @@ export function updateMemoryControl(input: {
   const index = controls.findIndex((item: any) => item.scope === scope && item.scopeId === scopeId && item.itemType === itemType && item.itemId === itemId);
   const before = index >= 0 ? controls[index] : null;
   const current = { scope, scopeId, itemType, itemId, pinned: false, deprecated: false, ...(before || {}) };
-  if (action === "pin") current.pinned = true;
-  if (action === "unpin") current.pinned = false;
+  if (action === "pin" || action === "lock") current.pinned = true;
+  if (action === "unpin" || action === "unlock") current.pinned = false;
   if (action === "edit") current.editedText = String(input.text || "").trim();
-  if (action === "deprecate") current.deprecated = true;
+  if (action === "deprecate" || action === "delete") current.deprecated = true;
   if (action === "restore") {
     current.deprecated = false;
     delete current.editedText;
@@ -177,6 +179,12 @@ function projectFile(project: string) {
   return listJsonFiles(PROJECT_MEMORY_DIR).find(file => readMemoryFile(file)?.project === project) || "";
 }
 
+function scopeFile(scope: MemoryScope, scopeId: string) {
+  if (scope === "group") return path.join(GROUP_MEMORY_DIR, `${scopeId}.json`);
+  if (scope === "project") return projectFile(scopeId);
+  return GLOBAL_MEMORY_FILE;
+}
+
 function healthAlerts(scope: MemoryScope, scopeId: string, memory: any) {
   const alerts: any[] = [];
   const add = (severity: string, code: string, message: string) => alerts.push({ id: `${scope}:${scopeId}:${code}`, scope, scopeId, severity, code, message });
@@ -190,8 +198,14 @@ function healthAlerts(scope: MemoryScope, scopeId: string, memory: any) {
     if (Number(compaction.consecutiveFailures || 0) > 0) add("warning", "model_compaction_failure", `模型压缩连续失败 ${compaction.consecutiveFailures} 次`);
     const currentPressure = compaction.postCompactTokenCount ? (Number(compaction.postCompactTokenCount) / 200_000) * 100 : 0;
     if (currentPressure >= 90) add("warning", "token_pressure", `当前上下文占用 ${Math.round(currentPressure * 10) / 10}%`);
-  } else {
+  } else if (scope === "project") {
     if (memory?.integrity?.conclusions?.pass === false || memory?.integrity?.decisions?.pass === false) add("critical", "archive_integrity", "项目记忆归档校验失败");
+  } else {
+    const compaction = memory?.compaction || {};
+    if (memory?.integrity?.pass === false) add("critical", "global_archive_integrity", `全局记忆归档校验失败：${(memory.integrity.corruptedArchives || []).join("、")}`);
+    if (compaction.health && compaction.health !== "healthy") add("warning", "global_compaction_health", `全局压缩健康状态：${compaction.health}`);
+    if (Number(compaction.consecutiveFailures || 0) >= 3) add("critical", "global_compaction_circuit_breaker", "全局记忆压缩连续失败，熔断器已触发");
+    if (memory?.privacy?.encryptedTranscripts !== true) add("critical", "global_transcript_encryption", "全局 Agent 原始转录未启用加密");
   }
   return alerts;
 }
@@ -339,6 +353,33 @@ export function runMemoryAcceptanceSnapshot() {
     scopes.push({ scope: "project", scopeId: memory.project || path.basename(file, ".json"), archiveIntegrity: archivesValid(memory) });
   }
 
+  if (fs.existsSync(GLOBAL_MEMORY_FILE)) {
+    const { loadGlobalAgentMemory, getGlobalMemoryEvidence } = require("../global-agent-memory");
+    const globalMemory = loadGlobalAgentMemory();
+    const globalItems = ["user", "feedback", "authorization", "decisions", "unresolved", "references"]
+      .flatMap((key: string) => globalMemory[key] || []);
+    let scopeRecallChecks = 0;
+    let scopeRecallHits = 0;
+    for (const item of globalItems) {
+      const sessionId = item.source?.sessionId;
+      const messageId = item.source?.messageIds?.[0];
+      if (!sessionId || !messageId) continue;
+      scopeRecallChecks++;
+      if (getGlobalMemoryEvidence({ sessionId, messageId }).length > 0) scopeRecallHits++;
+    }
+    recallChecks += scopeRecallChecks;
+    recallHits += scopeRecallHits;
+    memoryChecks += scopeRecallChecks;
+    forgettingFailures += scopeRecallChecks - scopeRecallHits;
+    projectIntegrityChecks++;
+    if (globalMemory.integrity?.pass === true) projectIntegrityPasses++;
+    if (fs.existsSync(`${GLOBAL_MEMORY_FILE}.bak`)) {
+      recoveryAttempts++;
+      if (backupReadable(GLOBAL_MEMORY_FILE)) recoverySuccesses++;
+    }
+    scopes.push({ scope: "global", scopeId: "global-agent", memoryItems: globalItems.length, recallChecks: scopeRecallChecks, recallHits: scopeRecallHits, archiveIntegrity: globalMemory.integrity?.pass === true, encryptedTranscripts: globalMemory.privacy?.encryptedTranscripts === true });
+  }
+
   const snapshot = {
     id: `acceptance-${Date.now().toString(36)}`,
     at: now(),
@@ -366,9 +407,12 @@ export function buildMemoryCenterOverview() {
     .map((memory: any) => memorySummary("group", String(memory.groupId || path.basename(memory.__file || "", ".json")), memory, String(labels.get(String(memory.groupId)) || memory.groupId)));
   const projects = listJsonFiles(PROJECT_MEMORY_DIR).map(file => readMemoryFile(file)).filter(Boolean)
     .map((memory: any) => memorySummary("project", String(memory.project || "unknown"), memory, String(memory.project || "unknown")));
+  const globalMemory = fs.existsSync(GLOBAL_MEMORY_FILE) ? require("../global-agent-memory").loadGlobalAgentMemory({ recover: false }) : null;
+  const globals = globalMemory ? [memorySummary("global", "global-agent", globalMemory, "全局 Agent 长期记忆")] : [];
   const allAlerts = [
     ...listJsonFiles(GROUP_MEMORY_DIR).flatMap(file => { const memory = readMemoryFile(file); return memory ? healthAlerts("group", String(memory.groupId || path.basename(file, ".json")), memory) : []; }),
     ...listJsonFiles(PROJECT_MEMORY_DIR).flatMap(file => { const memory = readMemoryFile(file); return memory ? healthAlerts("project", String(memory.project || path.basename(file, ".json")), memory) : []; }),
+    ...(globalMemory ? healthAlerts("global", "global-agent", globalMemory) : []),
   ];
   const metrics = getMemoryMetrics();
   const acceptanceRates = metrics.latestAcceptance?.rates || {};
@@ -378,8 +422,8 @@ export function buildMemoryCenterOverview() {
   if (acceptanceRates.recoverySuccessRate !== null && acceptanceRates.recoverySuccessRate < 100) addSystemAlert("critical", "backup_recoverability", `可用备份比例仅 ${acceptanceRates.recoverySuccessRate}%`);
   if (acceptanceRates.projectIntegrityRate !== null && acceptanceRates.projectIntegrityRate < 100) addSystemAlert("critical", "project_archive_integrity", `项目归档完整率仅 ${acceptanceRates.projectIntegrityRate}%`);
   return {
-    generatedAt: now(), groups, projects, alerts: allAlerts,
-    totals: { scopes: groups.length + projects.length, healthy: [...groups, ...projects].filter(item => item.health === "healthy").length, alerts: allAlerts.length },
+    generatedAt: now(), groups, projects, globals, alerts: allAlerts,
+    totals: { scopes: groups.length + projects.length + globals.length, healthy: [...groups, ...projects, ...globals].filter(item => item.health === "healthy").length, alerts: allAlerts.length },
     metrics,
   };
 }
@@ -389,7 +433,7 @@ function collectItems(scope: MemoryScope, scopeId: string, memory: any) {
   const groups: any[] = [];
   const keys = scope === "group"
     ? ["persistentRequirements", "factAnchors", "decisions", "completed", "blocked", "workerLedger", "openQuestions", "nextActions"]
-    : ["decisions", "conclusions"];
+    : scope === "project" ? ["decisions", "conclusions"] : ["user", "feedback", "authorization", "decisions", "missions", "unresolved", "references"];
   for (const key of keys) {
     const values = Array.isArray(memory?.[key]) ? memory[key] : [];
     groups.push({
@@ -401,7 +445,14 @@ function collectItems(scope: MemoryScope, scopeId: string, memory: any) {
           itemId, type: key, text: control?.editedText !== undefined ? control.editedText : itemText(key, item),
           originalText: itemText(key, item), pinned: !!control?.pinned, deprecated: !!control?.deprecated,
           reason: control?.reason || "", updatedAt: control?.updatedAt || "",
-          evidence: { groupId: item?.groupId || (scope === "group" ? scopeId : ""), messageId: item?.messageId || "", taskId: item?.taskId || "", time: item?.time || item?.timestamp || "" },
+          evidence: {
+            groupId: item?.groupId || (scope === "group" ? scopeId : ""),
+            messageId: item?.messageId || item?.source?.messageIds?.[0] || "",
+            taskId: item?.taskId || "",
+            sessionId: item?.source?.sessionId || "",
+            missionId: item?.source?.missionId || "",
+            time: item?.time || item?.timestamp || item?.source?.timestamp || "",
+          },
           raw: item,
         };
       }),
@@ -417,16 +468,35 @@ function collectItems(scope: MemoryScope, scopeId: string, memory: any) {
       }) });
     }
   }
+  if (scope === "global") {
+    groups.push({
+      type: "sessionArchives",
+      items: (memory?.archives || []).map((archive: any, index: number) => ({
+        itemId: getMemoryItemId("sessionArchives", archive, index),
+        type: "sessionArchives",
+        archived: true,
+        archiveId: archive.id,
+        text: `会话 ${archive.sessionId}：${archive.summary?.primaryRequest || "历史压缩段"}（${archive.count || 0} 条）`,
+        originalText: archive.summary?.latestOutcome || "",
+        pinned: false,
+        deprecated: false,
+        evidence: { sessionId: archive.sessionId, messageId: archive.summary?.sourceMessageIds?.[0] || "", time: archive.from || "" },
+        raw: archive,
+      })),
+    });
+  }
   return groups;
 }
 
 export function getMemoryCenterScope(scope: MemoryScope, scopeId: string) {
-  const file = scope === "group" ? path.join(GROUP_MEMORY_DIR, `${scopeId}.json`) : projectFile(scopeId);
+  const file = scopeFile(scope, scopeId);
   if (!file || !fs.existsSync(file)) throw new Error("记忆不存在");
-  const rawMemory = readMemoryFile(file);
+  const rawMemory = scope === "global" ? require("../global-agent-memory").loadGlobalAgentMemory({ recover: false }) : readMemoryFile(file);
   if (!rawMemory) throw new Error("记忆文件无法读取");
+  const policy = scope === "global" ? require("../global-agent-memory").getGlobalAgentMemoryPolicy() : null;
   return {
     scope, id: scopeId, file, backupExists: fs.existsSync(`${file}.bak`),
+    policy,
     summary: memorySummary(scope, scopeId, rawMemory, scopeId), alerts: healthAlerts(scope, scopeId, rawMemory),
     memory: applyMemoryControls(scope, scopeId, rawMemory), rawMemory,
     itemGroups: collectItems(scope, scopeId, rawMemory),
@@ -441,7 +511,11 @@ export function listMemoryAudit(limit = 200, filters: any = {}) {
   return rows.slice(-Math.max(1, Math.min(1000, limit))).reverse();
 }
 
-export function findMemoryEvidence(input: { groupId?: string; messageId?: string; taskId?: string }) {
+export function findMemoryEvidence(input: { scope?: string; groupId?: string; messageId?: string; taskId?: string; sessionId?: string; missionId?: string }) {
+  if (input.scope === "global" || input.sessionId || input.missionId) {
+    const { getGlobalMemoryEvidence } = require("../global-agent-memory");
+    return getGlobalMemoryEvidence(input);
+  }
   const groupIds = input.groupId ? [input.groupId] : listJsonFiles(GROUP_MESSAGES_DIR).map(file => path.basename(file, ".json"));
   const matches: any[] = [];
   for (const groupId of groupIds) {
@@ -458,7 +532,7 @@ export function findMemoryEvidence(input: { groupId?: string; messageId?: string
 
 export function rollbackMemory(scope: MemoryScope, scopeId: string, reason: string, actor = "local-user") {
   if (!String(reason || "").trim()) throw new Error("回滚前必须填写原因");
-  const file = scope === "group" ? path.join(GROUP_MEMORY_DIR, `${scopeId}.json`) : projectFile(scopeId);
+  const file = scopeFile(scope, scopeId);
   const backup = file ? `${file}.bak` : "";
   if (!file || !fs.existsSync(backup)) throw new Error("没有可用的记忆备份");
   const backupData = fs.readFileSync(backup, "utf-8");
@@ -477,6 +551,32 @@ export function rollbackMemory(scope: MemoryScope, scopeId: string, reason: stri
 
 export function recordMemoryOperation(input: any) {
   return appendAudit({ type: "memory_operation", ...input });
+}
+
+export function runGlobalMemoryControlSelfTest() {
+  const before = JSON.parse(JSON.stringify(getControlsState()));
+  const item = { id: `control-selftest-${process.pid}`, text: "全局 Agent 必须验证当前状态后再使用历史记忆", importance: 90 };
+  const itemId = getMemoryItemId("feedback", item);
+  try {
+    updateMemoryControl({ scope: "global", scopeId: "global-agent", itemType: "feedback", itemId, action: "lock", actor: "self-test" });
+    const pinned = applyMemoryControls("global", "global-agent", { feedback: [item] }).feedback[0];
+    updateMemoryControl({ scope: "global", scopeId: "global-agent", itemType: "feedback", itemId, action: "edit", text: "使用历史记忆前必须核验当前真实状态", reason: "验证可编辑能力", actor: "self-test" });
+    const edited = applyMemoryControls("global", "global-agent", { feedback: [item] }).feedback[0];
+    updateMemoryControl({ scope: "global", scopeId: "global-agent", itemType: "feedback", itemId, action: "delete", reason: "验证软删除与审计", actor: "self-test" });
+    const deleted = applyMemoryControls("global", "global-agent", { feedback: [item] }).feedback;
+    updateMemoryControl({ scope: "global", scopeId: "global-agent", itemType: "feedback", itemId, action: "restore", reason: "验证恢复", actor: "self-test" });
+    const restored = applyMemoryControls("global", "global-agent", { feedback: [item] }).feedback[0];
+    const checks = {
+      globalScopePins: pinned?.memoryControl?.pinned === true,
+      globalScopeEdits: edited?.text === "使用历史记忆前必须核验当前真实状态",
+      globalScopeDeletes: deleted.length === 0,
+      globalScopeRestores: restored?.text === item.text && restored?.memoryControl?.deprecated === false,
+      operationsAreAudited: listMemoryAudit(20, { scope: "global", scopeId: "global-agent" }).some(event => event.itemId === itemId),
+    };
+    return { pass: Object.values(checks).every(Boolean), checks };
+  } finally {
+    writeJsonAtomic(CONTROL_FILE, before);
+  }
 }
 
 export function handleMemoryCenterApi(pathname: string, req: any, res: any, parsed: any): boolean {
@@ -501,7 +601,14 @@ export function handleMemoryCenterApi(pathname: string, req: any, res: any, pars
   }
 
   if (pathname === "/api/memory-center/evidence" && req.method === "GET") {
-    sendJson(res, { evidence: findMemoryEvidence(parsed.query) });
+    sendJson(res, { evidence: findMemoryEvidence({
+      ...parsed.query,
+      groupId: parsed.query.groupId || parsed.query.group_id,
+      messageId: parsed.query.messageId || parsed.query.message_id,
+      taskId: parsed.query.taskId || parsed.query.task_id,
+      sessionId: parsed.query.sessionId || parsed.query.session_id,
+      missionId: parsed.query.missionId || parsed.query.mission_id,
+    }) });
     return true;
   }
 
@@ -511,7 +618,12 @@ export function handleMemoryCenterApi(pathname: string, req: any, res: any, pars
     req.on("end", () => {
       try {
         const data = JSON.parse(body);
-        updateMemoryControl(data);
+        updateMemoryControl({
+          ...data,
+          scopeId: data.scopeId || data.scope_id,
+          itemType: data.itemType || data.item_type,
+          itemId: data.itemId || data.item_id,
+        });
         sendJson(res, { success: true });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
@@ -526,8 +638,31 @@ export function handleMemoryCenterApi(pathname: string, req: any, res: any, pars
     req.on("end", () => {
       try {
         const data = JSON.parse(body);
-        recordMemoryOperation(data);
-        sendJson(res, { success: true });
+        const scope: MemoryScope = data.scope === "global" ? "global" : data.scope === "project" ? "project" : "group";
+        const scopeId = data.scopeId || data.scope_id || (scope === "global" ? "global-agent" : "");
+        const operation = String(data.operation || "");
+        if (!String(data.reason || "").trim()) throw new Error("维护操作必须填写原因");
+        let result: any = null;
+        if (operation === "rollback") result = rollbackMemory(scope, scopeId, data.reason, data.actor || "local-user");
+        else if (scope === "global" && operation === "compact") {
+          const { loadGlobalAgentMemory, compactGlobalAgentSession } = require("../global-agent-memory");
+          result = { sessions: loadGlobalAgentMemory().sessions.map((session: any) => compactGlobalAgentSession(session.sessionId, { force: true, reason: data.reason })) };
+        } else if (scope === "global" && operation === "rebuild") {
+          const { rebuildGlobalAgentMemory } = require("../global-agent-memory");
+          result = rebuildGlobalAgentMemory(data.reason, data.actor || "local-user");
+        } else if (scope === "global" && ["disable", "enable", "block_pattern", "remove_block_pattern"].includes(operation)) {
+          const { getGlobalAgentMemoryPolicy, setGlobalAgentMemoryPolicy } = require("../global-agent-memory");
+          const current = getGlobalAgentMemoryPolicy();
+          let blockedPatterns = current.blockedPatterns || [];
+          const pattern = String(data.pattern || "").trim();
+          if (["block_pattern", "remove_block_pattern"].includes(operation) && !pattern) throw new Error("请输入禁记规则");
+          if (operation === "block_pattern") blockedPatterns = [...new Set([...blockedPatterns, pattern])];
+          if (operation === "remove_block_pattern") blockedPatterns = blockedPatterns.filter((item: string) => item !== pattern);
+          result = setGlobalAgentMemoryPolicy({ disabled: operation === "disable" ? true : operation === "enable" ? false : current.disabled, blockedPatterns, reason: data.reason, actor: data.actor || "local-user" });
+        } else {
+          result = recordMemoryOperation({ ...data, scope, scopeId });
+        }
+        sendJson(res, { success: true, result });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }

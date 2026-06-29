@@ -116,3 +116,11 @@ Standalone MCP server for Feishu/Lark messaging. ESM module (`"type": "module"`)
 - Every persistent development task carries one backend-issued `trace_id`. Reuse it across intake messages, task status transitions, worker receipts, Runtime fallback, verification, merge, and final delivery; never generate UI-only trace identifiers.
 - Reliability-sensitive intake paths use persistent idempotency keys and task leases. A duplicate must replay the original result or report that it is still running, never create another task.
 - Long-running reliability validation uses the persisted soak-test state under `~/.cc-connect/reliability/soak/`. Server restarts resume the same test ID and append samples; never reset an active soak test during ordinary startup.
+
+## Global Agent Agentic Loop
+
+- Web and Feishu global-assistant requests must use the backend Agentic Loop in `backend/global-agent-loop.ts`; do not reintroduce browser-side action execution or require the Web page to remain open.
+- The model decides from full semantics and observations. Local keyword rules are degradation-only and may never bypass the server-side write-authorization or high-risk confirmation gates.
+- Read tools may run automatically. Code/project/task writes require explicit user authorization; destructive operations always persist a `waiting_confirmation` run and execute the exact pending tool only after confirmation.
+- Every run is persisted under `~/.cc-connect/global-agent-runs/`, carries one `trace_id`, enforces step/time budgets and idempotent tool execution, and must survive server restart without changing its run ID.
+- Terminal replies must distinguish actual completion from delegation or ongoing work and include observations/evidence, risks, and any user decision still required.

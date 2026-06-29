@@ -267,6 +267,22 @@ function saveGroupMessages(groupId: string, messages: any[]) {
   fs.renameSync(temp, file);
 }
 
+export function deriveTaskLifecycle(task: any, executions: any[] = []) {
+  const summary = task?.delivery_summary || {};
+  const status = String(task?.status || "pending");
+  if (status === "done" && summary.acceptance_gate_passed === true) return { state: "completed", terminal: true, keepsSession: false };
+  if (status === "cancelled") return { state: "cancelled", terminal: true, keepsSession: false };
+  if (status === "failed") return { state: "failed", terminal: false, keepsSession: true };
+  if (status === "paused") return { state: "paused", terminal: false, keepsSession: true };
+  if (task?.sandbox_rehearsal?.status === "needs_user" || task?.workflow_meta?.sandbox_rehearsal?.status === "needs_user") return { state: "waiting_confirmation", terminal: false, keepsSession: true };
+  if (Number(summary.agent_qa_open_count || 0) > 0 || /等待.*依赖|前置依赖/.test(String(task?.status_detail || ""))) return { state: "waiting_dependency", terminal: false, keepsSession: true };
+  if (Number(summary.rework_count || 0) > 0) return { state: "rework", terminal: false, keepsSession: true };
+  if (executions.some(item => item.state === "reviewing") || summary.acceptance_gate_passed === false && summary.acceptance_gate) return { state: "acceptance", terminal: false, keepsSession: true };
+  if (executions.some(item => ["spawning", "ready", "prompt_accepted", "running"].includes(item.state)) || status === "in_progress") return { state: "executing", terminal: false, keepsSession: true };
+  if (["pending", "queued"].includes(status)) return { state: "queued", terminal: false, keepsSession: true };
+  return { state: "intake", terminal: false, keepsSession: true };
+}
+
 function buildInlineTaskRuntime(task: any) {
   const executions = listExecutions({ taskId: task.id });
   const sessions = listTaskAgentSessions({ taskId: task.id });
@@ -279,6 +295,7 @@ function buildInlineTaskRuntime(task: any) {
     status: task.status,
     statusText: task.status_detail || "",
     updatedAt: task.updated_at || new Date().toISOString(),
+    lifecycle: deriveTaskLifecycle(task, executions),
     counts: { total: executions.length, running: running.length, reviewing: reviewing.length, failed: failed.length, mergeReady: mergeReady.length },
     agents: executions.map(item => ({
       project: item.project,
@@ -2152,17 +2169,19 @@ function getRequiredVerificationCoverage(receipts: any[] = []) {
     if (!commands.length) continue;
     const verification = splitEvidenceList(receipt?.verification || []);
     const executed = verification.filter(item => !isSuggestedOnlyVerification(item) && !isFailedVerification(item));
+    const externalRunner = executed.filter(item => /passed by external runner\s*\(exit 0\)/i.test(item));
     const manual = executed.some(isManualVerificationEvidence);
-    const matched = commands.filter(command => executed.some(item => verificationTextMatchesCommand(item, command)));
+    const matched = commands.filter(command => externalRunner.some(item => verificationTextMatchesCommand(item, command)));
     const item = {
       agent,
       required: commands.slice(0, 6),
       executed,
+      external_runner: externalRunner,
       matched,
       manual,
     };
     required.push(item);
-    if (manual || matched.length > 0) covered.push(item);
+    if (matched.length > 0) covered.push(item);
     else missing.push(item);
   }
 
@@ -2449,6 +2468,7 @@ function buildAcceptanceGate(task: any, execution: any, summary: any, finalStatu
     { id: "actual_changes", label: "真实文件变更", ok: !taskRequiresCodeChanges(task) || Number(summary.actual_file_change_count || 0) > 0, detail: `变更 ${summary.actual_file_change_count || 0} 个文件` },
     { id: "verification", label: "已执行验证", ok: !taskRequiresVerification(task) || Number(summary.verification_executed?.length || 0) > 0, detail: `已执行 ${summary.verification_executed?.length || 0} 条` },
     { id: "required_verification", label: "项目验证命令覆盖", ok: !taskRequiresVerification(task) || summary.verification_required_gate_passed !== false, detail: summary.verification_required_missing?.length ? `缺 ${summary.verification_required_missing.length} 项` : "已覆盖" },
+    { id: "verification_source", label: "独立 Runner 验证来源", ok: !taskRequiresVerification(task) || summary.verification_source_gate_passed === true, detail: `外部 Runner ${summary.external_runner_verification_count || 0} 条` },
     { id: "no_blockers", label: "无开放阻塞", ok: !(summary.blockers || []).length && !(summary.needs || []).length && !(summary.agent_qa_has_open_items), detail: `阻塞 ${(summary.blockers || []).length}，待补 ${(summary.needs || []).length}` },
     { id: "policy", label: "项目边界", ok: summary.project_policy_gate_passed !== false, detail: summary.project_policy_violations?.length ? `违规 ${summary.project_policy_violations.length} 项` : "通过" },
   ];
@@ -2493,6 +2513,11 @@ function buildDeliverySummary(task: any, execution: any, finalStatus: string) {
   const verification = uniqueStrings(...receipts.map((receipt: any) => receipt.verification));
   const verificationGate = getVerificationEvidenceGate(receipts);
   const requiredVerificationCoverage = getRequiredVerificationCoverage(receipts);
+  const externalRunnerVerification = uniqueStrings(
+    ...receipts.map((receipt: any) => (receipt.verification || []).filter(
+      (item: any) => /passed by external runner\s*\(exit 0\)/i.test(String(item))
+    ))
+  );
   const projectAgentProfiles = agents
     .map((agent: string) => getProjectAgentCapabilityProfile(agent))
     .filter((profile: any) => profile.configured);
@@ -2546,6 +2571,26 @@ function buildDeliverySummary(task: any, execution: any, finalStatus: string) {
     : finalStatus === "failed"
       ? "任务执行失败"
       : "任务仍需继续推进";
+  const taskSessions = task?.id ? listTaskAgentSessions({ taskId: task.id }) : [];
+  const sessionContinuity = taskSessions.map((session: any) => ({
+    id: session.id,
+    project: session.project,
+    executor: session.agentType,
+    native_session_id: session.nativeSessionId || "",
+    resume_mode: session.resumeMode,
+    status: session.status,
+    turn_count: Number(session.turnCount || 0),
+    last_turn_succeeded: session.lastTurnSucceeded,
+    degraded: session.resumeMode === "scratchpad" && getTaskAgentSessionContinuity(session).degraded,
+    reason: session.lastError || session.closeReason || "",
+  }));
+  const lifecycleState = task?.status === "cancelled" ? "cancelled"
+    : finalStatus === "done" ? "completed"
+      : finalStatus === "failed" ? "failed"
+        : openAgentQa.length ? "waiting_dependency"
+          : reworkEvidence.length ? "rework"
+            : task?.status === "pending" || task?.status === "queued" ? "queued"
+              : review ? "reviewing" : "executing";
 
   const summary: any = {
     headline,
@@ -2600,6 +2645,13 @@ function buildDeliverySummary(task: any, execution: any, finalStatus: string) {
     verification_required: requiredVerificationCoverage.required,
     verification_required_missing: requiredVerificationCoverage.missing,
     verification_required_covered: requiredVerificationCoverage.covered,
+    external_runner_verification: externalRunnerVerification,
+    external_runner_verification_count: externalRunnerVerification.length,
+    verification_sources: [
+      ...(externalRunnerVerification.length ? ["external_runner"] : []),
+      ...(verificationGate.executed.length > externalRunnerVerification.length ? ["agent_receipt"] : []),
+    ],
+    verification_source_gate_passed: !taskRequiresVerification(task) || externalRunnerVerification.length > 0,
     has_executed_verification: verificationGate.executed.length > 0,
     verification_required_gate_passed: requiredVerificationCoverage.pass,
     verification_gate_passed: verificationGate.pass && requiredVerificationCoverage.pass,
@@ -2607,6 +2659,16 @@ function buildDeliverySummary(task: any, execution: any, finalStatus: string) {
     needs,
     review_status: reviewStatus,
     has_final_review: !!review,
+    lifecycle: {
+      state: lifecycleState,
+      terminal: ["completed", "cancelled"].includes(lifecycleState),
+      final_acceptance_required: true,
+      session_close_rule: "only_after_final_acceptance_or_explicit_cancel",
+    },
+    session_continuity: sessionContinuity,
+    session_count: sessionContinuity.length,
+    native_session_count: sessionContinuity.filter((item: any) => item.resume_mode === "native" && item.native_session_id).length,
+    degraded_session_count: sessionContinuity.filter((item: any) => item.degraded).length,
     generated_at: new Date().toISOString(),
   };
   summary.acceptance_gate = buildAcceptanceGate(task, execution, summary, finalStatus);
@@ -4356,6 +4418,7 @@ ${childTaskText}
       let targetWorkEvents: any[] = [];
       let targetNativeSessionId = "";
       let targetSessionSucceeded = true;
+      let targetSessionError = "";
       const laneChangeSnapshot = tWorkDir ? ctx.createFileChangeSnapshot(tWorkDir) : null;
       const fallbackConfig = getProjectExtraConfig(targetName);
       const configuredAttemptTimeout = Number(
@@ -4405,6 +4468,7 @@ ${childTaskText}
         });
         targetNativeSessionId = "";
         targetSessionSucceeded = true;
+        targetSessionError = "";
         const attemptOutput = await ctx.callAgentForGroupStream(targetName, attemptPrompt, tWorkDir, activeRuntime, {
           res: streamRes,
           groupId,
@@ -4421,10 +4485,11 @@ ${childTaskText}
             targetWorkEvents = [...targetWorkEvents, ...(Array.isArray(opts.workEvents) ? opts.workEvents : [])].slice(-80);
             targetNativeSessionId = String(opts.nativeSessionId || "");
             targetSessionSucceeded = opts.isError !== true;
+            targetSessionError = String(opts.error || opts.message || "");
           }
         });
         if (activeTaskSession) {
-          activeTaskSession = recordTaskAgentSessionTurn(activeTaskSession.id, { nativeSessionId: targetNativeSessionId, success: targetSessionSucceeded }) || activeTaskSession;
+          activeTaskSession = recordTaskAgentSessionTurn(activeTaskSession.id, { nativeSessionId: targetNativeSessionId, success: targetSessionSucceeded, error: targetSessionError || (!targetSessionSucceeded ? attemptOutput : "") }) || activeTaskSession;
           if (taskId) addTaskLog(taskId, targetSessionSucceeded ? "info" : "warning", `${targetName} 会话轮次已记录：${activeTaskSession.agentType} turn=${activeTaskSession.turnCount}${activeTaskSession.nativeSessionId ? "，已捕获原生 session ID" : "，使用 scratchpad 续跑保护"}`);
         }
         const failedAttempt = !targetSessionSucceeded || checkTaskFailure(attemptOutput);
@@ -5598,6 +5663,8 @@ async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
           await ctx.onTaskStatusChange?.(waitingTask, "waiting", detail);
           continue;
         }
+        closeTaskAgentSessions({ taskId, groupId: task.group_id || undefined }, "主 Agent 最终验收完成");
+        const finalizedDeliverySummary = buildDeliverySummary(task, execution, "done");
         const completedTask = updateTask(taskId, {
           status: "done",
           result: result.substring(0, 500),
@@ -5606,12 +5673,11 @@ async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
           receipt: execution.receipt || null,
           review: execution.review || null,
           file_changes: execution.fileChanges || null,
-          delivery_summary: deliverySummary,
+          delivery_summary: finalizedDeliverySummary,
           completed_at: new Date().toISOString()
         }) || { ...task, status: "done", result: result.substring(0, 500) };
         updateGroupTaskInlineStatus(completedTask, "done", execution.detail || "验收通过");
-        finalizeTaskKernel(task, execution, deliverySummary, "succeeded", execution.detail || "验收通过");
-        closeTaskAgentSessions({ taskId, groupId: task.group_id || undefined }, "主 Agent 最终验收完成");
+        finalizeTaskKernel(task, execution, finalizedDeliverySummary, "succeeded", execution.detail || "验收通过");
         addTaskLog(taskId, "success", `✅ 任务完成：${execution.detail || "验收通过"}`);
         syncTaskBacklogStatus(completedTask, "done", execution.detail || result.substring(0, 500));
         await ctx.onTaskStatusChange?.(completedTask, "done", result.substring(0, 500));
@@ -5628,6 +5694,8 @@ async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
           };
           const promotedSummary = buildDeliverySummary(task, promotedExecution, "done");
           appendTaskTimelineEvent(taskId, { type: "acceptance_gate", title: "代码变更验收门禁", detail: promotedSummary.acceptance_gate_passed ? "门禁通过并自动完成" : `${promotedSummary.acceptance_gate?.failed_count || 0} 项未通过`, status: promotedSummary.acceptance_gate_passed ? "ok" : "warn", phase: "reviewing", data: promotedSummary.acceptance_gate || {} });
+          closeTaskAgentSessions({ taskId, groupId: task.group_id || undefined }, "主 Agent 最终验收完成");
+          const finalizedPromotedSummary = buildDeliverySummary(task, promotedExecution, "done");
           const completedTask = updateTask(taskId, {
             status: "done",
             result: result.substring(0, 500),
@@ -5636,12 +5704,11 @@ async function processTargetQueue(targetKey: string, ctx: CollabCtx) {
             receipt: execution.receipt || null,
             review: execution.review || null,
             file_changes: execution.fileChanges || null,
-            delivery_summary: promotedSummary,
+            delivery_summary: finalizedPromotedSummary,
             completed_at: new Date().toISOString()
           }) || { ...task, status: "done", result: result.substring(0, 500) };
           updateGroupTaskInlineStatus(completedTask, "done", promotedExecution.detail);
-          finalizeTaskKernel(task, promotedExecution, promotedSummary, "succeeded", promotedExecution.detail);
-          closeTaskAgentSessions({ taskId, groupId: task.group_id || undefined }, "主 Agent 最终验收完成");
+          finalizeTaskKernel(task, promotedExecution, finalizedPromotedSummary, "succeeded", promotedExecution.detail);
           addTaskLog(taskId, "success", `✅ 任务完成：${promotedExecution.detail}`);
           syncTaskBacklogStatus(completedTask, "done", promotedExecution.detail);
           await ctx.onTaskStatusChange?.(completedTask, "done", result.substring(0, 500));
@@ -9206,6 +9273,9 @@ function createTask(task: any) {
     parent_task_id: task.parent_task_id || task.parentTaskId || null,
     global_mission_id: task.global_mission_id || task.globalMissionId || null,
     mission_target: task.mission_target || task.missionTarget || null,
+    mission_dependencies: Array.isArray(task.mission_dependencies || task.missionDependencies)
+      ? (task.mission_dependencies || task.missionDependencies)
+      : [],
     child_task_ids: Array.isArray(task.child_task_ids || task.childTaskIds) ? (task.child_task_ids || task.childTaskIds) : [],
     mission_plan: task.mission_plan || task.missionPlan || null,
     followups: Array.isArray(task.followups) ? task.followups : [],
@@ -9222,9 +9292,36 @@ function createTask(task: any) {
   return newTask;
 }
 
+function getGlobalMissionChildDeliveryEvidence(task: any) {
+  const executions = task?.id ? listExecutions({ taskId: task.id }) : [];
+  const worktrees = executions.filter((item: any) => item?.workspace?.mode === "worktree");
+  const unmerged = worktrees.filter((item: any) => !item?.workspace?.mergedAt || !item?.workspace?.mergeCommit);
+  return {
+    execution_count: executions.length,
+    execution_states: executions.map((item: any) => ({
+      execution_id: item.id,
+      agent: item.agent || item.project || "",
+      state: item.state || "",
+      green_level: item.green?.level || "none",
+      green_passed: item.green?.pass === true,
+      workspace_mode: item.workspace?.mode || "shared",
+      merge_status: item.workspace?.mode === "worktree"
+        ? (item.workspace?.mergedAt && item.workspace?.mergeCommit ? "merged" : "merge_pending")
+        : "not_required",
+      merge_commit: item.workspace?.mergeCommit || "",
+    })),
+    merge_required: worktrees.length > 0,
+    merge_passed: unmerged.length === 0,
+    merge_pending_execution_ids: unmerged.map((item: any) => item.id),
+    merge_commits: worktrees.map((item: any) => item.workspace?.mergeCommit).filter(Boolean),
+  };
+}
+
 function globalMissionChildGatePassed(task: any) {
   if (!task || task.status !== "done") return false;
   const summary = task.delivery_summary || {};
+  const evidence = getGlobalMissionChildDeliveryEvidence(task);
+  if (!evidence.merge_passed) return false;
   if (task.assign_type === "group") return summary.acceptance_gate_passed === true;
   const requiresCode = taskRequiresCodeChanges(task);
   const requiresVerification = taskRequiresVerification(task);
@@ -9233,7 +9330,7 @@ function globalMissionChildGatePassed(task: any) {
   const failedVerification = Number(summary.verification_failed?.length || 0);
   if (requiresCode && actualChanges <= 0) return false;
   if (requiresVerification && executedVerification <= 0) return false;
-  if (failedVerification > 0 || summary.verification_required_gate_passed === false) return false;
+  if (failedVerification > 0 || summary.verification_required_gate_passed === false || (requiresVerification && summary.verification_source_gate_passed !== true)) return false;
   return true;
 }
 
@@ -9243,6 +9340,7 @@ function refreshGlobalMissionParentInTaskList(tasks: any[], parentId: string) {
   if (!parent) return null;
   const children = tasks.filter((item: any) => item.parent_task_id === parentId);
   const rows = children.map((child: any) => ({
+    ...getGlobalMissionChildDeliveryEvidence(child),
     task_id: child.id,
     title: child.title,
     target_type: child.mission_target?.type || child.assign_type,
@@ -9252,6 +9350,7 @@ function refreshGlobalMissionParentInTaskList(tasks: any[], parentId: string) {
     gate_passed: globalMissionChildGatePassed(child),
     actual_file_change_count: Number(child.delivery_summary?.actual_file_change_count || child.file_changes?.count || 0),
     verification_count: Number(child.delivery_summary?.verification_executed?.length || 0),
+    receipt_status: child.receipt?.status || "",
     blockers: [
       ...(Array.isArray(child.delivery_summary?.blockers) ? child.delivery_summary.blockers : []),
       ...(Array.isArray(child.delivery_summary?.needs) ? child.delivery_summary.needs : []),
@@ -9263,9 +9362,17 @@ function refreshGlobalMissionParentInTaskList(tasks: any[], parentId: string) {
   const blocked = rows.filter((item: any) => item.status === "failed" || item.blockers.length > 0 || (item.status === "done" && !item.gate_passed)).length;
   const allPassed = rows.length > 0 && passed === rows.length;
   const now = new Date().toISOString();
-  parent.status = allPassed ? "done" : "in_progress";
+  const controlMode = parent.supervisor_control?.mode || "automatic";
+  const cancelled = parent.status === "cancelled";
+  parent.status = allPassed ? "done" : cancelled ? "cancelled" : "in_progress";
   parent.status_detail = allPassed
     ? "所有群聊主 Agent和项目 Agent子任务均已通过交付门禁"
+    : cancelled
+      ? (parent.status_detail || "全局任务已取消")
+      : controlMode === "manual"
+        ? "全局任务已由用户人工接管"
+        : controlMode === "paused"
+          ? "全局任务监工已暂停"
     : failed > 0
       ? `${failed} 个子任务执行失败，等待全局 Agent重试或用户干预`
       : blocked > 0
@@ -9296,7 +9403,7 @@ function refreshGlobalMissionParentInTaskList(tasks: any[], parentId: string) {
   };
   parent.updated_at = now;
   if (allPassed) parent.completed_at = parent.completed_at || now;
-  else delete parent.completed_at;
+  else if (!cancelled) delete parent.completed_at;
   return parent;
 }
 
@@ -9311,6 +9418,7 @@ function updateTask(id: string, updates: any) {
     updates.receipt_idempotency_key = crypto.createHash("sha256").update(JSON.stringify(updates.receipt)).digest("hex");
   }
   Object.assign(tasks[idx], updates, { updated_at: new Date().toISOString() });
+  tasks[idx].lifecycle = deriveTaskLifecycle(tasks[idx], listExecutions({ taskId: id }));
   if (updates.status === "done") {
     tasks[idx].completed_at = updates.completed_at || new Date().toISOString();
   } else if (updates.status && updates.status !== "done") {
@@ -9346,6 +9454,237 @@ export function getGlobalDevelopmentMission(id: string) {
     mission,
     children: tasks.filter((item: any) => item.parent_task_id === id),
   };
+}
+
+function getMissionDependencyRefs(task: any) {
+  const value = task?.mission_dependencies || task?.mission_target?.depends_on || task?.mission_target?.dependsOn || [];
+  return (Array.isArray(value) ? value : [value]).map((item: any) => String(item || "").trim()).filter(Boolean);
+}
+
+function missionChildMatchesRef(task: any, ref: string) {
+  const target = task?.mission_target || {};
+  return [task?.id, target.name, target.project, target.group_id, task?.target_project, task?.group_id]
+    .filter(Boolean)
+    .some(value => String(value).toLowerCase() === String(ref).toLowerCase());
+}
+
+function removeTaskFromQueues(taskId: string) {
+  for (const queue of taskQueues.values()) {
+    let index = queue.indexOf(taskId);
+    while (index >= 0) {
+      queue.splice(index, 1);
+      index = queue.indexOf(taskId);
+    }
+  }
+}
+
+export function superviseGlobalDevelopmentMissionCycle(id: string, ctx: CollabCtx, options: any = {}) {
+  const initial = getGlobalDevelopmentMission(id);
+  if (!initial) return { success: false, error: "全局任务不存在", terminal: true };
+  const maxAttempts = Math.max(1, Math.min(20, Number(options.max_attempts || options.maxAttempts || 3)));
+  const staleMs = Math.max(30_000, Number(options.stale_ms || options.staleMs || TASK_WATCHDOG_STALE_MS));
+  const autoMerge = options.auto_merge !== false && options.autoMerge !== false;
+  const actions: any[] = [];
+  const waitingUser: any[] = [];
+  const childByRef = (ref: string) => initial.children.find((item: any) => missionChildMatchesRef(item, ref));
+  const dependencyGraph = new Map(initial.children.map((child: any) => [child.id, getMissionDependencyRefs(child).map(ref => childByRef(ref)?.id).filter(Boolean)]));
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const cyclic = new Set<string>();
+  const visit = (taskId: string, stack: string[] = []) => {
+    if (visiting.has(taskId)) {
+      const start = stack.indexOf(taskId);
+      for (const idInCycle of stack.slice(Math.max(0, start))) cyclic.add(idInCycle);
+      cyclic.add(taskId);
+      return;
+    }
+    if (visited.has(taskId)) return;
+    visiting.add(taskId);
+    for (const dependencyId of dependencyGraph.get(taskId) || []) visit(dependencyId, [...stack, taskId]);
+    visiting.delete(taskId);
+    visited.add(taskId);
+  };
+  for (const child of initial.children) visit(child.id);
+
+  for (const child of initial.children) {
+    if (cyclic.has(child.id)) {
+      waitingUser.push({ task_id: child.id, reason: "检测到循环依赖，需要用户修改目标依赖或人工接管" });
+      actions.push({ type: "dependency_cycle", task_id: child.id, dependencies: dependencyGraph.get(child.id) || [] });
+      continue;
+    }
+    const dependencyRefs = getMissionDependencyRefs(child);
+    const dependencies = dependencyRefs.map(ref => ({ ref, task: childByRef(ref) }));
+    const unknownDependencies = dependencies.filter(item => !item.task).map(item => item.ref);
+    const blockingDependencies = dependencies.filter(item => item.task && !globalMissionChildGatePassed(item.task));
+    if (unknownDependencies.length > 0) {
+      waitingUser.push({ task_id: child.id, reason: `找不到前置依赖：${unknownDependencies.join("、")}` });
+      actions.push({ type: "dependency_invalid", task_id: child.id, dependencies: unknownDependencies });
+      continue;
+    }
+    if (blockingDependencies.length > 0) {
+      actions.push({ type: "dependency_wait", task_id: child.id, dependencies: blockingDependencies.map(item => item.task.id) });
+      continue;
+    }
+
+    const attempts = Math.max(Number(child.retry_count || 0), Number(child.auto_gap_continue_count || 0));
+    if (child.status === "done") {
+      const evidence = getGlobalMissionChildDeliveryEvidence(child);
+      if (evidence.merge_required && !evidence.merge_passed && autoMerge) {
+        for (const executionId of evidence.merge_pending_execution_ids) {
+          try {
+            const result = mergeExecutionWorktree(executionId, {
+              commit: true,
+              message: `chore: 合并全局任务 ${id} 的交付变更`,
+            });
+            actions.push({ type: "worktree_merged", task_id: child.id, execution_id: executionId, result });
+          } catch (error: any) {
+            if (attempts >= maxAttempts) {
+              waitingUser.push({ task_id: child.id, reason: `自动合并失败且已达到返工上限：${error?.message || error}` });
+              actions.push({ type: "merge_failed", task_id: child.id, execution_id: executionId, error: error?.message || String(error) });
+            } else {
+              const message = `全局 Agent 最终合并失败：${error?.message || error}。请调查跨 Agent 冲突，在原任务会话中解决冲突、重新运行验证并提交完整结构化回执。`;
+              const result = continueTaskWithMessage(child.id, message, ctx, {
+                source: "mission_supervisor_gap_rework",
+                auto_execute: true,
+                idempotency_key: `${id}:merge:${executionId}:${attempts + 1}`,
+                status_detail: "全局 Agent 检测到合并冲突，已按缺口返工",
+              });
+              actions.push({ type: "merge_conflict_rework", task_id: child.id, execution_id: executionId, result: { success: result.success, queued: result.queued }, error: error?.message || String(error) });
+            }
+          }
+        }
+      } else if (!globalMissionChildGatePassed(child)) {
+        if (attempts >= maxAttempts) {
+          waitingUser.push({ task_id: child.id, reason: "交付门禁未通过且已达到自动返工上限" });
+        } else {
+          const result = continueTaskWithMessage(child.id, buildTaskGapContinuationDraft(child), ctx, {
+            source: "mission_supervisor_gap_rework",
+            auto_execute: true,
+            idempotency_key: `${id}:gate:${child.id}:${attempts + 1}`,
+            status_detail: "全局 Agent 检测到交付证据缺口，已自动返工",
+          });
+          actions.push({ type: "gate_gap_rework", task_id: child.id, result: { success: result.success, queued: result.queued } });
+        }
+      }
+      continue;
+    }
+
+    if (child.status === "failed") {
+      if (attempts >= maxAttempts) {
+        waitingUser.push({ task_id: child.id, reason: child.status_detail || child.result || "子任务失败且已达到自动重试上限" });
+      } else {
+        const runtimeFailure = isRecoverableRuntimeFailure(child);
+        const result = runtimeFailure
+          ? retryTask(child.id, ctx, `全局任务 ${id} 监工检测到执行器异常，恢复原生会话或切换执行器后重试`, true)
+          : continueTaskWithMessage(child.id, `全局 Agent 检测到本轮失败：${child.status_detail || child.result || "未知失败"}。请先调查根因，只针对失败缺口返工，保留已完成成果，重新运行相关验证并提交结构化回执。`, ctx, {
+              source: "mission_supervisor_failure_rework",
+              auto_execute: true,
+              idempotency_key: `${id}:failure:${child.id}:${attempts + 1}`,
+              status_detail: "全局 Agent 已按失败根因要求自动返工",
+            });
+        actions.push({ type: runtimeFailure ? "runtime_recovery" : "failure_rework", task_id: child.id, result: { success: result.success, queued: result.queued } });
+      }
+      continue;
+    }
+
+    if (child.status === "cancelled") {
+      waitingUser.push({ task_id: child.id, reason: "子任务已取消" });
+      continue;
+    }
+
+    if (child.status === "pending" && !isTaskQueuedInMemory(child.id) && !runningTaskIds.has(child.id)) {
+      if (child.auto_execute === false) {
+        waitingUser.push({ task_id: child.id, reason: "子任务配置为手动启动，等待用户确认派发" });
+        actions.push({ type: "manual_dispatch_required", task_id: child.id });
+        continue;
+      }
+      const result = enqueueTask(child.id, ctx);
+      actions.push({ type: dependencyRefs.length ? "dependency_released" : "queue_recovered", task_id: child.id, result });
+      continue;
+    }
+
+    if (child.status === "in_progress" && !runningTaskIds.has(child.id) && getTaskAgeMs(child) >= staleMs) {
+      if (attempts >= maxAttempts) {
+        waitingUser.push({ task_id: child.id, reason: "子任务执行超时且已达到恢复上限" });
+      } else {
+        const result = retryTask(child.id, ctx, `全局任务 ${id} 监工检测到执行中断或超时`, true);
+        actions.push({ type: "stalled_recovery", task_id: child.id, result: { success: result.success, queued: result.queued } });
+      }
+    }
+  }
+
+  const current = getGlobalDevelopmentMission(id)!;
+  const summary = current.mission.mission_summary || {};
+  const terminal = summary.all_passed === true;
+  if (actions.length > 0 || terminal || waitingUser.length > 0) {
+    appendTraceEvent(current.mission.trace_id, {
+      id: `mission:${id}:supervisor:${Date.now()}`,
+      type: terminal ? "mission.delivery_completed" : "mission.supervisor_cycle",
+      status: terminal ? "ok" : waitingUser.length ? "warning" : "info",
+      task_id: id,
+      message: terminal ? "全局任务全部交付门禁通过" : `监工执行 ${actions.length} 个动作，${waitingUser.length} 项需要人工处理`,
+      data: { actions, waiting_user: waitingUser, summary },
+    });
+  }
+  return {
+    success: true,
+    mission: current.mission,
+    children: current.children,
+    terminal,
+    waiting_user: waitingUser,
+    actions,
+  };
+}
+
+export async function controlGlobalDevelopmentMission(id: string, operation: string, ctx: CollabCtx, payload: any = {}) {
+  const current = getGlobalDevelopmentMission(id);
+  if (!current) return { success: false, status: 404, error: "全局任务不存在" };
+  const op = String(operation || "").toLowerCase();
+  const now = new Date().toISOString();
+  if (!["pause", "resume", "cancel", "takeover", "update_goal"].includes(op)) {
+    return { success: false, status: 400, error: `不支持的全局任务操作：${operation}` };
+  }
+
+  if (op === "update_goal") {
+    const goal = compactFormText(payload.business_goal || payload.businessGoal || payload.goal, current.mission.business_goal || current.mission.description || "");
+    const acceptance = compactFormText(payload.acceptance || payload.acceptance_criteria || payload.acceptanceCriteria, current.mission.acceptance_criteria || "");
+    updateTask(id, { business_goal: goal, description: goal, acceptance_criteria: acceptance, status_detail: "用户已修改全局目标，监工将按新目标继续" });
+    for (const child of current.children) {
+      if (["cancelled"].includes(child.status)) continue;
+      const followup = `全局目标已修改：${goal}\n新的验收标准：${acceptance || "沿用原标准"}`;
+      updateTask(child.id, {
+        business_goal: goal,
+        acceptance_criteria: acceptance,
+        description: `${child.description || ""}${buildTaskContinuationBlock(followup)}`,
+        followups: [...(Array.isArray(child.followups) ? child.followups : []), { time: now, message: followup, source: "mission_supervisor_goal_update" }],
+      });
+    }
+  } else if (op === "cancel") {
+    for (const child of current.children) {
+      if (["done", "cancelled"].includes(child.status)) continue;
+      removeTaskFromQueues(child.id);
+      const reason = compactFormText(payload.reason, "用户取消全局任务");
+      requestTaskCancellation(child.id, reason, String(payload.actor || "global-agent"));
+      const running = runningTaskIds.has(child.id);
+      updateTask(child.id, { status: running ? "in_progress" : "cancelled", status_detail: running ? "全局任务取消请求已发送，正在终止执行" : "随全局任务取消", cancellation_requested_at: now, cancellation_reason: reason });
+      await ctx.onTaskStatusChange?.(child, running ? "cancelling" : "cancelled", reason);
+    }
+    updateTask(id, { status: "cancelled", status_detail: compactFormText(payload.reason, "全局任务已取消"), cancelled_at: now });
+  } else {
+    const paused = op === "pause" || op === "takeover";
+    for (const child of current.children) {
+      if (["done", "cancelled"].includes(child.status)) continue;
+      updateTask(child.id, { is_paused: paused, paused, status_detail: paused ? (op === "takeover" ? "已转为人工接管" : "全局监工已暂停后续调度") : "全局监工已恢复调度" });
+      if (paused) removeTaskFromQueues(child.id);
+    }
+    updateTask(id, {
+      is_paused: paused,
+      paused,
+      supervisor_control: { mode: op === "takeover" ? "manual" : paused ? "paused" : "automatic", updated_at: now, actor: payload.actor || "user" },
+      status_detail: op === "takeover" ? "用户已人工接管，自动监工停止操作" : paused ? "全局任务监工已暂停" : "全局任务监工已恢复",
+    });
+  }
+  return { success: true, operation: op, ...getGlobalDevelopmentMission(id) };
 }
 
 export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
@@ -9503,6 +9842,9 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
       parent_task_id: parent.id,
       global_mission_id: parent.id,
       mission_target: target,
+      mission_dependencies: Array.isArray(target.depends_on || target.dependsOn)
+        ? (target.depends_on || target.dependsOn)
+        : (target.depends_on || target.dependsOn ? [target.depends_on || target.dependsOn] : []),
       workflow_meta: {
         global_mission: {
           parent_task_id: parent.id,
@@ -9523,9 +9865,10 @@ export function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx) {
       agent: "global-agent",
       data: { parent_task_id: parent.id, target },
     });
-    const queueResult = autoExecute
+    const hasDependencies = Array.isArray(child.mission_dependencies) && child.mission_dependencies.length > 0;
+    const queueResult = autoExecute && !hasDependencies
       ? enqueueTask(child.id, ctx)
-      : { queued: false, message: "子任务已创建，等待手动启动" };
+      : { queued: false, message: hasDependencies ? "子任务已创建，等待前置依赖通过交付门禁" : "子任务已创建，等待手动启动" };
     children.push({ task: child, target, queue_result: queueResult });
   }
 
@@ -9568,6 +9911,7 @@ function canCompleteDailyDevFromDeliverySummary(task: any, execution: any, summa
   if (taskRequiresCodeChanges(task) && actualChangeCount <= 0) return false;
   if (taskRequiresVerification(task) && executedVerificationCount <= 0) return false;
   if (taskRequiresVerification(task) && summary.verification_required_gate_passed === false) return false;
+  if (taskRequiresVerification(task) && summary.verification_source_gate_passed !== true) return false;
   return true;
 }
 function validateTaskManualStatusUpdate(current: any, updates: any) {
@@ -9601,6 +9945,7 @@ function validateTaskManualStatusUpdate(current: any, updates: any) {
   if (Array.isArray(summary?.verification_failed) && summary.verification_failed.length > 0) missing.push("失败验证记录");
   if (Array.isArray(summary?.verification_suggested) && summary.verification_suggested.length > 0) missing.push("仅建议/未执行验证记录");
   if (requiresVerification && summary?.verification_required_gate_passed === false) missing.push("项目配置验证命令执行证据");
+  if (requiresVerification && summary?.verification_source_gate_passed !== true) missing.push("独立外部 Runner 验证来源");
 
   if (missing.length === 0) return null;
   return `业务开发任务不能手动标记完成，缺少验收证据：${missing.join("、")}。请通过队列让主 Agent 继续执行，或在任务报告中补齐证据后由系统完成。`;
