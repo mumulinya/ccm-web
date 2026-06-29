@@ -668,3 +668,10 @@ export function describeFileStatus(statusCode: string, before: any = null) {
   if (code.includes("M")) return { statusText: "修改", statusColor: "#facc15", statusKind: "modified" };
   return { statusText: compact || "变更", statusColor: "#94a3b8", statusKind: "changed" };
 }
+
+export function calculateTokensAndCost(inputText: string, outputText: string) {
+  const inputTokens = Math.ceil((inputText?.length || 0) / 2.5);
+  const outputTokens = Math.ceil((outputText?.length || 0) / 2.5);
+  const totalCost = ((inputTokens / 1000000) * 3 + (outputTokens / 1000000) * 15) * 7.2;
+  return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, totalCost };
+}

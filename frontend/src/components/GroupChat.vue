@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick, watch, inject } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch, inject, computed } from 'vue'
 import { groupsApi, projectsApi } from '../api/index.js'
 import AgentPipeline from './AgentPipeline.vue'
 import { toast, confirmDialog } from '../utils/toast.js'
@@ -47,9 +47,23 @@ const projects = ref([])
 const currentGroup = ref(null)
 const messages = ref([])
 const groupMemory = ref(null)
+const mainAgentStatus = ref(null)
+const groupAgentQa = ref([])
 const groupMessagesEl = ref(null)
 const groupMessagesContentEl = ref(null)
 const isGroupMessagesPinnedToBottom = ref(true)
+const userMessages = computed(() => {
+  return messages.value
+    .map((m, idx) => ({ ...m, originalIndex: idx }))
+    .filter(m => m.role === 'user')
+})
+
+const scrollToMessage = (originalIndex) => {
+  const el = document.getElementById(`gc-msg-${originalIndex}`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+}
 const newMessage = ref('')
 const messageFiles = ref([])
 const messageFileInput = ref(null)
@@ -58,6 +72,51 @@ const messageMode = ref('project_task')
 const collapsedWorkPanels = ref({})
 let activeAgentStreamMsgs = {}
 const diffViewer = ref({ visible: false, file: null })
+
+// 处理单栏 Unified Diff (Modal 专用)
+const processModalUnifiedLines = computed(() => {
+  const rawDiff = diffViewer.value.file?.diff?.diff || ''
+  const lines = rawDiff ? rawDiff.split('\n') : []
+  const processed = []
+  const ext = diffViewer.value.file?.path ? diffViewer.value.file.path.split('.').pop() : ''
+  
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    const nextLine = lines[i + 1]
+    const isMeta = line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@') || line.startsWith('diff') || line.startsWith('index')
+    
+    if (isMeta) {
+      processed.push({ type: 'meta', sign: ' ', htmlContent: escapeHtml(line) })
+      i++
+    } else if (line.startsWith('-') && !line.startsWith('---') && nextLine && nextLine.startsWith('+') && !nextLine.startsWith('+++')) {
+      const { oldResult, newResult } = diffTokens(line.substring(1), nextLine.substring(1))
+      const leftHtml = oldResult.map(tok => {
+        const esc = escapeHtml(tok.text)
+        return tok.type === 'remove' ? `<span class="word-remove">${esc}</span>` : esc
+      }).join('')
+      const rightHtml = newResult.map(tok => {
+        const esc = escapeHtml(tok.text)
+        return tok.type === 'add' ? `<span class="word-add">${esc}</span>` : esc
+      }).join('')
+      
+      processed.push({ type: 'remove', sign: '-', htmlContent: leftHtml })
+      processed.push({ type: 'add', sign: '+', htmlContent: rightHtml })
+      i += 2
+    } else if (line.startsWith('+') && !line.startsWith('+++')) {
+      processed.push({ type: 'add', sign: '+', htmlContent: highlightCode(line.substring(1), ext) })
+      i++
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      processed.push({ type: 'remove', sign: '-', htmlContent: highlightCode(line.substring(1), ext) })
+      i++
+    } else {
+      const content = line.startsWith(' ') ? line.substring(1) : line
+      processed.push({ type: 'context', sign: ' ', htmlContent: highlightCode(content, ext) })
+      i++
+    }
+  }
+  return processed
+})
 const pipelineViewer = ref({ visible: false, assignments: [], coordinationPlan: null, fileChanges: null, receipts: [], deliverySummary: null, status: 'pending', title: 'Agent 协作流' })
 const agentQaActionLoading = ref({})
 const openPipelineViewer = (msg) => {
@@ -71,6 +130,28 @@ const openPipelineViewer = (msg) => {
     status: msg.status || (msg.streaming ? 'running' : 'done'),
     title: 'Agent 协同流看板'
   }
+}
+const openMainAgentPipeline = () => {
+  if (!mainAgentStatus.value?.latest_delivery_summary) return
+  openPipelineViewer({
+    delivery_summary: mainAgentStatus.value.latest_delivery_summary,
+    status: mainAgentStatus.value.latest_delivery_summary.status || 'waiting'
+  })
+}
+const hasMainAgentStatusDetail = computed(() => {
+  const status = mainAgentStatus.value || {}
+  return !!currentGroup.value && (
+    status.phase ||
+    status.running_child_agents?.length ||
+    status.open_qa_count ||
+    status.failed_gates?.length ||
+    status.blockers?.length ||
+    status.needs?.length
+  )
+})
+const compactStatusText = (value, max = 80) => {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  return text.length > max ? text.slice(0, max) + '...' : text
 }
 
 const isCoordinatorProject = (project) => String(project || '') === 'coordinator'
@@ -173,6 +254,20 @@ const getAgentMessageStatus = (msg) => {
   if (getWorkEvents(msg).length) return state
   if (msg?.streaming) return { tone: 'running', label: '思考中' }
   return { tone: 'idle', label: '回复' }
+}
+const getTaskRuntime = (msg) => msg?.taskRuntime || msg?.task_runtime || null
+const taskRuntimeStatusLabel = (status) => ({ pending: '待执行', in_progress: '执行中', done: '已完成', failed: '失败', cancelled: '已取消' }[status] || status || '执行中')
+const taskRuntimeAgentState = (state) => ({ queued: '排队', spawning: '启动', ready: '就绪', prompt_accepted: '已接单', running: '执行中', reviewing: '验收', succeeded: '完成', failed: '失败', cancel_requested: '停止中', cancelled: '已取消' }[state] || state || '等待')
+const taskRuntimeGreenLabel = (green) => ({ none: '未验收', targeted: '局部绿', project: '项目绿', workspace: '工作区绿', merge_ready: '可合并' }[green] || green || '未验收')
+const applyTransientTaskRuntime = (taskId, updater) => {
+  if (!taskId) return
+  messages.value.forEach((msg) => {
+    if (msg.task_id !== taskId) return
+    const current = getTaskRuntime(msg) || { taskId, status: msg.task?.status || 'in_progress', counts: {}, agents: [], sessions: [] }
+    const next = updater({ ...current, agents: [...(current.agents || [])], sessions: [...(current.sessions || [])] })
+    msg.taskRuntime = next
+    msg.task_runtime = next
+  })
 }
 const appendAgentWorkEvent = (agent, event) => {
   if (!agent || !event) return
@@ -385,6 +480,8 @@ const loadMessages = async () => {
   if (!currentGroup.value) return
   const data = await groupsApi.messages(currentGroup.value.id)
   groupMemory.value = data.memory || null
+  mainAgentStatus.value = data.mainAgentStatus || null
+  groupAgentQa.value = data.agentQa || []
   messages.value = (data.messages || []).filter(m => !m.content?.startsWith('📤'))
   scrollToBottom({ force: true })
   // 延迟多次滚动，防范 Markdown/Diff 渲染等重排引起的高度时差
@@ -429,6 +526,17 @@ const mergeIncomingMessage = (msg) => {
       ...msg,
       fileChanges: msg.fileChanges || current.fileChanges,
       workEvents: msg.workEvents || current.workEvents,
+      assignments: Array.isArray(msg.assignments) ? msg.assignments : current.assignments,
+      executionOrder: msg.executionOrder || current.executionOrder,
+      runtime: msg.runtime || current.runtime,
+      dispatchPolicy: msg.dispatchPolicy || current.dispatchPolicy,
+      coordinationPlan: msg.coordinationPlan || current.coordinationPlan,
+      workflow: msg.workflow || current.workflow,
+      taskRuntime: msg.taskRuntime || msg.task_runtime || current.taskRuntime || current.task_runtime,
+      task_runtime: msg.task_runtime || msg.taskRuntime || current.task_runtime || current.taskRuntime,
+      delivery_summary: msg.delivery_summary || current.delivery_summary,
+      deliverySummary: msg.deliverySummary || current.deliverySummary,
+      receipts: msg.receipts || current.receipts,
       streaming: current.streaming && !msg.content ? current.streaming : false
     }
     groupMessageKeyMap.set(next, currentKey)
@@ -832,15 +940,45 @@ const getAssignmentStatusClass = (status) => {
   return 'pending'
 }
 
+const getAssignmentIdentity = (item = {}) => ({
+  assignmentId: String(item.assignmentId || item.assignment_id || item.id || ''),
+  dispatchKey: String(item.dispatchKey || item.dispatch_key || ''),
+  project: String(item.project || item.agent || item.target_project || item.targetName || '')
+})
+
+const findAssignmentMessageIndex = (data) => {
+  if (data?.planMessageId) {
+    const idx = messages.value.findIndex(m => m.id === data.planMessageId)
+    if (idx !== -1) return idx
+  }
+  const identity = getAssignmentIdentity(data || {})
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const assignments = messages.value[i]?.assignments
+    if (!Array.isArray(assignments)) continue
+    if (identity.assignmentId && assignments.some(item => getAssignmentIdentity(item).assignmentId === identity.assignmentId)) return i
+    if (identity.dispatchKey && assignments.some(item => getAssignmentIdentity(item).dispatchKey === identity.dispatchKey)) return i
+    if (identity.project && assignments.filter(item => getAssignmentIdentity(item).project === identity.project).length === 1) return i
+  }
+  return -1
+}
+
+const getAssignmentKey = (msg, item) => `${msg?.id || getGroupMessageKey(msg)}-${item?.assignmentId || item?.dispatchKey || `${item?.project || 'agent'}-${item?.attempt || 1}-${item?.task || ''}`}`
+
 const applyAssignmentStatus = (data) => {
-  if (!data?.planMessageId || !data.project) return false
-  const msgIndex = messages.value.findIndex(m => m.id === data.planMessageId)
+  if (!data?.project && !data?.assignmentId && !data?.dispatchKey) return false
+  const msgIndex = findAssignmentMessageIndex(data)
   if (msgIndex === -1) return false
   const msg = messages.value[msgIndex]
   if (!Array.isArray(msg.assignments)) return false
   let changed = false
+  const incoming = getAssignmentIdentity(data)
+  const projectMatches = msg.assignments.filter(item => getAssignmentIdentity(item).project === incoming.project).length
   const assignments = msg.assignments.map(item => {
-    if (item.project !== data.project) return item
+    const current = getAssignmentIdentity(item)
+    const matchesIdentity = incoming.assignmentId && current.assignmentId === incoming.assignmentId
+    const matchesDispatch = !incoming.assignmentId && incoming.dispatchKey && current.dispatchKey === incoming.dispatchKey
+    const matchesProject = !incoming.assignmentId && !incoming.dispatchKey && incoming.project && current.project === incoming.project && projectMatches === 1
+    if (!matchesIdentity && !matchesDispatch && !matchesProject) return item
     changed = true
     return {
       ...item,
@@ -1137,6 +1275,40 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
         if (applyAssignmentStatus(data)) {
           scrollToBottom()
         }
+      } else if (data.type === 'native_session') {
+        applyTransientTaskRuntime(data.taskId, (runtime) => {
+          const sessions = runtime.sessions || []
+          const index = sessions.findIndex(item => item.project === data.session?.project && item.agentType === data.session?.agentType)
+          const session = { ...data.session, status: 'open', native: data.session?.mode === 'native', degraded: data.session?.mode !== 'native' }
+          if (index >= 0) sessions[index] = { ...sessions[index], ...session }
+          else sessions.push(session)
+          return { ...runtime, status: 'in_progress', sessions, statusText: `${data.agent} ${data.session?.resumed ? '恢复原生会话' : '创建原生会话'}` }
+        })
+        scrollToBottom()
+      } else if (data.type === 'runtime_fallback') {
+        applyTransientTaskRuntime(data.taskId, (runtime) => {
+          const agents = runtime.agents || []
+          const index = agents.findIndex(item => item.project === data.agent)
+          const patch = { project: data.agent, state: 'spawning', runtimeFallbacks: Number(agents[index]?.runtimeFallbacks || 0) + 1, runtime: data.toRuntime }
+          if (index >= 0) agents[index] = { ...agents[index], ...patch }
+          else agents.push(patch)
+          return { ...runtime, status: 'in_progress', agents, statusText: data.text }
+        })
+        appendAgentWorkEvent(data.agent, { id: `fallback-${Date.now()}`, time: new Date().toISOString(), kind: 'warning', text: data.text })
+        scrollToBottom()
+      } else if (data.type === 'conflict_plan') {
+        messages.value.push({
+          id: `conflict-${Date.now()}`,
+          role: 'assistant',
+          agent: 'system',
+          type: 'conflict_plan',
+          content: data.text,
+          conflictPlan: data.conflictPlan,
+          task_id: data.taskId,
+          timestamp: new Date().toISOString()
+        })
+        waitingCrossReply.value = true
+        scrollToBottom()
       } else if (data.type === 'agent_work_event') {
         appendAgentWorkEvent(data.agent, data.event)
         waitingCrossReply.value = true
@@ -1172,11 +1344,11 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
           if (data.messageId) streamMsg.id = data.messageId
           streamMsg.content = data.text
           streamMsg.streaming = false
-          streamMsg.assignments = data.assignments || null
-          streamMsg.executionOrder = data.executionOrder || ''
-          streamMsg.runtime = data.runtime || ''
-          streamMsg.dispatchPolicy = data.dispatchPolicy || null
-          streamMsg.coordinationPlan = data.coordinationPlan || null
+          if (Array.isArray(data.assignments)) streamMsg.assignments = data.assignments
+          streamMsg.executionOrder = data.executionOrder || streamMsg.executionOrder || ''
+          streamMsg.runtime = data.runtime || streamMsg.runtime || ''
+          streamMsg.dispatchPolicy = data.dispatchPolicy || streamMsg.dispatchPolicy || null
+          streamMsg.coordinationPlan = data.coordinationPlan || streamMsg.coordinationPlan || null
           streamMsg.workflow = data.workflow || streamMsg.workflow
           streamMsg.workEvents = data.workEvents || streamMsg.workEvents
           if (data.fileChanges && data.fileChanges.count > 0) {
@@ -1269,6 +1441,8 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
     try {
       const res = await fetch(`/api/groups/messages?id=${currentGroup.value.id}&limit=100`)
       const data = await res.json()
+      mainAgentStatus.value = data.mainAgentStatus || mainAgentStatus.value
+      groupAgentQa.value = data.agentQa || groupAgentQa.value
       lastGroupMsgCount.value = (data.messages || []).length
     } catch {}
   }
@@ -1283,6 +1457,8 @@ const pullNewMessages = async () => {
   try {
     const res = await fetch(`/api/groups/messages?id=${currentGroup.value.id}&limit=100`)
     const data = await res.json()
+    mainAgentStatus.value = data.mainAgentStatus || mainAgentStatus.value
+    groupAgentQa.value = data.agentQa || groupAgentQa.value
     const msgs = data.messages || []
     let appended = 0
     for (const m of msgs) {
@@ -1800,6 +1976,33 @@ const applyRecommendation = () => {
               <span class="sub">创建群聊并添加 Agent 成员</span>
             </div>
             <div v-else class="messages-flow" :key="currentGroup?.id" style="width: 100%; display: flex; flex-direction: column;">
+              <div v-if="hasMainAgentStatusDetail" class="main-agent-status-card">
+                <div class="main-agent-status-head">
+                  <div>
+                    <span class="main-agent-status-title" title="群聊主 Agent 只负责当前群聊内的计划、派发、回执验收和交付报告；规则兜底协调器是本地运行时，不是新的群成员。">主 Agent 状态</span>
+                    <span class="main-agent-phase">{{ mainAgentStatus?.label || '空闲' }}</span>
+                  </div>
+                  <button v-if="mainAgentStatus?.latest_delivery_summary" class="btn btn-outline btn-xs" @click="openMainAgentPipeline">协作看板</button>
+                </div>
+                <div class="main-agent-status-grid">
+                  <div class="main-agent-status-item">
+                    <span class="item-label">执行中</span>
+                    <span class="item-value">{{ mainAgentStatus?.running_child_agents?.length ? mainAgentStatus.running_child_agents.join('、') : '无' }}</span>
+                  </div>
+                  <div class="main-agent-status-item">
+                    <span class="item-label">开放问答</span>
+                    <span class="item-value">{{ mainAgentStatus?.open_qa_count || groupAgentQa.filter(q => ['waiting','asking','queued','needs_user','timeout','manual'].includes(q.status)).length || 0 }} 个</span>
+                  </div>
+                  <div class="main-agent-status-item warning" v-if="mainAgentStatus?.failed_gates?.length">
+                    <span class="item-label">未过门禁</span>
+                    <span class="item-value">{{ mainAgentStatus.failed_gates.map(g => g.label || g.id).join('、') }}</span>
+                  </div>
+                  <div class="main-agent-status-item warning" v-if="mainAgentStatus?.blockers?.length || mainAgentStatus?.needs?.length">
+                    <span class="item-label">阻塞/待补</span>
+                    <span class="item-value">{{ [...(mainAgentStatus.blockers || []), ...(mainAgentStatus.needs || [])].slice(0, 3).map(x => compactStatusText(x)).join('；') }}</span>
+                  </div>
+                </div>
+              </div>
               <div v-for="(msg, i) in messages" :key="getGroupMessageKey(msg)" :id="'gc-msg-' + i" class="message" :class="[msg.role, { 'msg-highlight': highlightMsgIndex === i }]">
                 <!-- 思考过程消息 -->
                 <div v-if="msg.role === 'thinking'" class="thinking-bubble">
@@ -1830,6 +2033,42 @@ const applyRecommendation = () => {
                     <span v-if="msg.task?.attachment_count">{{ msg.task.attachment_count }} 个附件</span>
                     <span>持久任务</span>
                     <span>验收后报告</span>
+                  </div>
+                  <div v-if="getTaskRuntime(msg)" class="inline-task-runtime">
+                    <div class="inline-runtime-head">
+                      <strong>{{ taskRuntimeStatusLabel(getTaskRuntime(msg).status) }}</strong>
+                      <span>{{ getTaskRuntime(msg).statusText || '主 Agent 正在协调任务' }}</span>
+                    </div>
+                    <div class="inline-runtime-counts">
+                      <span>执行 {{ getTaskRuntime(msg).counts?.running || 0 }}</span>
+                      <span>验收 {{ getTaskRuntime(msg).counts?.reviewing || 0 }}</span>
+                      <span>失败 {{ getTaskRuntime(msg).counts?.failed || 0 }}</span>
+                      <span>可合并 {{ getTaskRuntime(msg).counts?.mergeReady || 0 }}</span>
+                    </div>
+                    <div v-if="getTaskRuntime(msg).agents?.length" class="inline-runtime-agents">
+                      <span v-for="agent in getTaskRuntime(msg).agents" :key="`${agent.project}:${agent.state}`" :class="['inline-agent-state', agent.state]">
+                        {{ agent.project }} · {{ taskRuntimeAgentState(agent.state) }} · {{ taskRuntimeGreenLabel(agent.green) }}<template v-if="agent.runtimeFallbacks"> · 切换 {{ agent.runtimeFallbacks }}</template>
+                      </span>
+                    </div>
+                    <div v-if="getTaskRuntime(msg).sessions?.length" class="inline-runtime-sessions">
+                      <span v-for="session in getTaskRuntime(msg).sessions" :key="`${session.project}:${session.agentType}`">
+                        {{ session.project }} · {{ session.agentType }} · {{ session.native ? '原生续跑' : session.degraded ? 'scratchpad 保护' : session.mode }} · 第 {{ session.turnCount || session.turn || 1 }} 轮
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div v-else-if="msg.type === 'conflict_plan'" class="bubble conflict-plan-bubble">
+                  <div class="conflict-plan-head">
+                    <strong>跨 Agent 冲突保护</strong>
+                    <span>已自动串行</span>
+                  </div>
+                  <div class="project-task-content">{{ msg.content }}</div>
+                  <div v-if="msg.conflictPlan?.conflicts?.length" class="conflict-plan-list">
+                    <div v-for="(conflict, conflictIndex) in msg.conflictPlan.conflicts" :key="`${conflict.projects?.join(':')}:${conflictIndex}`">
+                      <strong>{{ conflict.projects?.join(' 与 ') }}</strong>
+                      <span>{{ conflict.reason }}</span>
+                      <code v-if="conflict.scopes?.length">{{ conflict.scopes.join('、') }}</code>
+                    </div>
                   </div>
                 </div>
                 <!-- Agent 问答 -->
@@ -1876,6 +2115,21 @@ const applyRecommendation = () => {
                     </span>
                   </div>
                   <div v-if="msg.content" class="agent-message-content" v-html="highlightMentions(msg.content)"></div>
+                  <div v-if="getTaskRuntime(msg)" class="inline-task-runtime compact">
+                    <div class="inline-runtime-head">
+                      <strong>{{ taskRuntimeStatusLabel(getTaskRuntime(msg).status) }}</strong>
+                      <span>{{ getTaskRuntime(msg).counts?.running || 0 }} 执行 · {{ getTaskRuntime(msg).counts?.reviewing || 0 }} 验收 · {{ getTaskRuntime(msg).counts?.failed || 0 }} 失败</span>
+                    </div>
+                    <div v-if="getTaskRuntime(msg).agents?.length" class="inline-runtime-agents">
+                      <span v-for="agent in getTaskRuntime(msg).agents.slice(0, 6)" :key="`${agent.project}:${agent.state}`" :class="['inline-agent-state', agent.state]">
+                        {{ agent.project }} · {{ taskRuntimeAgentState(agent.state) }} · {{ taskRuntimeGreenLabel(agent.green) }}
+                      </span>
+                    </div>
+                  </div>
+                  <div v-if="msg.delivery_summary || msg.deliverySummary" class="delivery-summary-actions">
+                    <button class="btn btn-sm btn-outline" @click="openPipelineViewer(msg)">查看交付协作看板</button>
+                    <span v-if="(msg.delivery_summary || msg.deliverySummary)?.acceptance_gate_passed === false" class="delivery-gate-warning">验收门禁未通过</span>
+                  </div>
                   <div v-if="msg.dispatchPolicy || (msg.assignments && msg.assignments.length)" class="orchestration-plan">
                     <div class="plan-header">
                       <span>{{ getPlanTitle(msg) }}</span>
@@ -1908,7 +2162,7 @@ const applyRecommendation = () => {
                         </div>
                       </div>
                     </div>
-                    <div v-for="item in msg.assignments" :key="`${msg.id || getGroupMessageKey(msg)}-${item.project}`" class="plan-item">
+                    <div v-for="item in msg.assignments" :key="getAssignmentKey(msg, item)" class="plan-item">
                       <div class="plan-item-top">
                         <span class="plan-project">{{ getAgentDisplayName(item.project) }}</span>
                         <span v-if="item.rework" class="plan-rework">返工 #{{ item.attempt || 2 }}</span>
@@ -1981,6 +2235,18 @@ const applyRecommendation = () => {
                 <div class="msg-meta">{{ new Date(msg.timestamp).toLocaleString('zh-CN') }}</div>
               </div>
             </div>
+          </div>
+        </div>
+        <!-- 消息锚点导航条 -->
+        <div v-if="userMessages.length > 1" class="msg-navigator">
+          <div 
+            v-for="msg in userMessages" 
+            :key="msg.originalIndex" 
+            class="navigator-dot"
+            @click="scrollToMessage(msg.originalIndex)"
+            :title="msg.content.slice(0, 30) + (msg.content.length > 30 ? '...' : '')"
+          >
+            <span class="dot-bar"></span>
           </div>
         </div>
 
@@ -2107,53 +2373,18 @@ const applyRecommendation = () => {
           </div>
           <div style="display:flex;align-items:center;gap:12px">
             <input v-if="diffViewer.file?.diff?.available" v-model="diffSearchQuery" class="diff-search-input" placeholder="在 diff 中搜索..." />
-            <div class="diff-mode-toggle" v-if="diffViewer.file?.diff?.available">
-              <button class="btn btn-outline btn-sm" :class="{ active: modalDiffMode === 'unified' }" @click="modalDiffMode = 'unified'">单栏对比</button>
-              <button class="btn btn-outline btn-sm" style="margin-left: 8px;" :class="{ active: modalDiffMode === 'split' }" @click="modalDiffMode = 'split'">分栏对比</button>
-            </div>
           </div>
         </div>
         <div v-if="diffViewer.file?.diff?.truncated" class="diff-note">
           文件较大，当前只展示前半部分可读差异。
         </div>
         <div v-if="diffViewer.file?.diff?.available" class="diff-viewer">
-          <!-- Split Mode -->
-          <template v-if="modalDiffMode === 'split'">
-            <div v-for="(hunk, hi) in parseSplitDiff(diffViewer.file?.diff?.diff)" :key="hi" class="hunk">
-              <div class="hunk-header">@@{{ hunk.header.split('@@')[1] || hunk.header }}@@</div>
-              <div class="split-diff-container">
-                <!-- 左侧 旧代码 -->
-                <div class="split-left-pane">
-                  <div v-for="(row, ri) in hunk.lines" :key="ri" 
-                    class="diff-line split-line-row" 
-                    :class="row.left.type === 'remove' ? 'remove' : row.left.type === 'context' ? 'context' : 'diff-empty-line'">
-                    <span class="diff-line-no">{{ row.left.lineNum }}</span>
-                    <span class="diff-sign">{{ row.left.type === 'remove' ? '-' : ' ' }}</span>
-                    <pre class="diff-text"><code v-html="row.left.isHtml ? highlightSearch(row.left.content, diffSearchQuery) : highlightSearch(escapeHtml(row.left.content), diffSearchQuery)"></code></pre>
-                  </div>
-                </div>
-                <!-- 右侧 新代码 -->
-                <div class="split-right-pane">
-                  <div v-for="(row, ri) in hunk.lines" :key="ri" 
-                    class="diff-line split-line-row" 
-                    :class="row.right.type === 'add' ? 'add' : row.right.type === 'context' ? 'context' : 'diff-empty-line'">
-                    <span class="diff-line-no">{{ row.right.lineNum }}</span>
-                    <span class="diff-sign">{{ row.right.type === 'add' ? '+' : ' ' }}</span>
-                    <pre class="diff-text"><code v-html="row.right.isHtml ? highlightSearch(row.right.content, diffSearchQuery) : highlightSearch(escapeHtml(row.right.content), diffSearchQuery)"></code></pre>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </template>
-          <!-- Unified Mode -->
-          <template v-else>
-            <div v-for="(line, index) in processModalUnifiedLines" :key="index" 
-              class="diff-line" 
-              :class="{ 'diff-add': line.type === 'add', 'diff-remove': line.type === 'remove', 'diff-context': line.type === 'context', 'diff-meta': line.type === 'meta' }">
-              <span class="diff-sign">{{ line.sign }}</span>
-              <span class="diff-text" v-html="highlightSearch(line.htmlContent, diffSearchQuery)"></span>
-            </div>
-          </template>
+          <div v-for="(line, index) in processModalUnifiedLines" :key="index" 
+            class="diff-line" 
+            :class="{ 'diff-add': line.type === 'add', 'diff-remove': line.type === 'remove', 'diff-context': line.type === 'context', 'diff-meta': line.type === 'meta' }">
+            <span class="diff-sign">{{ line.sign }}</span>
+            <span class="diff-text" v-html="highlightSearch(line.htmlContent, diffSearchQuery)"></span>
+          </div>
         </div>
         <div v-else class="diff-empty">
           {{ diffViewer.file?.diff?.reason || '没有可展示的文本差异' }}
@@ -2375,11 +2606,22 @@ const applyRecommendation = () => {
 .group-card.active { border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.08); color: var(--accent-blue); box-shadow: 0 4px 12px rgba(59, 130, 246, 0.03); }
 .badge { font-size: 9.5px; padding: 2px 6px; background: rgba(0,0,0,0.04); border-radius: 4px; color: var(--text-muted); font-family: 'Share Tech Mono', monospace; }
 .main-content { flex: 1; display: flex; overflow: hidden; }
-.content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: transparent; }
+.content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: transparent; position: relative; }
 .content-header { padding: 14px 20px; border-bottom: 1px solid rgba(0, 0, 0, 0.05); font-size: 13px; font-weight: 600; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
 .group-title-line { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
 .memory-chip { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid rgba(100, 116, 139, 0.16); background: rgba(100, 116, 139, 0.07); color: var(--text-muted); font-size: 11px; font-weight: 800; white-space: nowrap; }
 .memory-chip.active { border-color: rgba(59, 130, 246, 0.24); background: rgba(59, 130, 246, 0.08); color: var(--accent-blue); }
+.main-agent-status-card { margin: 0 0 16px; padding: 14px; border-radius: 14px; border: 1px solid rgba(59, 130, 246, 0.18); background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(14, 165, 233, 0.05)); box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); }
+.main-agent-status-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+.main-agent-status-title { font-size: 12px; font-weight: 900; color: var(--text-primary); margin-right: 8px; }
+.main-agent-phase { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; background: rgba(59, 130, 246, 0.12); color: var(--accent-blue); font-size: 11px; font-weight: 800; }
+.main-agent-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.main-agent-status-item { min-width: 0; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.55); border: 1px solid rgba(148, 163, 184, 0.16); }
+.main-agent-status-item.warning { border-color: rgba(245, 158, 11, 0.25); background: rgba(245, 158, 11, 0.08); }
+.main-agent-status-item .item-label { display: block; font-size: 10px; color: var(--text-muted); font-weight: 800; margin-bottom: 4px; }
+.main-agent-status-item .item-value { display: block; font-size: 12px; color: var(--text-primary); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.delivery-summary-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.delivery-gate-warning { font-size: 11px; font-weight: 800; color: #d97706; }
 .messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; }
 .message { margin-bottom: 18px; max-width: 80%; animation: msg-in 0.35s cubic-bezier(0.25, 0.8, 0.25, 1); }
 .msg-highlight { animation: msg-flash 0.5s ease-in-out 3; border-radius: 12px; }
@@ -3386,6 +3628,30 @@ const applyRecommendation = () => {
 .project-task-meta code {
   color: var(--accent-blue);
 }
+.inline-task-runtime {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.46);
+}
+.inline-task-runtime.compact { margin-bottom: 10px; }
+.inline-runtime-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; }
+.inline-runtime-head strong { color: var(--accent-blue); }
+.inline-runtime-head span { color: var(--text-muted); text-align: right; overflow-wrap: anywhere; }
+.inline-runtime-counts { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; color: var(--text-secondary); font-size: 10.5px; }
+.inline-runtime-agents, .inline-runtime-sessions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.inline-runtime-agents > span, .inline-runtime-sessions > span { padding: 4px 7px; border-radius: 5px; background: rgba(100, 116, 139, 0.09); color: var(--text-secondary); font-size: 10px; }
+.inline-agent-state.running, .inline-agent-state.spawning, .inline-agent-state.ready, .inline-agent-state.prompt_accepted, .inline-agent-state.reviewing { background: rgba(37, 99, 235, 0.1); color: var(--accent-blue); }
+.inline-agent-state.succeeded { background: rgba(34, 197, 94, 0.11); color: var(--accent-green); }
+.inline-agent-state.failed, .inline-agent-state.cancelled { background: rgba(239, 68, 68, 0.1); color: #b91c1c; }
+.conflict-plan-bubble { border-left: 3px solid #d97706; background: rgba(245, 158, 11, 0.06); }
+.conflict-plan-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.conflict-plan-head span { padding: 3px 7px; border-radius: 5px; background: rgba(245, 158, 11, 0.12); color: #b45309; font-size: 10px; font-weight: 700; }
+.conflict-plan-list { display: grid; gap: 7px; margin-top: 9px; }
+.conflict-plan-list > div { display: grid; gap: 3px; padding: 7px 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.52); font-size: 10.5px; }
+.conflict-plan-list span { color: var(--text-secondary); }
+.conflict-plan-list code { color: #92400e; overflow-wrap: anywhere; }
 
 .agent-exec-bubble {
   position: relative;
@@ -3705,5 +3971,83 @@ const applyRecommendation = () => {
 }
 [data-theme="dark"] .agent-qa-actions {
   border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+/* 消息节点锚点导航条 */
+.msg-navigator {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 4px;
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 20px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
+  z-index: 100;
+  max-height: 70%;
+  overflow-y: auto;
+}
+
+:global([data-theme="dark"]) .msg-navigator {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.navigator-dot {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.dot-bar {
+  width: 8px;
+  height: 2px;
+  background: var(--text-muted);
+  border-radius: 1px;
+  opacity: 0.5;
+  transition: all 0.2s;
+}
+
+.navigator-dot:hover .dot-bar {
+  width: 14px;
+  height: 3px;
+  background: var(--accent-blue);
+  opacity: 1;
+}
+
+/* Tooltip 悬停显示用户消息 */
+.navigator-dot::after {
+  content: attr(title);
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%) scale(0.85);
+  background: rgba(15, 23, 42, 0.9);
+  color: #ffffff;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+  transform-origin: right center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.navigator-dot:hover::after {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
 }
 </style>

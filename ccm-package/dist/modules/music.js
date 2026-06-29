@@ -1154,9 +1154,52 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
     // === 歌曲封面同源代理（支持 MP3 解析与二次元哈希缓存） ===
     if (pathname === "/api/music/cover" && req.method === "GET") {
         const filename = parsed.query.file;
-        if (!filename || filename.includes("..")) {
+        if (filename && filename.includes("..")) {
             res.writeHead(400);
             res.end("Bad Request");
+            return true;
+        }
+        // 如果没有传入具体的文件名，说明是在获取弹幕头像，直接给它返回随机二次元图片！
+        if (!filename) {
+            (async () => {
+                let success = false;
+                let imgBuffer = null;
+                let mimeType = "image/jpeg";
+                // 从公开的随机动漫图片 API 中抓取
+                for (const url of ["http://www.dmoe.cc/random.php", "http://api.btstu.cn/sjbz/api.php?lx=dongman&format=images", "http://t.alcy.cc/acg", "http://api.amrno.com/api/acg"]) {
+                    try {
+                        const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
+                        if (resp.ok) {
+                            imgBuffer = Buffer.from(await resp.arrayBuffer());
+                            mimeType = resp.headers.get("content-type") || "image/jpeg";
+                            success = true;
+                            break;
+                        }
+                    }
+                    catch (e) { }
+                }
+                if (success && imgBuffer) {
+                    res.writeHead(200, {
+                        "Content-Type": mimeType,
+                        "Content-Length": imgBuffer.length,
+                        "Cache-Control": "no-cache"
+                    });
+                    res.end(imgBuffer);
+                }
+                else {
+                    // 如果网络抓取均失败，我们读取默认的主页底图 room_window_bg.png 作为 fallback 头像，保证 100% 绝对不裂图！
+                    const defaultPath = path.join(utils_1.PUBLIC_DIR, "room_window_bg.png");
+                    if (fs.existsSync(defaultPath)) {
+                        const buffer = fs.readFileSync(defaultPath);
+                        res.writeHead(200, { "Content-Type": "image/png", "Content-Length": buffer.length });
+                        res.end(buffer);
+                    }
+                    else {
+                        res.writeHead(404);
+                        res.end("Not Found");
+                    }
+                }
+            })();
             return true;
         }
         const filePath = path.join(MUSIC_DIR, filename);
@@ -1343,73 +1386,94 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                 }
                 return translated;
             };
-            // 阶段 1：HTTPS wttr.in
-            try {
-                let url = "https://wttr.in/?m&format=%C+%t&lang=zh";
-                if (lat && lon) {
-                    url = `https://wttr.in/${lat},${lon}?m&format=%C+%t&lang=zh`;
-                }
-                const resp = await fetch(url, {
-                    headers: { "User-Agent": "curl/8.4.0" },
-                    signal: AbortSignal.timeout(3500)
-                });
-                const text = await resp.text();
-                const translated = translateWeather(text);
-                if (isHealthy(translated)) {
-                    cleanProxy();
-                    return (0, utils_1.sendJson)(res, { success: true, weather: translated });
-                }
-            }
-            catch (err) {
-                console.warn("[Weather Proxy] Stage 1 (HTTPS wttr.in) failed:", err.message);
-            }
-            // 阶段 2：HTTP wttr.in (绕过 SSL 阻断)
-            try {
-                let url = "http://wttr.in/?m&format=%C+%t&lang=zh";
-                if (lat && lon) {
-                    url = `http://wttr.in/${lat},${lon}?m&format=%C+%t&lang=zh`;
-                }
-                const resp = await fetch(url, {
-                    headers: { "User-Agent": "curl/8.4.0" },
-                    signal: AbortSignal.timeout(3500)
-                });
-                const text = await resp.text();
-                const translated = translateWeather(text);
-                if (isHealthy(translated)) {
-                    cleanProxy();
-                    return (0, utils_1.sendJson)(res, { success: true, weather: translated });
-                }
-            }
-            catch (err) {
-                console.warn("[Weather Proxy] Stage 2 (HTTP wttr.in) failed:", err.message);
-            }
-            // 阶段 3：国内 IP-API + 科大讯飞天气
-            try {
-                const ipResp = await fetch("http://ip-api.com/json/?lang=zh-CN", {
-                    signal: AbortSignal.timeout(3000)
-                });
-                const ipData = await ipResp.json();
-                if (ipData && ipData.status === "success" && ipData.city) {
-                    const city = ipData.city.replace(/市$/, "");
-                    const weatherUrl = `http://autodev.openspeech.cn/api/v1/weather?openId=12345678&city=${encodeURIComponent(city)}`;
-                    const wResp = await fetch(weatherUrl, {
+            // 封装阶段3的国内 IP + 科大讯飞高精度天气逻辑
+            const fetchDomesticWeather = async () => {
+                try {
+                    const ipResp = await fetch("http://ip-api.com/json/?lang=zh-CN", {
                         signal: AbortSignal.timeout(3000)
                     });
-                    const wData = await wResp.json();
-                    if (wData && wData.code === 0 && wData.data && wData.data.list && wData.data.list.length > 0) {
-                        const item = wData.data.list[0];
-                        const wText = item.weather || "";
-                        const tempText = (item.temp && item.temp !== 0) ? `${item.temp}°C` : `${item.low}~${item.high}°C`;
-                        const result = `${wText} ${tempText}`.trim();
-                        if (isHealthy(result)) {
-                            cleanProxy();
-                            return (0, utils_1.sendJson)(res, { success: true, weather: result });
+                    const ipData = await ipResp.json();
+                    if (ipData && ipData.status === "success" && ipData.city) {
+                        const city = ipData.city.replace(/市$/, "");
+                        const weatherUrl = `http://autodev.openspeech.cn/api/v1/weather?openId=12345678&city=${encodeURIComponent(city)}`;
+                        const wResp = await fetch(weatherUrl, {
+                            signal: AbortSignal.timeout(3000)
+                        });
+                        const wData = await wResp.json();
+                        if (wData && wData.code === 0 && wData.data && wData.data.list && wData.data.list.length > 0) {
+                            const item = wData.data.list[0];
+                            const wText = item.weather || "";
+                            const tempText = (item.temp && item.temp !== 0) ? `${item.temp}°C` : `${item.low}~${item.high}°C`;
+                            const result = `${wText} ${tempText}`.trim();
+                            if (isHealthy(result)) {
+                                return result;
+                            }
                         }
                     }
                 }
+                catch (err) {
+                    console.warn("[Weather Proxy] Domestic IP weather failed:", err.message);
+                }
+                return null;
+            };
+            // 封装 wttr.in 天气逻辑
+            const fetchWttrWeather = async (useHttps = true) => {
+                try {
+                    let url = useHttps ? "https://wttr.in/?m&format=%C+%t&lang=zh" : "http://wttr.in/?m&format=%C+%t&lang=zh";
+                    if (lat && lon) {
+                        url = useHttps ? `https://wttr.in/${lat},${lon}?m&format=%C+%t&lang=zh` : `http://wttr.in/${lat},${lon}?m&format=%C+%t&lang=zh`;
+                    }
+                    const resp = await fetch(url, {
+                        headers: { "User-Agent": "curl/8.4.0" },
+                        signal: AbortSignal.timeout(3500)
+                    });
+                    const text = await resp.text();
+                    const translated = translateWeather(text);
+                    if (isHealthy(translated)) {
+                        return translated;
+                    }
+                }
+                catch (err) {
+                    console.warn(`[Weather Proxy] wttr.in (${useHttps ? "HTTPS" : "HTTP"}) failed:`, err.message);
+                }
+                return null;
+            };
+            // === 气象定位分流控制 ===
+            if (lat && lon) {
+                // 如果有 GPS 经纬度：优先走 wttr.in 经纬度精准天气
+                let result = await fetchWttrWeather(true);
+                if (result) {
+                    cleanProxy();
+                    return (0, utils_1.sendJson)(res, { success: true, weather: result });
+                }
+                result = await fetchWttrWeather(false);
+                if (result) {
+                    cleanProxy();
+                    return (0, utils_1.sendJson)(res, { success: true, weather: result });
+                }
+                result = await fetchDomesticWeather();
+                if (result) {
+                    cleanProxy();
+                    return (0, utils_1.sendJson)(res, { success: true, weather: result });
+                }
             }
-            catch (err) {
-                console.error("[Weather Proxy] Stage 3 (Domestic API Fallback) failed:", err.message);
+            else {
+                // 如果没有 GPS 经纬度（依靠 IP 定位）：优先走国内 IP 定位 + 科大讯飞精确市级天气（防范梯子/IP 粗识别偏移）
+                let result = await fetchDomesticWeather();
+                if (result) {
+                    cleanProxy();
+                    return (0, utils_1.sendJson)(res, { success: true, weather: result });
+                }
+                result = await fetchWttrWeather(true);
+                if (result) {
+                    cleanProxy();
+                    return (0, utils_1.sendJson)(res, { success: true, weather: result });
+                }
+                result = await fetchWttrWeather(false);
+                if (result) {
+                    cleanProxy();
+                    return (0, utils_1.sendJson)(res, { success: true, weather: result });
+                }
             }
             cleanProxy();
             (0, utils_1.sendJson)(res, { success: false, error: "所有天气接口获取均失败" });

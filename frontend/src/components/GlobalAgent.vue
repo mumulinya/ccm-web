@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { toast } from '../utils/toast.js'
+import { toast, confirmDialog } from '../utils/toast.js'
 
 const emit = defineEmits(['switch-tab', 'set-navigation'])
 
@@ -9,7 +9,7 @@ const CURRENT_ID_STORAGE_KEY = 'cc_global_assistant_current_id_v2'
 
 const DEFAULT_WELCOME = {
   role: 'assistant',
-  content: '你好！我是您的全局助手。我可以帮您控制这整套系统。\n\n例如，您可以对我说：\n- 🎵 *"我想听 颜人中 的 晚安"* \n- 🐾 *"帮我把桌面宠物打开"* \n- 📂 *"帮我跳转到项目管理页面"* \n- 📋 *"创建一个开发任务：实现用户登录"* \n- 🛠️ *"帮我修改 smart-live-Cloud 项目，在登录接口加个日志"* \n- 💬 *"给 智评生活开发群 派发指令：修改前端首页适配的 bug"*',
+  content: '你好！我是您的全局助手。我负责系统级入口、管理操作和任务路由；涉及开发落地时，会把需求交给群聊主 Agent 与项目 Agent 协作完成。\n\n例如，您可以对我说：\n- 🎵 *"我想听 颜人中 的 晚安"* \n- 🐾 *"帮我把桌面宠物打开"* \n- 📂 *"帮我跳转到项目管理页面"* \n- 📋 *"创建一个开发任务：实现用户登录"* \n- 🛠️ *"帮我修改 smart-live-Cloud 项目，在登录接口加个日志"* \n- 💬 *"给 智评生活开发群 派发指令：修改前端首页适配的 bug"*',
   timestamp: new Date().toISOString()
 }
 
@@ -24,6 +24,19 @@ const currentSession = computed(() => {
 const messages = computed(() => {
   return currentSession.value ? currentSession.value.messages : []
 })
+
+const userMessages = computed(() => {
+  return messages.value
+    .map((m, idx) => ({ ...m, originalIndex: idx }))
+    .filter(m => m.role === 'user')
+})
+
+const scrollToMessage = (originalIndex) => {
+  const el = document.getElementById(`msg-${originalIndex}`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+}
 
 const loadHistory = () => {
   try {
@@ -97,13 +110,13 @@ const selectSession = (id) => {
   setTimeout(() => scrollToBottom({ force: true }), 200)
 }
 
-const deleteSession = (id, event) => {
+const deleteSession = async (id, event) => {
   if (event) event.stopPropagation()
   
   const targetSession = sessions.value.find(s => s.id === id)
   const sessionName = targetSession ? targetSession.name : '该会话'
   
-  if (confirm(`确定要删除会话「${sessionName}」吗？`)) {
+  if (await confirmDialog(`确定要删除会话「${sessionName}」吗？`)) {
     const idx = sessions.value.findIndex(s => s.id === id)
     if (idx !== -1) {
       sessions.value.splice(idx, 1)
@@ -513,51 +526,97 @@ const sendMessage = async () => {
       content: m.content
     }))
     
+    const agentMsg = {
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toISOString(),
+      files: []
+    }
+    let agentMsgAdded = false
+    let pendingAction = null
+    
     let res
     if (attachedFiles.length > 0) {
       const formData = new FormData()
       formData.append('message', userText)
       formData.append('history', JSON.stringify(historyPayload))
+      formData.append('stream', 'true')
       attachedFiles.forEach((f, idx) => {
         formData.append(`file_${idx}`, f.file)
       })
-      res = await fetch('/api/global-agent/chat', {
+      res = await fetch('/api/global-agent/chat?stream=true', {
         method: 'POST',
         body: formData
       })
     } else {
       res = await fetch('/api/global-agent/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userText, history: historyPayload })
+        headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+        body: JSON.stringify({ message: userText, history: historyPayload, stream: true })
       })
     }
-    
-    const data = await res.json()
-    if (data.error) {
-      currentSession.value.messages.push({
-        role: 'assistant',
-        content: `❌ 出错啦: ${data.error}`,
-        timestamp: new Date().toISOString()
-      })
-      saveHistory()
-    } else {
-      currentSession.value.messages.push({
-        role: 'assistant',
-        content: data.reply,
-        timestamp: new Date().toISOString(),
-        files: data.files || []
-      })
-      saveHistory()
-      
-      if (data.action) {
-        await executeAction(data.action, data.files || [])
+
+    if (!res.ok) {
+      const errText = await res.text()
+      throw new Error(errText || `HTTP ${res.status}`)
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let sseBuffer = ''
+
+    const handleGlobalSseEvent = (rawEvent) => {
+      const dataText = rawEvent
+        .split(/\r?\n/)
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice(5).trimStart())
+        .join('\n')
+      if (!dataText) return
+      try {
+        const data = JSON.parse(dataText)
+        if (data.type === 'text') {
+          if (!agentMsgAdded) {
+            currentSession.value.messages.push(agentMsg)
+            agentMsgAdded = true
+          }
+          agentMsg.content += data.text
+          scrollToBottom()
+        } else if (data.type === 'action') {
+          pendingAction = data.action
+          agentMsg.files = data.files || []
+        } else if (data.type === 'error') {
+          if (!agentMsgAdded) {
+            currentSession.value.messages.push(agentMsg)
+            agentMsgAdded = true
+          }
+          agentMsg.content = `❌ 出错啦: ${data.text}`
+        }
+      } catch {}
+    }
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      sseBuffer += decoder.decode(value, { stream: true })
+      const events = sseBuffer.split(/\r?\n\r?\n/)
+      sseBuffer = events.pop() || ''
+      for (const event of events) {
+        handleGlobalSseEvent(event)
       }
+    }
+    sseBuffer += decoder.decode()
+    if (sseBuffer.trim()) handleGlobalSseEvent(sseBuffer)
+
+    saveHistory()
+
+    if (pendingAction) {
+      await executeAction(pendingAction, agentMsg.files || [])
     }
   } catch (err) {
     currentSession.value.messages.push({
       role: 'assistant',
-      content: `❌ 连接服务器失败，请检查网络或配置。`,
+      content: `❌ 连接服务器失败：${err.message || '请检查网络或配置'}`,
       timestamp: new Date().toISOString()
     })
     saveHistory()
@@ -1337,11 +1396,12 @@ const handleGitCommitCardSubmit = async (msg) => {
         <div ref="chatContentInner" style="display: flex; flex-direction: column; gap: 24px; width: 100%;">
           <div class="chat-flow" :key="currentSessionId" style="display: flex; flex-direction: column; gap: 24px; width: 100%;">
             <div 
-            v-for="(msg, index) in messages" 
-            :key="index"
-            class="chat-bubble-wrapper"
-            :class="msg.role"
-          >
+              v-for="(msg, index) in messages" 
+              :key="index"
+              :id="'msg-' + index"
+              class="chat-bubble-wrapper"
+              :class="msg.role"
+            >
             <div class="avatar">{{ msg.role === 'user' ? '👤' : '🤖' }}</div>
             <div class="chat-bubble">
               <!-- 助手消息判定 -->
@@ -1547,7 +1607,7 @@ const handleGitCommitCardSubmit = async (msg) => {
           </div>
           
           <!-- 正在分析状态 -->
-          <div v-if="isSending" class="chat-bubble-wrapper assistant typing">
+          <div v-if="isSending && (!currentSession?.messages?.length || currentSession.messages[currentSession.messages.length - 1].role !== 'assistant')" class="chat-bubble-wrapper assistant typing">
             <div class="avatar">🤖</div>
             <div class="chat-bubble">
               <div class="typing-dots">
@@ -1557,6 +1617,19 @@ const handleGitCommitCardSubmit = async (msg) => {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- 消息锚点导航条 -->
+      <div v-if="userMessages.length > 1" class="msg-navigator">
+        <div 
+          v-for="msg in userMessages" 
+          :key="msg.originalIndex" 
+          class="navigator-dot"
+          @click="scrollToMessage(msg.originalIndex)"
+          :title="msg.content.slice(0, 30) + (msg.content.length > 30 ? '...' : '')"
+        >
+          <span class="dot-bar"></span>
         </div>
       </div>
     </div>
@@ -1601,7 +1674,7 @@ const handleGitCommitCardSubmit = async (msg) => {
             @keydown.enter="sendMessage"
             :disabled="isSending"
           />
-          <button class="send-btn" @click="sendMessage" :disabled="isSending || (!chatInput.trim() && selectedFiles.length === 0)">
+          <button class="send-btn" :class="{ 'pulse-glow': isSending }" @click="sendMessage" :disabled="isSending || (!chatInput.trim() && selectedFiles.length === 0)">
             <svg class="icon-send" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <line x1="22" y1="2" x2="11" y2="13"></line>
               <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
@@ -1621,6 +1694,84 @@ const handleGitCommitCardSubmit = async (msg) => {
 </template>
 
 <style scoped>
+/* 消息节点锚点导航条 */
+.msg-navigator {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 4px;
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 20px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
+  z-index: 100;
+  max-height: 70%;
+  overflow-y: auto;
+}
+
+:global([data-theme="dark"]) .msg-navigator {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.navigator-dot {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.dot-bar {
+  width: 8px;
+  height: 2px;
+  background: var(--text-muted);
+  border-radius: 1px;
+  opacity: 0.5;
+  transition: all 0.2s;
+}
+
+.navigator-dot:hover .dot-bar {
+  width: 14px;
+  height: 3px;
+  background: var(--accent-blue);
+  opacity: 1;
+}
+
+/* Tooltip 悬停显示用户消息 */
+.navigator-dot::after {
+  content: attr(title);
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%) scale(0.85);
+  background: rgba(15, 23, 42, 0.9);
+  color: #ffffff;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+  transform-origin: right center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.navigator-dot:hover::after {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+}
+
 .global-assistant-panel {
   position: relative;
   width: 100%;
@@ -1719,24 +1870,24 @@ const handleGitCommitCardSubmit = async (msg) => {
 
 .new-chat-btn {
   flex: 1;
-  background: linear-gradient(135deg, #6366f1, #06b6d4);
+  background: #4f46e5;
   color: white;
   border: none;
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 10px 16px;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  transition: all 0.25s ease;
-  box-shadow: 0 4px 15px rgba(99, 102, 241, 0.25);
+  transition: all 0.2s;
 }
 .new-chat-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.38);
+  background: #4338ca;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
 }
 
 .toggle-sidebar-btn {

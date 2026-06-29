@@ -34,21 +34,34 @@ const agentList = computed(() => {
       ...data,
       successRate: data.calls > 0 ? Math.round((data.successes / data.calls) * 100) : 0,
       avgMsFormatted: data.avgMs > 1000 ? (data.avgMs / 1000).toFixed(1) + 's' : data.avgMs + 'ms',
+      totalTokensFormatted: formatTokens((data.inputTokens || 0) + (data.outputTokens || 0)),
+      totalCostFormatted: (data.totalCost || 0).toFixed(4)
     }))
     .sort((a, b) => b.calls - a.calls)
 })
+
+const formatTokens = (t) => {
+  if (!t) return '0'
+  if (t > 1000000) return (t / 1000000).toFixed(2) + 'M'
+  if (t > 1000) return (t / 1000).toFixed(1) + 'k'
+  return t.toString()
+}
 
 // 今日统计
 const todayStats = computed(() => {
   const today = new Date().toISOString().slice(0, 10)
   const todayData = metrics.value.daily?.[today] || {}
   let totalCalls = 0, totalSuccess = 0, totalFail = 0, totalMs = 0, totalFileChanges = 0
+  let inputTokens = 0, outputTokens = 0, totalCost = 0
   for (const d of Object.values(todayData)) {
     totalCalls += d.calls
     totalSuccess += d.successes
     totalFail += d.failures
     totalMs += d.totalMs
     totalFileChanges += d.totalFileChanges || 0
+    inputTokens += d.inputTokens || 0
+    outputTokens += d.outputTokens || 0
+    totalCost += d.totalCost || 0
   }
   return {
     calls: totalCalls,
@@ -56,7 +69,31 @@ const todayStats = computed(() => {
     fail: totalFail,
     fileChanges: totalFileChanges,
     avgMs: totalCalls > 0 ? Math.round(totalMs / totalCalls) : 0,
-    successRate: totalCalls > 0 ? Math.round((totalSuccess / totalCalls) * 100) : 0
+    successRate: totalCalls > 0 ? Math.round((totalSuccess / totalCalls) * 100) : 0,
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    totalTokensFormatted: formatTokens(inputTokens + outputTokens),
+    totalCost,
+    totalCostFormatted: totalCost.toFixed(4)
+  }
+})
+
+// 总计成本
+const allTimeStats = computed(() => {
+  let inputTokens = 0, outputTokens = 0, totalCost = 0
+  for (const a of Object.values(metrics.value.agents || {})) {
+    inputTokens += a.inputTokens || 0
+    outputTokens += a.outputTokens || 0
+    totalCost += a.totalCost || 0
+  }
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    totalTokensFormatted: formatTokens(inputTokens + outputTokens),
+    totalCost,
+    totalCostFormatted: totalCost.toFixed(4)
   }
 })
 
@@ -224,6 +261,29 @@ onUnmounted(() => {
         <div class="stat-value">{{ todayStats.fileChanges }}</div>
         <div class="stat-label">代码文件变更</div>
         <div class="glow-bg"></div>
+      </div>
+      <div class="stat-card stat-cyan">
+        <div class="stat-icon-wrapper">🪙</div>
+        <div class="stat-value">{{ todayStats.totalTokensFormatted }}</div>
+        <div class="stat-label">今日 Token 消耗</div>
+        <div class="glow-bg"></div>
+      </div>
+      <div class="stat-card stat-gold">
+        <div class="stat-icon-wrapper">💰</div>
+        <div class="stat-value">¥{{ todayStats.totalCostFormatted }}</div>
+        <div class="stat-label">今日预计账单</div>
+        <div class="glow-bg"></div>
+      </div>
+    </div>
+
+    <!-- 累计成本账单摘要 -->
+    <div class="cost-summary-card">
+      <div class="cs-content">
+        <div class="cs-icon">💳</div>
+        <div class="cs-text">
+          <div class="cs-title">平台累计总账单</div>
+          <div class="cs-val">¥{{ allTimeStats.totalCostFormatted }} <span class="cs-sub">(共消耗 {{ allTimeStats.totalTokensFormatted }} Tokens)</span></div>
+        </div>
       </div>
     </div>
 
@@ -423,6 +483,20 @@ onUnmounted(() => {
                     <span class="lbl">上次变更</span>
                   </div>
                 </div>
+                <div class="matrix-item">
+                  <span class="icon text-cyan">🪙</span>
+                  <div class="info">
+                    <span class="val">{{ agent.totalTokensFormatted }}</span>
+                    <span class="lbl">总计 Token</span>
+                  </div>
+                </div>
+                <div class="matrix-item">
+                  <span class="icon text-gold">💰</span>
+                  <div class="info">
+                    <span class="val">¥{{ agent.totalCostFormatted }}</span>
+                    <span class="lbl">累计成本</span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -444,7 +518,7 @@ onUnmounted(() => {
 /* 1. KPI 发光卡片 */
 .stats-row { 
   display: grid; 
-  grid-template-columns: repeat(5, 1fr); 
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); 
   gap: 14px; 
   margin-bottom: 24px; 
 }
@@ -512,6 +586,41 @@ onUnmounted(() => {
 .stat-purple .glow-bg { background: #a855f7; }
 .stat-red .glow-bg { background: #f43f5e; }
 .stat-orange .glow-bg { background: #f97316; }
+.stat-cyan .glow-bg { background: #06b6d4; }
+.stat-gold .glow-bg { background: #eab308; }
+
+.stat-cyan:hover { border-color: rgba(6, 182, 212, 0.25); }
+.stat-gold:hover { border-color: rgba(234, 179, 8, 0.25); }
+
+/* 累计账单摘要卡片 */
+.cost-summary-card {
+  margin-bottom: 24px;
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.3), rgba(15, 23, 42, 0.5));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+[data-theme="light"] .cost-summary-card {
+  background: linear-gradient(135deg, rgba(248, 250, 252, 0.7), rgba(241, 245, 249, 0.9));
+  border-color: rgba(0, 0, 0, 0.05);
+}
+.cs-content {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.cs-icon {
+  font-size: 28px;
+  background: rgba(234, 179, 8, 0.15);
+  padding: 10px;
+  border-radius: 50%;
+  color: #eab308;
+}
+.cs-text { display: flex; flex-direction: column; }
+.cs-title { font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 600; }
+.cs-val { font-size: 22px; font-weight: 800; font-family: 'Orbitron', monospace; color: var(--text-primary); }
+.cs-sub { font-size: 13px; font-weight: 500; color: var(--text-muted); margin-left: 8px; font-family: -apple-system, sans-serif; }
+
 
 /* 2. 系统整体健康卡 */
 .health-card {

@@ -63,7 +63,25 @@ const weatherIcon = computed(() => {
   else if (w.includes('风') || w.includes('wind') || w.includes('gale')) code = '504'
   
   if (code === '999') return null
-  return `https://a.hecdn.net/img/common/icon/202106d/${code}.png`
+  return `https://icons.qweather.com/assets/icons/${code}.svg`
+})
+
+const weatherIconError = ref(false)
+const weatherEmoji = computed(() => {
+  const w = currentWeather.value.toLowerCase()
+  if (w.includes('晴') || w.includes('sun') || w.includes('clear')) return '☀️'
+  if (w.includes('多云') || w.includes('partly')) return '⛅'
+  if (w.includes('阴') || w.includes('overcast') || w.includes('cloud')) return '☁️'
+  if (w.includes('雷') || w.includes('storm')) return '⛈️'
+  if (w.includes('雨') || w.includes('rain') || w.includes('shower')) return '🌧️'
+  if (w.includes('雪') || w.includes('snow')) return '❄️'
+  if (w.includes('雾') || w.includes('fog')) return '🌫️'
+  if (w.includes('风') || w.includes('wind')) return '💨'
+  return '🌡️'
+})
+
+watch(currentWeather, () => {
+  weatherIconError.value = false
 })
 const floatingComments = ref([])
 
@@ -192,26 +210,15 @@ const nextRecommendTrack = computed(() => {
   return preselectedNextTrack.value
 })
 
-const avatars = [
-  '/anime_covers/anime_1.png',
-  '/anime_covers/anime_2.png',
-  '/anime_covers/anime_3.png',
-  '/anime_covers/anime_4.png',
-  '/anime_covers/anime_5.png',
-  '/anime_covers/anime_6.png',
-  '/anime_covers/anime_7.png',
-  '/anime_covers/anime_8.png'
-]
-
 let lastTrackIndex = 0
 const addBubbleComment = (text, type = 'lyric') => {
   if (!text || !text.trim()) return
   if (floatingComments.value.some(c => c.text === text)) return
-  // 限制最大漂浮评论气泡数量，避免重叠拥挤
   if (floatingComments.value.length >= 4) return
-  
+
   const id = Date.now() + Math.random()
-  const avatar = avatars[Math.floor(Math.random() * avatars.length)]
+  const randomIdx = Math.floor(Math.random() * 4) + 1
+  const avatar = `/anime_covers/anime_${randomIdx}.png`
   const track = lastTrackIndex
   lastTrackIndex = (lastTrackIndex + 1) % 5 // 5 条轨道
   const y = 12 + track * 15 + Math.random() * 3 // 分轨定位，适应高度
@@ -270,7 +277,7 @@ const coverStyle = computed(() => {
 const ambientBgStyle = computed(() => {
   if (currentTrack.value?.pic) {
     return {
-      backgroundImage: `linear-gradient(to bottom, rgba(10, 8, 24, 0.35), rgba(10, 8, 24, 0.8)), url(${currentTrack.value.pic})`,
+      backgroundImage: `linear-gradient(to bottom, rgba(10, 8, 24, 0.1), rgba(10, 8, 24, 0.3)), url(${currentTrack.value.pic})`,
       backgroundPosition: 'center',
       backgroundSize: 'cover',
       backgroundRepeat: 'no-repeat',
@@ -646,6 +653,9 @@ const loadTracks = async () => {
     tracks.value = data.tracks || []
     playlist.value = tracks.value
     updatePreselectedTrack()
+    if (playlist.value.length > 0 && currentIndex.value === -1) {
+      currentIndex.value = 0
+    }
   } catch {}
 }
 
@@ -752,7 +762,12 @@ const togglePlay = () => {
     isPlaying.value = false
     notifyMusicPetIdle(`已暂停：${formatTrackLabel(currentTrack.value)}`)
   } else {
-    startAudioPlayback(currentTrack.value)
+    const currentSrc = audioEl.value.src || ''
+    if (!currentSrc || !currentSrc.includes('/api/music/stream')) {
+      play(currentTrack.value)
+    } else {
+      startAudioPlayback(currentTrack.value)
+    }
   }
 }
 
@@ -1327,7 +1342,7 @@ const sendAgentMessage = async () => {
     : mode.value === 'netease'
       ? `{"command":"curl -s 'https://music.163.com/api/search/get/web?s=${encodeURIComponent(msg)}&type=1'"}`
       : `{"command":"find_local_tracks --query '${msg}' --library '~/.cc-connect/music'"}`;
-  pushAgentMessage({ role: 'bash', content: mockBashCmd, time })
+  // pushAgentMessage({ role: 'bash', content: mockBashCmd, time })
   
   agentLoading.value = true
   notifyMusicPet(isPlaying.value ? 'juggling' : 'thinking', isPlaying.value ? `正在播放：${formatTrackLabel(currentTrack.value)}` : '音乐助手正在找歌', currentTrack.value)
@@ -1412,16 +1427,16 @@ const sendToClaudeAgent = async (msg) => {
       notifyMusicPetSpeech('', { role: 'assistant', mode: 'append', final: true, source: 'music-chat' })
     }
     const playResult = await autoplayFromAgentRequest(msg)
-    if (playResult) {
-      pushAgentMessage({
-        role: 'system',
-        content: playResult.success
-          ? `🎵 已按“本地优先，B站兜底”播放：${playResult.title}（${playResult.source}）`
-          : `❌ 自动播放失败：${playResult.error || '未找到歌曲'}`,
-        time: formatTimeHHMMSS()
-      })
-      scrollChat()
-    }
+    // if (playResult) {
+    //   pushAgentMessage({
+    //     role: 'system',
+    //     content: playResult.success
+    //       ? `🎵 已按“本地优先，B站兜底”播放：${playResult.title}（${playResult.source}）`
+    //       : `❌ 自动播放失败：${playResult.error || '未找到歌曲'}`,
+    //     time: formatTimeHHMMSS()
+    //   })
+    //   scrollChat()
+    // }
   } catch {
     const anchor = captureAgentChatScroll()
     setAgentMessageContent(agentMsg, '❌ 连接失败，请检查系统设置里的统一大模型配置')
@@ -1454,16 +1469,16 @@ const sendToSimpleAgent = async (msg) => {
       notifyMusicPetSpeech(replyText, { role: 'assistant', mode: 'replace', final: true, source: 'music-chat' })
       if (data.intent === 'play') {
         const result = await autoplayFromAgentRequest(msg)
-        if (result) {
-          pushAgentMessage({
-            role: 'system',
-            content: result.success
-              ? `🎵 已按“本地优先，B站兜底”播放：${result.title}（${result.source}）`
-              : `❌ 自动播放失败：${result.error || '未找到歌曲'}`,
-            time: formatTimeHHMMSS()
-          })
-          scrollChat()
-        }
+        // if (result) {
+        //   pushAgentMessage({
+        //     role: 'system',
+        //     content: result.success
+        //       ? `🎵 已按“本地优先，B站兜底”播放：${result.title}（${result.source}）`
+        //       : `❌ 自动播放失败：${result.error || '未找到歌曲'}`,
+        //     time: formatTimeHHMMSS()
+        //   })
+        //   scrollChat()
+        // }
       }
     } else {
       const errorText = `出错: ${data.error}`
@@ -1659,7 +1674,7 @@ const getMessageResults = (msg) => {
 <template>
   <div class="aura-player scanline-overlay dot-matrix-bg" :class="{ 'is-playing': isPlaying }">
     <!-- 清晰音乐封面大背景层（最底层，不模糊） -->
-    <div class="music-cover-bg" :style="currentTrack?.pic ? { backgroundImage: `linear-gradient(to right, #090616 15%, rgba(9, 6, 22, 0.75) 50%, rgba(9, 6, 22, 0.3) 100%), linear-gradient(to bottom, rgba(9, 6, 22, 0) 70%, #090616 100%), url(${currentTrack.pic})` } : {}"></div>
+    <div class="music-cover-bg" :style="currentTrack?.pic ? { backgroundImage: `linear-gradient(to right, #090616 5%, rgba(9, 6, 22, 0.6) 30%, rgba(9, 6, 22, 0.1) 100%), linear-gradient(to bottom, rgba(9, 6, 22, 0) 80%, #090616 100%), url(${currentTrack.pic})` } : {}"></div>
 
     <!-- 沉浸式动态模糊流光大背景层 -->
     <div class="ambient-glow-background" :style="ambientBgStyle"></div>
@@ -1701,9 +1716,9 @@ const getMessageResults = (msg) => {
             </div>
           </div>
           <div class="header-widget-card">
-            <span class="widget-icon">
-              <img v-if="weatherIcon" :src="weatherIcon" style="width: 24px; height: 24px; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));" />
-              <span v-else>🌡️</span>
+            <span class="widget-icon" style="display: flex; align-items: center; justify-content: center;">
+              <img v-if="weatherIcon && !weatherIconError" :src="weatherIcon" @error="weatherIconError = true" style="width: 24px; height: 24px; object-fit: contain; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));" />
+              <span v-else style="font-size: 20px; line-height: 1;">{{ weatherEmoji }}</span>
             </span>
             <div class="widget-text-group">
               <span class="widget-label">天气</span>
@@ -1748,7 +1763,7 @@ const getMessageResults = (msg) => {
       <div class="aura-body aura-os-grid">
         
         <!-- 1. 氛围歌词漂浮气泡墙 (左上) -->
-        <div class="aura-card atmosphere-card" :style="currentTrack?.pic ? { backgroundImage: `linear-gradient(to bottom, rgba(10, 8, 24, 0.25), rgba(10, 8, 24, 0.75)), url(${currentTrack.pic})` } : {}">
+        <div class="aura-card atmosphere-card" :style="currentTrack?.pic ? { backgroundImage: `linear-gradient(to bottom, rgba(10, 8, 24, 0.1), rgba(10, 8, 24, 0.4)), url(${currentTrack.pic})` } : {}">
           <div class="atmosphere-header">
             <div class="card-header-status">
               <span class="pulse-dot-green"></span>
@@ -2169,7 +2184,7 @@ const getMessageResults = (msg) => {
   background-size: contain;
   background-position: right center;
   background-repeat: no-repeat;
-  opacity: 0.55;
+  opacity: 0.95;
   transition: background-image 1.2s ease;
 }
 
@@ -2633,9 +2648,12 @@ const getMessageResults = (msg) => {
   align-items: center;
   justify-content: center;
   box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.05), -8px 8px 24px rgba(0,0,0,0.6);
+  animation: rotate-disc 30s linear infinite;
+  animation-play-state: paused;
+  transition: animation-play-state 0.3s ease;
 }
 .vinyl-record.playing {
-  animation: rotate-disc 30s linear infinite;
+  animation-play-state: running;
 }
 .vinyl-record .vinyl-cover {
   width: 64px;

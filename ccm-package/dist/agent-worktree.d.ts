@@ -6,6 +6,8 @@ export interface PreparedAgentWorkDir {
     originalWorkDir: string;
     worktreePath?: string;
     worktreeBranch?: string;
+    baseHead?: string;
+    baseBranch?: string;
     reused?: boolean;
     warning?: string;
 }
@@ -14,6 +16,8 @@ export declare function createChildAgentWorktree(baseWorkDir: string, options?: 
     worktreePath: string;
     worktreeBranch: string;
     reused: boolean;
+    baseHead: string;
+    baseBranch: string;
 };
 export declare function prepareChildAgentWorkDir(baseWorkDir: string, options?: any): PreparedAgentWorkDir;
 export declare function buildChildAgentWorktreeNotice(prepared: PreparedAgentWorkDir): string;

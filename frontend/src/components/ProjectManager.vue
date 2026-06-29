@@ -68,6 +68,12 @@ const messages = ref([])
 const messagesEl = ref(null)
 const isMessagesPinnedToBottom = ref(true)
 const chatInput = ref('')
+const userMessages = computed(() => {
+  return messages.value
+    .map((m, idx) => ({ ...m, originalIndex: idx }))
+    .filter(m => m.role === 'user')
+})
+
 const chatFiles = ref([])
 const chatFileInput = ref(null)
 const diffViewer = ref({ visible: false, file: null })
@@ -279,11 +285,14 @@ const submitCreate = async () => {
 // 显示编辑弹窗
 const openEditModal = (project) => {
   editProject.value = project
+  const platformMap = { '飞书': 'feishu', '微信': 'weixin', 'Lark': 'lark', 'Telegram': 'telegram', 'Slack': 'slack', 'Discord': 'discord' }
+  const rawPlatform = project.platform || 'feishu'
+  const mappedPlatform = platformMap[rawPlatform] || rawPlatform
   form.value = {
     name: project.name,
     work_dir: project.work_dir || '',
     agent: project.agent || 'claudecode',
-    platform: project.platform || 'feishu'
+    platform: mappedPlatform
   }
   showEdit.value = true
 }
@@ -1524,6 +1533,18 @@ const handleKeydown = (e) => {
             </div>
           </template>
         </div>
+        <!-- 消息锚点导航条 -->
+        <div v-if="userMessages.length > 1" class="msg-navigator">
+          <div 
+            v-for="msg in userMessages" 
+            :key="msg.originalIndex" 
+            class="navigator-dot"
+            @click="scrollToMessage(msg.originalIndex)"
+            :title="msg.content.slice(0, 30) + (msg.content.length > 30 ? '...' : '')"
+          >
+            <span class="dot-bar"></span>
+          </div>
+        </div>
         <div class="chat-bar">
           <input ref="chatFileInput" type="file" multiple class="hidden-file-input" @change="onChatFilesSelected">
           <button class="btn btn-outline attach-btn" title="添加附件" @click="chooseChatFiles">📎</button>
@@ -1599,50 +1620,15 @@ const handleKeydown = (e) => {
           </div>
           <div style="display:flex;align-items:center;gap:12px">
             <input v-if="diffViewer.file?.diff?.available" v-model="diffSearchQuery" class="diff-search-input" placeholder="在 diff 中搜索..." />
-            <div class="diff-mode-toggle" v-if="diffViewer.file?.diff?.available">
-              <button class="btn btn-outline btn-sm" :class="{ active: modalDiffMode === 'unified' }" @click="modalDiffMode = 'unified'">单栏对比</button>
-              <button class="btn btn-outline btn-sm" style="margin-left: 8px;" :class="{ active: modalDiffMode === 'split' }" @click="modalDiffMode = 'split'">分栏对比</button>
-            </div>
           </div>
         </div>
         <div v-if="diffViewer.file?.diff?.available" class="diff-viewer">
-          <!-- Split Mode -->
-          <template v-if="modalDiffMode === 'split'">
-            <div v-for="(hunk, hi) in parseSplitDiff(diffViewer.file?.diff?.diff)" :key="hi" class="hunk">
-              <div class="hunk-header">@@{{ hunk.header.split('@@')[1] || hunk.header }}@@</div>
-              <div class="split-diff-container">
-                <!-- 左侧 旧代码 -->
-                <div class="split-left-pane">
-                  <div v-for="(row, ri) in hunk.lines" :key="ri" 
-                    class="diff-line split-line-row" 
-                    :class="row.left.type === 'remove' ? 'remove' : row.left.type === 'context' ? 'context' : 'diff-empty-line'">
-                    <span class="diff-line-no">{{ row.left.lineNum }}</span>
-                    <span class="diff-sign">{{ row.left.type === 'remove' ? '-' : ' ' }}</span>
-                    <pre class="diff-text"><code v-html="row.left.isHtml ? highlightSearch(row.left.content, diffSearchQuery) : highlightSearch(escapeHtml(row.left.content), diffSearchQuery)"></code></pre>
-                  </div>
-                </div>
-                <!-- 右侧 新代码 -->
-                <div class="split-right-pane">
-                  <div v-for="(row, ri) in hunk.lines" :key="ri" 
-                    class="diff-line split-line-row" 
-                    :class="row.right.type === 'add' ? 'add' : row.right.type === 'context' ? 'context' : 'diff-empty-line'">
-                    <span class="diff-line-no">{{ row.right.lineNum }}</span>
-                    <span class="diff-sign">{{ row.right.type === 'add' ? '+' : ' ' }}</span>
-                    <pre class="diff-text"><code v-html="row.right.isHtml ? highlightSearch(row.right.content, diffSearchQuery) : highlightSearch(escapeHtml(row.right.content), diffSearchQuery)"></code></pre>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </template>
-          <!-- Unified Mode -->
-          <template v-else>
-            <div v-for="(line, index) in processModalUnifiedLines" :key="index" 
-              class="diff-line" 
-              :class="{ 'diff-add': line.type === 'add', 'diff-remove': line.type === 'remove', 'diff-context': line.type === 'context', 'diff-meta': line.type === 'meta' }">
-              <span class="diff-sign">{{ line.sign }}</span>
-              <span class="diff-text" v-html="highlightSearch(line.htmlContent, diffSearchQuery)"></span>
-            </div>
-          </template>
+          <div v-for="(line, index) in processModalUnifiedLines" :key="index" 
+            class="diff-line" 
+            :class="{ 'diff-add': line.type === 'add', 'diff-remove': line.type === 'remove', 'diff-context': line.type === 'context', 'diff-meta': line.type === 'meta' }">
+            <span class="diff-sign">{{ line.sign }}</span>
+            <span class="diff-text" v-html="highlightSearch(line.htmlContent, diffSearchQuery)"></span>
+          </div>
         </div>
         <div v-else class="diff-empty">
           {{ diffViewer.file?.diff?.reason || '没有可展示的文本差异' }}
@@ -1707,6 +1693,16 @@ const handleKeydown = (e) => {
           <select v-model="form.agent">
             <option v-for="agent in agentOptions" :key="agent.type" :value="agent.type">{{ agent.name }}</option>
           </select>
+        </div>
+        <div class="form-group">
+          <label>平台</label>
+          <select v-model="form.platform">
+            <option v-for="p in platforms" :key="p.value" :value="p.value">{{ p.label }}</option>
+          </select>
+        </div>
+        <div v-if="form.platform === 'feishu' || form.platform === 'lark'" style="margin-bottom:16px">
+          <button class="btn btn-outline" @click="openFeishuQr()" style="width:100%">🤖 扫码创建飞书机器人</button>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:4px;text-align:center">自动配置飞书机器人并获取凭证</div>
         </div>
         <div class="form-actions">
           <button class="btn btn-cancel" @click="showEdit = false">取消</button>
@@ -2293,6 +2289,7 @@ const handleKeydown = (e) => {
   flex-direction: column;
   overflow: hidden;
   background: transparent;
+  position: relative;
 }
 
 .content-header {
@@ -3303,5 +3300,83 @@ const handleKeydown = (e) => {
 .work-event.ok .work-event-kind { background: rgba(34, 197, 94, 0.12); color: var(--accent-green); }
 .work-event.fail .work-event-kind { background: rgba(239, 68, 68, 0.12); color: var(--accent-red); }
 .work-event.output .work-event-kind { background: rgba(59, 130, 246, 0.1); color: var(--accent-blue); }
+
+/* 消息节点锚点导航条 */
+.msg-navigator {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 4px;
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 20px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
+  z-index: 100;
+  max-height: 70%;
+  overflow-y: auto;
+}
+
+:global([data-theme="dark"]) .msg-navigator {
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.navigator-dot {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  position: relative;
+}
+
+.dot-bar {
+  width: 8px;
+  height: 2px;
+  background: var(--text-muted);
+  border-radius: 1px;
+  opacity: 0.5;
+  transition: all 0.2s;
+}
+
+.navigator-dot:hover .dot-bar {
+  width: 14px;
+  height: 3px;
+  background: var(--accent-blue);
+  opacity: 1;
+}
+
+/* Tooltip 悬停显示用户消息 */
+.navigator-dot::after {
+  content: attr(title);
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%) scale(0.85);
+  background: rgba(15, 23, 42, 0.9);
+  color: #ffffff;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+  transform-origin: right center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.navigator-dot:hover::after {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+}
 </style>
 

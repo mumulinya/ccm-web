@@ -692,6 +692,8 @@ onUnmounted(() => {
   font-weight: 700; 
   color: var(--text-primary); 
   font-family: 'Orbitron', monospace; 
+  text-shadow: 0 0 10px rgba(59, 130, 246, 0.18);
+  letter-spacing: -0.5px;
 }
 .text-yellow { color: var(--accent-yellow) !important; }
 .text-purple { color: var(--accent-purple) !important; }
@@ -815,7 +817,12 @@ onUnmounted(() => {
 }
 .agent-card.running {
   background: rgba(255, 255, 255, 0.7);
-  border-color: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.25);
+  animation: agent-running-glow 2s infinite ease-in-out;
+}
+@keyframes agent-running-glow {
+  0%, 100% { border-color: rgba(34, 197, 94, 0.25); box-shadow: 0 0 4px rgba(34, 197, 94, 0.05); }
+  50% { border-color: rgba(34, 197, 94, 0.55); box-shadow: 0 0 16px rgba(34, 197, 94, 0.15); }
 }
 .agent-card.working {
   border-color: rgba(234, 179, 8, 0.25);

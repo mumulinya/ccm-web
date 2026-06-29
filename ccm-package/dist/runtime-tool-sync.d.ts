@@ -24,6 +24,16 @@ export interface RuntimeToolSyncAudit {
     warnings: string[];
     timestamp: string;
 }
+export declare function getRuntimeExecutionEnv(agentType: string): Record<string, string>;
+export declare function runRuntimeToolSyncSelfTest(): {
+    pass: boolean;
+    checks: {
+        unifiedGatewayConfigured: boolean;
+        webSearchDisabled: boolean;
+        secretUsesEnvironment: boolean;
+        secretNotPersisted: boolean;
+    };
+};
 export declare function syncRuntimeTools(workDir: string, agentType: string, allowedTools: any): RuntimeToolSyncAudit;
 export declare function buildRuntimeToolSyncPrompt(audit: RuntimeToolSyncAudit): string;
 export declare function recordRuntimeToolSyncAudit(audit: RuntimeToolSyncAudit, projectName?: string, groupId?: string): void;

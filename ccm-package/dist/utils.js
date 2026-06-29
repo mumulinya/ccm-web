@@ -68,6 +68,7 @@ exports.buildFileDiff = buildFileDiff;
 exports.createFileChangeSnapshot = createFileChangeSnapshot;
 exports.getFileChanges = getFileChanges;
 exports.describeFileStatus = describeFileStatus;
+exports.calculateTokensAndCost = calculateTokensAndCost;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
@@ -753,5 +754,11 @@ function describeFileStatus(statusCode, before = null) {
     if (code.includes("M"))
         return { statusText: "修改", statusColor: "#facc15", statusKind: "modified" };
     return { statusText: compact || "变更", statusColor: "#94a3b8", statusKind: "changed" };
+}
+function calculateTokensAndCost(inputText, outputText) {
+    const inputTokens = Math.ceil((inputText?.length || 0) / 2.5);
+    const outputTokens = Math.ceil((outputText?.length || 0) / 2.5);
+    const totalCost = ((inputTokens / 1000000) * 3 + (outputTokens / 1000000) * 15) * 7.2;
+    return { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens, totalCost };
 }
 //# sourceMappingURL=utils.js.map

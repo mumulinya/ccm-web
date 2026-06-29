@@ -36,9 +36,10 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
-const child_process_1 = require("child_process");
 const utils_1 = require("./utils");
 const agent_runtime_1 = require("./agent-runtime");
+const runtime_tool_sync_1 = require("./runtime-tool-sync");
+const execution_kernel_1 = require("./execution-kernel");
 const AGENT_RUNNER_DIR = path.join(utils_1.CCM_DIR, "agent-runner");
 const REQUESTS_DIR = path.join(AGENT_RUNNER_DIR, "requests");
 const RESULTS_DIR = path.join(AGENT_RUNNER_DIR, "results");
@@ -118,8 +119,8 @@ function buildCliAllowedTools(request) {
     });
     return Array.from(new Set(rules));
 }
-function runProjectVerificationCommands(projectName, workDir, timeoutMs) {
-    const commands = getProjectVerificationCommands(projectName);
+async function runProjectVerificationCommands(projectName, workDir, timeoutMs, request) {
+    const commands = getProjectVerificationCommands(projectName).filter(execution_kernel_1.isSafeVerificationCommand);
     const results = [];
     const verification = [];
     const failed = [];
@@ -129,19 +130,21 @@ function runProjectVerificationCommands(projectName, workDir, timeoutMs) {
     const perCommandTimeout = Math.max(30000, Math.min(timeoutMs || 300000, 180000));
     for (const command of commands) {
         try {
-            const output = (0, child_process_1.execSync)(command, {
+            const managed = await (0, execution_kernel_1.runManagedCommand)({
+                taskId: String(request.taskId || request.id),
+                executionId: String(request.executionId || ""),
+                command,
                 cwd: workDir,
-                encoding: "utf-8",
-                shell: true,
-                timeout: perCommandTimeout,
-                maxBuffer: 5 * 1024 * 1024,
+                timeoutMs: perCommandTimeout,
+                maxOutputBytes: 5 * 1024 * 1024,
+                env: (0, execution_kernel_1.sanitizeExecutionEnv)((0, runtime_tool_sync_1.getRuntimeExecutionEnv)(request.agentType || "claudecode"), request.envAllowlist || []),
             });
-            const item = { command, exitCode: 0, status: "passed", output: String(output || "").slice(-4000) };
+            const item = { command, exitCode: 0, status: "passed", output: String(managed.stdout || "").slice(-4000) };
             results.push(item);
             verification.push(`${command} passed by external runner (exit 0)`);
         }
         catch (error) {
-            const exitCode = error?.status ?? null;
+            const exitCode = error?.exitCode ?? error?.status ?? null;
             const output = String(error?.stdout || error?.stderr || error?.message || error || "").slice(-4000);
             const item = { command, exitCode, status: "failed", output };
             results.push(item);
@@ -163,11 +166,27 @@ function appendRunnerVerificationOutput(output, runnerVerification) {
 }
 async function runRequest(file) {
     const request = readJson(file);
-    if (!request?.id || request.status === "done" || request.status === "running")
+    if (!request?.id || ["done", "running", "failed", "cancelled", "expired"].includes(request.status))
         return false;
+    const createdAt = Date.parse(String(request.created_at || request.createdAt || ""));
+    const requestAgeMs = Number.isFinite(createdAt) ? Date.now() - createdAt : 0;
+    const staleAfterMs = Math.max(10 * 60 * 1000, Number(request.timeoutMs || 300000) + 60 * 1000);
+    if (request.status === "pending" && requestAgeMs > staleAfterMs) {
+        markRequest(file, { status: "expired", completed_at: new Date().toISOString(), error: "外部 Runner 请求已超过调用方等待窗口，安全跳过，避免恢复历史任务" });
+        return true;
+    }
     const resultFile = path.join(RESULTS_DIR, `${request.id}.json`);
     if (fs.existsSync(resultFile))
         return false;
+    const taskId = String(request.taskId || request.id);
+    const executionId = String(request.executionId || "");
+    if (request.status === "cancel_requested" || (0, execution_kernel_1.isTaskCancellationRequested)(taskId)) {
+        writeJsonAtomic(resultFile, { id: request.id, success: false, cancelled: true, error: request.cancel_reason || "任务已取消", completed_at: new Date().toISOString() });
+        markRequest(file, { status: "cancelled", completed_at: new Date().toISOString() });
+        if (executionId)
+            (0, execution_kernel_1.transitionExecution)(executionId, "cancelled", request.cancel_reason || "任务已取消");
+        return true;
+    }
     markRequest(file, { status: "running", runner_pid: process.pid, started_at: new Date().toISOString() });
     writeHeartbeat("running", `${request.projectName || "agent"} ${request.id}`);
     const msgFile = path.join(utils_1.UPLOAD_DIR, `_runner_${request.id}.txt`);
@@ -179,22 +198,31 @@ async function runRequest(file) {
     const cliAllowedTools = buildCliAllowedTools(request);
     try {
         fs.writeFileSync(msgFile, String(request.message || ""), "utf-8");
-        const agentOutput = (0, child_process_1.execSync)((0, agent_runtime_1.buildAgentCommand)(agentType, msgFile, { cliAllowedTools, mcpConfigPath: String(request.mcpConfigPath || "") }), {
-            encoding: "utf-8",
-            timeout: timeoutMs,
+        const managed = await (0, execution_kernel_1.runManagedCommand)({
+            taskId,
+            executionId,
+            command: (0, agent_runtime_1.buildAgentCommand)(agentType, msgFile, {
+                cliAllowedTools,
+                mcpConfigPath: String(request.mcpConfigPath || ""),
+                ...(request.agentSession || {}),
+            }),
             cwd: workDir,
-            shell: true,
-            maxBuffer: 10 * 1024 * 1024,
-        }).trim();
+            timeoutMs,
+            maxOutputBytes: Number(request.maxOutputBytes || 2 * 1024 * 1024),
+            env: (0, execution_kernel_1.sanitizeExecutionEnv)((0, runtime_tool_sync_1.getRuntimeExecutionEnv)(agentType), request.envAllowlist || []),
+        });
+        const normalizedOutput = (0, agent_runtime_1.normalizeAgentCommandOutput)(agentType, String(managed.stdout || "").trim());
+        const agentOutput = (0, execution_kernel_1.persistBoundedOutput)(taskId, normalizedOutput.output, Number(request.maxContextOutputBytes || 256 * 1024)).content;
         const runnerVerification = isAgentProbeRequest(request)
             ? { ccm_runner_verification: true, status: "skipped", verification: [], failed: [], results: [] }
-            : runProjectVerificationCommands(request.projectName || "", workDir, timeoutMs);
+            : await runProjectVerificationCommands(request.projectName || "", workDir, timeoutMs, request);
         const output = appendRunnerVerificationOutput(agentOutput, runnerVerification);
         const fileChanges = (0, utils_1.getFileChanges)(request.projectName || "", changeSnapshot);
         writeJsonAtomic(resultFile, {
             id: request.id,
             success: true,
             output,
+            nativeSessionId: normalizedOutput.sessionId || request.agentSession?.sessionId || "",
             fileChanges,
             agentType,
             command: cliAllowedTools.length ? `${command} --allowed-tools ${cliAllowedTools.join(",")}` : command,
@@ -207,13 +235,15 @@ async function runRequest(file) {
         markRequest(file, { status: "done", completed_at: new Date().toISOString() });
     }
     catch (error) {
-        const output = error?.killed || error?.signal === "SIGTERM"
-            ? "Agent 响应超时"
-            : String(error?.stderr || error?.message || error || "").slice(0, 4000);
+        const failure = (0, execution_kernel_1.classifyExecutionFailure)(error);
+        const cancelled = failure.failureClass === "cancelled";
+        const output = failure.failureClass === "timeout" ? "Agent 响应超时" : failure.message.slice(0, 4000);
         const fileChanges = (0, utils_1.getFileChanges)(request.projectName || "", changeSnapshot);
         writeJsonAtomic(resultFile, {
             id: request.id,
             success: false,
+            cancelled,
+            failure,
             error: output || "Agent Runner 执行失败",
             output,
             fileChanges,
@@ -225,7 +255,9 @@ async function runRequest(file) {
             runner: "node",
             completed_at: new Date().toISOString(),
         });
-        markRequest(file, { status: "failed", completed_at: new Date().toISOString(), error: output });
+        markRequest(file, { status: cancelled ? "cancelled" : "failed", completed_at: new Date().toISOString(), error: output });
+        if (executionId)
+            (0, execution_kernel_1.transitionExecution)(executionId, cancelled ? "cancelled" : "failed", output, { failure, failureClass: failure.failureClass });
     }
     finally {
         try {
@@ -257,6 +289,7 @@ async function runOnce() {
     return handled;
 }
 async function main() {
+    (0, utils_1.refreshEnvPath)();
     ensureDirs();
     const watch = process.argv.includes("--watch");
     console.log(`[agent-runner] ${watch ? "watching" : "running once"} ${REQUESTS_DIR}`);

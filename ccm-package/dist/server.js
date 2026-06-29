@@ -42,6 +42,7 @@ const child_process_1 = require("child_process");
 const tool_manager_1 = require("./tool-manager");
 const agent_runtime_1 = require("./agent-runtime");
 const runtime_tool_sync_1 = require("./runtime-tool-sync");
+const execution_kernel_1 = require("./execution-kernel");
 // 导入底座与持久层
 const utils_1 = require("./utils");
 const db_1 = require("./db");
@@ -56,6 +57,8 @@ const tools_1 = require("./modules/tools");
 const pets_1 = require("./modules/pets");
 const music_1 = require("./modules/music");
 const collaboration_1 = require("./modules/collaboration");
+const reliability_drills_1 = require("./reliability-drills");
+const soak_test_1 = require("./soak-test");
 const global_agent_1 = require("./modules/global-agent");
 const rag_1 = require("./modules/rag");
 const sessions_2 = require("./modules/sessions");
@@ -526,7 +529,7 @@ function isSpawnPermissionError(error) {
     const text = `${error?.code || ""} ${error?.message || ""} ${error?.stderr || ""}`;
     return /\bEPERM\b|spawnSync .* EPERM|spawn .* EPERM/i.test(text);
 }
-function createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools = null, mcpConfigPath = "") {
+function createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools = null, mcpConfigPath = "", agentSession = null, executionInfo = null) {
     ensureAgentRunnerDirs();
     const id = `ar_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const request = {
@@ -537,6 +540,9 @@ function createAgentRunnerRequest(projectName, message, workDir, agentType, time
         timeoutMs,
         allowedTools,
         mcpConfigPath,
+        agentSession: agentSession || null,
+        taskId: String(executionInfo?.taskId || ""),
+        executionId: String(executionInfo?.executionId || executionInfo?.taskId || ""),
         cliAllowedTools: buildAgentCliAllowedTools(projectName, message),
         message,
         status: "pending",
@@ -562,8 +568,10 @@ async function waitForAgentRunnerResult(resultFile, timeoutMs) {
     }
     throw new Error("外部 Agent Runner 等待超时；请运行 npm run agent-runner:ps 或 npm run agent-runner 启用外部执行通道");
 }
-async function callAgentViaExternalRunner(projectName, message, workDir, agentType, timeoutMs, allowedTools = null, mcpConfigPath = "") {
-    const request = createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools, mcpConfigPath);
+async function callAgentViaExternalRunner(projectName, message, workDir, agentType, timeoutMs, allowedTools = null, mcpConfigPath = "", agentSession = null, executionInfo = null) {
+    const request = createAgentRunnerRequest(projectName, message, workDir, agentType, timeoutMs, allowedTools, mcpConfigPath, agentSession, executionInfo);
+    if (executionInfo?.executionId)
+        (0, execution_kernel_1.registerExternalRunnerRequest)(executionInfo.executionId, request.id);
     const result = await waitForAgentRunnerResult(request.resultFile, timeoutMs);
     if (!result?.success) {
         const label = result?.command || (0, agent_runtime_1.getAgentCommandLabel)(agentType);
@@ -571,7 +579,7 @@ async function callAgentViaExternalRunner(projectName, message, workDir, agentTy
         throw new Error(`[${projectName}] 外部 Agent Runner 执行 ${label} 失败${exitText}：${result?.error || result?.output || "未知错误"}`);
     }
     const output = await appendToolResults(String(result.output || "").trim(), allowedTools);
-    return { output, fileChanges: result.fileChanges || null, runnerRequestId: request.id };
+    return { output, fileChanges: result.fileChanges || null, runnerRequestId: request.id, nativeSessionId: result.nativeSessionId || "" };
 }
 async function appendToolResults(output, allowedTools = null) {
     const calls = tool_manager_1.toolManager.parseToolCalls(output);
@@ -599,20 +607,26 @@ async function callAgent(projectName, message, workDir, agentType, timeoutMs, wo
         fs.mkdirSync(utils_1.UPLOAD_DIR, { recursive: true });
     }
     fs.writeFileSync(tmpMsg, message, "utf-8");
-    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: workspaceTarget?.mcpConfigPath });
+    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: workspaceTarget?.mcpConfigPath, ...(workspaceTarget?.agentSession || {}) });
+    const taskId = String(workspaceTarget?.taskId || workspaceTarget?.executionId || `standalone-${projectName}-${Date.now()}`);
+    const executionId = String(workspaceTarget?.executionId || workspaceTarget?.taskId || "");
     try {
-        const result = (0, child_process_1.execSync)(cmd, {
-            encoding: "utf-8",
-            timeout: timeoutMs || 300000,
+        const managed = await (0, execution_kernel_1.runManagedCommand)({
+            taskId,
+            executionId,
+            command: cmd,
             cwd: safeCwd,
-            shell: true,
-            maxBuffer: 10 * 1024 * 1024,
+            timeoutMs: timeoutMs || 300000,
+            maxOutputBytes: Number(workspaceTarget?.maxOutputBytes || 2 * 1024 * 1024),
+            env: (0, execution_kernel_1.sanitizeExecutionEnv)((0, runtime_tool_sync_1.getRuntimeExecutionEnv)(agentType), workspaceTarget?.envAllowlist || []),
         });
         try {
             fs.unlinkSync(tmpMsg);
         }
         catch { }
-        const output = await appendToolResults(result.trim(), workspaceTarget?.allowedTools);
+        const normalized = (0, agent_runtime_1.normalizeAgentCommandOutput)(agentType, managed.stdout);
+        const bounded = (0, execution_kernel_1.persistBoundedOutput)(taskId, normalized.output, Number(workspaceTarget?.maxContextOutputBytes || 256 * 1024));
+        const output = await appendToolResults(bounded.content, workspaceTarget?.allowedTools);
         const fileChanges = (0, utils_1.getFileChanges)(projectName, changeSnapshot);
         (0, db_1.recordMetric)(projectName, {
             success: true,
@@ -631,7 +645,7 @@ async function callAgent(projectName, message, workDir, agentType, timeoutMs, wo
         catch { }
         if (isSpawnPermissionError(e)) {
             try {
-                const runner = await callAgentViaExternalRunner(projectName, message, workDir, agentType, timeoutMs, workspaceTarget?.allowedTools, workspaceTarget?.mcpConfigPath);
+                const runner = await callAgentViaExternalRunner(projectName, message, workDir, agentType, timeoutMs, workspaceTarget?.allowedTools, workspaceTarget?.mcpConfigPath, workspaceTarget?.agentSession, { taskId, executionId });
                 const fileChanges = runner.fileChanges || (0, utils_1.getFileChanges)(projectName, changeSnapshot);
                 (0, db_1.recordMetric)(projectName, {
                     success: true,
@@ -679,7 +693,9 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
         fs.mkdirSync(utils_1.UPLOAD_DIR, { recursive: true });
     }
     fs.writeFileSync(tmpMsg, message, "utf-8");
-    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: options.mcpConfigPath });
+    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: options.mcpConfigPath, ...(options.agentSession || {}) });
+    const taskId = String(options.taskId || options.executionId || `standalone-${projectName}-${Date.now()}`);
+    const executionId = String(options.executionId || options.taskId || "");
     const streamRes = options.res;
     const workEvents = Array.isArray(options.initialWorkEvents) ? options.initialWorkEvents.slice(-20) : [];
     const pushWorkEvent = (kind, text, extra = {}) => {
@@ -703,8 +719,10 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
     broadcastPetSpeech(projectName, { role: "status", text: `${projectName} 正在思考...`, source: "group" });
     return new Promise((resolve) => {
         let child = null;
+        let stopTracking = () => { };
         try {
-            child = (0, child_process_1.spawn)(cmd, [], { shell: true, cwd: safeCwd, stdio: ["pipe", "pipe", "pipe"] });
+            child = (0, child_process_1.spawn)(cmd, [], { shell: true, cwd: safeCwd, stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: (0, execution_kernel_1.sanitizeExecutionEnv)((0, runtime_tool_sync_1.getRuntimeExecutionEnv)(agentType), options.envAllowlist || []) });
+            stopTracking = (0, execution_kernel_1.trackManagedChildProcess)(taskId, executionId, child);
         }
         catch (spawnError) {
             if (!isSpawnPermissionError(spawnError)) {
@@ -716,7 +734,7 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             const runnerText = `🧩 ${projectName} 交给外部 Agent Runner 执行...`;
             pushWorkEvent("status", runnerText);
             writeSse(streamRes, { type: "status", text: runnerText, agent: projectName });
-            callAgentViaExternalRunner(projectName, message, workDir, agentType, options.timeoutMs || 300000, options.allowedTools, options.mcpConfigPath)
+            callAgentViaExternalRunner(projectName, message, workDir, agentType, options.timeoutMs || 300000, options.allowedTools, options.mcpConfigPath, options.agentSession, { taskId, executionId })
                 .then((runner) => {
                 const fileChanges = runner.fileChanges || (0, utils_1.getFileChanges)(projectName, changeSnapshot);
                 (0, db_1.recordMetric)(projectName, {
@@ -727,7 +745,7 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
                 try {
                     if (typeof options.onDone === "function") {
                         pushWorkEvent("done", "外部 Runner 执行完成", { final: true, fileChanges });
-                        options.onDone({ text: runner.output, fileChanges, isError: false, runnerRequestId: runner.runnerRequestId, workEvents });
+                        options.onDone({ text: runner.output, fileChanges, isError: false, runnerRequestId: runner.runnerRequestId, nativeSessionId: runner.nativeSessionId || "", workEvents });
                     }
                 }
                 catch { }
@@ -760,15 +778,25 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
         }
         child.stdin.end();
         let output = "";
+        let stderrOutput = "";
         let settled = false;
-        const timeoutId = setTimeout(() => { finish("⏰ 响应超时", true).catch(() => { }); }, options.timeoutMs || 300000);
+        const timeoutId = setTimeout(() => {
+            try {
+                if (child?.exitCode === null && child?.signalCode === null)
+                    (0, execution_kernel_1.terminateManagedChildProcess)(child);
+            }
+            catch { }
+            finish("⏰ 响应超时", true).catch(() => { });
+        }, options.timeoutMs || 300000);
         const finish = async (text, isError = false) => {
             if (settled)
                 return;
             settled = true;
+            stopTracking();
             clearTimeout(timeoutId);
             try {
-                child?.kill();
+                if (child)
+                    (0, execution_kernel_1.terminateManagedChildProcess)(child);
             }
             catch { }
             try {
@@ -776,6 +804,9 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             }
             catch { }
             let finalText = text || output.trim();
+            const normalized = isError ? { output: finalText, sessionId: "" } : (0, agent_runtime_1.normalizeAgentCommandOutput)(agentType, finalText);
+            finalText = normalized.output;
+            finalText = (0, execution_kernel_1.persistBoundedOutput)(taskId, finalText, Number(options.maxContextOutputBytes || 256 * 1024)).content;
             if (!isError)
                 finalText = await appendToolResults(finalText, options.allowedTools);
             const fileChanges = (0, utils_1.getFileChanges)(projectName, changeSnapshot);
@@ -787,7 +818,7 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             try {
                 if (typeof options.onDone === "function") {
                     pushWorkEvent(isError ? "error" : "done", isError ? finalText : "执行完成", { final: true, fileChanges });
-                    options.onDone({ text: finalText, fileChanges, isError, workEvents });
+                    options.onDone({ text: finalText, fileChanges, isError, nativeSessionId: normalized.sessionId || options.agentSession?.sessionId || "", workEvents });
                 }
             }
             catch { }
@@ -802,12 +833,16 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             if (!text)
                 return;
             output += text;
-            pushWorkEvent("output", text);
-            writeSse(streamRes, { type: "chunk", agent: projectName, text });
-            broadcastPetSpeech(projectName, { role: "assistant", text, mode: "append", source: "group" });
+            const jsonSessionStream = ["codex", "cursor"].includes((0, agent_runtime_1.normalizeAgentRuntimeId)(agentType)) && !!options.agentSession?.persistSession;
+            if (!jsonSessionStream) {
+                pushWorkEvent("output", text);
+                writeSse(streamRes, { type: "chunk", agent: projectName, text });
+                broadcastPetSpeech(projectName, { role: "assistant", text, mode: "append", source: "group" });
+            }
         });
         child.stderr.on("data", (chunk) => {
             const text = chunk.toString("utf-8");
+            stderrOutput = (stderrOutput + text).slice(-12000);
             if (text.trim() && !output.trim()) {
                 const runningText = `🧠 ${projectName} 运行中...`;
                 pushWorkEvent("status", runningText);
@@ -815,7 +850,11 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
                 broadcastPetSpeech(projectName, { role: "status", text: `${projectName} 运行中...`, source: "group" });
             }
         });
-        child.on("close", () => { finish(output.trim()).catch((err) => finish(`❌ 错误: ${err.message}`, true)); });
+        child.on("close", (code) => {
+            const failed = typeof code === "number" && code !== 0;
+            const text = failed ? (output.trim() || stderrOutput.trim() || `Agent 进程退出，exitCode=${code}`) : output.trim();
+            finish(text, failed).catch((err) => finish(`❌ 错误: ${err.message}`, true));
+        });
         child.on("error", (err) => { finish(`❌ 错误: ${err.message}`, true).catch(() => { }); });
     });
 }
@@ -1282,6 +1321,9 @@ function handleRequest(req, res) {
         return;
     if ((0, rag_1.handleRagApi)(pathname, req, res, parsed))
         return;
+    const { handleMemoryCenterApi } = require("./modules/memory-control-center");
+    if (handleMemoryCenterApi(pathname, req, res, parsed))
+        return;
     // 404 fallback
     (0, utils_1.sendJson)(res, { error: "Not Found" }, 404);
 }
@@ -1294,6 +1336,10 @@ function startServer(port) {
     (0, cron_1.startCronScheduler)(startupCollabCtx);
     (0, collaboration_1.startTaskWatchdog)(startupCollabCtx);
     (0, collaboration_1.startAgentRecoveryMonitor)(startupCollabCtx);
+    (0, reliability_drills_1.startReliabilityDrillScheduler)();
+    const soakResume = (0, soak_test_1.resumeSoakTest)();
+    if (soakResume.resumed)
+        console.log("[Soak Test] 已恢复未完成的稳定性浸泡测试");
     const resumeResult = (0, collaboration_1.resumeTaskQueues)(startupCollabCtx);
     if (resumeResult.total > 0) {
         console.log(`[任务队列] 启动恢复 ${resumeResult.resumed}/${resumeResult.total} 个自动执行任务`);
@@ -1303,6 +1349,8 @@ function startServer(port) {
         (0, cron_1.stopCronScheduler)();
         (0, collaboration_1.stopTaskWatchdog)();
         (0, collaboration_1.stopAgentRecoveryMonitor)();
+        (0, reliability_drills_1.stopReliabilityDrillScheduler)();
+        (0, soak_test_1.shutdownSoakMonitor)();
     });
     server.listen(port, () => {
         console.log(`\n╔══════════════════════════════════════╗`);

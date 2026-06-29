@@ -15,6 +15,8 @@ const FEISHU_CONFIG_FILE = path.join(CCM_DIR, "feishu-config.json");
 const TEMPLATES_FILE = path.join(CCM_DIR, "prompt-templates.json");
 const PROJECT_CONFIGS_FILE = path.join(CCM_DIR, "project-configs.json");
 const MUSIC_CONFIG_FILE = path.join(CCM_DIR, "music-config.json");
+const RAG_WATCH_PATHS_FILE = path.join(CCM_DIR, "rag-watch-paths.json");
+const RAG_METADATA_FILE = path.join(CCM_DIR, "knowledge-metadata.json");
 
 // === 本地工具和技能目录 ===
 export const MCP_DIR = path.join(CCM_DIR, "mcp");
@@ -23,6 +25,16 @@ export const SKILLS_DIR = path.join(CCM_DIR, "skills");
 // 确保基础目录存在
 if (!fs.existsSync(MCP_DIR)) fs.mkdirSync(MCP_DIR, { recursive: true });
 if (!fs.existsSync(SKILLS_DIR)) fs.mkdirSync(SKILLS_DIR, { recursive: true });
+
+function writeJsonAtomic(file: string, value: any) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 7)}.tmp`;
+  if (fs.existsSync(file)) {
+    try { fs.copyFileSync(file, `${file}.bak`); } catch {}
+  }
+  fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf-8");
+  fs.renameSync(temp, file);
+}
 
 // === 代理类型定义 ===
 export const AGENTS = [
@@ -186,6 +198,9 @@ export function recordMetric(agent: string, data: any) {
       avgMs: 0,
       totalFileChanges: 0,
       lastFileChangeCount: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalCost: 0,
       lastCall: null
     };
   }
@@ -198,6 +213,11 @@ export function recordMetric(agent: string, data: any) {
   }
   a.totalFileChanges = (a.totalFileChanges || 0) + (data.fileChangeCount || 0);
   a.lastFileChangeCount = data.fileChangeCount || 0;
+  
+  if (data.inputTokens) a.inputTokens = (a.inputTokens || 0) + data.inputTokens;
+  if (data.outputTokens) a.outputTokens = (a.outputTokens || 0) + data.outputTokens;
+  if (data.totalCost) a.totalCost = (a.totalCost || 0) + data.totalCost;
+  
   a.lastCall = new Date().toISOString();
   
   if (!metrics.daily[today]) metrics.daily[today] = {};
@@ -207,7 +227,10 @@ export function recordMetric(agent: string, data: any) {
       successes: 0,
       failures: 0,
       totalMs: 0,
-      totalFileChanges: 0
+      totalFileChanges: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalCost: 0
     };
   }
   const d = metrics.daily[today][agent];
@@ -215,6 +238,10 @@ export function recordMetric(agent: string, data: any) {
   if (data.success) d.successes++; else d.failures++;
   if (data.durationMs) d.totalMs += data.durationMs;
   d.totalFileChanges = (d.totalFileChanges || 0) + (data.fileChangeCount || 0);
+
+  if (data.inputTokens) d.inputTokens = (d.inputTokens || 0) + data.inputTokens;
+  if (data.outputTokens) d.outputTokens = (d.outputTokens || 0) + data.outputTokens;
+  if (data.totalCost) d.totalCost = (d.totalCost || 0) + data.totalCost;
 
   saveMetrics(metrics);
 }
@@ -225,12 +252,19 @@ export function loadTasks(): any[] {
   try {
     return JSON.parse(fs.readFileSync(TASKS_FILE, "utf-8"));
   } catch {
+    try {
+      const recovered = JSON.parse(fs.readFileSync(`${TASKS_FILE}.bak`, "utf-8"));
+      if (Array.isArray(recovered)) {
+        saveTasks(recovered);
+        return recovered;
+      }
+    } catch {}
     return [];
   }
 }
 
 export function saveTasks(tasks: any[]) {
-  fs.writeFileSync(TASKS_FILE, JSON.stringify(tasks, null, 2));
+  writeJsonAtomic(TASKS_FILE, tasks);
 }
 
 // === Dialogue Templates ===
@@ -299,12 +333,15 @@ export function loadCronJobs(): any[] {
   try {
     return JSON.parse(fs.readFileSync(CRON_FILE, "utf-8"));
   } catch {
-    return [];
+    try {
+      const recovered = JSON.parse(fs.readFileSync(`${CRON_FILE}.bak`, "utf-8"));
+      return Array.isArray(recovered) ? recovered : [];
+    } catch { return []; }
   }
 }
 
 export function saveCronJobs(jobs: any[]) {
-  fs.writeFileSync(CRON_FILE, JSON.stringify(jobs, null, 2));
+  writeJsonAtomic(CRON_FILE, jobs);
 }
 
 // === Auto Dev Daily Reports ===
@@ -348,4 +385,34 @@ export function loadAutoDevNotifyConfig(): any {
 
 export function saveAutoDevNotifyConfig(config: any) {
   fs.writeFileSync(AUTO_DEV_NOTIFY_FILE, JSON.stringify(config || {}, null, 2));
+}
+
+// === RAG Watch Paths ===
+export function loadRagWatchPaths(): string[] {
+  if (!fs.existsSync(RAG_WATCH_PATHS_FILE)) return [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(RAG_WATCH_PATHS_FILE, "utf-8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveRagWatchPaths(paths: string[]) {
+  fs.writeFileSync(RAG_WATCH_PATHS_FILE, JSON.stringify(paths || [], null, 2));
+}
+
+// === RAG Metadata (Tags) ===
+export function loadRagMetadata(): Record<string, { tags: string[] }> {
+  if (!fs.existsSync(RAG_METADATA_FILE)) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(RAG_METADATA_FILE, "utf-8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveRagMetadata(metadata: Record<string, { tags: string[] }>) {
+  fs.writeFileSync(RAG_METADATA_FILE, JSON.stringify(metadata || {}, null, 2));
 }

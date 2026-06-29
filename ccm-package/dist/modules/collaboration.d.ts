@@ -1,4 +1,12 @@
 export declare function loadGroups(): any[];
+export declare function runGroupMemoryStorageRecoverySelfTest(): {
+    pass: boolean;
+    checks: {
+        atomicFileIsValidJson: boolean;
+        backupRecoveryWorks: boolean;
+        backupExists: boolean;
+    };
+};
 export declare const FEISHU_SCOPES: string[];
 export declare function sendFeishuReportMessage(options: {
     title: string;
@@ -6,35 +14,7 @@ export declare function sendFeishuReportMessage(options: {
 }): Promise<any>;
 export declare function buildEvidenceGateFollowUps(group: any, outputs: string[]): any[];
 export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
-    task: {
-        id: string;
-        title: any;
-        description: any;
-        target_project: any;
-        group_id: any;
-        assign_type: any;
-        status: string;
-        priority: any;
-        auto_execute: boolean;
-        workflow_type: any;
-        business_goal: any;
-        acceptance_criteria: any;
-        source_documents: any;
-        source_attachments: any;
-        requires_code_changes: any;
-        requires_verification: any;
-        workflow_meta: any;
-        parent_task_id: any;
-        global_mission_id: any;
-        mission_target: any;
-        child_task_ids: any;
-        mission_plan: any;
-        followups: any;
-        cron_job_id: any;
-        cron_trigger: any;
-        created_at: string;
-        updated_at: string;
-    };
+    task: any;
     queueResult: {
         queued: boolean;
         message: string;
@@ -64,6 +44,7 @@ export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
 export declare function resumeTaskQueues(ctx: CollabCtx): {
     resumed: number;
     total: number;
+    trace_backfilled: number;
     results: any[];
     queue_status: {
         total_queued: number;
@@ -454,9 +435,16 @@ export declare function getGlobalDevelopmentMission(id: string): {
 };
 export declare function createGlobalDevelopmentMission(payload: any, ctx: CollabCtx): {
     success: boolean;
+    duplicate: boolean;
+    mission: any;
+    children: any;
+    rejected: any[];
+} | {
+    success: boolean;
     mission: any;
     children: any[];
     rejected: any[];
+    duplicate?: undefined;
 };
 export declare function continueDailyDevTasksFromGaps(ctx: CollabCtx, options?: any): {
     success: boolean;
@@ -467,40 +455,6 @@ export declare function continueDailyDevTasksFromGaps(ctx: CollabCtx, options?: 
     failed: number;
     limit: number;
     max_per_task: number;
-    results: ({
-        task: any;
-        continuation_message: string;
-        success: boolean;
-        status: number;
-        error: string;
-        message?: undefined;
-        queued?: undefined;
-        queue_result?: undefined;
-        queue_status?: undefined;
-        task_id: any;
-        title: any;
-        group_id: any;
-    } | {
-        task: any;
-        continuation_message: string;
-        success: boolean;
-        message: string;
-        queued: boolean;
-        queue_result: any;
-        queue_status: {
-            total_queued: number;
-            running_targets: number;
-            target_status: any;
-            pending_tasks: number;
-            in_progress_tasks: number;
-            failed_tasks: number;
-            running_task_ids: string[];
-        };
-        status?: undefined;
-        error?: undefined;
-        task_id: any;
-        title: any;
-        group_id: any;
-    })[];
+    results: any[];
 };
 export declare function handleCollaborationApi(pathname: string, req: any, res: any, parsed: any, ctx: CollabCtx): boolean;

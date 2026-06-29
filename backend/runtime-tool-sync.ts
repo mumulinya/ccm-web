@@ -5,6 +5,7 @@ import * as os from "os";
 import { loadMcpTools, loadSkills } from "./db";
 import { normalizeAgentRuntimeId } from "./agent-runtime";
 import { CCM_DIR } from "./utils";
+import { loadOrchestratorConfig } from "./modules/group-orchestrator";
 
 const CCM_MCP_PREFIX = "ccm__";
 const CCM_SKILL_MARKER = ".ccm-managed.json";
@@ -136,8 +137,45 @@ function tomlString(value: any) {
   return JSON.stringify(String(value ?? ""));
 }
 
-function buildCodexConfigToml(mcpServers: Record<string, any>) {
+interface CodexGatewayConfig {
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+}
+
+function loadCodexGatewayConfig(): CodexGatewayConfig | null {
+  const config = loadOrchestratorConfig();
+  const format = String(config?.format || "").trim().toLowerCase();
+  const apiUrl = String(config?.apiUrl || "").trim().replace(/\/+$/, "");
+  const apiKey = String(config?.apiKey || "").trim();
+  const model = String(config?.model || "").trim();
+  if (config?.enabled === false || !["openai-compatible", "auto"].includes(format) || !apiUrl || !apiKey || !model) return null;
+  return { apiUrl, apiKey, model };
+}
+
+export function getRuntimeExecutionEnv(agentType: string): Record<string, string> {
+  if (normalizeAgentRuntimeId(agentType) !== "codex") return {};
+  const gateway = loadCodexGatewayConfig();
+  return gateway ? { CCM_CODEX_API_KEY: gateway.apiKey } : {};
+}
+
+function buildCodexConfigToml(mcpServers: Record<string, any>, gateway: CodexGatewayConfig | null) {
   const lines = ["# Managed by CCM. This CODEX_HOME contains only tools authorized for this invocation.", ""];
+  if (gateway) {
+    lines.push(
+      `model_provider = ${tomlString("ccm")}`,
+      `model = ${tomlString(gateway.model)}`,
+      `web_search = ${tomlString("disabled")}`,
+      "",
+      "[model_providers.ccm]",
+      `name = ${tomlString("CCM Unified Gateway")}`,
+      `base_url = ${tomlString(gateway.apiUrl)}`,
+      `env_key = ${tomlString("CCM_CODEX_API_KEY")}`,
+      `wire_api = ${tomlString("responses")}`,
+      "requires_openai_auth = false",
+      "",
+    );
+  }
   for (const [name, server] of Object.entries(mcpServers)) {
     lines.push(`[mcp_servers.${tomlString(name)}]`);
     if (server.url) {
@@ -153,6 +191,22 @@ function buildCodexConfigToml(mcpServers: Record<string, any>) {
     lines.push("");
   }
   return lines.join("\n");
+}
+
+export function runRuntimeToolSyncSelfTest() {
+  const fakeSecret = "ccm-test-secret-must-not-be-persisted";
+  const config = buildCodexConfigToml({}, {
+    apiUrl: "https://gateway.example.test/v1",
+    apiKey: fakeSecret,
+    model: "test-model",
+  });
+  const checks = {
+    unifiedGatewayConfigured: config.includes('model_provider = "ccm"') && config.includes('base_url = "https://gateway.example.test/v1"'),
+    webSearchDisabled: config.includes('web_search = "disabled"'),
+    secretUsesEnvironment: config.includes('env_key = "CCM_CODEX_API_KEY"'),
+    secretNotPersisted: !config.includes(fakeSecret),
+  };
+  return { pass: Object.values(checks).every(Boolean), checks };
 }
 
 function linkCodexAuth(runtimeHome: string, audit: RuntimeToolSyncAudit) {
@@ -174,6 +228,13 @@ function linkCodexAuth(runtimeHome: string, audit: RuntimeToolSyncAudit) {
       audit.warnings.push(`Codex 认证同步失败：${copyError?.message || error?.message || String(copyError)}`);
     }
   }
+}
+
+function removeManagedCodexAuth(runtimeHome: string) {
+  const target = path.join(runtimeHome, "auth.json");
+  try {
+    if (fs.existsSync(target)) fs.unlinkSync(target);
+  } catch {}
 }
 
 export function syncRuntimeTools(workDir: string, agentType: string, allowedTools: any): RuntimeToolSyncAudit {
@@ -211,8 +272,15 @@ export function syncRuntimeTools(workDir: string, agentType: string, allowedTool
   }
 
   try {
+    const codexGateway = runtime === "codex" ? loadCodexGatewayConfig() : null;
     const authorizationId = crypto.createHash("sha256")
-      .update(JSON.stringify({ runtime, requested, mcp: selectedMcp, skills: selectedSkills.map(skill => ({ name: skill.name, prompt: skill.prompt })) }))
+      .update(JSON.stringify({
+        runtime,
+        requested,
+        mcp: selectedMcp,
+        skills: selectedSkills.map(skill => ({ name: skill.name, prompt: skill.prompt })),
+        codexGateway: codexGateway ? { apiUrl: codexGateway.apiUrl, model: codexGateway.model } : null,
+      }))
       .digest("hex")
       .slice(0, 16);
     const mcpServers: Record<string, any> = {};
@@ -243,8 +311,9 @@ export function syncRuntimeTools(workDir: string, agentType: string, allowedTool
       const configPath = path.join(runtimeHome, "config.toml");
       const skillRoot = path.join(runtimeHome, "skills");
       fs.mkdirSync(runtimeHome, { recursive: true });
-      fs.writeFileSync(configPath, buildCodexConfigToml(mcpServers), "utf-8");
-      linkCodexAuth(runtimeHome, audit);
+      fs.writeFileSync(configPath, buildCodexConfigToml(mcpServers, codexGateway), "utf-8");
+      if (codexGateway) removeManagedCodexAuth(runtimeHome);
+      else linkCodexAuth(runtimeHome, audit);
       audit.mcpConfigPath = configPath;
       audit.runtimeHomePath = runtimeHome;
       audit.skillRoot = skillRoot;

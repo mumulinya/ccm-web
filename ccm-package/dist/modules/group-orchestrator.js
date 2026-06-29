@@ -62,6 +62,8 @@ exports.runLlmCoordinatorSummary = runLlmCoordinatorSummary;
 exports.runLlmCoordinatorReview = runLlmCoordinatorReview;
 exports.decomposeRequirementWithCodedCoordinator = decomposeRequirementWithCodedCoordinator;
 exports.runGroupOrchestrator = runGroupOrchestrator;
+exports.isContextLimitError = isContextLimitError;
+exports.buildReactiveCompactionContext = buildReactiveCompactionContext;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
@@ -122,7 +124,15 @@ function saveOrchestratorConfig(updates) {
 }
 function publicOrchestratorConfig(config = loadOrchestratorConfig()) {
     const { apiKey, ...safe } = config;
-    return { ...safe, hasKey: !!apiKey };
+    return { ...safe, hasKey: !!apiKey, boundary: buildGroupMainAgentBoundary("config") };
+}
+function buildGroupMainAgentBoundary(planner = "coded_fallback") {
+    return {
+        layer: "group_main_agent",
+        planner,
+        runtime: "coded_orchestrator",
+        responsibility: "per-group planning, dispatch, receipt review",
+    };
 }
 function getLlmConfigIssue(config) {
     if (!config.enabled)
@@ -1004,6 +1014,11 @@ function runCoordinatorProtocolSelfTest() {
         && shortDocAssignments
             .filter((item) => /app|web|front|frontend|前端/i.test(String(item.project || "")))
             .every((item) => !shortDocBackendProject || item.dependsOn === shortDocBackendProject);
+    const reactiveContext = buildReactiveCompactionContext(`SUMMARY_START ${"a".repeat(80_000)} LATEST_USER_REQUIREMENT`);
+    const reactiveCompactionPass = reactiveContext.length < 55_000
+        && reactiveContext.includes("SUMMARY_START")
+        && reactiveContext.includes("LATEST_USER_REQUIREMENT")
+        && isContextLimitError(new Error("HTTP 413: prompt too long"));
     const pass = String(result.content || "").includes("主 Agent 计划")
         && Array.isArray(result.coordinationPlan?.phases)
         && result.coordinationPlan.phases.length >= 5
@@ -1014,7 +1029,8 @@ function runCoordinatorProtocolSelfTest() {
         && frontendDependsOnBackend
         && taskChecks.every((item) => item.hasWorkerPacket && item.hasUnderstanding && item.hasVerification && item.hasReceipt && item.hasDocumentEvidence && item.hasCoordinatorWorkerProtocol && item.forbidsLazyDelegation)
         && llmDocumentGuardPass
-        && shortDocBackendFirstPass;
+        && shortDocBackendFirstPass
+        && reactiveCompactionPass;
     return {
         pass,
         contentHasPlan: String(result.content || "").includes("主 Agent 计划"),
@@ -1028,6 +1044,7 @@ function runCoordinatorProtocolSelfTest() {
         llmDocumentGuardPass,
         shortDocBackendFirstPass,
         shortDocExecutionOrder: shortDocResult.executionOrder || "",
+        reactiveCompactionPass,
         documentFindings: Array.isArray(result.analysis?.documentFindings) ? result.analysis.documentFindings : [],
     };
 }
@@ -1142,12 +1159,18 @@ async function runLlmCoordinatorReview(group, userMessage, coordinatorPlan, outp
     const allowFollowUps = options.allowFollowUps !== false;
     const round = Math.max(1, Number(options.round || 1));
     const maxRounds = Math.max(round, Number(options.maxRounds || 3));
+    const requiresCodeChanges = options.requiresCodeChanges !== false;
+    const requiresVerification = options.requiresVerification !== false;
     const childReplies = validOutputs
         .map((text, i) => `--- 子 Agent task-notification ${i + 1} ---\n${String(text).slice(0, 2400)}`)
         .join("\n\n");
     const system = `你是 CCM 群聊的主 Agent（工作协调者）。你已经把用户需求分派给项目 Agent，现在要像项目负责人一样复盘子 Agent 的回复。
 
 当前是第 ${round}/${maxRounds} 轮验收；${allowFollowUps ? "如果证据不足，可以继续派发返工任务。" : "本轮不能再派发返工任务，必须给出最终结论或向用户提出具体问题。"}
+
+本任务的最新门禁配置（优先级高于历史会话中的旧要求）：
+- 必须产生代码/文件变更：${requiresCodeChanges ? "是" : "否；不得因为 filesChanged 为空判定缺口"}
+- 必须执行项目验证命令：${requiresVerification ? "是" : "否；不得因为未运行、无法运行或缺少 npm test/build 等命令判定缺口"}
 
 你不是代码执行 Agent，不写代码，不假装完成没有证据的工作。你要做的是：
 1. 判断子 Agent 是否真正回答了任务、是否完成修改/验证、是否有缺口。
@@ -1160,7 +1183,8 @@ async function runLlmCoordinatorReview(group, userMessage, coordinatorPlan, outp
 - 优先读取每个 Worker 的 <task-notification>：task-id 表示 Worker，status 表示 completed/failed/blocked/partial/missing_receipt，receipt-status 表示 CCM_AGENT_RECEIPT 状态，result 是 Worker 结果摘要。
 - 优先读取每个子 Agent 回复末尾的 CCM_AGENT_RECEIPT / “结构化回执”摘要。
 - 如果某个被派发的 Agent 缺少结构化回执，或回执 status 不是 done，或没有提供实际动作/验证证据，通常不能判定 complete。
-- 对代码修改类任务，必须看到修改点/文件或明确说明未修改，以及验证方式；否则在 gaps 里指出，并在允许追问时 followUps 要求补齐。
+- ${requiresCodeChanges ? "对代码修改类任务，必须看到修改点/文件或明确说明未修改；否则在 gaps 里指出。" : "本任务允许无文件变更；只需核对任务约定的可验收产出。"}
+- ${requiresVerification ? "必须看到符合任务要求的实际验证证据。" : "本任务已关闭强制验证门禁，不得追问项目测试命令。"}
 - 对依赖任务，后续 Agent 的结论必须引用或吸收前置 Agent 的结论；否则指出依赖未闭环。
 - 对接口文档、业务文档、需求文档或 PRD 驱动的任务，必须检查子 Agent 是否覆盖了被分派的接口契约、字段、业务规则、页面/交互、验收标准；缺少文档条目对应的实现/确认/验证证据时不能判定 complete。
 - 不要把“已建议”“可以修改”“应该检查”当成已完成。
@@ -1172,8 +1196,17 @@ ${buildAllowedProjectBrief(normalized) || "- 无"}
 
 JSON 格式：
 {
+  "schema_version": 1,
   "status": "complete | needs_followup | needs_user",
+  "verdict": "pass | blocked | needs_user",
+  "decision": { "can_complete": true, "reason": "为什么可以完成或不能完成" },
   "summary": "给用户看的最终或阶段性协调结论，必须包含已确认结论、已完成/未完成事项、风险和验证建议",
+  "checks": [
+    { "id": "worker_receipt | actual_changes | verification | dependency | user_scope", "label": "检查项", "status": "pass | fail | warn", "detail": "检查结论", "evidence": ["证据"] }
+  ],
+  "worker_reviews": [
+    { "project": "项目 Agent 名称", "receipt_status": "done | partial | blocked | failed | missing", "trusted": true, "completed_scope": ["已完成范围"], "gaps": ["缺口"], "verification": ["验证证据"] }
+  ],
   "gaps": ["仍缺少的信息或证据"],
   "conflicts": ["子 Agent 之间冲突或不一致的地方"],
   "followUps": [
@@ -1274,6 +1307,41 @@ ${childReplies}
         const gaps = Array.isArray(parsed.gaps) ? parsed.gaps.map((x) => String(x)).filter(Boolean) : [];
         const conflicts = Array.isArray(parsed.conflicts) ? parsed.conflicts.map((x) => String(x)).filter(Boolean) : [];
         const userQuestion = String(parsed.userQuestion || "").trim();
+        const normalizeStringList = (items, limit = 20) => Array.isArray(items) ? items.map((x) => String(x || "").trim()).filter(Boolean).slice(0, limit) : [];
+        const checks = Array.isArray(parsed.checks) ? parsed.checks.map((item) => ({
+            id: String(item?.id || "").trim(),
+            label: String(item?.label || item?.id || "检查项").trim(),
+            status: ["pass", "fail", "warn"].includes(String(item?.status || "")) ? String(item.status) : "warn",
+            detail: String(item?.detail || "").trim(),
+            evidence: normalizeStringList(item?.evidence, 10),
+        })).filter((item) => item.id || item.detail || item.evidence.length) : [];
+        const workerReviews = Array.isArray(parsed.worker_reviews || parsed.workerReviews) ? (parsed.worker_reviews || parsed.workerReviews).map((item) => ({
+            project: String(item?.project || item?.agent || "").trim(),
+            receipt_status: String(item?.receipt_status || item?.receiptStatus || item?.status || "missing").trim(),
+            trusted: item?.trusted !== false,
+            completed_scope: normalizeStringList(item?.completed_scope || item?.completedScope, 12),
+            gaps: normalizeStringList(item?.gaps, 12),
+            verification: normalizeStringList(item?.verification, 12),
+        })).filter((item) => item.project || item.receipt_status !== "missing" || item.gaps.length || item.verification.length) : [];
+        const decision = parsed.decision && typeof parsed.decision === "object" ? {
+            can_complete: parsed.decision.can_complete !== false && parsed.decision.canComplete !== false,
+            reason: String(parsed.decision.reason || "").trim(),
+        } : { can_complete: status === "complete" && !gaps.length && !conflicts.length && !userQuestion && !followUps.length, reason: summary };
+        const verdict = ["pass", "blocked", "needs_user"].includes(String(parsed.verdict || ""))
+            ? String(parsed.verdict)
+            : status === "complete" && decision.can_complete ? "pass" : userQuestion ? "needs_user" : "blocked";
+        const structuredReview = {
+            schema_version: Number(parsed.schema_version || parsed.schemaVersion || 1),
+            verdict,
+            decision,
+            summary,
+            checks,
+            worker_reviews: workerReviews,
+            gaps,
+            conflicts,
+            user_question: userQuestion,
+            confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0,
+        };
         const lines = ["📋 **协调复盘**", ""];
         if (summary)
             lines.push(summary);
@@ -1296,7 +1364,8 @@ ${childReplies}
             gaps,
             conflicts,
             content: lines.join("\n").trim(),
-            confidence: typeof parsed.confidence === "number" ? parsed.confidence : 0,
+            confidence: structuredReview.confidence,
+            structured_review: structuredReview,
         };
     }
     catch (err) {
@@ -1666,6 +1735,7 @@ function buildCoordinatorResultFromAnalysis(group, message, analysis, targets, r
             analysis,
             dispatchPolicy,
             runtime,
+            agentBoundary: buildGroupMainAgentBoundary(runtime === "llm-api" ? "llm" : runtime),
             content: response || policyLine || `我理解了你的需求，不过还需要你补充一下：**${fallbackQuestion}**`,
         };
     }
@@ -1684,6 +1754,7 @@ function buildCoordinatorResultFromAnalysis(group, message, analysis, targets, r
         coordinationPlan,
         dispatchPolicy,
         runtime,
+        agentBoundary: buildGroupMainAgentBoundary(runtime === "llm-api" ? "llm" : runtime),
         executionOrder,
         coordinationStrategy,
         content: [
@@ -1719,6 +1790,7 @@ async function runGroupOrchestrator(input) {
             return {
                 ...fallback,
                 runtime: "coded-fallback",
+                agentBoundary: buildGroupMainAgentBoundary("coded_fallback"),
                 content: `${fallback.content}\n\n主 Agent API 回退：${configIssue}`,
             };
         }
@@ -1727,12 +1799,13 @@ async function runGroupOrchestrator(input) {
             delegated: [],
             assignments: [],
             runtime: "llm-not-configured",
+            agentBoundary: buildGroupMainAgentBoundary("llm-not-configured"),
             content: [
                 "主 Agent 暂时不能开始协调：大模型 API 未配置完整。",
                 "",
                 `原因：${configIssue}`,
                 "",
-                "请到 设置 -> 统一大模型配置 中填写 Base URL、API Key 和模型名。",
+                "请到 设置 -> 群聊主 Agent 模型配置 中填写 Base URL、API Key 和模型名。",
                 "配置完成后，主 Agent 会先调用大模型理解需求，再分派给项目 Agent。"
             ].join("\n"),
         };
@@ -1741,11 +1814,32 @@ async function runGroupOrchestrator(input) {
         return await runLlmGroupOrchestrator({ ...input, group });
     }
     catch (error) {
+        if (isContextLimitError(error) && input.context) {
+            try {
+                const recovered = await runLlmGroupOrchestrator({
+                    ...input,
+                    group,
+                    context: buildReactiveCompactionContext(input.context),
+                });
+                return {
+                    ...recovered,
+                    contextRecovery: {
+                        type: "reactive-compact",
+                        originalChars: String(input.context || "").length,
+                        recoveredChars: buildReactiveCompactionContext(input.context).length,
+                    },
+                };
+            }
+            catch (recoveryError) {
+                error = recoveryError;
+            }
+        }
         if (config.fallbackToRules) {
             const fallback = runCodedGroupOrchestrator({ ...input, group });
             return {
                 ...fallback,
                 runtime: "coded-fallback",
+                agentBoundary: buildGroupMainAgentBoundary("coded_fallback"),
                 content: `${fallback.content}\n\n主 Agent API 回退：${error.message}`,
             };
         }
@@ -1754,6 +1848,7 @@ async function runGroupOrchestrator(input) {
             delegated: [],
             assignments: [],
             runtime: "llm-error",
+            agentBoundary: buildGroupMainAgentBoundary("llm-error"),
             content: [
                 "主 Agent 大模型调用失败，本轮不分派子 Agent。",
                 "",
@@ -1763,5 +1858,18 @@ async function runGroupOrchestrator(input) {
             ].join("\n"),
         };
     }
+}
+function isContextLimitError(error) {
+    const text = String(error?.message || error || "");
+    return /HTTP\s*413|prompt(?:\s+is)?\s+too\s+long|context(?:_length)?(?:\s+window)?\s*(?:exceeded|limit)|maximum context|token limit/i.test(text);
+}
+function buildReactiveCompactionContext(context, maxChars = 48_000) {
+    const text = String(context || "");
+    if (text.length <= maxChars)
+        return text;
+    const marker = "\n\n…[Reactive Compact：中间上下文已紧急折叠；原始群聊记录仍可按 message id 回溯]…\n\n";
+    const head = Math.floor((maxChars - marker.length) * 0.58);
+    const tail = Math.max(1, maxChars - marker.length - head);
+    return `${text.slice(0, head)}${marker}${text.slice(-tail)}`;
 }
 //# sourceMappingURL=group-orchestrator.js.map

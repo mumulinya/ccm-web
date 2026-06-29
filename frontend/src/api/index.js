@@ -52,6 +52,11 @@ export const tasksApi = {
   create: (data) => api('/api/tasks/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   update: (data) => api('/api/tasks/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   retry: (data) => api('/api/tasks/retry', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  cancel: (data) => api('/api/tasks/cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  executions: (taskId) => api(`/api/tasks/executions?task_id=${encodeURIComponent(taskId)}`),
+  rollbackExecution: (data) => api('/api/tasks/execution/rollback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  mergeExecution: (data) => api('/api/tasks/execution/merge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  cleanupExecution: (data) => api('/api/tasks/execution/cleanup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   delete: (id) => api('/api/tasks/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }),
 };
 

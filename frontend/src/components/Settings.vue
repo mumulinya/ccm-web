@@ -138,7 +138,7 @@ const searchQuery = ref('')
 const searchResults = ref(null)
 const isSearching = ref(false)
 
-// 统一大模型配置（群聊主 Agent / 音乐 Agent 共用）
+// 群聊主 Agent 模型配置（coded orchestrator 为规则兜底协调器）
 const orchestratorConfig = ref({
   enabled: true,
   format: 'openai-compatible',
@@ -839,7 +839,7 @@ const saveOrchestratorConfig = async () => {
     const data = await res.json()
     if (data.success) {
       orchestratorConfig.value = { ...orchestratorConfig.value, ...data.config, apiKey: '' }
-      toast.success('统一大模型配置已保存')
+      toast.success('群聊主 Agent 模型配置已保存')
     } else {
       toast.error('保存失败: ' + (data.error || '未知错误'))
     }
@@ -889,11 +889,7 @@ onUnmounted(() => {
           </button>
           <button class="nav-item" :class="{ active: activeSection === 'agent' }" @click="activeSection = 'agent'">
             <span class="nav-icon">🤖</span>
-            <span class="nav-label">统一大模型配置</span>
-          </button>
-          <button class="nav-item" :class="{ active: activeSection === 'knowledge' }" @click="activeSection = 'knowledge'">
-            <span class="nav-icon">📚</span>
-            <span class="nav-label">本地知识库管理</span>
+            <span class="nav-label">群聊主 Agent 模型</span>
           </button>
           <button class="nav-item" :class="{ active: activeSection === 'perf' }" @click="activeSection = 'perf'">
             <span class="nav-icon">🎨</span>
@@ -1053,8 +1049,8 @@ onUnmounted(() => {
             <div class="card-header">
               <span class="icon">🎯</span>
               <div>
-                <div class="card-title">统一大模型配置</div>
-                <div class="card-desc">群聊主 Agent 和音乐 Agent 共用这一套大模型 API 配置；项目子 Agent 仍按各自项目配置运行</div>
+                <div class="card-title">群聊主 Agent 模型配置</div>
+                <div class="card-desc">为群聊主 Agent 提供 LLM 编排能力；全局助手负责系统入口和路由，项目子 Agent 仍按各自项目配置运行，规则兜底协调器在 LLM 不可用时接管计划和派单。</div>
               </div>
             </div>
 
@@ -1068,367 +1064,13 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div v-if="orchestratorDiagnostics" class="diagnostics-panel" :class="orchestratorDiagnostics.readiness">
-              <div class="auto-dev-hero">
-                <div class="auto-dev-main">
-                  <div class="auto-dev-eyebrow">自动开发就绪状态</div>
-                  <h3>{{ getReadinessHeadline(orchestratorDiagnostics) }}</h3>
-                  <p>{{ getReadinessDescription(orchestratorDiagnostics) }}</p>
-                </div>
-                <div class="auto-dev-status" :class="orchestratorDiagnostics.readiness">
-                  {{ getReadinessText(orchestratorDiagnostics.readiness) }}
-                </div>
-              </div>
-
-              <div v-if="orchestratorDiagnostics.autopilot" class="auto-dev-summary" :class="orchestratorDiagnostics.autopilot.mode">
-                <div class="auto-dev-summary-copy">
-                  <strong>{{ getAutopilotPlainStatus(orchestratorDiagnostics.autopilot) }}</strong>
-                  <span>{{ getAutopilotPlainReason(orchestratorDiagnostics.autopilot) }}</span>
-                </div>
-                <b>{{ getAutopilotModeText(orchestratorDiagnostics.autopilot.mode) }}</b>
-              </div>
-
-              <div v-if="orchestratorDiagnostics.autopilot" class="auto-dev-checklist">
-                <div v-for="item in getAutoDevChecklist(orchestratorDiagnostics.autopilot)" :key="item.key" class="auto-dev-check" :class="item.state">
-                  <div>
-                    <strong>{{ item.label }}</strong>
-                    <span>{{ item.hint }}</span>
-                  </div>
-                  <b>{{ item.value }}</b>
-                </div>
-              </div>
-
-              <div v-if="orchestratorDiagnostics.autopilot?.next_actions?.length" class="auto-dev-next-actions">
-                <strong>建议下一步</strong>
-                <ul>
-                  <li v-for="action in orchestratorDiagnostics.autopilot.next_actions" :key="action">{{ action }}</li>
-                </ul>
-              </div>
-
-              <div v-if="orchestratorDiagnostics.autopilot" class="auto-dev-controls">
-                <button class="btn btn-primary btn-sm" :disabled="dailyDevAutopilotLoading" @click="runDailyDevAutopilot">
-                  {{ dailyDevAutopilotLoading ? '运行中...' : '试运行一次自动开发' }}
-                </button>
-                <button class="btn btn-outline btn-sm" :disabled="dailyDevCronEnsureLoading" @click="ensureDailyDevCronJobs">
-                  {{ dailyDevCronEnsureLoading ? '启用中...' : '开启定时接活' }}
-                </button>
-                <button class="btn btn-outline btn-sm" :disabled="inferredVerificationApplyLoading || !(orchestratorDiagnostics.autopilot.counts?.verificationInferred > 0)" @click="applyInferredVerificationCommands">
-                  {{ inferredVerificationApplyLoading ? '初始化中...' : '补齐验证命令' }}
-                </button>
-                <span>这些操作会使用需求池、共享文档、任务队列和项目 Agent 执行检查。</span>
-              </div>
-
-              <div v-if="dailyDevAutopilotRun || inferredVerificationApplyRun || dailyDevCronEnsureRun" class="auto-dev-run-results">
-                <div v-if="dailyDevAutopilotRun" class="autopilot-run-result">
-                  <span>续跑 {{ dailyDevAutopilotRun.continued || 0 }}</span>
-                  <span>导入 {{ dailyDevAutopilotRun.imported || 0 }}</span>
-                  <span>派发 {{ dailyDevAutopilotRun.dispatched || 0 }}</span>
-                  <span>入队 {{ dailyDevAutopilotRun.queued || 0 }}</span>
-                  <span>失败 {{ dailyDevAutopilotRun.failed || 0 }}</span>
-                  <span>执行准入 {{ dailyDevAutopilotRun.can_auto_execute_daily_dev ? '通过' : '等待子 Agent 检查' }}</span>
-                </div>
-                <div v-if="inferredVerificationApplyRun" class="autopilot-run-result">
-                  <span>验证命令已补齐 {{ inferredVerificationApplyRun.applied || 0 }}</span>
-                  <span>已有配置 {{ inferredVerificationApplyRun.skipped_configured || 0 }}</span>
-                  <span>无法推断 {{ inferredVerificationApplyRun.missing_inferred || 0 }}</span>
-                </div>
-                <div v-if="dailyDevCronEnsureRun" class="autopilot-run-result">
-                  <span>新建定时 {{ dailyDevCronEnsureRun.created || 0 }}</span>
-                  <span>重新启用 {{ dailyDevCronEnsureRun.enabled || 0 }}</span>
-                  <span>已存在 {{ dailyDevCronEnsureRun.existing || 0 }}</span>
-                  <span>跳过群聊 {{ dailyDevCronEnsureRun.skipped || 0 }}</span>
-                </div>
-              </div>
-
-              <div v-if="dailyDevAutopilotRun?.outcome" class="autopilot-outcome" :class="{ blocked: dailyDevAutopilotRun.outcome.blocked }">
-                <strong>{{ dailyDevAutopilotRun.outcome.message }}</strong>
-                <p v-if="dailyDevAutopilotRun.execution_readiness?.message" class="autopilot-readiness-message">
-                  {{ dailyDevAutopilotRun.execution_readiness.message }}
-                </p>
-                <ul v-if="dailyDevAutopilotRun.outcome.next_actions?.length">
-                  <li v-for="action in dailyDevAutopilotRun.outcome.next_actions" :key="action">{{ action }}</li>
-                </ul>
-              </div>
-
-              <div v-if="orchestratorDiagnostics.autopilot?.recent_cron?.length" class="autopilot-cron">
-                <span v-for="job in orchestratorDiagnostics.autopilot.recent_cron" :key="job.id">
-                  {{ job.name }}：{{ job.last_result || job.last_status }}
-                </span>
-              </div>
-              <div v-if="agentProbeTargets.length" class="agent-probe-matrix">
-                <div class="agent-probe-matrix-head">
-                  <div>
-                    <strong>子 Agent 运行检查</strong>
-                    <span>确认这些项目 Agent 能被真实调用。通过 {{ agentProbeMatrixCounts?.ready || 0 }}/{{ agentProbeMatrixCounts?.executable || 0 }} · 未检查 {{ agentProbeMatrixCounts?.missing || 0 }} · 结果过期 {{ agentProbeMatrixCounts?.stale || 0 }}</span>
-                  </div>
-                  <div class="agent-probe-actions">
-                    <button class="btn btn-outline btn-sm" @click="runAgentCliProbe" :disabled="agentCliProbeLoading || agentCliProbeBatchLoading || !selectedAgentCliProbeTarget">
-                      {{ agentCliProbeLoading ? '检查中...' : '检查所选' }}
-                    </button>
-                    <button class="btn btn-outline btn-sm" @click="runAgentCliProbeBatch" :disabled="agentCliProbeBatchLoading || agentCliProbeLoading || !(agentProbeMatrixCounts?.executable > 0)">
-                      {{ agentCliProbeBatchLoading ? '批量检查中...' : '检查全部子 Agent' }}
-                    </button>
-                  </div>
-                </div>
-                <div v-if="agentCliProbeBatch" class="agent-probe-batch-result">
-                  <span>批量复检 {{ agentCliProbeBatch.passed || 0 }}/{{ agentCliProbeBatch.total || 0 }}</span>
-                  <span>失败 {{ agentCliProbeBatch.failed || 0 }}</span>
-                  <span>跳过 {{ agentCliProbeBatch.skipped || 0 }}</span>
-                </div>
-                <div class="agent-probe-grid">
-                  <button v-for="target in agentProbeTargets" :key="target.key || (target.group_id + target.project)" class="agent-probe-row" :class="[getAgentProbeStatusClass(target), { active: agentCliProbeTargetKey === target.group_id + '::' + target.project }]" @click="selectProbeTarget(target)">
-                    <span class="agent-probe-state">{{ getAgentProbeStatusText(target) }}</span>
-                    <span class="agent-probe-main">{{ target.group_name }} / {{ target.project }}</span>
-                    <span class="agent-probe-sub">{{ target.agent_type }} · {{ target.command || '未记录命令' }}</span>
-                    <span class="agent-probe-time">{{ formatRunnerAge(target.age_ms) }}</span>
-                  </button>
-                </div>
-              </div>
-              <div class="diagnostics-section-title">高级诊断明细</div>
-              <div class="diagnostics-list">
-                <div v-for="check in orchestratorDiagnostics.checks" :key="check.id" class="diagnostic-item" :class="check.status">
-                  <span class="diagnostic-state">{{ getDiagnosticStatusText(check.status) }}</span>
-                  <div class="diagnostic-copy">
-                    <div class="diagnostic-label">{{ check.label }}</div>
-                    <div class="diagnostic-message">{{ check.message }}</div>
-                    <div v-if="getRunnerDetail(check)" class="runner-detail">
-                      <div class="runner-grid">
-                        <span>Runner：{{ formatRunnerState(getRunnerDetail(check)) }}</span>
-                        <span>待处理：{{ getRunnerDetail(check).pending_requests || 0 }}</span>
-                        <span>请求/结果：{{ getRunnerDetail(check).requests || 0 }} / {{ getRunnerDetail(check).results || 0 }}</span>
-                        <span>最近：{{ formatRunnerAge(getRunnerDetail(check).last_result?.age_ms || getRunnerDetail(check).age_ms) }}</span>
-                        <span>命令：{{ getRunnerDetail(check).last_result?.command || '未执行' }}</span>
-                        <span>执行器：{{ getRunnerDetail(check).last_result?.runner || getRunnerDetail(check).runner || '未知' }}</span>
-                        <span>探针：{{ formatProbeState(getProbeDetail(check)) }}</span>
-                        <span>探针时间：{{ formatRunnerAge(getProbeDetail(check)?.age_ms) }}</span>
-                      </div>
-                      <div v-if="getProbeDetail(check)?.message" class="runner-probe" :class="getProbeDetail(check).success ? 'ok' : 'fail'">
-                        {{ getProbeDetail(check).target?.project ? `目标 ${getProbeDetail(check).target.project}：` : '' }}{{ getProbeDetail(check).message }}
-                      </div>
-                      <div v-if="getRunnerDetail(check).last_result?.error" class="runner-error">
-                        {{ getRunnerDetail(check).last_result.error }}
-                      </div>
-                      <div v-if="getRunnerDetail(check).last_result?.hint" class="runner-hint">
-                        {{ getRunnerDetail(check).last_result.hint }}
-                      </div>
-                      <div v-if="getChildProcessDetail(check)?.error" class="runner-node-error">
-                        Node 子进程：{{ getChildProcessDetail(check).error }}
-                      </div>
-                    </div>
-                    <div v-if="getAgentProbeCheckDetail(check)" class="recovery-monitor-detail">
-                      <div class="runner-grid">
-                        <span>状态：{{ formatProbeState(getAgentProbeCheckDetail(check).probe) }}</span>
-                        <span>健康：{{ getAgentProbeCheckDetail(check).probeHealth?.status || 'missing' }}</span>
-                        <span>时间：{{ formatRunnerAge(getAgentProbeCheckDetail(check).probe?.age_ms) }}</span>
-                        <span>目标：{{ getAgentProbeCheckDetail(check).probe?.target?.project || '未选择' }}</span>
-                        <span>执行路径：{{ getAgentProbeCheckDetail(check).probe?.execution_path || getAgentProbeCheckDetail(check).probe?.readiness_mode || '未记录' }}</span>
-                        <span>预期标记：{{ getAgentProbeCheckDetail(check).probe?.expected_marker || 'CCM_AGENT_PROBE_OK' }}</span>
-                        <span>工作目录：{{ getAgentProbeCheckDetail(check).probe?.target?.work_dir || '未记录' }}</span>
-                      </div>
-                      <div v-if="getAgentProbeCheckDetail(check).probe?.message" class="runner-probe" :class="getAgentProbeCheckDetail(check).probe?.success ? 'ok' : 'fail'">
-                        {{ getAgentProbeCheckDetail(check).probe.message }}
-                      </div>
-                      <pre v-if="formatProbePreview(getAgentProbeCheckDetail(check).probe?.output_preview)" class="probe-output">{{ formatProbePreview(getAgentProbeCheckDetail(check).probe?.output_preview) }}</pre>
-                      <ul v-if="getAgentProbeCheckDetail(check).fix_actions?.length" class="runner-actions">
-                        <li v-for="action in getAgentProbeCheckDetail(check).fix_actions" :key="action">{{ action }}</li>
-                      </ul>
-                    </div>
-                    <div v-if="getRecoveryMonitorDetail(check)" class="recovery-monitor-detail">
-                      <div class="runner-grid">
-                        <span>监控：{{ formatRecoveryMonitorState(getRecoveryMonitorDetail(check)) }}</span>
-                        <span>探针间隔：{{ formatDuration(getRecoveryMonitorDetail(check).interval_ms) }}</span>
-                        <span>等待通道：{{ getRecoveryMonitorDetail(check).work?.blocked_pending?.length || 0 }}</span>
-                        <span>可重试失败：{{ getRecoveryMonitorDetail(check).work?.runtime_failed?.length || 0 }}</span>
-                      </div>
-                      <div v-if="getRecoveryMonitorDetail(check).probe_in_flight" class="runner-probe">
-                        后台正在复检执行通道，成功后会自动恢复队列
-                      </div>
-                    </div>
-                    <div v-if="getWatchdogDetail(check)" class="recovery-monitor-detail">
-                      <div class="runner-grid">
-                        <span>待恢复：{{ getWatchdogDetail(check).stale_pending?.length || 0 }}</span>
-                        <span>执行中断：{{ getWatchdogDetail(check).stalled_in_progress?.length || 0 }}</span>
-                        <span>可按缺口续跑：{{ getWatchdogDetail(check).gap_rework?.length || 0 }}</span>
-                        <span>执行失败：{{ getWatchdogDetail(check).runtime_failed?.length || 0 }}</span>
-                      </div>
-                    </div>
-                    <div v-if="getProjectVerificationDetail(check)" class="verification-detail">
-                      <div class="runner-grid">
-                        <span>可检查：{{ getProjectVerificationDetail(check).total || 0 }}</span>
-                        <span>已配置：{{ getProjectVerificationDetail(check).configured || 0 }}</span>
-                        <span>自动推断：{{ getProjectVerificationDetail(check).inferred || 0 }}</span>
-                        <span>缺失：{{ getProjectVerificationDetail(check).missing || 0 }}</span>
-                      </div>
-                      <div v-if="getProjectVerificationDetail(check).members?.length" class="verification-members">
-                        <div v-for="member in getProjectVerificationDetail(check).members" :key="`${member.group}-${member.project}`" class="verification-member" :class="member.source">
-                          <strong>{{ member.project || '未命名项目' }}</strong>
-                          <span>{{ member.group || '未分组' }} · {{ formatVerificationSource(member.source) }}</span>
-                          <code>{{ member.commands?.length ? member.commands.join('；') : '请在项目工具配置中填写验证命令' }}</code>
-                        </div>
-                      </div>
-                    </div>
-                    <div v-if="getWorkerProtocolDetail(check)" class="worker-protocol-detail">
-                      <div class="worker-protocol-title">协议证据</div>
-                      <div class="worker-protocol-grid">
-                        <span
-                          v-for="item in formatBooleanChecks(getWorkerProtocolDetail(check).taskNotificationChecks)"
-                          :key="'notify-' + item.key"
-                          :class="item.ok ? 'ok' : 'fail'"
-                        >
-                          {{ item.ok ? '通过' : '失败' }} · {{ item.label }}
-                        </span>
-                        <span
-                          v-for="item in formatBooleanChecks(getWorkerProtocolDetail(check).scratchpadChecks)"
-                          :key="'scratch-' + item.key"
-                          :class="item.ok ? 'ok' : 'fail'"
-                        >
-                          {{ item.ok ? '通过' : '失败' }} · {{ item.label }}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div v-if="showExecutionRecovery()" class="execution-recovery">
-                <div class="execution-recovery-head">
-                  <strong>执行通道恢复步骤</strong>
-                  <span>{{ getExecutionRecoveryReason() }}</span>
-                </div>
-                <ol>
-                  <li>在项目目录启动外部执行器：<code>npm run agent-runner:ps</code></li>
-                  <li>在同一台机器确认 Claude CLI 可用：<code>claude -p</code></li>
-                  <li>回到这里点击“复检执行通道”。探针通过后会自动触发看门狗恢复任务。</li>
-                </ol>
-              </div>
-              <div v-if="agentCliProbeTargetOptions.length" class="probe-target-picker">
-                <label>探针目标</label>
-                <select v-model="agentCliProbeTargetKey">
-                  <option v-for="target in agentCliProbeTargetOptions" :key="target.key" :value="target.key">
-                    {{ target.label }}
-                  </option>
-                </select>
-              </div>
-              <div class="btn-actions">
-                <button class="btn btn-outline" @click="loadOrchestratorDiagnostics" :disabled="orchestratorDiagnosticsLoading">
-                  {{ orchestratorDiagnosticsLoading ? '自检中...' : '刷新闭环自检' }}
-                </button>
-                <button class="btn btn-outline" @click="runAgentCliProbe" :disabled="agentCliProbeLoading">
-                  {{ agentCliProbeLoading ? '复检中...' : '复检执行通道' }}
-                </button>
-                <button class="btn btn-outline" @click="runAgentRecoveryMonitor" :disabled="agentRecoveryMonitorLoading">
-                  {{ agentRecoveryMonitorLoading ? '恢复中...' : '立即恢复自动任务' }}
-                </button>
-                <button class="btn btn-primary" @click="runDailyDevRehearsal" :disabled="dailyDevRehearsalLoading">
-                  {{ dailyDevRehearsalLoading ? '演练中...' : '运行闭环演练' }}
-                </button>
-                <button class="btn btn-outline" @click="createDailyDevSmokeTask" :disabled="dailyDevSmokeLoading">
-                  {{ dailyDevSmokeLoading ? '创建中...' : '创建真实试运行任务' }}
-                </button>
-                <button class="btn btn-outline" @click="loadDailyDevSmokeStatus('', { silent: false })" :disabled="dailyDevSmokeLoading">
-                  {{ dailyDevSmokeLoading ? '刷新中...' : '刷新试运行状态' }}
-                </button>
-              </div>
-              <div v-if="agentCliProbe" class="probe-box" :class="agentCliProbe.success ? 'ok' : 'fail'">
-                <div class="rehearsal-head">
-                  <strong>{{ agentCliProbe.success ? '执行通道探针通过' : (agentCliProbe.blocked ? '执行通道仍阻塞' : '执行通道探针失败') }}</strong>
-                  <span>{{ agentCliProbe.target?.project || agentCliProbe.readiness?.mode || '未执行' }}</span>
-                </div>
-                <div class="probe-message">{{ agentCliProbe.message || agentCliProbe.error }}</div>
-                <div v-if="agentCliProbe.target" class="smoke-task-meta">
-                  <span>群聊：{{ agentCliProbe.target.group_name }}</span>
-                  <span>子 Agent：{{ agentCliProbe.target.project }}</span>
-                  <span>命令类型：{{ agentCliProbe.target.agent_type }}</span>
-                  <span>执行路径：{{ agentCliProbe.execution_path || agentCliProbe.readiness?.mode || '未记录' }}</span>
-                  <span>预期标记：{{ agentCliProbe.expected_marker || 'CCM_AGENT_PROBE_OK' }}</span>
-                  <span>工作目录：{{ agentCliProbe.target.work_dir || '未记录' }}</span>
-                  <span>耗时：{{ agentCliProbe.duration_ms || 0 }}ms</span>
-                </div>
-                <div v-if="agentCliProbeRecovery" class="smoke-task-meta">
-                  <span>卡住恢复：{{ agentCliProbeRecovery.recovered || 0 }}/{{ agentCliProbeRecovery.total_recoverable || 0 }}</span>
-                  <span v-if="agentCliProbeRecovery.blocked_recovery">准入恢复：{{ agentCliProbeRecovery.blocked_recovery?.recovered || 0 }}/{{ agentCliProbeRecovery.blocked_recovery?.total_blocked || 0 }}</span>
-                  <span>执行失败恢复：{{ agentCliProbeRecovery.runtime_queued || 0 }}/{{ agentCliProbeRecovery.runtime_failed_total || 0 }}</span>
-                  <span>缺口续跑：{{ agentCliProbeRecovery.gap_queued || 0 }}/{{ agentCliProbeRecovery.gap_rework_total || 0 }}</span>
-                  <span v-if="agentCliProbeRecovery.gap_continue_skipped_reason">续跑跳过：{{ agentCliProbeRecovery.gap_continue_skipped_reason }}</span>
-                  <span v-if="agentCliProbeRecovery.runtime_retry_skipped_reason">跳过：{{ agentCliProbeRecovery.runtime_retry_skipped_reason }}</span>
-                </div>
-                <pre v-if="formatProbePreview(agentCliProbe.output_preview || agentCliProbe.output)" class="probe-output">{{ formatProbePreview(agentCliProbe.output_preview || agentCliProbe.output) }}</pre>
-              </div>
-              <div v-if="agentRecoveryMonitorRun" class="probe-box" :class="agentRecoveryMonitorRun.success ? 'ok' : 'fail'">
-                <div class="rehearsal-head">
-                  <strong>{{ agentRecoveryMonitorRun.success ? '恢复监控已执行' : '恢复监控未通过' }}</strong>
-                  <span>{{ agentRecoveryMonitorRun.skipped ? '无需恢复' : (agentRecoveryMonitorRun.probe?.target?.project || agentRecoveryMonitorRun.probe?.readiness?.mode || '后台探针') }}</span>
-                </div>
-                <div class="probe-message">{{ agentRecoveryMonitorRun.reason || agentRecoveryMonitorRun.message || agentRecoveryMonitorRun.probe?.message || agentRecoveryMonitorRun.error }}</div>
-                <div class="smoke-task-meta">
-                  <span>等待通道：{{ agentRecoveryMonitorRun.work?.blocked_pending?.length || 0 }}</span>
-                  <span>可重试失败：{{ agentRecoveryMonitorRun.work?.runtime_failed?.length || 0 }}</span>
-                  <span>已恢复：{{ agentRecoveryMonitorRun.blocked_recovery?.recovered || 0 }}/{{ agentRecoveryMonitorRun.blocked_recovery?.total_blocked || 0 }}</span>
-                  <span>已重试：{{ agentRecoveryMonitorRun.runtime_recovery?.queued || 0 }}/{{ agentRecoveryMonitorRun.runtime_recovery?.total_recoverable || 0 }}</span>
-                </div>
-              </div>
-              <div v-if="dailyDevRehearsal" class="rehearsal-box" :class="dailyDevRehearsal.pass ? 'ok' : 'fail'">
-                <div class="rehearsal-head">
-                  <strong>{{ dailyDevRehearsal.pass ? '闭环演练通过' : '闭环演练未通过' }}</strong>
-                  <span>{{ dailyDevRehearsal.group?.name || '未选择群聊' }}</span>
-                </div>
-                <div class="rehearsal-steps">
-                  <span v-for="step in dailyDevRehearsal.steps" :key="step.id" :class="step.status">
-                    {{ step.status === 'ok' ? '通过' : '失败' }} · {{ step.message }}
-                  </span>
-                </div>
-                <div v-if="dailyDevRehearsal.worker_notification" class="smoke-task-meta">
-                  <span>通知：{{ dailyDevRehearsal.worker_notification.status || 'unknown' }}</span>
-                  <span>Worker：{{ dailyDevRehearsal.worker_notification.task_id || '未记录' }}</span>
-                  <span>回执：{{ dailyDevRehearsal.worker_notification.receipt_status || 'missing' }}</span>
-                  <span>{{ dailyDevRehearsal.scratchpad_context ? 'scratchpad 已生成' : 'scratchpad 未生成' }}</span>
-                </div>
-              </div>
-              <div v-if="dailyDevSmokeTask" class="rehearsal-box ok">
-                <div class="rehearsal-head">
-                  <strong>真实试运行任务已创建</strong>
-                  <span>{{ dailyDevSmokeTask.queued ? '已入队' : '未入队' }}</span>
-                </div>
-                <div class="smoke-task-meta">
-                  <span>任务：{{ dailyDevSmokeTask.task?.title }}</span>
-                  <span>ID：{{ dailyDevSmokeTask.task?.id }}</span>
-                  <span>群聊：{{ dailyDevSmokeTask.group?.name || dailyDevSmokeTask.group?.id }}</span>
-                  <span>子 Agent：{{ dailyDevSmokeTask.target_member }}</span>
-                  <span>文件：{{ dailyDevSmokeTask.smoke_file }}</span>
-                </div>
-              </div>
-              <div v-if="dailyDevSmokeStatus" class="rehearsal-box" :class="dailyDevSmokeStatus.pass ? 'ok' : 'fail'">
-                <div class="rehearsal-head">
-                  <strong>{{ dailyDevSmokeStatus.pass ? '真实试运行已通过' : '真实试运行未通过' }}</strong>
-                  <span>{{ dailyDevSmokeStatus.status || 'unknown' }}</span>
-                </div>
-                <div class="probe-message">{{ dailyDevSmokeStatus.message }}</div>
-                <div v-if="dailyDevSmokeStatus.task" class="smoke-task-meta">
-                  <span>任务：{{ dailyDevSmokeStatus.task.id }}</span>
-                  <span>状态：{{ dailyDevSmokeStatus.task.status }}</span>
-                  <span>群聊：{{ dailyDevSmokeStatus.target?.group_name }}</span>
-                  <span>子 Agent：{{ dailyDevSmokeStatus.target?.member }}</span>
-                  <span>文件：{{ dailyDevSmokeStatus.target?.smoke_file }}</span>
-                  <span>{{ dailyDevSmokeStatus.target?.file_exists ? '文件已存在' : '文件不存在' }}</span>
-                </div>
-                <div v-if="dailyDevSmokeStatus.evidence" class="rehearsal-steps">
-                  <span :class="dailyDevSmokeStatus.evidence.task_done ? 'ok' : 'fail'">{{ dailyDevSmokeStatus.evidence.task_done ? '通过' : '缺失' }} · 任务完成</span>
-                  <span :class="dailyDevSmokeStatus.evidence.file_exists ? 'ok' : 'fail'">{{ dailyDevSmokeStatus.evidence.file_exists ? '通过' : '缺失' }} · smoke 文件</span>
-                  <span :class="dailyDevSmokeStatus.evidence.has_target_assignment ? 'ok' : 'fail'">{{ dailyDevSmokeStatus.evidence.has_target_assignment ? '通过' : '缺失' }} · 主 Agent 派发</span>
-                  <span :class="dailyDevSmokeStatus.evidence.has_target_worker_notification ? 'ok' : 'fail'">{{ dailyDevSmokeStatus.evidence.worker_notification_count || 0 }} · Worker 通知</span>
-                  <span :class="dailyDevSmokeStatus.evidence.coordination_plan_count > 0 ? 'ok' : 'fail'">{{ dailyDevSmokeStatus.evidence.coordination_plan_count || 0 }} · 协调计划</span>
-                  <span :class="dailyDevSmokeStatus.evidence.actual_file_change_count > 0 ? 'ok' : 'fail'">{{ dailyDevSmokeStatus.evidence.actual_file_change_count || 0 }} · 实际变更</span>
-                  <span :class="dailyDevSmokeStatus.evidence.has_done_receipt ? 'ok' : 'fail'">{{ dailyDevSmokeStatus.evidence.has_done_receipt ? '通过' : '缺失' }} · 子 Agent 回执</span>
-                  <span :class="dailyDevSmokeStatus.evidence.has_final_review ? 'ok' : 'fail'">{{ dailyDevSmokeStatus.evidence.has_final_review ? '通过' : '缺失' }} · 主 Agent 复盘</span>
-                  <span :class="dailyDevSmokeStatus.evidence.executed_verification_count > 0 ? 'ok' : 'fail'">{{ dailyDevSmokeStatus.evidence.executed_verification_count || 0 }} · 已执行验证</span>
-                </div>
-              </div>
-            </div>
+            
 
             <div class="form-group row-checkbox">
               <label class="switch-label">
                 <input type="checkbox" v-model="orchestratorConfig.enabled" class="switch-input">
                 <span class="switch-slider"></span>
-                <span class="switch-text">启用统一大模型 API（群聊主 Agent / 音乐 Agent 共用）</span>
+                <span class="switch-text">启用群聊主 Agent LLM 编排 API</span>
               </label>
             </div>
 
@@ -1473,7 +1115,7 @@ onUnmounted(() => {
               <label class="switch-label">
                 <input type="checkbox" v-model="orchestratorConfig.fallbackToRules" class="switch-input">
                 <span class="switch-slider"></span>
-                <span class="switch-text">LLM 不可用时保留“规则主 Agent”继续计划和派单</span>
+                <span class="switch-text">LLM 不可用时启用“规则兜底协调器”继续计划和派单</span>
               </label>
             </div>
 
@@ -1484,7 +1126,7 @@ onUnmounted(() => {
               </div>
               <div class="btn-actions">
                 <button class="btn btn-primary" @click="saveOrchestratorConfig" :disabled="orchestratorLoading">
-                  {{ orchestratorLoading ? '保存中...' : '💾 保存统一大模型配置' }}
+                  {{ orchestratorLoading ? '保存中...' : '💾 保存群聊主 Agent 模型配置' }}
                 </button>
                 <button class="btn btn-outline" @click="testOrchestrator" :disabled="orchestratorLoading">⚡ 测试意图识别</button>
               </div>
@@ -1574,91 +1216,6 @@ onUnmounted(() => {
                     <span class="switch-hint">（开启后将禁用全站毛玻璃磨砂 `backdrop-filter` 以及复杂的交互悬停缩放，能极大地为核显设备降温和提速）</span>
                   </div>
                 </label>
-              </div>
-            </div>
-          </div>
-        </transition>
-
-        <!-- SECTION RAG: 本地知识库与文档问答 (RAG) -->
-        <transition name="fade" mode="out-in">
-          <div v-if="activeSection === 'knowledge'" class="settings-card">
-            <div class="card-header">
-              <span class="icon">📚</span>
-              <div>
-                <div class="card-title">本地知识库与文档问答 (RAG)</div>
-                <div class="card-desc">上传本地开发文档和知识库，全局助手将在对话时自动检索匹配，作为大模型推理的参考上下文。</div>
-              </div>
-            </div>
-
-            <!-- 上传部分 -->
-            <div class="settings-subsection">
-              <h4 class="sub-title">📥 上传新知识文档</h4>
-              <div class="upload-dropzone" style="border: 2px dashed rgba(255, 255, 255, 0.15); border-radius: 8px; padding: 24px; text-align: center; background: rgba(255, 255, 255, 0.02); transition: border-color 0.3s; position: relative;">
-                <input type="file" multiple @change="uploadKnowledgeFile" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;" :disabled="knowledgeLoading" />
-                <div class="upload-inner" style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
-                  <span style="font-size: 32px;">📄</span>
-                  <span style="font-size: 14px; color: var(--text-color, #ccc);">点击或拖拽文件到此处上传</span>
-                  <span style="font-size: 12px; color: var(--text-muted, #888);">支持 .md, .txt, .js, .ts, .json, .java, .py, .go 等文本格式</span>
-                </div>
-              </div>
-              <div v-if="knowledgeLoading" class="loading-bar" style="margin-top: 12px; font-size: 14px; color: var(--text-color, #ccc); display: flex; align-items: center; gap: 8px;">
-                <span class="spinner-icon" style="animation: spin 1s linear infinite;">🔄</span> 正在解析并为文档构建索引中，请稍候...
-              </div>
-            </div>
-
-            <!-- 文档列表 -->
-            <div class="settings-subsection" style="margin-top: 24px;">
-              <h4 class="sub-title">🗂️ 已归档的文档列表 ({{ knowledgeFiles.length }})</h4>
-              <div v-if="knowledgeFiles.length === 0" class="empty-state" style="padding: 32px; text-align: center; color: var(--text-muted, #888); background: rgba(0,0,0,0.1); border-radius: 8px;">
-                暂无已归档文档，请在上方上传文档以建立本地知识库。
-              </div>
-              <div v-else class="file-list" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
-                <div v-for="file in knowledgeFiles" :key="file.name" class="file-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 6px;">
-                  <div class="file-info" style="display: flex; align-items: center; gap: 10px; overflow: hidden;">
-                    <span style="font-size: 18px;">📄</span>
-                    <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                      <div class="file-name" style="font-size: 14px; font-weight: 500; color: #eee;" :title="file.name">{{ file.name }}</div>
-                      <div class="file-meta" style="font-size: 12px; color: #888;">
-                        大小: {{ (file.size / 1024).toFixed(2) }} KB | 分片数: {{ file.chunksCount }} | 上传时间: {{ new Date(file.uploadedAt).toLocaleString() }}
-                      </div>
-                    </div>
-                  </div>
-                  <button class="btn btn-danger btn-sm" @click="deleteKnowledgeFile(file.name)" style="padding: 4px 10px; font-size: 12px;">
-                    🗑️ 删除
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <!-- 检索匹配测试 -->
-            <div class="settings-subsection" style="margin-top: 24px;">
-              <h4 class="sub-title">🔍 知识库相似度检索测试</h4>
-              <div class="search-test-box" style="display: flex; gap: 8px; margin-bottom: 12px;">
-                <input v-model="searchQuery" type="text" placeholder="输入你想测试检索的查询，如：'飞书通知配置'..." class="form-control" style="flex: 1; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 8px 12px; border-radius: 6px;" @keyup.enter="testKnowledgeQuery" />
-                <button class="btn btn-primary" :disabled="isSearching" @click="testKnowledgeQuery" style="display: flex; align-items: center; gap: 6px;">
-                  <span v-if="isSearching">🌀 检索中...</span>
-                  <span v-else>🔍 检索匹配</span>
-                </button>
-              </div>
-
-              <!-- 检索结果 -->
-              <div v-if="searchResults" class="search-results-panel" style="background: rgba(0,0,0,0.2); border-radius: 8px; padding: 16px; border: 1px solid rgba(255,255,255,0.05);">
-                <div style="font-size: 13px; color: #888; margin-bottom: 12px; display: flex; justify-content: space-between;">
-                  <span>检索成功，匹配到 {{ searchResults.results?.length || 0 }} 个高相关分片</span>
-                  <span>用时: {{ searchResults.elapsedMs }}ms</span>
-                </div>
-                <div v-if="!searchResults.results || searchResults.results.length === 0" style="color: #ff9800; font-size: 14px; text-align: center; padding: 16px;">
-                  没有找到匹配的知识分片。请确认查询内容或重新上传相关文档。
-                </div>
-                <div v-else style="display: flex; flex-direction: column; gap: 12px; max-height: 350px; overflow-y: auto;">
-                  <div v-for="(res, idx) in searchResults.results" :key="idx" style="background: rgba(255,255,255,0.02); border-left: 3px solid #00bcd4; padding: 10px 12px; border-radius: 0 4px 4px 0;">
-                    <div style="display: flex; justify-content: space-between; font-size: 12px; color: #aaa; margin-bottom: 6px;">
-                      <span>📄 来源: <strong>{{ res.source }}</strong></span>
-                      <span style="color: #00bcd4; font-weight: bold;">得分: {{ res.score.toFixed(4) }}</span>
-                    </div>
-                    <pre style="white-space: pre-wrap; font-family: monospace; font-size: 12px; color: #ddd; background: rgba(0,0,0,0.15); padding: 8px; border-radius: 4px; margin: 0;">{{ res.text }}</pre>
-                  </div>
-                </div>
               </div>
             </div>
           </div>

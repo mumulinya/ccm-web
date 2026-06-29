@@ -22,6 +22,12 @@ import {
   sendFeishuReportMessage,
   type CollabCtx,
 } from "./collaboration";
+import {
+  acquireIdempotency,
+  completeIdempotency,
+  failIdempotency,
+  getIdempotencyRecord,
+} from "../reliability-ledger";
 
 const runningCronJobs = new Set<string>();
 let schedulerTimer: NodeJS.Timeout | null = null;
@@ -1058,7 +1064,7 @@ export function syncCronTaskStatus(task: any, status: string, result = "") {
   }
 }
 
-async function runCronJob(id: string, ctx: CollabCtx, trigger: "manual" | "schedule") {
+async function runCronJobCore(id: string, ctx: CollabCtx, trigger: "manual" | "schedule", reliability: any = null) {
   const jobs = loadCronJobs();
   const job = jobs.find(j => j.id === id);
   if (!job) throw new Error("定时任务不存在");
@@ -1110,6 +1116,13 @@ async function runCronJob(id: string, ctx: CollabCtx, trigger: "manual" | "sched
     taskDrafts = Array.isArray(taskDraft?.drafts)
       ? taskDraft.drafts
       : (Array.isArray(taskDraft) ? taskDraft : [taskDraft].filter(Boolean));
+    if (reliability?.operationKey) {
+      taskDrafts = taskDrafts.map((draft: any, index: number) => ({
+        ...draft,
+        trace_id: reliability.traceId,
+        idempotency_key: `cron:${reliability.operationKey}:draft:${index}:${draft?.workflow_meta?.intake?.backlog_file || draft?.title || "task"}`,
+      }));
+    }
     if (taskDrafts.length === 0) {
       const continuedCount = Number(gapContinueResult?.continued || 0);
       const queuedCount = Number(gapContinueResult?.queued || 0);
@@ -1196,6 +1209,33 @@ async function runCronJob(id: string, ctx: CollabCtx, trigger: "manual" | "sched
   }
 }
 
+async function runCronJob(id: string, ctx: CollabCtx, trigger: "manual" | "schedule") {
+  if (trigger !== "schedule") return runCronJobCore(id, ctx, trigger);
+  const operationKey = `${id}:${minuteKey(new Date())}`;
+  const operation = acquireIdempotency({ scope: "cron-schedule", key: operationKey, leaseMs: 10 * 60 * 1000, metadata: { cron_job_id: id, minute_key: operationKey.split(":").slice(1).join(":") } });
+  if (!operation.acquired) {
+    return operation.record?.result || { success: true, duplicate: true, skipped: true, message: operation.inProgress ? "相同定时周期正在执行" : "相同定时周期已执行" };
+  }
+  try {
+    const result = await runCronJobCore(id, ctx, trigger, { operationKey, traceId: operation.traceId });
+    if (result?.success === false) {
+      failIdempotency("cron-schedule", operationKey, result.error || result.message || "定时任务执行失败");
+      return result;
+    }
+    completeIdempotency("cron-schedule", operationKey, {
+      success: true,
+      queued: !!result?.queued,
+      task_id: result?.task?.id || null,
+      task_ids: result?.tasks?.map((task: any) => task.id) || [],
+      message: result?.message || result?.error || "",
+    });
+    return result;
+  } catch (error: any) {
+    failIdempotency("cron-schedule", operationKey, error);
+    throw error;
+  }
+}
+
 async function tickCronScheduler(ctx: CollabCtx) {
   const now = new Date();
   const key = minuteKey(now);
@@ -1214,7 +1254,8 @@ async function tickCronScheduler(ctx: CollabCtx) {
       }
       continue;
     }
-    if (job.last_run_key === key || runningCronJobs.has(job.id)) continue;
+    if (runningCronJobs.has(job.id)) continue;
+    if (job.last_run_key === key && getIdempotencyRecord("cron-schedule", `${job.id}:${key}`)?.status === "completed") continue;
     if (!matchesCron(job.schedule, now)) continue;
 
     runCronJob(job.id, ctx, "schedule")

@@ -33,6 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.getRuntimeExecutionEnv = getRuntimeExecutionEnv;
+exports.runRuntimeToolSyncSelfTest = runRuntimeToolSyncSelfTest;
 exports.syncRuntimeTools = syncRuntimeTools;
 exports.buildRuntimeToolSyncPrompt = buildRuntimeToolSyncPrompt;
 exports.recordRuntimeToolSyncAudit = recordRuntimeToolSyncAudit;
@@ -43,6 +45,7 @@ const os = __importStar(require("os"));
 const db_1 = require("./db");
 const agent_runtime_1 = require("./agent-runtime");
 const utils_1 = require("./utils");
+const group_orchestrator_1 = require("./modules/group-orchestrator");
 const CCM_MCP_PREFIX = "ccm__";
 const CCM_SKILL_MARKER = ".ccm-managed.json";
 function uniqueNames(value) {
@@ -163,8 +166,27 @@ function pruneManagedMcpSnapshots(runtimeRoot, keepFile) {
 function tomlString(value) {
     return JSON.stringify(String(value ?? ""));
 }
-function buildCodexConfigToml(mcpServers) {
+function loadCodexGatewayConfig() {
+    const config = (0, group_orchestrator_1.loadOrchestratorConfig)();
+    const format = String(config?.format || "").trim().toLowerCase();
+    const apiUrl = String(config?.apiUrl || "").trim().replace(/\/+$/, "");
+    const apiKey = String(config?.apiKey || "").trim();
+    const model = String(config?.model || "").trim();
+    if (config?.enabled === false || !["openai-compatible", "auto"].includes(format) || !apiUrl || !apiKey || !model)
+        return null;
+    return { apiUrl, apiKey, model };
+}
+function getRuntimeExecutionEnv(agentType) {
+    if ((0, agent_runtime_1.normalizeAgentRuntimeId)(agentType) !== "codex")
+        return {};
+    const gateway = loadCodexGatewayConfig();
+    return gateway ? { CCM_CODEX_API_KEY: gateway.apiKey } : {};
+}
+function buildCodexConfigToml(mcpServers, gateway) {
     const lines = ["# Managed by CCM. This CODEX_HOME contains only tools authorized for this invocation.", ""];
+    if (gateway) {
+        lines.push(`model_provider = ${tomlString("ccm")}`, `model = ${tomlString(gateway.model)}`, `web_search = ${tomlString("disabled")}`, "", "[model_providers.ccm]", `name = ${tomlString("CCM Unified Gateway")}`, `base_url = ${tomlString(gateway.apiUrl)}`, `env_key = ${tomlString("CCM_CODEX_API_KEY")}`, `wire_api = ${tomlString("responses")}`, "requires_openai_auth = false", "");
+    }
     for (const [name, server] of Object.entries(mcpServers)) {
         lines.push(`[mcp_servers.${tomlString(name)}]`);
         if (server.url) {
@@ -182,6 +204,21 @@ function buildCodexConfigToml(mcpServers) {
         lines.push("");
     }
     return lines.join("\n");
+}
+function runRuntimeToolSyncSelfTest() {
+    const fakeSecret = "ccm-test-secret-must-not-be-persisted";
+    const config = buildCodexConfigToml({}, {
+        apiUrl: "https://gateway.example.test/v1",
+        apiKey: fakeSecret,
+        model: "test-model",
+    });
+    const checks = {
+        unifiedGatewayConfigured: config.includes('model_provider = "ccm"') && config.includes('base_url = "https://gateway.example.test/v1"'),
+        webSearchDisabled: config.includes('web_search = "disabled"'),
+        secretUsesEnvironment: config.includes('env_key = "CCM_CODEX_API_KEY"'),
+        secretNotPersisted: !config.includes(fakeSecret),
+    };
+    return { pass: Object.values(checks).every(Boolean), checks };
 }
 function linkCodexAuth(runtimeHome, audit) {
     const source = path.join(os.homedir(), ".codex", "auth.json");
@@ -208,6 +245,14 @@ function linkCodexAuth(runtimeHome, audit) {
             audit.warnings.push(`Codex 认证同步失败：${copyError?.message || error?.message || String(copyError)}`);
         }
     }
+}
+function removeManagedCodexAuth(runtimeHome) {
+    const target = path.join(runtimeHome, "auth.json");
+    try {
+        if (fs.existsSync(target))
+            fs.unlinkSync(target);
+    }
+    catch { }
 }
 function syncRuntimeTools(workDir, agentType, allowedTools) {
     const runtime = (0, agent_runtime_1.normalizeAgentRuntimeId)(agentType);
@@ -241,8 +286,15 @@ function syncRuntimeTools(workDir, agentType, allowedTools) {
         return audit;
     }
     try {
+        const codexGateway = runtime === "codex" ? loadCodexGatewayConfig() : null;
         const authorizationId = crypto.createHash("sha256")
-            .update(JSON.stringify({ runtime, requested, mcp: selectedMcp, skills: selectedSkills.map(skill => ({ name: skill.name, prompt: skill.prompt })) }))
+            .update(JSON.stringify({
+            runtime,
+            requested,
+            mcp: selectedMcp,
+            skills: selectedSkills.map(skill => ({ name: skill.name, prompt: skill.prompt })),
+            codexGateway: codexGateway ? { apiUrl: codexGateway.apiUrl, model: codexGateway.model } : null,
+        }))
             .digest("hex")
             .slice(0, 16);
         const mcpServers = {};
@@ -274,8 +326,11 @@ function syncRuntimeTools(workDir, agentType, allowedTools) {
             const configPath = path.join(runtimeHome, "config.toml");
             const skillRoot = path.join(runtimeHome, "skills");
             fs.mkdirSync(runtimeHome, { recursive: true });
-            fs.writeFileSync(configPath, buildCodexConfigToml(mcpServers), "utf-8");
-            linkCodexAuth(runtimeHome, audit);
+            fs.writeFileSync(configPath, buildCodexConfigToml(mcpServers, codexGateway), "utf-8");
+            if (codexGateway)
+                removeManagedCodexAuth(runtimeHome);
+            else
+                linkCodexAuth(runtimeHome, audit);
             audit.mcpConfigPath = configPath;
             audit.runtimeHomePath = runtimeHome;
             audit.skillRoot = skillRoot;

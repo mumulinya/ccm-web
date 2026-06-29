@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch, provide } from 'vue'
 import ProjectManager from './components/ProjectManager.vue'
 import GroupChat from './components/GroupChat.vue'
@@ -17,6 +17,9 @@ import MusicPlayer from './components/MusicPlayer.vue'
 import MenuManager from './components/MenuManager.vue'
 import PetMenu from './components/pets/PetMenu.vue'
 import GlobalAgent from './components/GlobalAgent.vue'
+import KnowledgeBase from './components/KnowledgeBase.vue'
+import MemoryCenter from './components/MemoryCenter.vue'
+import SystemDiagnostics from './components/SystemDiagnostics.vue'
 
 const currentTab = ref('')
 const projects = ref([])
@@ -275,6 +278,9 @@ const DEFAULT_TABS = [
   { id: 'changes', icon: '📝', label: '代码变更' },
   { id: 'tasks', icon: '📋', label: '任务派发' },
   { id: 'autodev', icon: '🧭', label: '自动开发' },
+  { id: 'diagnostics', icon: '🩺', label: '系统自检与体检' },
+  { id: 'knowledge', icon: '📖', label: '知识库与文档' },
+  { id: 'memory-center', icon: '🧠', label: '记忆控制中心' },
   { id: 'cron', icon: '⏰', label: '定时任务' },
   { id: 'terminal', icon: '💻', label: '内置终端' },
   { id: 'templates', icon: '📚', label: '对话模板' },
@@ -332,7 +338,7 @@ const DEFAULT_GROUPS = [
 const DEFAULT_TAB_GROUPS = {
   projects: 'core', groups: 'collab', tasks: 'collab', autodev: 'collab', 'global-agent': 'core',
   tools: 'dev', changes: 'dev', terminal: 'dev', templates: 'dev',
-  dashboard: 'data', metrics: 'data', search: 'data',
+  dashboard: 'data', metrics: 'data', search: 'data', 'memory-center': 'data', knowledge: 'data', diagnostics: 'data',
   cron: 'system', pets: 'system', music: 'system', settings: 'system',
 }
 
@@ -506,6 +512,9 @@ const closeTab = (tabId, event) => {
         <div v-show="currentTab === 'changes'" class="tab-pane"><CodeChanges /></div>
         <div v-show="currentTab === 'tasks'" class="tab-pane"><TaskManager /></div>
         <div v-show="currentTab === 'autodev'" class="tab-pane"><AutoDevOps /></div>
+        <div v-show="currentTab === 'diagnostics'" class="tab-pane"><SystemDiagnostics /></div>
+        <div v-show="currentTab === 'knowledge'" class="tab-pane"><KnowledgeBase /></div>
+        <div v-show="currentTab === 'memory-center'" class="tab-pane"><MemoryCenter /></div>
         <div v-show="currentTab === 'cron'" class="tab-pane"><CronJobs /></div>
         <div v-show="currentTab === 'terminal'" class="tab-pane"><Terminal /></div>
         <div v-show="currentTab === 'templates'" class="tab-pane"><Templates /></div>

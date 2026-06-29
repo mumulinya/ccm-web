@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.FEISHU_SCOPES = void 0;
 exports.loadGroups = loadGroups;
+exports.runGroupMemoryStorageRecoverySelfTest = runGroupMemoryStorageRecoverySelfTest;
 exports.sendFeishuReportMessage = sendFeishuReportMessage;
 exports.buildEvidenceGateFollowUps = buildEvidenceGateFollowUps;
 exports.createAndQueueTask = createAndQueueTask;
@@ -64,6 +65,12 @@ const group_orchestrator_1 = require("./group-orchestrator");
 const agent_runtime_1 = require("../agent-runtime");
 const runtime_tool_sync_1 = require("../runtime-tool-sync");
 const agent_worktree_1 = require("../agent-worktree");
+const execution_kernel_1 = require("../execution-kernel");
+const task_agent_sessions_1 = require("../task-agent-sessions");
+const collaboration_resilience_1 = require("../collaboration-resilience");
+const reliability_ledger_1 = require("../reliability-ledger");
+const reliability_drills_1 = require("../reliability-drills");
+const soak_test_1 = require("../soak-test");
 // === 任务队列系统（支持并行执行）===
 const taskQueues = new Map(); // 每个目标（群聊/Agent）独立队列
 const runningTasks = new Map(); // 正在运行的任务目标
@@ -175,11 +182,25 @@ function loadGroups() {
         return normalized;
     }
     catch {
+        try {
+            const recovered = JSON.parse(fs.readFileSync(`${utils_1.GROUPS_FILE}.bak`, "utf-8"));
+            if (Array.isArray(recovered))
+                return recovered.map(group_orchestrator_1.normalizeGroupOrchestrator);
+        }
+        catch { }
         return [];
     }
 }
 function saveGroups(groups) {
-    fs.writeFileSync(utils_1.GROUPS_FILE, JSON.stringify(groups, null, 2));
+    const temp = `${utils_1.GROUPS_FILE}.${process.pid}.${Date.now()}.tmp`;
+    if (fs.existsSync(utils_1.GROUPS_FILE)) {
+        try {
+            fs.copyFileSync(utils_1.GROUPS_FILE, `${utils_1.GROUPS_FILE}.bak`);
+        }
+        catch { }
+    }
+    fs.writeFileSync(temp, JSON.stringify(groups, null, 2), "utf-8");
+    fs.renameSync(temp, utils_1.GROUPS_FILE);
 }
 function getGroupMessages(groupId) {
     const file = path.join(utils_1.GROUP_MESSAGES_DIR, `${groupId}.json`);
@@ -189,22 +210,94 @@ function getGroupMessages(groupId) {
         return JSON.parse(fs.readFileSync(file, "utf-8"));
     }
     catch {
-        return [];
+        try {
+            return JSON.parse(fs.readFileSync(`${file}.bak`, "utf-8"));
+        }
+        catch {
+            return [];
+        }
     }
 }
 function appendGroupMessage(groupId, msg) {
     const messages = getGroupMessages(groupId);
-    messages.push(msg);
-    if (!fs.existsSync(utils_1.GROUP_MESSAGES_DIR)) {
-        fs.mkdirSync(utils_1.GROUP_MESSAGES_DIR, { recursive: true });
-    }
-    fs.writeFileSync(path.join(utils_1.GROUP_MESSAGES_DIR, `${groupId}.json`), JSON.stringify(messages, null, 2));
+    const messageId = String(msg?.id || "").trim();
+    const existing = messageId ? messages.find((item) => String(item?.id || "") === messageId) : null;
+    if (existing)
+        return existing;
+    const taskTraceId = msg?.task_id ? (0, db_1.loadTasks)().find((task) => task.id === msg.task_id)?.trace_id : "";
+    const traceId = (0, reliability_ledger_1.ensureTraceId)(msg?.trace_id || msg?.traceId || taskTraceId, "message");
+    const next = { ...msg, trace_id: traceId };
+    messages.push(next);
+    saveGroupMessages(groupId, messages);
+    (0, reliability_ledger_1.appendTraceEvent)(traceId, { id: `group-message:${groupId}:${messageId || messages.length}`, type: "group.message_persisted", status: "ok", group_id: groupId, task_id: msg?.task_id || "", agent: msg?.agent || msg?.role || "", message: String(msg?.content || "").slice(0, 500), data: { message_id: messageId } });
+    return next;
 }
 function saveGroupMessages(groupId, messages) {
     if (!fs.existsSync(utils_1.GROUP_MESSAGES_DIR)) {
         fs.mkdirSync(utils_1.GROUP_MESSAGES_DIR, { recursive: true });
     }
-    fs.writeFileSync(path.join(utils_1.GROUP_MESSAGES_DIR, `${groupId}.json`), JSON.stringify(messages, null, 2));
+    const file = path.join(utils_1.GROUP_MESSAGES_DIR, `${groupId}.json`);
+    const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    if (fs.existsSync(file)) {
+        try {
+            fs.copyFileSync(file, `${file}.bak`);
+        }
+        catch { }
+    }
+    fs.writeFileSync(temp, JSON.stringify(messages, null, 2), "utf-8");
+    fs.renameSync(temp, file);
+}
+function buildInlineTaskRuntime(task) {
+    const executions = (0, execution_kernel_1.listExecutions)({ taskId: task.id });
+    const sessions = (0, task_agent_sessions_1.listTaskAgentSessions)({ taskId: task.id });
+    const running = executions.filter(item => ["spawning", "ready", "prompt_accepted", "running"].includes(item.state));
+    const failed = executions.filter(item => item.state === "failed");
+    const reviewing = executions.filter(item => item.state === "reviewing");
+    const mergeReady = executions.filter(item => item.green?.level === "merge_ready");
+    return {
+        taskId: task.id,
+        status: task.status,
+        statusText: task.status_detail || "",
+        updatedAt: task.updated_at || new Date().toISOString(),
+        counts: { total: executions.length, running: running.length, reviewing: reviewing.length, failed: failed.length, mergeReady: mergeReady.length },
+        agents: executions.map(item => ({
+            project: item.project,
+            state: item.state,
+            green: item.green?.level || "none",
+            failureClass: item.failure?.failureClass || "",
+            runtimeFallbacks: (item.events || []).filter((event) => event.name === "runtime.fallback").length,
+            conflictGroup: item.workspace?.conflictGroup || "",
+        })),
+        sessions: sessions.map(session => ({
+            project: session.project,
+            agentType: session.agentType,
+            status: session.status,
+            nativeSessionId: session.nativeSessionId || "",
+            ...(0, task_agent_sessions_1.getTaskAgentSessionContinuity)(session),
+        })),
+    };
+}
+function updateGroupTaskInlineStatus(task, status, detail = "") {
+    if (!task?.group_id || !task?.id)
+        return null;
+    const messages = getGroupMessages(task.group_id);
+    const runtime = buildInlineTaskRuntime({ ...task, status, status_detail: detail || task.status_detail });
+    let changed = false;
+    const next = messages.map((message) => {
+        if (message?.task_id !== task.id)
+            return message;
+        changed = true;
+        return {
+            ...message,
+            task: message.task ? { ...message.task, status, status_detail: detail || task.status_detail || "" } : message.task,
+            taskRuntime: runtime,
+            task_runtime: runtime,
+            workflow: { ...(message.workflow || {}), phase: status === "done" ? "complete" : status === "failed" || status === "cancelled" ? "needs_rework" : status === "in_progress" ? "executing" : (message.workflow?.phase || "dispatching"), updated_at: new Date().toISOString() },
+        };
+    });
+    if (changed)
+        saveGroupMessages(task.group_id, next);
+    return runtime;
 }
 function loadAgentQaItems() {
     if (!fs.existsSync(AGENT_QA_FILE))
@@ -314,6 +407,9 @@ function emitAgentQaEvent(streamRes, kind, qa, content = "") {
 function getGroupMemoryFile(groupId) {
     return path.join(GROUP_MEMORY_DIR, `${groupId}.json`);
 }
+function getGroupMemoryBackupFile(groupId) {
+    return `${getGroupMemoryFile(groupId)}.bak`;
+}
 function createEmptyGroupMemory(groupId) {
     return {
         groupId,
@@ -340,6 +436,15 @@ function loadGroupMemory(groupId) {
         return { ...createEmptyGroupMemory(groupId), ...JSON.parse(fs.readFileSync(file, "utf-8")) };
     }
     catch {
+        const backup = getGroupMemoryBackupFile(groupId);
+        try {
+            const recovered = { ...createEmptyGroupMemory(groupId), ...JSON.parse(fs.readFileSync(backup, "utf-8")) };
+            const temp = `${file}.${process.pid}.recover.tmp`;
+            fs.writeFileSync(temp, JSON.stringify(recovered, null, 2), "utf-8");
+            fs.renameSync(temp, file);
+            return recovered;
+        }
+        catch { }
         return createEmptyGroupMemory(groupId);
     }
 }
@@ -352,8 +457,49 @@ function saveGroupMemory(groupId, memory) {
         groupId,
         updated_at: new Date().toISOString(),
     });
-    fs.writeFileSync(getGroupMemoryFile(groupId), JSON.stringify(next, null, 2));
+    const file = getGroupMemoryFile(groupId);
+    const backup = getGroupMemoryBackupFile(groupId);
+    const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    if (fs.existsSync(file)) {
+        try {
+            JSON.parse(fs.readFileSync(file, "utf-8"));
+            fs.copyFileSync(file, backup);
+        }
+        catch { }
+    }
+    fs.writeFileSync(temp, JSON.stringify(next, null, 2), "utf-8");
+    fs.renameSync(temp, file);
     return next;
+}
+function runGroupMemoryStorageRecoverySelfTest() {
+    const groupId = `memory-storage-self-test-${process.pid}-${Date.now()}`;
+    const file = getGroupMemoryFile(groupId);
+    const backup = getGroupMemoryBackupFile(groupId);
+    try {
+        const first = saveGroupMemory(groupId, { goal: "first-valid-state", decisions: [{ decision: "keep" }] });
+        saveGroupMemory(groupId, { goal: "second-valid-state" });
+        fs.writeFileSync(file, "{broken-json", "utf-8");
+        const recovered = loadGroupMemory(groupId);
+        const checks = {
+            atomicFileIsValidJson: (() => { try {
+                JSON.parse(fs.readFileSync(file, "utf-8"));
+                return true;
+            }
+            catch {
+                return false;
+            } })(),
+            backupRecoveryWorks: recovered.goal === first.goal && recovered.decisions?.[0]?.decision === "keep",
+            backupExists: fs.existsSync(backup),
+        };
+        return { pass: Object.values(checks).every(Boolean), checks };
+    }
+    finally {
+        for (const target of [file, backup])
+            try {
+                fs.unlinkSync(target);
+            }
+            catch { }
+    }
 }
 function uniqueByKey(items, keyFn, limit = 20) {
     const seen = new Set();
@@ -998,7 +1144,9 @@ function appendTaskTimelineEvent(taskId, event = {}) {
         };
         tasks[idx].workflow_timeline = [...current, nextEvent].slice(-160);
         tasks[idx].updated_at = now;
+        tasks[idx].trace_id = (0, reliability_ledger_1.ensureTraceId)(tasks[idx].trace_id, "task");
         (0, db_1.saveTasks)(tasks);
+        (0, reliability_ledger_1.appendTraceEvent)(tasks[idx].trace_id, { id: `timeline:${taskId}:${nextEvent.id}`, type: `timeline.${nextEvent.type}`, status: nextEvent.status, task_id: taskId, group_id: tasks[idx].group_id || "", agent: nextEvent.agent, message: nextEvent.detail || nextEvent.title, data: { phase: nextEvent.phase, ...(nextEvent.data || {}) } });
         return nextEvent;
     }
     catch (e) {
@@ -3177,7 +3325,13 @@ async function runAgentCliProbe(payload, ctx) {
     const runtime = (0, group_orchestrator_1.resolveMemberRuntime)(selectedProject, target.group, (0, db_1.getConfigs)());
     if (!runtime?.workDir)
         throw new Error("未找到探针目标 Agent 的工作目录");
-    const agentType = runtime.agentType || "claudecode";
+    const requestedAgentType = String(payload.agent_type || payload.agentType || "").trim().toLowerCase();
+    const requestedRuntime = requestedAgentType
+        ? (0, agent_runtime_1.getPublicAgentRuntimes)().find((item) => item.id === requestedAgentType || item.aliases?.includes(requestedAgentType))
+        : null;
+    if (requestedAgentType && !requestedRuntime)
+        throw new Error(`不支持的 Agent Runtime：${requestedAgentType}`);
+    const agentType = requestedRuntime?.id || (0, agent_runtime_1.normalizeAgentRuntimeId)(runtime.agentType || "claudecode");
     const probeTarget = {
         group_id: target.group.id,
         group_name: target.group.name || target.group.id,
@@ -3209,11 +3363,65 @@ async function runAgentCliProbe(payload, ctx) {
         "只回复一行：CCM_AGENT_PROBE_OK",
     ].join("\n");
     try {
+        const toolContext = buildAgentToolContext(ctx, target.group, selectedProject);
+        const runtimeToolContext = prepareAgentRuntimeTools(target.group.id, selectedProject, runtime.workDir, agentType, toolContext.allowedTools);
+        const timeoutMs = Math.max(15000, Math.min(300000, Number(payload.timeout_ms || payload.timeoutMs || 120000)));
+        if (payload.native_session || payload.nativeSession) {
+            const probeTaskId = `native-probe-${agentType}-${Date.now()}`;
+            let nativeSessionId = agentType === "claudecode" ? crypto.randomUUID() : "";
+            let firstErrored = false;
+            const firstMarker = "CCM_NATIVE_SESSION_ROUND_1_OK";
+            const firstOutput = await ctx.callAgentForGroupStream(selectedProject, `${prompt}\n本轮改为只回复一行：${firstMarker}`, runtime.workDir, agentType, {
+                groupId: target.group.id,
+                timeoutMs,
+                allowedTools: toolContext.allowedTools,
+                mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+                taskId: probeTaskId,
+                agentSession: { persistSession: true, sessionId: nativeSessionId, resumeSession: false },
+                onDone: (opts) => {
+                    firstErrored = opts.isError === true;
+                    nativeSessionId = String(opts.nativeSessionId || nativeSessionId || "");
+                },
+            });
+            const firstOk = !firstErrored && firstOutput.includes(firstMarker) && !!nativeSessionId;
+            let secondErrored = false;
+            const secondMarker = "CCM_NATIVE_SESSION_ROUND_2_OK";
+            const secondOutput = firstOk
+                ? await ctx.callAgentForGroupStream(selectedProject, `继续同一个健康探针会话。不要修改文件，只回复一行：${secondMarker}`, runtime.workDir, agentType, {
+                    groupId: target.group.id,
+                    timeoutMs,
+                    allowedTools: toolContext.allowedTools,
+                    mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+                    taskId: probeTaskId,
+                    agentSession: { persistSession: true, sessionId: nativeSessionId, resumeSession: true },
+                    onDone: (opts) => { secondErrored = opts.isError === true; },
+                })
+                : "";
+            const ok = firstOk && !secondErrored && secondOutput.includes(secondMarker);
+            const result = {
+                success: ok,
+                blocked: false,
+                message: ok ? "Agent 原生会话两轮续跑探针通过" : "Agent 原生会话两轮续跑探针失败",
+                error: ok ? "" : compactMemoryText(firstOutput || secondOutput || "未捕获探针输出", 500),
+                fix_actions: ok ? [] : buildAgentExecutionFixActions({ error: firstOutput || secondOutput, agentType }),
+                execution_path: readiness.mode,
+                expected_marker: secondMarker,
+                target: probeTarget,
+                duration_ms: Date.now() - started,
+                native_session: { captured: !!nativeSessionId, session_id: nativeSessionId, first_round: firstOk, second_round: !secondErrored && secondOutput.includes(secondMarker) },
+                output: compactMemoryText(secondOutput || firstOutput, 1000),
+                readiness,
+            };
+            writeAgentProbeStatus(result);
+            return result;
+        }
         const output = await ctx.callAgent(selectedProject, prompt, runtime.workDir, agentType, Number(payload.timeout_ms || payload.timeoutMs || 120000), {
             tab: "groups",
             groupId: target.group.id,
             project: selectedProject,
             probe: true,
+            allowedTools: toolContext.allowedTools,
+            mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
         });
         const ok = /CCM_AGENT_PROBE_OK/i.test(output);
         const failure = ok ? null : getAgentProbeOutputFailure(output);
@@ -3260,6 +3468,72 @@ async function runAgentCliProbe(payload, ctx) {
         writeAgentProbeStatus(result);
         return result;
     }
+}
+async function runRuntimeFallbackProbe(payload, ctx) {
+    const target = selectDailyDevSmokeTarget(payload);
+    const selectedProject = target.selectedMember.project;
+    const runtime = (0, group_orchestrator_1.resolveMemberRuntime)(selectedProject, target.group, (0, db_1.getConfigs)());
+    if (!runtime?.workDir)
+        throw new Error("未找到探针目标 Agent 的工作目录");
+    const normalizeRequestedRuntime = (value, fallback) => {
+        const requested = String(value || fallback).trim().toLowerCase();
+        const descriptor = (0, agent_runtime_1.getPublicAgentRuntimes)().find((item) => item.id === requested || item.aliases?.includes(requested));
+        if (!descriptor)
+            throw new Error(`不支持的 Agent Runtime：${requested}`);
+        return descriptor.id;
+    };
+    const primaryRuntime = normalizeRequestedRuntime(payload.primary_runtime || payload.primaryRuntime, "gemini");
+    const fallbackRuntime = normalizeRequestedRuntime(payload.fallback_runtime || payload.fallbackRuntime, "codex");
+    const timeoutMs = Math.max(15000, Math.min(120000, Number(payload.timeout_ms || payload.timeoutMs || 30000)));
+    const marker = "CCM_RUNTIME_FALLBACK_OK";
+    const prompt = `这是 cc-connect 执行器切换探针。不要修改任何文件，不要运行写入命令。只回复一行：${marker}`;
+    const toolContext = buildAgentToolContext(ctx, target.group, selectedProject);
+    const taskId = `fallback-probe-${Date.now()}`;
+    const attempts = [];
+    let previousOutput = "";
+    let switched = false;
+    for (const [index, agentType] of [primaryRuntime, fallbackRuntime].entries()) {
+        const runtimeToolContext = prepareAgentRuntimeTools(target.group.id, selectedProject, runtime.workDir, agentType, toolContext.allowedTools);
+        let errored = false;
+        const attemptPrompt = index === 0 ? prompt : (0, collaboration_resilience_1.buildRuntimeRecoveryPrompt)({
+            originalPrompt: prompt,
+            previousOutput,
+            failure: previousOutput,
+            fromRuntime: primaryRuntime,
+            toRuntime: fallbackRuntime,
+            attempt: 2,
+        });
+        const output = await ctx.callAgentForGroupStream(selectedProject, attemptPrompt, runtime.workDir, agentType, {
+            groupId: target.group.id,
+            timeoutMs,
+            allowedTools: toolContext.allowedTools,
+            mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+            taskId,
+            onDone: (opts) => { errored = opts.isError === true; },
+        });
+        const ok = !errored && output.includes(marker);
+        attempts.push({ runtime: agentType, success: ok, error: errored, output: compactMemoryText(output, 500) });
+        if (ok) {
+            return {
+                success: true,
+                message: index === 0 ? "主执行器探针通过，未触发切换" : "主执行器失败后已自动切换并续跑成功",
+                switched,
+                primary_runtime: primaryRuntime,
+                final_runtime: agentType,
+                attempts,
+            };
+        }
+        previousOutput = output;
+        if (index === 0) {
+            const decision = (0, collaboration_resilience_1.shouldSwitchRuntime)(errored ? `Agent 进程退出：${output}` : output);
+            if (!decision.switchRuntime) {
+                return { success: false, message: "主执行器失败但未被判定为可恢复故障", switched: false, primary_runtime: primaryRuntime, final_runtime: primaryRuntime, attempts, decision };
+            }
+            switched = true;
+            attempts[0].decision = decision;
+        }
+    }
+    return { success: false, message: "执行器切换后仍失败", switched, primary_runtime: primaryRuntime, final_runtime: fallbackRuntime, attempts };
 }
 function parseJsonCandidate(text) {
     try {
@@ -3513,7 +3787,7 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
     const sourceTask = getTaskById(taskId);
     const mentionLabels = atMentions.map(m => typeof m === "string" ? m : m.mention).filter(Boolean);
     console.log(`[跨Agent协作] 源: ${sourceProject}, 检测到 @mentions: ${mentionLabels.join(", ")}`);
-    const uniqueMentions = atMentions.filter((m, idx, arr) => {
+    let uniqueMentions = atMentions.filter((m, idx, arr) => {
         const key = typeof m === "string" ? m : `${m.targetName}:${m.message}`;
         return arr.findIndex(item => (typeof item === "string" ? item : `${item.targetName}:${item.message}`) === key) === idx;
     });
@@ -3523,6 +3797,45 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
             ? (mentionStr.startsWith("@") ? mentionStr.slice(1) : mentionStr)
             : mention.targetName;
     };
+    const conflictInputs = uniqueMentions.map((mention, index) => {
+        const project = getMentionTargetName(mention);
+        const runtime = (0, group_orchestrator_1.resolveMemberRuntime)(project, group, configs);
+        const profile = getProjectAgentCapabilityProfile(project, runtime?.workDir || "");
+        return {
+            key: `${project}:${index}`,
+            project,
+            task: typeof mention === "string" ? output : String(mention.message || mention.task || output || ""),
+            workDir: runtime?.workDir || path.join(process.cwd(), `.ccm-missing-${project}`),
+            writablePaths: profile.writable_paths || [],
+        };
+    });
+    const conflictPlan = (0, collaboration_resilience_1.buildCollaborationConflictPlan)(conflictInputs, executionOrder);
+    uniqueMentions = uniqueMentions.map((mention, index) => {
+        const lane = conflictPlan.lanes[index];
+        const base = typeof mention === "string"
+            ? { mention, targetName: getMentionTargetName(mention), message: output, structured: false }
+            : mention;
+        return { ...base, conflictWorkspaceKey: lane?.conflictWorkspaceKey || "", conflictGroup: lane?.conflictGroup || "", mergeOwner: lane?.mergeOwner !== false };
+    });
+    if (conflictPlan.protected) {
+        const conflictText = `主 Agent 检测到 ${conflictPlan.conflicts.length} 组潜在修改冲突，已自动改为串行执行并让冲突 Agent 复用同一隔离 worktree。`;
+        if (taskId) {
+            addTaskLog(taskId, "warning", conflictText);
+            appendTaskTimelineEvent(taskId, { type: "conflict_plan", title: "跨 Agent 冲突保护", detail: conflictText, status: "warn", phase: "planning", agent: sourceProject, data: conflictPlan });
+        }
+        appendGroupMessage(groupId, {
+            id: "m" + Date.now().toString(36) + "conflict" + crypto.randomBytes(2).toString("hex"),
+            role: "assistant",
+            agent: "system",
+            type: "conflict_plan",
+            content: conflictText,
+            timestamp: new Date().toISOString(),
+            task_id: taskId || undefined,
+            conflictPlan,
+            workflow: buildWorkflowMeta("planning", "冲突保护计划"),
+        });
+        writeSse(streamRes, { type: "conflict_plan", text: conflictText, taskId, conflictPlan });
+    }
     const completedOutputsByAgent = new Map();
     const dependencyStates = new Map();
     const rememberMentionOutputs = (mention, outputs) => {
@@ -3716,13 +4029,58 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
         }
         tWorkDir = workDirState.path || runtime.workDir;
         tAgentType = runtime.agentType || targetMember.agent || "claudecode";
+        let activeTaskSession = taskId ? (0, task_agent_sessions_1.openTaskAgentSession)({
+            scopeId: taskId,
+            taskId,
+            groupId,
+            project: targetName,
+            agentType: tAgentType,
+        }) : null;
+        if (activeTaskSession) {
+            addTaskLog(taskId, "info", `${targetName} ${activeTaskSession.turnCount > 0 ? "恢复" : "创建"}任务级原生会话（${activeTaskSession.agentType}，第 ${activeTaskSession.turnCount + 1} 轮）`);
+            appendTaskTimelineEvent(taskId, {
+                type: activeTaskSession.turnCount > 0 ? "native_session_resume" : "native_session_open",
+                title: `${targetName} ${activeTaskSession.turnCount > 0 ? "恢复原生会话" : "创建原生会话"}`,
+                detail: `${activeTaskSession.agentType} / ${activeTaskSession.resumeMode}`,
+                status: "active",
+                phase: "executing",
+                agent: targetName,
+                data: { sessionRecordId: activeTaskSession.id, nativeSessionId: activeTaskSession.nativeSessionId, turn: activeTaskSession.turnCount + 1 },
+            });
+            writeSse(streamRes, { type: "native_session", taskId, agent: targetName, session: { project: targetName, agentType: activeTaskSession.agentType, mode: activeTaskSession.resumeMode, turn: activeTaskSession.turnCount + 1, resumed: activeTaskSession.turnCount > 0 } });
+            if (sourceTask)
+                updateGroupTaskInlineStatus(sourceTask, "in_progress", `${targetName} ${activeTaskSession.turnCount > 0 ? "恢复原生会话" : "创建原生会话"}`);
+        }
         const preparedWorkDir = (0, agent_worktree_1.prepareChildAgentWorkDir)(tWorkDir, {
             mode: getChildAgentIsolationMode(group, sourceTask),
             taskId: taskId || "",
-            agentName: targetName,
+            agentName: mention.conflictWorkspaceKey || targetName,
             sourceProject,
+            reuseKey: mention.conflictWorkspaceKey ? `${taskId || planMessageId}-${mention.conflictWorkspaceKey}` : "",
+            failClosed: true,
         });
         tWorkDir = preparedWorkDir.workDir;
+        const laneExecutionId = taskId ? `${taskId}--${targetName}` : "";
+        if (laneExecutionId) {
+            (0, execution_kernel_1.ensureExecution)({ task: sourceTask || { id: taskId, title: atMessage, target_project: targetName }, project: targetName, agent: targetName, workDir: tWorkDir, executionId: laneExecutionId });
+            (0, execution_kernel_1.attachExecutionWorkspace)(laneExecutionId, {
+                ...preparedWorkDir,
+                project: targetName,
+                mode: preparedWorkDir.mode,
+                conflictGroup: mention.conflictGroup || "",
+                conflictWorkspaceKey: mention.conflictWorkspaceKey || "",
+                mergeOwner: mention.mergeOwner !== false,
+            });
+            if (!(0, execution_kernel_1.loadExecution)(laneExecutionId)?.checkpointIds?.length) {
+                try {
+                    (0, execution_kernel_1.createExecutionCheckpoint)({ executionId: laneExecutionId, taskId, workDir: tWorkDir, mode: preparedWorkDir.mode, label: `${targetName} 开始执行前` });
+                }
+                catch (error) {
+                    addTaskLog(taskId, "warning", `无法创建 ${targetName} 文件检查点：${error.message}`);
+                }
+            }
+            (0, execution_kernel_1.transitionExecution)(laneExecutionId, "spawning", `${targetName} 执行通道准备中`);
+        }
         const worktreeNotice = (0, agent_worktree_1.buildChildAgentWorktreeNotice)(preparedWorkDir);
         if (preparedWorkDir.mode === "worktree") {
             const text = `子 Agent ${targetName} 已启用 worktree 隔离：${preparedWorkDir.worktreePath}（${preparedWorkDir.worktreeBranch || "branch unknown"}）`;
@@ -3834,7 +4192,7 @@ async function processCrossAgents(groupId, group, sourceProject, output, atMenti
             ? (0, group_orchestrator_1.buildCoordinatorCollaborationInstructions)((0, group_orchestrator_1.getRoutableMembers)(group).map((m) => m.project).join(", "))
             : (0, group_orchestrator_1.buildMemberCollaborationInstructions)(targetName, memberList);
         const toolContext = buildAgentToolContext(ctx, group, targetName);
-        const runtimeToolContext = prepareAgentRuntimeTools(groupId, targetName, tWorkDir, tAgentType, toolContext.allowedTools, streamRes);
+        let runtimeToolContext = prepareAgentRuntimeTools(groupId, targetName, tWorkDir, tAgentType, toolContext.allowedTools, streamRes);
         const developmentContract = buildChildAgentDevelopmentContract(targetName, childTaskText, {
             source: `${sourceProject} @ 协作`,
             acceptance: sourceTask?.acceptance_criteria || "",
@@ -3848,11 +4206,22 @@ ${developmentContract}
 
 ${worktreeNotice}
 
+${mention.conflictWorkspaceKey ? `[跨 Agent 冲突保护]
+- 本任务与同仓库其他 Agent 的修改范围可能重叠。
+- 主 Agent 已将相关工作单改为串行，并让它们复用隔离工作区 ${mention.conflictWorkspaceKey}。
+- 执行前先检查工作区已有修改，承接前一个 Agent 的结果；不得覆盖或回退已有正确变更。` : ""}
+
 ${memoryPacket}
 
 ${continuationNotice}
 
 ${dependencyOutputPacket}
+
+${activeTaskSession ? `[任务级原生会话]
+- 会话记录：${activeTaskSession.id}
+- 当前轮次：${activeTaskSession.turnCount + 1}
+- 续跑模式：${activeTaskSession.resumeMode === "native" ? "恢复同一个 CLI 原生会话" : "平台 scratchpad 续跑"}
+- 此会话只在主 Agent 最终验收完成后关闭；返工必须承接上一轮结论，不得从零重做。` : ""}
 
 以下是群聊最近的消息记录：
 ${tContext}
@@ -3865,16 +4234,95 @@ ${childTaskText}
             const responseMessageId = "m" + Date.now().toString(36) + "cross" + crypto.randomBytes(2).toString("hex");
             let targetFileChanges = null;
             let targetWorkEvents = [];
-            const tOutput = await ctx.callAgentForGroupStream(targetName, tPrompt, tWorkDir, tAgentType, {
-                res: streamRes,
-                groupId,
-                timeoutMs: 300000,
-                messageId: responseMessageId,
-                allowedTools: toolContext.allowedTools,
-                mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
-                initialWorkEvents: [runtimeToolContext.workEvent],
-                onDone: (opts) => { targetFileChanges = opts.fileChanges; targetWorkEvents = Array.isArray(opts.workEvents) ? opts.workEvents : []; }
-            });
+            let targetNativeSessionId = "";
+            let targetSessionSucceeded = true;
+            const laneChangeSnapshot = tWorkDir ? ctx.createFileChangeSnapshot(tWorkDir) : null;
+            const fallbackConfig = getProjectExtraConfig(targetName);
+            const configuredAttemptTimeout = Number(sourceTask?.runtime_attempt_timeout_ms
+                || sourceTask?.runtimeAttemptTimeoutMs
+                || fallbackConfig.runtime_attempt_timeout_ms
+                || fallbackConfig.runtimeAttemptTimeoutMs
+                || 120000);
+            const runtimeAttemptTimeoutMs = Math.max(30000, Math.min(300000, Number.isFinite(configuredAttemptTimeout) ? configuredAttemptTimeout : 120000));
+            const baseRuntimeCandidates = (0, collaboration_resilience_1.buildRuntimeRecoveryCandidates)(tAgentType, fallbackConfig.fallback_agents || fallbackConfig.fallbackAgents || fallbackConfig.runtime_fallbacks || fallbackConfig.runtimeFallbacks || []);
+            const runtimeCandidates = activeTaskSession?.resumeMode === "native" && activeTaskSession.nativeSessionId
+                ? [baseRuntimeCandidates[0], baseRuntimeCandidates[0], ...baseRuntimeCandidates.slice(1)]
+                : baseRuntimeCandidates;
+            let activeRuntime = tAgentType;
+            let tOutput = "";
+            let previousOutput = "";
+            let previousReceipt = null;
+            for (let attemptIndex = 0; attemptIndex < runtimeCandidates.length; attemptIndex++) {
+                activeRuntime = runtimeCandidates[attemptIndex];
+                if (attemptIndex > 0) {
+                    const previousRuntime = runtimeCandidates[attemptIndex - 1];
+                    const sameRuntimeResume = activeRuntime === previousRuntime;
+                    if (!sameRuntimeResume) {
+                        runtimeToolContext = prepareAgentRuntimeTools(groupId, targetName, tWorkDir, activeRuntime, toolContext.allowedTools, streamRes);
+                        activeTaskSession = taskId ? (0, task_agent_sessions_1.openTaskAgentSession)({ scopeId: taskId, taskId, groupId, project: targetName, agentType: activeRuntime }) : null;
+                    }
+                    const recoveryText = sameRuntimeResume
+                        ? `${targetName} 正在恢复同一个 ${activeRuntime} 原生会话，从失败点继续`
+                        : `${targetName} 执行器自动切换：${previousRuntime} → ${activeRuntime}，从已有工作区和回执继续`;
+                    if (taskId) {
+                        addTaskLog(taskId, "warning", recoveryText);
+                        appendTaskTimelineEvent(taskId, { type: sameRuntimeResume ? "native_session_retry" : "runtime_fallback", title: sameRuntimeResume ? `${targetName} 恢复原生会话` : `${targetName} 切换执行器`, detail: recoveryText, status: "warn", phase: "executing", agent: targetName, data: { from: previousRuntime, to: activeRuntime, attempt: attemptIndex + 1 } });
+                    }
+                    writeSse(streamRes, { type: sameRuntimeResume ? "native_session" : "runtime_fallback", agent: targetName, taskId, fromRuntime: previousRuntime, toRuntime: activeRuntime, attempt: attemptIndex + 1, text: recoveryText, session: sameRuntimeResume ? { project: targetName, agentType: activeRuntime, mode: "native", turn: activeTaskSession?.turnCount + 1, resumed: true } : undefined });
+                    if (laneExecutionId)
+                        (0, execution_kernel_1.transitionExecution)(laneExecutionId, "spawning", recoveryText, { name: sameRuntimeResume ? "session.native_retry" : "runtime.fallback", status: "warning", data: { from: previousRuntime, to: activeRuntime, attempt: attemptIndex + 1 } });
+                    if (sourceTask)
+                        updateGroupTaskInlineStatus(sourceTask, "in_progress", recoveryText);
+                }
+                const attemptPrompt = attemptIndex === 0 ? tPrompt : (0, collaboration_resilience_1.buildRuntimeRecoveryPrompt)({
+                    originalPrompt: tPrompt,
+                    previousOutput,
+                    previousReceipt,
+                    failure: previousOutput,
+                    fromRuntime: runtimeCandidates[attemptIndex - 1],
+                    toRuntime: activeRuntime,
+                    attempt: attemptIndex + 1,
+                });
+                targetNativeSessionId = "";
+                targetSessionSucceeded = true;
+                const attemptOutput = await ctx.callAgentForGroupStream(targetName, attemptPrompt, tWorkDir, activeRuntime, {
+                    res: streamRes,
+                    groupId,
+                    timeoutMs: runtimeAttemptTimeoutMs,
+                    messageId: responseMessageId,
+                    allowedTools: toolContext.allowedTools,
+                    mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+                    taskId,
+                    executionId: laneExecutionId,
+                    agentSession: activeTaskSession ? (0, task_agent_sessions_1.getTaskAgentSessionOptions)(activeTaskSession) : null,
+                    initialWorkEvents: [runtimeToolContext.workEvent],
+                    onDone: (opts) => {
+                        targetFileChanges = opts.fileChanges;
+                        targetWorkEvents = [...targetWorkEvents, ...(Array.isArray(opts.workEvents) ? opts.workEvents : [])].slice(-80);
+                        targetNativeSessionId = String(opts.nativeSessionId || "");
+                        targetSessionSucceeded = opts.isError !== true;
+                    }
+                });
+                if (activeTaskSession) {
+                    activeTaskSession = (0, task_agent_sessions_1.recordTaskAgentSessionTurn)(activeTaskSession.id, { nativeSessionId: targetNativeSessionId, success: targetSessionSucceeded }) || activeTaskSession;
+                    if (taskId)
+                        addTaskLog(taskId, targetSessionSucceeded ? "info" : "warning", `${targetName} 会话轮次已记录：${activeTaskSession.agentType} turn=${activeTaskSession.turnCount}${activeTaskSession.nativeSessionId ? "，已捕获原生 session ID" : "，使用 scratchpad 续跑保护"}`);
+                }
+                const failedAttempt = !targetSessionSucceeded || checkTaskFailure(attemptOutput);
+                if (!failedAttempt) {
+                    tOutput = attemptOutput;
+                    break;
+                }
+                previousOutput = attemptOutput;
+                previousReceipt = extractAgentReceipt(attemptOutput, targetName);
+                const fallbackDecision = (0, collaboration_resilience_1.shouldSwitchRuntime)(targetSessionSucceeded ? attemptOutput : `Agent 进程退出：${attemptOutput}`);
+                if (!fallbackDecision.switchRuntime || attemptIndex >= runtimeCandidates.length - 1) {
+                    tOutput = attemptOutput;
+                    break;
+                }
+            }
+            if (laneChangeSnapshot)
+                targetFileChanges = ctx.getFileChanges(targetName, laneChangeSnapshot);
             const targetReceipt = extractAgentReceipt(tOutput, targetName);
             outputs.push(formatCollectedAgentOutput(targetName, tOutput, targetReceipt));
             if (taskId && targetReceipt) {
@@ -3884,6 +4332,10 @@ ${childTaskText}
                 appendTaskTimelineEvent(taskId, { type: "child_agent_receipt", title: `${targetName} 提交回执`, detail: targetReceipt.summary || "无摘要", status: targetReceipt.status === "done" ? "ok" : "warn", phase: "executing", agent: targetName, data: { receipt: targetReceipt, fileCount, verificationCount } });
             }
             if (targetReceipt) {
+                if (laneExecutionId) {
+                    const green = (0, execution_kernel_1.evaluateGreenContract)({ receipt: targetReceipt, fileChanges: targetFileChanges, requiresChanges: sourceTask ? taskRequiresCodeChanges(sourceTask) : true, requiresVerification: sourceTask?.requires_verification !== false, requiredLevel: "project" });
+                    (0, execution_kernel_1.transitionExecution)(laneExecutionId, targetReceipt.status === "failed" ? "failed" : "reviewing", targetReceipt.status === "done" ? "子 Agent 已交付，等待主 Agent 验收" : (targetReceipt.summary || "子 Agent 回执未完成"), { green });
+                }
                 if (targetReceipt.status === "done" || targetReceipt.status === "partial") {
                     updateGroupMemory(groupId, {
                         currentPhase: targetReceipt.status === "done" ? "executing" : "needs_rework",
@@ -4059,7 +4511,7 @@ ${childTaskText}
             completed.add(getMentionTargetName(mention));
         }
     }
-    else if (executionOrder === "sequential" || executionOrder === "backend_first") {
+    else if (conflictPlan.effectiveOrder === "sequential" || conflictPlan.effectiveOrder === "backend_first") {
         // 串行执行：后端优先或按顺序
         const backendMentions = [];
         const frontendMentions = [];
@@ -4704,8 +5156,19 @@ async function executeTask(task, ctx) {
             taskId: task.id,
             agentName: task.target_project,
             sourceProject: "task-queue",
+            failClosed: true,
         });
         workDir = preparedWorkDir.workDir;
+        (0, execution_kernel_1.ensureExecution)({ task, project: task.target_project, agent: task.target_project, workDir, executionId: task.id });
+        (0, execution_kernel_1.attachExecutionWorkspace)(task.id, { ...preparedWorkDir, project: task.target_project, mode: preparedWorkDir.mode });
+        if (!(0, execution_kernel_1.loadExecution)(task.id)?.checkpointIds?.length) {
+            try {
+                (0, execution_kernel_1.createExecutionCheckpoint)({ executionId: task.id, taskId: task.id, workDir, mode: preparedWorkDir.mode, label: "项目 Agent 开始执行前" });
+            }
+            catch (error) {
+                addTaskLog(task.id, "warning", `无法创建任务前文件检查点：${error.message}`);
+            }
+        }
         const worktreeNotice = (0, agent_worktree_1.buildChildAgentWorktreeNotice)(preparedWorkDir);
         const runtimeToolContext = prepareAgentRuntimeTools(task.group_id || "", task.target_project, workDir, agentType, toolContext.allowedTools);
         if (preparedWorkDir.mode === "worktree") {
@@ -4747,10 +5210,78 @@ async function executeTask(task, ctx) {
   "needs": ["还需要用户或其他 Agent 补充的内容；没有填空数组"]
 }
 \`\`\``;
-        const output = await ctx.callAgent(task.target_project, message, workDir, agentType, 300000, { allowedTools: toolContext.allowedTools, mcpConfigPath: runtimeToolContext.audit.mcpConfigPath });
+        const output = await ctx.callAgent(task.target_project, message, workDir, agentType, 300000, { allowedTools: toolContext.allowedTools, mcpConfigPath: runtimeToolContext.audit.mcpConfigPath, taskId: task.id, executionId: task.id });
         const fileChanges = workDir ? ctx.getFileChanges(task.target_project, changeSnapshot) : null;
-        return getTaskExecutionFromReceipt(output, extractAgentReceipt(output, task.target_project), { fileChanges });
+        const receipt = extractAgentReceipt(output, task.target_project);
+        const result = getTaskExecutionFromReceipt(output, receipt, { fileChanges });
+        const green = (0, execution_kernel_1.evaluateGreenContract)({ receipt, fileChanges, requiresChanges: taskRequiresCodeChanges(task), requiresVerification: task.requires_verification !== false, requiredLevel: "project" });
+        (0, execution_kernel_1.transitionExecution)(task.id, result.status === "failed" ? "failed" : "reviewing", result.status === "done" ? "项目 Agent 已交付，进入验收" : result.detail, { green });
+        return { ...result, executionKernel: { executionId: task.id, green } };
     }
+}
+function ensureTaskKernelExecution(task) {
+    if (!task?.id)
+        return null;
+    if ((0, execution_kernel_1.loadExecution)(task.id))
+        return (0, execution_kernel_1.loadExecution)(task.id);
+    let project = String(task.target_project || "");
+    if (task.assign_type === "group" && task.group_id) {
+        const group = loadGroups().find((item) => item.id === task.group_id);
+        if (group)
+            project = (0, group_orchestrator_1.getCoordinatorMember)(group).project;
+    }
+    const config = (0, db_1.getConfigs)().find((item) => item.name === project);
+    const workDir = config ? String((0, db_1.getConfigInfo)(config.path)?.[0]?.workDir || "") : "";
+    if (!project || !workDir || !fs.existsSync(workDir))
+        return null;
+    return (0, execution_kernel_1.ensureExecution)({ task, project, agent: project, workDir, executionId: task.id });
+}
+function finalizeTaskKernel(task, execution, deliverySummary, state, message) {
+    ensureTaskKernelExecution(task);
+    const records = (0, execution_kernel_1.listExecutions)({ taskId: task.id });
+    let rootGreen = null;
+    for (const record of records) {
+        if (state === "cancelled") {
+            (0, execution_kernel_1.transitionExecution)(record.id, "cancelled", message);
+            continue;
+        }
+        if (state === "failed") {
+            const failure = (0, execution_kernel_1.classifyExecutionFailure)(message);
+            (0, execution_kernel_1.transitionExecution)(record.id, "failed", message, { failure, failureClass: failure.failureClass });
+            continue;
+        }
+        let branchFresh = true;
+        if (record.workspace?.mode === "worktree" && record.workspace?.worktreePath) {
+            try {
+                branchFresh = (0, execution_kernel_1.inspectBranchFreshness)(record.workspace.worktreePath, record.workspace.baseBranch || "").fresh;
+            }
+            catch {
+                branchFresh = false;
+            }
+        }
+        const acceptancePassed = deliverySummary?.acceptance_gate_passed !== false && state === "succeeded";
+        let green = record.green || { level: "none", pass: false };
+        if (record.id === task.id) {
+            green = (0, execution_kernel_1.evaluateGreenContract)({
+                receipt: execution?.receipt || { status: execution?.status, verification: deliverySummary?.verification_executed || [] },
+                fileChanges: extractActualFileChanges(execution?.fileChanges, task.target_project || record.project),
+                requiresChanges: taskRequiresCodeChanges(task),
+                requiresVerification: task.requires_verification !== false,
+                workspacePassed: acceptancePassed,
+                branchFresh,
+                reviewPassed: state === "succeeded",
+                requiredLevel: record.workspace?.mode === "worktree" ? "merge_ready" : "project",
+            });
+            rootGreen = green;
+        }
+        else if (state === "succeeded" && acceptancePassed && branchFresh && ["project", "workspace", "merge_ready"].includes(String(green.level))) {
+            green = { ...green, level: record.workspace?.mode === "worktree" ? "merge_ready" : green.level, pass: true, reviewedAt: new Date().toISOString() };
+        }
+        (0, execution_kernel_1.transitionExecution)(record.id, state, message, { green });
+    }
+    if (records.length)
+        updateTask(task.id, { execution_kernel: { execution_id: task.id, state, green: rootGreen, updated_at: new Date().toISOString() } });
+    return rootGreen;
 }
 // 队列处理
 async function processTargetQueue(targetKey, ctx) {
@@ -4769,7 +5300,7 @@ async function processTargetQueue(targetKey, ctx) {
             continue;
         const tasks = (0, db_1.loadTasks)();
         const task = tasks.find(t => t.id === taskId);
-        if (!task || task.status === "done") {
+        if (!task || task.status === "done" || task.status === "cancelled") {
             addTaskLog(taskId, "info", `跳过任务（不存在或已完成）`);
             continue;
         }
@@ -4777,16 +5308,37 @@ async function processTargetQueue(targetKey, ctx) {
             addTaskLog(taskId, "info", `任务已暂停，跳过本次队列执行`);
             continue;
         }
+        const traceId = (0, reliability_ledger_1.ensureTraceId)(task.trace_id, "task");
+        const leaseResult = (0, reliability_ledger_1.acquireTaskLease)(taskId, traceId, 45_000);
+        if (!leaseResult.acquired) {
+            addTaskLog(taskId, "warning", `任务已有存活 Worker 租约，本实例跳过重复执行（owner=${leaseResult.lease?.owner_id || "unknown"}）`);
+            (0, reliability_ledger_1.appendTraceEvent)(traceId, { type: "task.duplicate_execution_suppressed", status: "warning", task_id: taskId, group_id: task.group_id || "", message: "检测到有效执行租约，阻止重复执行" });
+            continue;
+        }
+        let leaseHeartbeat = null;
         addTaskLog(taskId, "info", `开始执行任务: ${task.title}`);
         try {
             runningTaskIds.add(taskId);
-            const startedTask = updateTask(taskId, { status: "in_progress", started_at: new Date().toISOString() }) || task;
+            leaseHeartbeat = setInterval(() => (0, reliability_ledger_1.renewTaskLease)(taskId, 45_000), 10_000);
+            ensureTaskKernelExecution(task);
+            (0, execution_kernel_1.transitionExecution)(taskId, "spawning", "任务队列正在启动开发执行内核");
+            const startedTask = updateTask(taskId, { status: "in_progress", trace_id: traceId, started_at: new Date().toISOString(), execution_lease: { owner_id: leaseResult.lease.owner_id, acquired_at: leaseResult.lease.acquired_at, recovery_count: leaseResult.lease.recovery_count } }) || task;
+            updateGroupTaskInlineStatus(startedTask, "in_progress", "主 Agent 已开始协调执行");
             addTaskLog(taskId, "info", `任务状态更新为: 进行中`);
             syncTaskBacklogStatus(startedTask, "in_progress", "任务已进入执行阶段");
             await ctx.onTaskStatusChange?.(startedTask, "in_progress");
             addTaskLog(taskId, "info", `调用 Agent 执行任务...`);
             const execution = await executeTask(task, ctx);
             const result = execution.result || execution.report || "";
+            if ((0, execution_kernel_1.isTaskCancellationRequested)(taskId)) {
+                const cancelledTask = updateTask(taskId, { status: "cancelled", result: "任务已取消", status_detail: "任务已由用户取消", cancelled_at: new Date().toISOString() }) || { ...task, status: "cancelled" };
+                updateGroupTaskInlineStatus(cancelledTask, "cancelled", "任务已由用户取消");
+                finalizeTaskKernel(task, execution, null, "cancelled", "任务已由用户取消");
+                (0, task_agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, "任务已取消，关闭任务级原生会话");
+                addTaskLog(taskId, "warning", "任务执行进程已终止，状态更新为已取消");
+                await ctx.onTaskStatusChange?.(cancelledTask, "cancelled", "任务已由用户取消");
+                continue;
+            }
             addTaskLog(taskId, "response", `Agent 响应:\n${result.substring(0, 1000)}`);
             if (execution.status === "failed") {
                 const deliverySummary = buildDeliverySummary(task, execution, "failed");
@@ -4801,6 +5353,8 @@ async function processTargetQueue(targetKey, ctx) {
                     file_changes: execution.fileChanges || null,
                     delivery_summary: deliverySummary,
                 }) || { ...task, status: "failed", result: result.substring(0, 500) };
+                updateGroupTaskInlineStatus(failedTask, "failed", execution.detail || "Agent 回执失败");
+                finalizeTaskKernel(task, execution, deliverySummary, "failed", execution.detail || "Agent 回执失败");
                 addTaskLog(taskId, "error", `❌ 任务执行失败：${execution.detail || "Agent 回执失败"}`);
                 syncTaskBacklogStatus(failedTask, "blocked", execution.detail || result.substring(0, 500));
                 await ctx.onTaskStatusChange?.(failedTask, "failed", result.substring(0, 500));
@@ -4815,6 +5369,15 @@ async function processTargetQueue(targetKey, ctx) {
             if (isCompleted) {
                 const deliverySummary = buildDeliverySummary(task, execution, "done");
                 appendTaskTimelineEvent(taskId, { type: "acceptance_gate", title: "代码变更验收门禁", detail: deliverySummary.acceptance_gate_passed ? "门禁通过" : `${deliverySummary.acceptance_gate?.failed_count || 0} 项未通过`, status: deliverySummary.acceptance_gate_passed ? "ok" : "warn", phase: "reviewing", data: deliverySummary.acceptance_gate || {} });
+                if (!deliverySummary.acceptance_gate_passed) {
+                    const detail = `验收门禁未通过：${deliverySummary.acceptance_gate?.failed_count || 1} 项缺口，任务保持进行中`;
+                    const waitingTask = updateTask(taskId, { status: "in_progress", result: result.substring(0, 500), final_report: execution.report || result, status_detail: detail, receipt: execution.receipt || null, review: execution.review || null, file_changes: execution.fileChanges || null, delivery_summary: deliverySummary }) || task;
+                    updateGroupTaskInlineStatus(waitingTask, "in_progress", detail);
+                    finalizeTaskKernel(task, execution, deliverySummary, "reviewing", detail);
+                    addTaskLog(taskId, "warning", detail);
+                    await ctx.onTaskStatusChange?.(waitingTask, "waiting", detail);
+                    continue;
+                }
                 const completedTask = updateTask(taskId, {
                     status: "done",
                     result: result.substring(0, 500),
@@ -4826,6 +5389,9 @@ async function processTargetQueue(targetKey, ctx) {
                     delivery_summary: deliverySummary,
                     completed_at: new Date().toISOString()
                 }) || { ...task, status: "done", result: result.substring(0, 500) };
+                updateGroupTaskInlineStatus(completedTask, "done", execution.detail || "验收通过");
+                finalizeTaskKernel(task, execution, deliverySummary, "succeeded", execution.detail || "验收通过");
+                (0, task_agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, "主 Agent 最终验收完成");
                 addTaskLog(taskId, "success", `✅ 任务完成：${execution.detail || "验收通过"}`);
                 syncTaskBacklogStatus(completedTask, "done", execution.detail || result.substring(0, 500));
                 await ctx.onTaskStatusChange?.(completedTask, "done", result.substring(0, 500));
@@ -4854,6 +5420,9 @@ async function processTargetQueue(targetKey, ctx) {
                         delivery_summary: promotedSummary,
                         completed_at: new Date().toISOString()
                     }) || { ...task, status: "done", result: result.substring(0, 500) };
+                    updateGroupTaskInlineStatus(completedTask, "done", promotedExecution.detail);
+                    finalizeTaskKernel(task, promotedExecution, promotedSummary, "succeeded", promotedExecution.detail);
+                    (0, task_agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, "主 Agent 最终验收完成");
                     addTaskLog(taskId, "success", `✅ 任务完成：${promotedExecution.detail}`);
                     syncTaskBacklogStatus(completedTask, "done", promotedExecution.detail);
                     await ctx.onTaskStatusChange?.(completedTask, "done", result.substring(0, 500));
@@ -4871,6 +5440,8 @@ async function processTargetQueue(targetKey, ctx) {
                         file_changes: execution.fileChanges || null,
                         delivery_summary: deliverySummary,
                     }) || { ...task, status: "in_progress", result: result.substring(0, 500) };
+                    updateGroupTaskInlineStatus(waitingTask, "in_progress", execution.detail || "等待补充信息或返工");
+                    finalizeTaskKernel(task, execution, deliverySummary, "reviewing", execution.detail || "等待补充信息或返工");
                     addTaskLog(taskId, "warning", `任务仍需继续：${execution.detail || "验收未完成"}`);
                     syncTaskBacklogStatus(waitingTask, "blocked", execution.detail || result.substring(0, 500));
                     await ctx.onTaskStatusChange?.(waitingTask, "waiting", result.substring(0, 500));
@@ -4880,21 +5451,33 @@ async function processTargetQueue(targetKey, ctx) {
         }
         catch (error) {
             console.error(`[任务队列] [${targetKey}] 任务执行失败: ${task.title}`, error.message);
+            const failure = (0, execution_kernel_1.classifyExecutionFailure)(error);
+            const cancelled = failure.failureClass === "cancelled" || (0, execution_kernel_1.isTaskCancellationRequested)(taskId);
             const failedExecution = buildTaskExecutionResult("failed", `执行失败: ${error.message}`, { detail: String(error.message || "执行失败") });
             const failedTask = updateTask(taskId, {
-                status: "failed",
-                result: `执行失败: ${error.message}`,
+                status: cancelled ? "cancelled" : "failed",
+                result: cancelled ? "任务已取消" : `执行失败: ${error.message}`,
                 status_detail: String(error.message || "执行失败").slice(0, 500),
+                failure_class: failure.failureClass,
                 delivery_summary: buildDeliverySummary(task, failedExecution, "failed"),
-            }) || { ...task, status: "failed", result: `执行失败: ${error.message}` };
-            addTaskLog(taskId, "error", `❌ 任务执行失败: ${error.message}`);
+            }) || { ...task, status: cancelled ? "cancelled" : "failed", result: cancelled ? "任务已取消" : `执行失败: ${error.message}` };
+            updateGroupTaskInlineStatus(failedTask, cancelled ? "cancelled" : "failed", cancelled ? "任务已由用户取消" : String(error.message || "执行失败"));
+            finalizeTaskKernel(task, failedExecution, failedTask.delivery_summary, cancelled ? "cancelled" : "failed", cancelled ? "任务已由用户取消" : error.message);
+            if (cancelled)
+                (0, task_agent_sessions_1.closeTaskAgentSessions)({ taskId, groupId: task.group_id || undefined }, "任务已取消，关闭任务级原生会话");
+            addTaskLog(taskId, cancelled ? "warning" : "error", cancelled ? "任务已取消，运行中的 Agent 进程已终止" : `❌ 任务执行失败: ${error.message}`);
             syncTaskBacklogStatus(failedTask, "blocked", error.message);
-            await ctx.onTaskStatusChange?.(failedTask, "failed", String(error.message || ""));
-            appendTaskGroupReport(failedTask, "failed", error.message);
-            await sendTaskFailureNotification(failedTask, error.message);
+            await ctx.onTaskStatusChange?.(failedTask, cancelled ? "cancelled" : "failed", String(error.message || ""));
+            appendTaskGroupReport(failedTask, cancelled ? "waiting" : "failed", cancelled ? "任务已取消" : error.message);
+            if (!cancelled)
+                await sendTaskFailureNotification(failedTask, error.message);
         }
         finally {
+            if (leaseHeartbeat)
+                clearInterval(leaseHeartbeat);
             runningTaskIds.delete(taskId);
+            const finalTask = (0, db_1.loadTasks)().find((item) => item.id === taskId);
+            (0, reliability_ledger_1.releaseTaskLease)(taskId, finalTask?.status || "unknown");
         }
         await new Promise(resolve => setTimeout(resolve, 500));
     }
@@ -4963,26 +5546,55 @@ function createAndQueueTask(task, ctx) {
     const queueResult = enqueueTask(newTask.id, ctx);
     return { task: newTask, queueResult };
 }
+function backfillTaskTraceIds() {
+    const tasks = (0, db_1.loadTasks)();
+    let changed = 0;
+    for (const task of tasks) {
+        if (task.trace_id)
+            continue;
+        task.trace_id = (0, reliability_ledger_1.createTraceId)("task");
+        task.updated_at = task.updated_at || new Date().toISOString();
+        (0, reliability_ledger_1.appendTraceEvent)(task.trace_id, { id: `task:${task.id}:trace-backfill`, type: "task.trace_backfilled", status: "info", task_id: task.id, group_id: task.group_id || "", agent: task.target_project || "", message: "历史任务已补齐统一 Trace ID", data: { original_created_at: task.created_at || "" } });
+        changed++;
+    }
+    if (changed)
+        (0, db_1.saveTasks)(tasks);
+    return changed;
+}
 function resumeTaskQueues(ctx) {
+    const traceBackfilled = backfillTaskTraceIds();
     const tasks = (0, db_1.loadTasks)();
     const resumable = tasks.filter(isRecoverableAutoTask);
     const results = [];
     for (const task of resumable) {
+        const traceId = (0, reliability_ledger_1.ensureTraceId)(task.trace_id, "task");
+        const recoveryLease = (0, reliability_ledger_1.acquireTaskLease)(task.id, traceId, 45_000);
+        if (!recoveryLease.acquired) {
+            addTaskLog(task.id, "info", `启动恢复跳过：另一个存活实例仍持有任务租约（owner=${recoveryLease.lease?.owner_id || "unknown"}）`);
+            results.push({ task_id: task.id, queued: false, active_elsewhere: true, message: "另一个实例仍在执行" });
+            continue;
+        }
         if (task.status === "in_progress") {
             updateTask(task.id, {
                 status: "pending",
+                trace_id: traceId,
                 result: "服务启动时检测到未完成执行，已自动恢复排队",
+                recovery: { recovered_at: new Date().toISOString(), lease_recovery_count: recoveryLease.lease.recovery_count, previous_status: "in_progress" },
             });
             addTaskLog(task.id, "warning", "服务启动时检测到任务处于进行中，已恢复为待执行并重新入队");
         }
         else {
             addTaskLog(task.id, "info", "服务启动恢复自动执行任务，重新加入队列");
         }
-        results.push({ task_id: task.id, ...enqueueTask(task.id, ctx) });
+        const queued = enqueueTask(task.id, ctx);
+        if (!queued.queued)
+            (0, reliability_ledger_1.releaseTaskLease)(task.id, "recovery_not_queued");
+        results.push({ task_id: task.id, ...queued });
     }
     return {
         resumed: results.filter(item => item.queued).length,
         total: resumable.length,
+        trace_backfilled: traceBackfilled,
         results,
         queue_status: getQueueStatus(),
     };
@@ -8114,6 +8726,13 @@ function buildTaskContinuationBlock(message) {
 }
 function createTask(task) {
     const tasks = (0, db_1.loadTasks)();
+    const idempotencyKey = String(task.idempotency_key || task.idempotencyKey || "").trim();
+    if (idempotencyKey) {
+        const existing = tasks.find((item) => String(item.idempotency_key || "") === idempotencyKey);
+        if (existing)
+            return existing;
+    }
+    const traceId = (0, reliability_ledger_1.ensureTraceId)(task.trace_id || task.traceId, "task");
     const newTask = {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         title: task.title,
@@ -8142,11 +8761,14 @@ function createTask(task) {
         followups: Array.isArray(task.followups) ? task.followups : [],
         cron_job_id: task.cron_job_id || null,
         cron_trigger: task.cron_trigger || null,
+        trace_id: traceId,
+        idempotency_key: idempotencyKey || null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
     };
     tasks.push(newTask);
     (0, db_1.saveTasks)(tasks);
+    (0, reliability_ledger_1.appendTraceEvent)(traceId, { id: `task:${newTask.id}:created`, type: "task.created", status: "ok", task_id: newTask.id, group_id: newTask.group_id || "", agent: newTask.target_project || "", message: newTask.title, data: { workflow_type: newTask.workflow_type, assign_type: newTask.assign_type, idempotency_key: idempotencyKey ? "present" : "absent" } });
     return newTask;
 }
 function globalMissionChildGatePassed(task) {
@@ -8239,6 +8861,12 @@ function updateTask(id, updates) {
     const idx = tasks.findIndex(t => t.id === id);
     if (idx === -1)
         return null;
+    const previousStatus = tasks[idx].status;
+    const previousReceiptKey = String(tasks[idx].receipt_idempotency_key || "");
+    tasks[idx].trace_id = (0, reliability_ledger_1.ensureTraceId)(tasks[idx].trace_id || updates.trace_id || updates.traceId, "task");
+    if (updates.receipt) {
+        updates.receipt_idempotency_key = crypto.createHash("sha256").update(JSON.stringify(updates.receipt)).digest("hex");
+    }
     Object.assign(tasks[idx], updates, { updated_at: new Date().toISOString() });
     if (updates.status === "done") {
         tasks[idx].completed_at = updates.completed_at || new Date().toISOString();
@@ -8250,6 +8878,12 @@ function updateTask(id, updates) {
         refreshGlobalMissionParentInTaskList(tasks, tasks[idx].parent_task_id);
     }
     (0, db_1.saveTasks)(tasks);
+    if (updates.status && updates.status !== previousStatus) {
+        (0, reliability_ledger_1.appendTraceEvent)(tasks[idx].trace_id, { id: `task:${id}:status:${updates.status}:${tasks[idx].updated_at}`, type: "task.status_changed", status: updates.status === "failed" ? "error" : updates.status === "done" ? "ok" : "info", task_id: id, group_id: tasks[idx].group_id || "", agent: tasks[idx].target_project || "", message: `${previousStatus || "unknown"} → ${updates.status}`, data: { from: previousStatus || "", to: updates.status, detail: String(updates.status_detail || updates.result || "").slice(0, 500) } });
+    }
+    if (updates.receipt && updates.receipt_idempotency_key !== previousReceiptKey) {
+        (0, reliability_ledger_1.appendTraceEvent)(tasks[idx].trace_id, { id: `task:${id}:receipt:${updates.receipt_idempotency_key}`, type: "worker.receipt_persisted", status: updates.receipt.status === "done" ? "ok" : updates.receipt.status === "failed" ? "error" : "warning", task_id: id, group_id: tasks[idx].group_id || "", agent: updates.receipt.agent || tasks[idx].target_project || "", message: updates.receipt.summary || `回执状态 ${updates.receipt.status || "unknown"}`, data: { receipt_status: updates.receipt.status || "", filesChanged: updates.receipt.filesChanged || [], verification: updates.receipt.verification || [] } });
+    }
     return tasks[idx];
 }
 function refreshGlobalDevelopmentMissions() {
@@ -8272,6 +8906,15 @@ function getGlobalDevelopmentMission(id) {
     };
 }
 function createGlobalDevelopmentMission(payload, ctx) {
+    const missionIdempotencyKey = String(payload.idempotency_key || payload.idempotencyKey || "").trim();
+    if (missionIdempotencyKey) {
+        const existingParent = (0, db_1.loadTasks)().find((item) => item.workflow_type === "global_mission" && item.idempotency_key === missionIdempotencyKey);
+        if (existingParent) {
+            const taskMap = new Map((0, db_1.loadTasks)().map((item) => [item.id, item]));
+            return { success: true, duplicate: true, mission: existingParent, children: (existingParent.child_task_ids || []).map((id) => ({ task: taskMap.get(id) })).filter((item) => item.task), rejected: [] };
+        }
+    }
+    const missionTraceId = (0, reliability_ledger_1.ensureTraceId)(payload.trace_id || payload.traceId, "mission");
     const groups = loadGroups();
     const configs = (0, db_1.getConfigs)();
     const requestedTargets = Array.isArray(payload.targets) ? payload.targets : [];
@@ -8373,6 +9016,8 @@ function createGlobalDevelopmentMission(payload, ctx) {
                 state: "dispatching",
             },
         },
+        trace_id: missionTraceId,
+        idempotency_key: missionIdempotencyKey || null,
     });
     appendTaskTimelineEvent(parent.id, {
         type: "global_mission_plan",
@@ -8420,6 +9065,8 @@ function createGlobalDevelopmentMission(payload, ctx) {
                     target_name: target.name,
                 },
             },
+            trace_id: missionTraceId,
+            idempotency_key: missionIdempotencyKey ? `${missionIdempotencyKey}:target:${target.type}:${target.group_id || target.project}` : null,
         });
         appendTaskTimelineEvent(child.id, {
             type: "global_mission_dispatch",
@@ -8875,6 +9522,15 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
     const current = tasks.find(t => t.id === taskId);
     if (!current)
         return { success: false, status: 404, error: "任务不存在" };
+    const explicitOperationKey = String(options.idempotency_key || options.idempotencyKey || options.request_id || options.requestId || "").trim();
+    const automaticOperationKey = /gap_rework/i.test(String(options.source || ""))
+        ? `${options.source}:${Number(current.auto_gap_continue_count || 0) + 1}:${crypto.createHash("sha256").update(compactFormText(message, "")).digest("hex").slice(0, 16)}`
+        : "";
+    const operationKey = explicitOperationKey || automaticOperationKey;
+    const operation = operationKey ? (0, reliability_ledger_1.acquireIdempotency)({ scope: "task-continue", key: `${taskId}:${operationKey}`, traceId: current.trace_id, leaseMs: 60_000 }) : null;
+    if (operation && !operation.acquired) {
+        return { success: true, duplicate: true, task: (0, db_1.loadTasks)().find((item) => item.id === taskId) || current, ...(operation.record?.result || {}), trace_id: operation.traceId };
+    }
     const followup = {
         time: new Date().toISOString(),
         message: compactFormText(message, ""),
@@ -8919,6 +9575,8 @@ function continueTaskWithMessage(taskId, message, ctx, options = {}) {
     if (options.auto_execute !== false && options.autoExecute !== false) {
         queueResult = enqueueTask(taskId, ctx);
     }
+    if (operationKey)
+        (0, reliability_ledger_1.completeIdempotency)("task-continue", `${taskId}:${operationKey}`, { task_id: taskId, queued: !!queueResult?.queued, followup_time: followup.time });
     return {
         success: true,
         task,
@@ -8938,6 +9596,7 @@ function retryTask(id, ctx, reason = "", autoExecute = true) {
     if (current.status === "done")
         return { success: false, status: 409, error: "已完成任务不能重试" };
     const retryCount = Number(current.retry_count || 0) + 1;
+    (0, execution_kernel_1.clearTaskCancellation)(id);
     const retryReason = compactFormText(reason, "用户重新入队");
     const task = updateTask(id, {
         status: "pending",
@@ -8956,6 +9615,8 @@ function retryTask(id, ctx, reason = "", autoExecute = true) {
         last_retry_at: new Date().toISOString(),
         last_retry_reason: retryReason,
     });
+    if (task)
+        updateGroupTaskInlineStatus(task, "pending", `第 ${retryCount} 次重试，等待主 Agent 重新执行`);
     addTaskLog(id, "info", `任务重新入队重试：${retryReason}`);
     const queueResult = autoExecute ? enqueueTask(id, ctx) : null;
     return { success: true, task, queued: !!queueResult?.queued, queue_result: queueResult, queue_status: getQueueStatus() };
@@ -9011,11 +9672,166 @@ function retryRuntimeFailedTasks(ctx, options = {}) {
 function deleteTask(id) {
     const tasks = (0, db_1.loadTasks)().filter(t => t.id !== id);
     (0, db_1.saveTasks)(tasks);
+    (0, task_agent_sessions_1.closeTaskAgentSessions)({ taskId: id }, "用户删除任务，关闭任务级原生会话");
 }
 function handleCollaborationApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/tasks/execution-dashboard" && req.method === "GET") {
         const limit = Math.max(1, Math.min(50, Number(parsed.query.limit || 12)));
         (0, utils_1.sendJson)(res, buildExecutionDashboard(limit));
+        return true;
+    }
+    if (pathname === "/api/tasks/executions" && req.method === "GET") {
+        const executionId = String(parsed.query.execution_id || parsed.query.executionId || "");
+        const taskId = String(parsed.query.task_id || parsed.query.taskId || "");
+        (0, utils_1.sendJson)(res, { success: true, execution: executionId ? (0, execution_kernel_1.loadExecution)(executionId) : null, executions: executionId ? [] : (0, execution_kernel_1.listExecutions)(taskId ? { taskId } : {}) });
+        return true;
+    }
+    if (pathname === "/api/tasks/native-sessions" && req.method === "GET") {
+        const taskId = String(parsed.query.task_id || parsed.query.taskId || "");
+        if (!taskId) {
+            (0, utils_1.sendJson)(res, { error: "缺少任务 ID" }, 400);
+            return true;
+        }
+        const sessions = (0, task_agent_sessions_1.listTaskAgentSessions)({ taskId }).map(session => ({ ...session, continuity: (0, task_agent_sessions_1.getTaskAgentSessionContinuity)(session) }));
+        (0, utils_1.sendJson)(res, { success: true, task_id: taskId, sessions });
+        return true;
+    }
+    if (pathname === "/api/orchestrator/resilience" && req.method === "GET") {
+        const runtimes = (0, agent_runtime_1.getPublicAgentRuntimes)().map(runtime => ({ id: runtime.id, label: runtime.label, available: (0, collaboration_resilience_1.isRuntimeCommandAvailable)(runtime.id), sessionResume: runtime.capabilities.sessionResume }));
+        (0, utils_1.sendJson)(res, { success: true, self_test: (0, collaboration_resilience_1.runCollaborationResilienceSelfTest)(), runtimes });
+        return true;
+    }
+    if (pathname === "/api/reliability/traces" && req.method === "GET") {
+        const traceId = String(parsed.query.id || parsed.query.trace_id || "").trim();
+        const taskId = String(parsed.query.task_id || "").trim();
+        if (traceId) {
+            const trace = (0, reliability_ledger_1.getTrace)(traceId);
+            if (!trace)
+                return (0, utils_1.sendJson)(res, { success: false, error: "Trace 不存在" }, 404);
+            (0, utils_1.sendJson)(res, { success: true, trace });
+            return true;
+        }
+        const traces = (0, reliability_ledger_1.listTraces)(Number(parsed.query.limit || 50)).filter((trace) => !taskId || trace.task_id === taskId || trace.events?.some((event) => event.task_id === taskId));
+        (0, utils_1.sendJson)(res, { success: true, traces });
+        return true;
+    }
+    if (pathname === "/api/reliability/self-test" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, result: (0, reliability_ledger_1.runReliabilityLedgerSelfTest)() });
+        return true;
+    }
+    if (pathname === "/api/reliability/drills/run" && req.method === "POST") {
+        try {
+            const outcome = (0, reliability_drills_1.runScheduledProductionReliabilityDrill)({ force: true });
+            const result = outcome.result;
+            (0, utils_1.sendJson)(res, { success: result.pass, result }, result.pass ? 200 : 500);
+        }
+        catch (error) {
+            (0, utils_1.sendJson)(res, { success: false, error: error.message || String(error) }, 500);
+        }
+        return true;
+    }
+    if (pathname === "/api/reliability/drills/status" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, status: (0, reliability_drills_1.getReliabilityDrillStatus)() });
+        return true;
+    }
+    if (pathname === "/api/reliability/soak/status" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, state: (0, soak_test_1.getSoakTestStatus)(), report: (0, soak_test_1.getSoakReport)() });
+        return true;
+    }
+    if (pathname === "/api/reliability/soak/self-test" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, result: (0, soak_test_1.runSoakTestSelfTest)() });
+        return true;
+    }
+    if (["/api/reliability/soak/start", "/api/reliability/soak/stop", "/api/reliability/soak/sample"].includes(pathname) && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", async () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                if (pathname.endsWith("/start"))
+                    (0, utils_1.sendJson)(res, { success: true, ...(await (0, soak_test_1.startSoakTest)(payload)) });
+                else if (pathname.endsWith("/stop"))
+                    (0, utils_1.sendJson)(res, { success: true, state: (0, soak_test_1.stopSoakTest)(payload.reason || "用户停止浸泡测试") });
+                else
+                    (0, utils_1.sendJson)(res, { success: true, state: await (0, soak_test_1.sampleSoakTestNow)() });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error.message || String(error) }, 500);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/tasks/execution-kernel/self-test" && req.method === "GET") {
+        try {
+            (0, utils_1.sendJson)(res, { success: true, ...(0, execution_kernel_1.runExecutionKernelSelfTest)() });
+        }
+        catch (e) {
+            (0, utils_1.sendJson)(res, { success: false, error: e.message }, 500);
+        }
+        return true;
+    }
+    if (pathname === "/api/tasks/cancel" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", async () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const taskId = String(payload.task_id || payload.taskId || payload.id || "");
+                if (!taskId)
+                    return (0, utils_1.sendJson)(res, { error: "缺少任务 ID" }, 400);
+                const task = (0, db_1.loadTasks)().find((item) => item.id === taskId);
+                if (!task)
+                    return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                if (task.status === "done")
+                    return (0, utils_1.sendJson)(res, { error: "已完成任务不能取消" }, 409);
+                for (const queue of taskQueues.values()) {
+                    let index = queue.indexOf(taskId);
+                    while (index >= 0) {
+                        queue.splice(index, 1);
+                        index = queue.indexOf(taskId);
+                    }
+                }
+                const reason = compactFormText(payload.reason, "用户主动停止任务");
+                const cancellation = (0, execution_kernel_1.requestTaskCancellation)(taskId, reason, String(payload.actor || "local-user"));
+                const isRunning = runningTaskIds.has(taskId);
+                const updated = updateTask(taskId, { status: isRunning ? "in_progress" : "cancelled", status_detail: isRunning ? "取消请求已发送，正在终止 Agent 进程" : "任务已取消", cancellation_requested_at: new Date().toISOString(), cancellation_reason: reason, ...(isRunning ? {} : { cancelled_at: new Date().toISOString() }) });
+                updateGroupTaskInlineStatus(updated || task, isRunning ? "in_progress" : "cancelled", isRunning ? "正在终止 Agent 进程" : "任务已取消");
+                addTaskLog(taskId, "warning", isRunning ? "已发送取消请求，正在终止 Agent 进程树" : "已从队列移除并取消任务");
+                await ctx.onTaskStatusChange?.(updated || task, isRunning ? "cancelling" : "cancelled", reason);
+                (0, utils_1.sendJson)(res, { success: true, task: updated, running: isRunning, cancellation, queue_status: getQueueStatus() });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+            }
+        });
+        return true;
+    }
+    if (["/api/tasks/execution/rollback", "/api/tasks/execution/merge", "/api/tasks/execution/cleanup"].includes(pathname) && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                let result;
+                if (pathname.endsWith("/rollback"))
+                    result = (0, execution_kernel_1.rollbackExecutionCheckpoint)(String(payload.checkpoint_id || payload.checkpointId || ""), String(payload.reason || ""), { allowShared: payload.allow_shared === true || payload.allowShared === true });
+                else if (pathname.endsWith("/merge"))
+                    result = (0, execution_kernel_1.mergeExecutionWorktree)(String(payload.execution_id || payload.executionId || ""), { force: !!payload.force, commit: payload.commit !== false, message: payload.message || "" });
+                else
+                    result = (0, execution_kernel_1.cleanupExecutionWorktree)(String(payload.execution_id || payload.executionId || ""), !!payload.force);
+                const executionId = String(payload.execution_id || payload.executionId || result?.executionId || "");
+                const executionRecord = executionId ? (0, execution_kernel_1.loadExecution)(executionId) : null;
+                const task = executionRecord?.taskId ? (0, db_1.loadTasks)().find((item) => item.id === executionRecord.taskId) : null;
+                if (task?.trace_id) {
+                    const action = pathname.endsWith("/merge") ? "merge" : pathname.endsWith("/rollback") ? "rollback" : "cleanup";
+                    (0, reliability_ledger_1.appendTraceEvent)(task.trace_id, { id: `execution:${executionId}:${action}:${result?.mergeCommit || result?.rolledBackAt || result?.cleanedAt || "done"}`, type: `execution.${action}`, status: "ok", task_id: task.id, group_id: task.group_id || "", agent: executionRecord?.project || "", message: result?.duplicate ? `${action} 重复请求已复用原结果` : `${action} 操作完成`, data: result });
+                }
+                (0, utils_1.sendJson)(res, result);
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { error: e.message }, 409);
+            }
+        });
         return true;
     }
     if (pathname === "/api/tasks" && req.method === "GET") {
@@ -9045,8 +9861,11 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
         let body = "";
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
+            let operationKey = "";
             try {
                 const payload = body ? JSON.parse(body) : {};
+                operationKey = String(payload.idempotency_key || payload.idempotencyKey || "").trim();
+                const traceId = (0, reliability_ledger_1.ensureTraceId)(payload.trace_id || payload.traceId, "daily-dev");
                 const groupId = payload.group_id || payload.groupId;
                 if (!groupId)
                     return (0, utils_1.sendJson)(res, { error: "请选择目标开发群聊" }, 400);
@@ -9067,6 +9886,12 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                         error: quality.message,
                         quality,
                     }, 422);
+                }
+                const operation = operationKey ? (0, reliability_ledger_1.acquireIdempotency)({ scope: "create-daily-dev", key: operationKey, traceId, leaseMs: 60_000 }) : null;
+                if (operation && !operation.acquired) {
+                    const existingTask = operation.record?.result?.task_id ? (0, db_1.loadTasks)().find((item) => item.id === operation.record.result.task_id) : null;
+                    (0, utils_1.sendJson)(res, { success: true, duplicate: true, task: existingTask, trace_id: operation.traceId });
+                    return;
                 }
                 const title = compactFormText(payload.title, goal.slice(0, 60));
                 const backlogFile = persistDailyDevBacklogFile(groups, group, payload, title, goal);
@@ -9098,6 +9923,8 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                             source: "create-daily-dev",
                         } : null,
                     },
+                    trace_id: traceId,
+                    idempotency_key: operationKey || null,
                 });
                 if (backlogFile) {
                     markDailyDevBacklogStatus(groupId, backlogFile.name, "dispatched", {
@@ -9115,9 +9942,17 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                         });
                     }
                 }
+                if (operationKey)
+                    (0, reliability_ledger_1.completeIdempotency)("create-daily-dev", operationKey, { task_id: task.id, queued: !!queueResult?.queued });
                 (0, utils_1.sendJson)(res, { success: true, task, backlog_file: backlogFile?.name || null, queued: !!queueResult?.queued, queue_result: queueResult, queue_status: getQueueStatus() });
             }
             catch (e) {
+                if (operationKey) {
+                    try {
+                        (0, reliability_ledger_1.failIdempotency)("create-daily-dev", operationKey, e);
+                    }
+                    catch { }
+                }
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
             }
         });
@@ -9241,6 +10076,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                 const task = updateTask(id, updates);
                 if (!task)
                     return (0, utils_1.sendJson)(res, { error: "任务不存在" }, 404);
+                updateGroupTaskInlineStatus(task, task.status, task.status_detail || "任务状态已更新");
                 (0, utils_1.sendJson)(res, { success: true, task });
             }
             catch (e) {
@@ -9261,6 +10097,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                     source: payload.source || "user",
                     auto_execute: payload.auto_execute,
                     autoExecute: payload.autoExecute,
+                    idempotencyKey: payload.idempotency_key || payload.idempotencyKey || payload.request_id || payload.requestId,
                 });
                 if (!result.success)
                     return (0, utils_1.sendJson)(res, { error: result.error }, result.status || 400);
@@ -9292,6 +10129,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                     auto_execute: payload.auto_execute,
                     autoExecute: payload.autoExecute,
                     status_detail: "已按交付缺口生成返工说明，等待主 Agent 继续执行",
+                    idempotencyKey: payload.idempotency_key || payload.idempotencyKey || payload.request_id || payload.requestId,
                 });
                 if (!result.success)
                     return (0, utils_1.sendJson)(res, { error: result.error }, result.status || 400);
@@ -9351,10 +10189,20 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                 const taskId = payload.task_id || payload.id;
                 if (!taskId)
                     return (0, utils_1.sendJson)(res, { error: "缺少任务 ID" }, 400);
+                const operationKey = String(payload.idempotency_key || payload.idempotencyKey || payload.request_id || payload.requestId || "").trim();
+                const task = (0, db_1.loadTasks)().find((item) => item.id === taskId);
+                const operation = operationKey ? (0, reliability_ledger_1.acquireIdempotency)({ scope: "task-retry", key: `${taskId}:${operationKey}`, traceId: task?.trace_id, leaseMs: 60_000 }) : null;
+                if (operation && !operation.acquired)
+                    return (0, utils_1.sendJson)(res, { success: true, duplicate: true, ...(operation.record?.result || {}), trace_id: operation.traceId });
                 const autoExecute = payload.auto_execute !== false && payload.autoExecute !== false;
                 const result = retryTask(taskId, ctx, payload.reason || payload.message || "", autoExecute);
-                if (!result.success)
+                if (!result.success) {
+                    if (operationKey)
+                        (0, reliability_ledger_1.failIdempotency)("task-retry", `${taskId}:${operationKey}`, result.error || "重试失败");
                     return (0, utils_1.sendJson)(res, { error: result.error }, result.status || 400);
+                }
+                if (operationKey)
+                    (0, reliability_ledger_1.completeIdempotency)("task-retry", `${taskId}:${operationKey}`, { task_id: taskId, queued: !!result.queue_result?.queued, retry_count: result.task?.retry_count });
                 (0, utils_1.sendJson)(res, result);
             }
             catch (e) {
@@ -9646,6 +10494,21 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                 const payload = body ? JSON.parse(body) : {};
                 const result = await runAgentCliProbe(payload, ctx);
                 (0, utils_1.sendJson)(res, result, result.success ? 200 : (result.blocked ? 409 : 500));
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/orchestrator/runtime-fallback-probe" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", async () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const result = await runRuntimeFallbackProbe(payload, ctx);
+                (0, utils_1.sendJson)(res, result, result.success ? 200 : 500);
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
@@ -10057,6 +10920,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/groups/send" && req.method === "POST") {
         const contentType = req.headers["content-type"] || "";
         const handleGroupSend = async (payload, uploadedFiles = []) => {
+            let reliabilityOperationKey = "";
             try {
                 const { group_id, target_project, message, client_message_id } = payload;
                 const userMessage = String(message || "").trim();
@@ -10080,12 +10944,29 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                 if (targetMembers.length === 0) {
                     return (0, utils_1.sendJson)(res, { error: "没有找到目标项目" }, 400);
                 }
+                const messageMode = String(payload.message_mode || payload.messageMode || "conversation").trim().toLowerCase();
+                const messageTraceId = (0, reliability_ledger_1.ensureTraceId)(payload.trace_id || payload.traceId, "group");
+                const persistentTaskRequest = isOrchestrated && ["project_task", "daily_dev", "mission"].includes(messageMode);
+                const groupOperationKey = persistentTaskRequest && client_message_id ? `${group_id}:${String(client_message_id)}` : "";
+                reliabilityOperationKey = groupOperationKey;
+                const groupOperation = groupOperationKey
+                    ? (0, reliability_ledger_1.acquireIdempotency)({ scope: "group-task-message", key: groupOperationKey, traceId: messageTraceId, leaseMs: 10 * 60 * 1000, metadata: { group_id, client_message_id: String(client_message_id) } })
+                    : null;
+                if (groupOperation && !groupOperation.acquired) {
+                    const replay = groupOperation.record?.result || {};
+                    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "Access-Control-Allow-Origin": "*" });
+                    writeSse(res, { type: "duplicate_suppressed", text: groupOperation.inProgress ? "相同群聊消息正在处理，已阻止重复派发" : "相同群聊消息已经处理，返回原任务", traceId: groupOperation.traceId, task: replay.task || null, queue: replay.queue || null });
+                    writeSse(res, { type: "done", taskId: replay.task?.id || "", traceId: groupOperation.traceId });
+                    res.end();
+                    return;
+                }
                 const userMsg = {
                     id: client_message_id ? String(client_message_id) : "m" + Date.now().toString(36),
                     role: "user",
                     target: routing.targetLabel,
                     content: userMessageForHistory,
                     timestamp: new Date().toISOString(),
+                    trace_id: messageTraceId,
                 };
                 appendGroupMessage(group_id, userMsg);
                 for (const member of targetMembers) {
@@ -10098,7 +10979,6 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                     orchestrated: isOrchestrated
                 });
                 const configs = (0, db_1.getConfigs)();
-                const messageMode = String(payload.message_mode || payload.messageMode || "conversation").trim().toLowerCase();
                 // 项目任务模式会创建持久工单。后续执行由可恢复任务队列持有，不依赖本次 SSE 连接。
                 if (isOrchestrated && ["project_task", "daily_dev", "mission"].includes(messageMode)) {
                     const groupReadiness = validateDailyDevGroupReady(group);
@@ -10163,6 +11043,8 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                                 user_directive: userMessage || "请读取并完成附件中的开发需求",
                             },
                         },
+                        trace_id: messageTraceId,
+                        idempotency_key: groupOperationKey ? `group-task-message:${groupOperationKey}` : null,
                     });
                     appendTaskTimelineEvent(task.id, {
                         type: "project_mission_intake",
@@ -10188,6 +11070,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                         content: receiptContent,
                         timestamp: now,
                         task_id: task.id,
+                        trace_id: messageTraceId,
                         task: {
                             id: task.id,
                             title: task.title,
@@ -10212,6 +11095,8 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                         ? `任务已进入执行队列（位置 ${queueResult.position || 1}）`
                         : `任务已保存；${queueResult?.message || "等待执行通道恢复"}`;
                     addTaskLog(task.id, queueResult?.queued ? "success" : "warning", queueText);
+                    if (groupOperationKey)
+                        (0, reliability_ledger_1.completeIdempotency)("group-task-message", groupOperationKey, { task: { id: task.id, title: task.title, status: task.status, workflow_type: task.workflow_type }, queue: queueResult });
                     res.writeHead(200, {
                         "Content-Type": "text/event-stream",
                         "Cache-Control": "no-cache",
@@ -10230,6 +11115,7 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                             workflow_type: task.workflow_type,
                             attachment_count: attachmentRecords.length,
                         },
+                        traceId: messageTraceId,
                         queue: queueResult,
                         workflow: receiptMessage.workflow,
                     });
@@ -10655,6 +11541,12 @@ function handleCollaborationApi(pathname, req, res, parsed, ctx) {
                 (0, utils_1.sendJson)(res, { success: true, reply: output });
             }
             catch (e) {
+                if (reliabilityOperationKey) {
+                    try {
+                        (0, reliability_ledger_1.failIdempotency)("group-task-message", reliabilityOperationKey, e);
+                    }
+                    catch { }
+                }
                 (0, utils_1.sendJson)(res, { error: e.message }, 500);
             }
         };

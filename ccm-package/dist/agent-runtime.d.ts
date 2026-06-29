@@ -2,6 +2,9 @@ export type AgentRuntimeId = "claudecode" | "claude" | "cursor" | "gemini" | "co
 export interface AgentCommandOptions {
     cliAllowedTools?: string[];
     mcpConfigPath?: string;
+    sessionId?: string;
+    resumeSession?: boolean;
+    persistSession?: boolean;
 }
 export interface AgentRuntimeDescriptor {
     id: AgentRuntimeId;
@@ -37,3 +40,20 @@ export declare function getPublicAgentRuntimes(): {
         scratchpadContinuation: boolean;
     };
 }[];
+export declare function normalizeAgentCommandOutput(agentType: string, rawOutput: string): {
+    output: string;
+    sessionId: string;
+};
+export declare function runAgentRuntimeSessionSelfTest(): {
+    pass: boolean;
+    checks: {
+        claudeCreatesNamedSession: boolean;
+        claudeResumesSameSession: boolean;
+        codexInitialIsPersistent: boolean;
+        codexResumesSameSession: boolean;
+        codexCapturesNativeSession: boolean;
+        cursorInitialCapturesSession: boolean;
+        cursorResumesSameSession: boolean;
+        cursorParsesNativeSession: boolean;
+    };
+};

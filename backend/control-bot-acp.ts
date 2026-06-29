@@ -41,11 +41,11 @@ function extractPromptText(params: any) {
   return parts.join("\n").trim();
 }
 
-async function callGlobalAgent(text: string, sessionId = "default") {
+async function callGlobalAgent(text: string, sessionId = "default", messageId = "") {
   const response = await fetch(`${baseUrl}/api/feishu/control-bot/message`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-CCM-ACP": "1" },
-    body: JSON.stringify({ text, sessionId, source: "cc-connect-acp" }),
+    body: JSON.stringify({ text, sessionId, messageId, source: "cc-connect-acp" }),
     signal: AbortSignal.timeout(10 * 60 * 1000),
   });
   const data = await response.json() as any;
@@ -106,7 +106,7 @@ async function handleRequest(message: any) {
         respond(id, { stopReason: "end_turn" });
         return;
       }
-      const reply = await callGlobalAgent(text, sessionId);
+      const reply = await callGlobalAgent(text, sessionId, String(id ?? ""));
       sendTextUpdate(sessionId, reply);
       respond(id, { stopReason: "end_turn" });
       return;

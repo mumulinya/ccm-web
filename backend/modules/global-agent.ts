@@ -5,6 +5,7 @@ import { queryKnowledgeBase } from "./rag";
 import { execFileSync } from "child_process";
 import {
   sendJson,
+  calculateTokensAndCost,
   collectRequestBuffer,
   getMultipartBoundary,
   parseMultipart,
@@ -12,7 +13,7 @@ import {
   CCM_DIR
 } from "../utils";
 import { loadOrchestratorConfig } from "./group-orchestrator";
-import { getConfigs, getConfigInfo, loadCronJobs, loadTasks, loadMcpTools, loadSkills, loadFeishuConfig } from "../db";
+import { getConfigs, getConfigInfo, loadCronJobs, loadTasks, loadMcpTools, loadSkills, loadFeishuConfig, recordMetric } from "../db";
 import {
   loadGroups,
   createGlobalDevelopmentMission,
@@ -21,6 +22,14 @@ import {
   sendFeishuReportMessage,
   type CollabCtx,
 } from "./collaboration";
+import {
+  acquireIdempotency,
+  appendTraceEvent,
+  completeIdempotency,
+  ensureTraceId,
+  failIdempotency,
+  getIdempotencyRecord,
+} from "../reliability-ledger";
 
 
 type LocalIntentResult = {
@@ -32,6 +41,15 @@ const GLOBAL_AGENT_HISTORY_FILE = path.join(CCM_DIR, "global-agent-history.json"
 const GLOBAL_AGENT_BRIDGE_FILE = path.join(CCM_DIR, "global-agent-bridge.json");
 const GLOBAL_AGENT_HISTORY_LIMIT = 80;
 const GLOBAL_AGENT_SESSION_LIMIT = 30;
+
+function writeGlobalJsonAtomic(file: string, value: any) {
+  const temp = `${file}.${process.pid}.${Date.now()}.${crypto.randomBytes(2).toString("hex")}.tmp`;
+  if (fs.existsSync(file)) {
+    try { fs.copyFileSync(file, `${file}.bak`); } catch {}
+  }
+  fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf-8");
+  fs.renameSync(temp, file);
+}
 
 function normalizeGlobalAgentMessages(messages: any[] = []) {
   return messages
@@ -51,6 +69,10 @@ function loadGlobalAgentHistoryStore(): any {
       return { sessions: [], ...data };
     }
   } catch {}
+  try {
+    const recovered = JSON.parse(fs.readFileSync(`${GLOBAL_AGENT_HISTORY_FILE}.bak`, "utf-8"));
+    return { sessions: [], ...recovered, storage_recovery: { recovered_from_backup: true, recovered_at: new Date().toISOString() } };
+  } catch {}
   return { current_session_id: "", sessions: [] };
 }
 
@@ -65,7 +87,7 @@ function saveGlobalAgentHistoryStore(store: any) {
     .filter((session: any) => session.id && session.messages.length > 0)
     .sort((a: any, b: any) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
     .slice(0, GLOBAL_AGENT_SESSION_LIMIT);
-  fs.writeFileSync(GLOBAL_AGENT_HISTORY_FILE, JSON.stringify(store, null, 2), "utf-8");
+  writeGlobalJsonAtomic(GLOBAL_AGENT_HISTORY_FILE, store);
 }
 
 function syncGlobalAgentWebHistory(payload: any) {
@@ -131,10 +153,33 @@ function buildFeishuConversationId(payload: any) {
   return "feishu:" + String(raw || "default").replace(/[^a-zA-Z0-9:_@.-]/g, "_").slice(0, 120);
 }
 
+function getFeishuMessageId(payload: any) {
+  return String(
+    payload?.event?.message?.message_id
+    || payload?.message_id
+    || payload?.messageId
+    || payload?.message?.id
+    || payload?.header?.event_id
+    || payload?.event_id
+    || ""
+  ).trim();
+}
+
+async function waitForIdempotencyResult(scope: string, key: string, timeoutMs = 10 * 60 * 1000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const record = getIdempotencyRecord(scope, key);
+    if (record?.status === "completed" || record?.status === "failed") return record;
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  return getIdempotencyRecord(scope, key);
+}
+
 function loadGlobalAgentBridgeStore(): any {
   try {
     if (fs.existsSync(GLOBAL_AGENT_BRIDGE_FILE)) return JSON.parse(fs.readFileSync(GLOBAL_AGENT_BRIDGE_FILE, "utf-8"));
   } catch {}
+  try { return JSON.parse(fs.readFileSync(`${GLOBAL_AGENT_BRIDGE_FILE}.bak`, "utf-8")); } catch {}
   return { requests: [] };
 }
 
@@ -143,7 +188,7 @@ function saveGlobalAgentBridgeStore(store: any) {
   store.requests = (Array.isArray(store.requests) ? store.requests : [])
     .filter((item: any) => item.status === "pending" || Date.parse(item.updated_at || item.created_at || 0) > cutoff)
     .slice(-100);
-  fs.writeFileSync(GLOBAL_AGENT_BRIDGE_FILE, JSON.stringify(store, null, 2), "utf-8");
+  writeGlobalJsonAtomic(GLOBAL_AGENT_BRIDGE_FILE, store);
 }
 
 function createGlobalAgentBridgeRequest(text: string, sessionId: string) {
@@ -220,6 +265,11 @@ const GLOBAL_MANAGEMENT_REQUIRED_PARAMS: Record<string, Record<string, string[]>
   },
 };
 
+const GLOBAL_AGENT_BOUNDARY = {
+  layer: "global_agent",
+  responsibility: "system intent routing, management actions, development mission fan-out",
+};
+
 function annotateGlobalAction(action: any) {
   if (!action || !action.type) return action;
   const spec = GLOBAL_MANAGEMENT_ACTIONS[action.type];
@@ -237,6 +287,7 @@ function annotateGlobalAction(action: any) {
     ...action,
     params,
     management: true,
+    agentBoundary: GLOBAL_AGENT_BOUNDARY,
     capability: spec.label,
     risk: requiresConfirmation ? "high" : "normal",
     requires_confirmation: requiresConfirmation,
@@ -313,6 +364,7 @@ function findAllGroups(message: string, groups: any[]) {
 function buildLocalDevelopmentTargets(message: string, projects: string[], groups: any[]) {
   const matchedGroups = findAllGroups(message, groups);
   const matchedProjects = findAllProjectNames(message, projects);
+  const requestsWholeWorkspace = /(?:所有|全部|全量|整个|全局|全项目|跨项目).*(?:项目|代码库|仓库|系统)|(?:项目|代码库|仓库|系统).*(?:全部|全量|整体|全局)/.test(message);
   const targets = [
     ...matchedGroups.map((group: any) => ({
       type: "group",
@@ -328,6 +380,14 @@ function buildLocalDevelopmentTargets(message: string, projects: string[], group
     })),
   ];
   if (targets.length > 0) return targets;
+  if (requestsWholeWorkspace && projects.length > 0) {
+    return projects.map((project: string) => ({
+      type: "project",
+      project,
+      reason: "用户明确要求覆盖整个项目工作区",
+      task: message,
+    }));
+  }
   if (groups[0]) {
     return [{
       type: "group",
@@ -339,6 +399,25 @@ function buildLocalDevelopmentTargets(message: string, projects: string[], group
   return projects[0]
     ? [{ type: "project", project: projects[0], reason: "用户未指定执行目标，交由默认项目 Agent分析", task: message }]
     : [];
+}
+
+/**
+ * 仅用于大模型不可用时的保底判断。正常聊天路径由大模型决定是否产生 action，
+ * 这里不能因为出现“知识库 / 实现 / 优化”等主题词就自动创建项目任务。
+ */
+function hasExplicitDevelopmentExecutionIntent(message: string) {
+  const text = normalizeText(message);
+  if (!text) return false;
+  if (/(?:只是|仅仅|只想|先)(?:问问|了解|咨询|讨论|解释|分析)|不要(?:执行|修改|创建|派发)|不用(?:执行|修改|创建|派发)/.test(text)) return false;
+
+  const hasDevelopmentAction = /(实现|新增|添加|修改|改造|修复|重构|优化|完成|对接|上线|部署|运行|执行|测试|检查|排查|审查|提交|创建)/.test(text);
+  if (!hasDevelopmentAction) return false;
+
+  const isExplanatoryQuestion = /[?？]|(?:怎么|如何|为什么|是什么|原理|介绍|讲讲|说明|能不能|可不可以|是否|有哪些|有什么)/.test(text);
+  const explicitDirective = /^(?:实现|新增|添加|修改|改造|修复|重构|优化|完成|对接|上线|部署|运行|执行|测试|检查|排查|审查|提交|创建)/.test(text)
+    || /(?:请(?!问)|帮我|麻烦|给我|需要你|我要你|直接|立即|马上|开始).*(?:实现|新增|添加|修改|改造|修复|重构|优化|完成|对接|上线|部署|运行|执行|测试|检查|排查|审查|提交|创建)/.test(text);
+
+  return explicitDirective && !isExplanatoryQuestion;
 }
 
 function chineseNumberToInt(value: string) {
@@ -602,8 +681,7 @@ function inferLocalGlobalAction(message: string, projects: string[], groups: any
     };
   }
 
-  const isDevelopmentRequest = /(业务需求|需求文档|开发|实现|新增|修改|修复|重构|优化|完成|对接|上线|功能)/.test(text)
-    && !/(只是解释|只分析|不要执行|不用修改|不要创建任务)/.test(text);
+  const isDevelopmentRequest = hasExplicitDevelopmentExecutionIntent(text);
   if (isDevelopmentRequest) {
     const targets = buildLocalDevelopmentTargets(text, projects, groups);
     if (targets.length > 0) {
@@ -663,6 +741,86 @@ function inferLocalGlobalAction(message: string, projects: string[], groups: any
   }
 
   return null;
+}
+
+function createActionBlockSafeStreamer(emit: (text: string) => void) {
+  const actionMarker = "```action";
+  const fenceMarker = "```";
+  let buffer = "";
+  let insideAction = false;
+
+  const drain = (final = false) => {
+    while (buffer) {
+      if (insideAction) {
+        const closeIndex = buffer.indexOf(fenceMarker);
+        if (closeIndex >= 0) {
+          buffer = buffer.slice(closeIndex + fenceMarker.length);
+          insideAction = false;
+          continue;
+        }
+        if (final) buffer = "";
+        else buffer = buffer.slice(Math.max(0, buffer.length - (fenceMarker.length - 1)));
+        return;
+      }
+
+      const actionIndex = buffer.indexOf(actionMarker);
+      if (actionIndex >= 0) {
+        if (actionIndex > 0) emit(buffer.slice(0, actionIndex));
+        buffer = buffer.slice(actionIndex + actionMarker.length);
+        insideAction = true;
+        continue;
+      }
+
+      if (final) {
+        emit(buffer);
+        buffer = "";
+        return;
+      }
+
+      const safeLength = Math.max(0, buffer.length - (actionMarker.length - 1));
+      if (safeLength > 0) {
+        emit(buffer.slice(0, safeLength));
+        buffer = buffer.slice(safeLength);
+      }
+      return;
+    }
+  };
+
+  return {
+    push(text: string) {
+      buffer += String(text || "");
+      drain(false);
+    },
+    finish() {
+      drain(true);
+    },
+  };
+}
+
+export function runGlobalAgentIntentSelfTest() {
+  const projects = ["frontend-app", "backend-api"];
+  const groups = [{ id: "dev-group", name: "开发群", members: projects.map(project => ({ project })) }];
+  const cases = [
+    { message: "知识库是怎么实现的？", expected: null },
+    { message: "知识库有哪些可以优化的地方？", expected: null },
+    { message: "请介绍一下当前知识库的工作原理", expected: null },
+    { message: "请优化整个项目的知识库检索，并完成测试", expected: "orchestrate_development", expectedTargetCount: projects.length },
+    { message: "修复 backend-api 的知识库检索错误", expected: "orchestrate_development" },
+  ];
+  const results = cases.map(item => {
+    const result = inferLocalGlobalAction(item.message, projects, groups, {});
+    const actual = result?.action?.type || null;
+    const targetCount = Array.isArray(result?.action?.params?.targets) ? result.action.params.targets.length : 0;
+    const targetCountPassed = item.expectedTargetCount === undefined || targetCount === item.expectedTargetCount;
+    return { ...item, actual, targetCount, passed: actual === item.expected && targetCountPassed };
+  });
+  const visibleChunks: string[] = [];
+  const safeStreamer = createActionBlockSafeStreamer(text => visibleChunks.push(text));
+  for (const chunk of ["这是自然回答。\n`", "``act", "ion\n{\"type\":\"navigate\"}\n`", "``"]) safeStreamer.push(chunk);
+  safeStreamer.finish();
+  const visibleReply = visibleChunks.join("");
+  const actionBlockHidden = visibleReply === "这是自然回答。\n";
+  return { passed: results.every(item => item.passed) && actionBlockHidden, results, actionBlockHidden, visibleReply };
 }
 
 function decryptFeishuEvent(encrypted: string, encryptKey: string): any {
@@ -839,8 +997,8 @@ async function executeFeishuManagementAction(baseUrl: string, action: any, origi
     else if (operation === "resume") {
       await postLocalApi(baseUrl, "/api/tasks/update", { id, status: "pending", status_detail: "由飞书全局 Agent 恢复" });
       result = await postLocalApi(baseUrl, "/api/tasks/queue", { task_id: id });
-    } else if (operation === "continue") result = await postLocalApi(baseUrl, "/api/tasks/continue", { id, message: params.message || "由飞书全局 Agent 继续推进", auto_execute: true });
-    else if (operation === "retry") result = await postLocalApi(baseUrl, "/api/tasks/retry", { id, reason: params.message || "由飞书全局 Agent 发起重试", auto_execute: true });
+    } else if (operation === "continue") result = await postLocalApi(baseUrl, "/api/tasks/continue", { id, message: params.message || "由飞书全局 Agent 继续推进", auto_execute: true, idempotency_key: params.idempotency_key });
+    else if (operation === "retry") result = await postLocalApi(baseUrl, "/api/tasks/retry", { id, reason: params.message || "由飞书全局 Agent 发起重试", auto_execute: true, idempotency_key: params.idempotency_key });
     else if (operation === "queue") result = await postLocalApi(baseUrl, "/api/tasks/queue", { task_id: id });
   } else if (action.type === "manage_project") {
     const project = params.project || params.name;
@@ -873,9 +1031,9 @@ async function executeFeishuManagementAction(baseUrl: string, action: any, origi
   return count === undefined ? `操作已完成：${action.type}/${operation}` : `查询完成：${count} 条记录。`;
 }
 
-async function executeFeishuAction(baseUrl: string, action: any, originalText = ""): Promise<string> {
+async function executeFeishuAction(baseUrl: string, action: any, originalText = "", traceId = ""): Promise<string> {
   if (!action?.type) return "";
-  if (GLOBAL_MANAGEMENT_ACTIONS[action.type]) return executeFeishuManagementAction(baseUrl, action, originalText);
+  if (GLOBAL_MANAGEMENT_ACTIONS[action.type]) return executeFeishuManagementAction(baseUrl, { ...action, params: { ...(action.params || {}), idempotency_key: traceId || action.params?.idempotency_key } }, originalText);
   const params = action.params || {};
   if (action.type === "play_music") {
     return queueMusicPlayback(baseUrl, params.keyword || params.query || params.song || originalText);
@@ -903,6 +1061,8 @@ async function executeFeishuAction(baseUrl: string, action: any, originalText = 
       source_documents: params.documents || params.source_documents || "",
       auto_execute: true,
       source: "feishu-control-bot",
+      trace_id: traceId,
+      idempotency_key: traceId ? `feishu:${traceId}` : undefined,
     });
     return `全局开发任务已建立并开始派发。\n- 标题：${result.mission?.title || params.title}\n- 任务 ID：${result.mission?.id}\n- 执行目标：${result.children?.length || 0} 个`;
   }
@@ -916,6 +1076,8 @@ async function executeFeishuAction(baseUrl: string, action: any, originalText = 
       acceptance: params.acceptance || "子 Agent 提供回执；主 Agent 输出最终报告",
       persist_documents: true,
       auto_execute: true,
+      trace_id: traceId,
+      idempotency_key: traceId ? `feishu:${traceId}` : undefined,
     });
     return `协作任务已派发并进入自动执行队列。\n- 任务 ID：${result.task?.id || result.id || "已创建"}`;
   }
@@ -924,6 +1086,8 @@ async function executeFeishuAction(baseUrl: string, action: any, originalText = 
       group_id: params.group_id || params.groupId,
       target_project: params.target_project || params.targetProject || "coordinator",
       message: params.message || params.prompt || params.command,
+      trace_id: traceId,
+      client_message_id: traceId ? `feishu-${traceId}` : undefined,
     });
     return `群聊主 Agent 已收到指令。${result.reply ? `\n\n主 Agent 回执：\n${String(result.reply).slice(0, 1200)}` : ""}`;
   }
@@ -938,8 +1102,9 @@ async function executeFeishuAction(baseUrl: string, action: any, originalText = 
   return `已识别动作 ${action.type}，但它不适合从飞书远程执行。`;
 }
 
-async function processFeishuGlobalAgentMessage(baseUrl: string, text: string, payload: any, options: { sendReport?: boolean } = {}) {
+async function processFeishuGlobalAgentMessage(baseUrl: string, text: string, payload: any, options: { sendReport?: boolean; traceId?: string } = {}) {
   const sendReport = options.sendReport !== false;
+  const traceId = ensureTraceId(options.traceId, "feishu");
   const conversationId = buildFeishuConversationId(payload);
   const historyBeforeUser = getGlobalAgentConversationMessages(conversationId);
   appendGlobalAgentConversationMessage(conversationId, "user", text, "feishu");
@@ -947,7 +1112,9 @@ async function processFeishuGlobalAgentMessage(baseUrl: string, text: string, pa
     source: "feishu-control-bot",
     sender_id: payload?.event?.sender?.sender_id?.open_id || payload?.event?.sender?.sender_id?.user_id || payload?.sender?.id || "unknown",
     message_id: payload?.event?.message?.message_id || payload?.message?.id || "",
+    trace_id: traceId,
   };
+  appendTraceEvent(traceId, { id: `feishu:${getFeishuMessageId(payload) || crypto.randomBytes(4).toString("hex")}:received`, type: "feishu.message_received", status: "info", message: text.slice(0, 500), data: { conversation_id: conversationId, message_id: getFeishuMessageId(payload) } });
   try {
     if (/^(帮助|help|\/help)$/i.test(text)) {
       const markdown = "可以直接发送业务需求，也可以说：\n- 查看任务状态\n- 检查系统状态\n- 给某个群聊/项目 Agent 下发指令\n- 每天 9 点执行某项任务\n- 暂停、恢复或重试指定任务\n\n删除等高风险操作必须回到 CCM 界面确认。";
@@ -971,7 +1138,7 @@ async function processFeishuGlobalAgentMessage(baseUrl: string, text: string, pa
       if (sendReport) await sendFeishuReportMessage({ title: "全局 Agent 回复", markdown });
       return markdown;
     }
-    const result = await executeFeishuAction(baseUrl, action, text);
+    const result = await executeFeishuAction(baseUrl, action, text, traceId);
     const markdown = `${chat.reply || "已收到指令。"}\n\n${result}`;
     appendGlobalActionAudit({ ...auditBase, action: action || { type: "unrecognized", params: { message: text } }, status: "success", result: { summary: result } });
     appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
@@ -1065,13 +1232,38 @@ export function handleGlobalAgentApi(
         }
         if (isAcp) {
           const conversationId = buildFeishuConversationId(payload);
+          const messageId = getFeishuMessageId(payload);
+          const operationKey = messageId ? `${conversationId}:${messageId}` : "";
+          const operation = operationKey ? acquireIdempotency({ scope: "feishu-control-message", key: operationKey, leaseMs: 11 * 60 * 1000, metadata: { conversation_id: conversationId, message_id: messageId } }) : null;
+          if (operation && !operation.acquired) {
+            const settled = operation.inProgress ? await waitForIdempotencyResult("feishu-control-message", operationKey) : operation.record;
+            const replay = settled?.result || {};
+            sendJson(res, { success: settled?.status === "completed", duplicate: true, message: "重复控制消息已抑制", reply: replay.reply || replay.error || "消息仍在处理中", trace_id: settled?.trace_id || operation.traceId });
+            return;
+          }
           const request = createGlobalAgentBridgeRequest(text, conversationId);
           const result = await waitForGlobalAgentBridgeResult(request.id);
-          sendJson(res, { success: result.status !== "failed", message: "控制机器人消息已桥接到 Web 全局 Agent", reply: result.reply || result.error || "已处理" });
+          const reply = result.reply || result.error || "已处理";
+          if (operationKey) {
+            if (result.status === "failed") failIdempotency("feishu-control-message", operationKey, result.error || "桥接失败");
+            else completeIdempotency("feishu-control-message", operationKey, { reply, bridge_request_id: request.id });
+          }
+          sendJson(res, { success: result.status !== "failed", message: "控制机器人消息已桥接到 Web 全局 Agent", reply, trace_id: operation?.traceId || "" });
           return;
         }
-        const reply = await processFeishuGlobalAgentMessage(getRequestBaseUrl(req), text, payload, { sendReport: true });
-        sendJson(res, { success: true, message: "控制机器人消息已处理", reply });
+        const conversationId = buildFeishuConversationId(payload);
+        const messageId = getFeishuMessageId(payload);
+        const operationKey = messageId ? `${conversationId}:${messageId}` : "";
+        const operation = operationKey ? acquireIdempotency({ scope: "feishu-control-message", key: operationKey, leaseMs: 11 * 60 * 1000, metadata: { conversation_id: conversationId, message_id: messageId } }) : null;
+        if (operation && !operation.acquired) {
+          const settled = operation.inProgress ? await waitForIdempotencyResult("feishu-control-message", operationKey) : operation.record;
+          const replay = settled?.result || {};
+          sendJson(res, { success: settled?.status === "completed", duplicate: true, message: "重复控制消息已抑制", reply: replay.reply || replay.error || "消息仍在处理中", trace_id: settled?.trace_id || operation.traceId });
+          return;
+        }
+        const reply = await processFeishuGlobalAgentMessage(getRequestBaseUrl(req), text, payload, { sendReport: true, traceId: operation?.traceId });
+        if (operationKey) completeIdempotency("feishu-control-message", operationKey, { reply });
+        sendJson(res, { success: true, message: "控制机器人消息已处理", reply, trace_id: operation?.traceId || "" });
       } catch (error: any) {
         if (!res.headersSent) sendJson(res, { success: false, error: error?.message || "控制机器人消息处理失败" }, 400);
       }
@@ -1126,7 +1318,7 @@ export function handleGlobalAgentApi(
         if (payload?.header?.event_type !== "im.message.receive_v1") return;
         if (payload?.event?.sender?.sender_type === "app") return;
 
-        const messageId = String(payload?.event?.message?.message_id || "").trim();
+        const messageId = getFeishuMessageId(payload);
         if (messageId && processedFeishuMessageIds.has(messageId)) return;
         if (messageId) {
           processedFeishuMessageIds.add(messageId);
@@ -1140,7 +1332,12 @@ export function handleGlobalAgentApi(
           void sendFeishuReportMessage({ title: "全局 Agent", markdown: "目前控制机器人只处理文字消息，请把需求或指令以文字发送。" });
           return;
         }
-        void processFeishuGlobalAgentMessage(getRequestBaseUrl(req), text, payload);
+        const operationKey = messageId || String(payload?.header?.event_id || "").trim();
+        const operation = operationKey ? acquireIdempotency({ scope: "feishu-event", key: operationKey, leaseMs: 11 * 60 * 1000, metadata: { message_id: messageId, event_id: payload?.header?.event_id || "" } }) : null;
+        if (operation && !operation.acquired) return;
+        void processFeishuGlobalAgentMessage(getRequestBaseUrl(req), text, payload, { traceId: operation?.traceId })
+          .then(reply => { if (operationKey) completeIdempotency("feishu-event", operationKey, { reply }); })
+          .catch(error => { if (operationKey) failIdempotency("feishu-event", operationKey, error); });
       } catch (error: any) {
         if (!res.headersSent) sendJson(res, { code: 1, error: error?.message || "飞书事件处理失败" }, 401);
       }
@@ -1210,14 +1407,38 @@ export function handleGlobalAgentApi(
   if (pathname === "/api/global-agent/chat" && req.method === "POST") {
     const contentType = req.headers["content-type"] || "";
 
-    const handleChat = async (message: string, history: any[], files: any[]) => {
+    const handleChat = async (message: string, history: any[], files: any[], isStream: boolean) => {
       try {
         let finalMessage = message || "";
         if (files && files.length > 0) {
           const filesContext = buildUploadedFilesContext(files, "本次消息附件");
           finalMessage = finalMessage ? `${finalMessage}\n\n${filesContext}` : `请处理以下附件：\n\n${filesContext}`;
         }
-        if (!finalMessage) return sendJson(res, { error: "消息不能为空" }, 400);
+        if (!finalMessage) {
+          if (isStream) {
+            res.writeHead(400, {
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache, no-transform",
+              "Connection": "keep-alive",
+              "X-Accel-Buffering": "no"
+            });
+            if (typeof res.flushHeaders === "function") res.flushHeaders();
+            res.write(`data: ${JSON.stringify({ type: "error", text: "消息不能为空" })}\n\n`);
+            res.end();
+            return;
+          }
+          return sendJson(res, { error: "消息不能为空" }, 400);
+        }
+
+        if (isStream) {
+          res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+          });
+          if (typeof res.flushHeaders === "function") res.flushHeaders();
+        }
 
         // 检索本地知识库相关参考资料
         const ragContext = queryKnowledgeBase(message || "");
@@ -1236,32 +1457,46 @@ export function handleGlobalAgentApi(
           mcpTools: loadMcpTools(),
           skills: loadSkills(),
         };
+        // 本地规则只作为大模型不可用时的降级能力；模型正常返回时，不得用关键词结果覆盖模型判断。
         const localIntent = inferLocalGlobalAction(finalMessage, projectItems, groupItems, systemResources);
-        if (localIntent) localIntent.action = annotateGlobalAction(localIntent.action);
-        if (localIntent?.action?.management) {
-          return sendJson(res, {
-            success: true,
-            reply: localIntent.reply,
-            action: localIntent.action,
-            files: files ? files.map(f => ({ name: f.filename, size: f.size, savedPath: f.savedPath })) : []
-          });
+        let localFallbackIntent: LocalIntentResult | null = null;
+        if (localIntent) {
+          try {
+            localFallbackIntent = { ...localIntent, action: annotateGlobalAction(localIntent.action) };
+          } catch {
+            localFallbackIntent = null;
+          }
         }
 
         const config = loadOrchestratorConfig();
         if (!config.apiKey || !config.apiUrl || !config.model) {
-          if (localIntent) {
-            return sendJson(res, {
+          if (localFallbackIntent) {
+            const replyText = `${localFallbackIntent.reply}\n\n提示：当前还没有配置统一大模型，所以我先用本地规则执行这个明确指令。复杂编排建议到「系统设置」启用统一大模型配置。`;
+            const payload = {
               success: true,
-              reply: `${localIntent.reply}
-
-提示：当前还没有配置统一大模型，所以我先用本地规则执行这个明确指令。复杂编排建议到「系统设置」启用统一大模型配置。`,
-              action: localIntent.action,
+              reply: replyText,
+              action: localFallbackIntent.action,
               files: files ? files.map(f => ({ name: f.filename, size: f.size, savedPath: f.savedPath })) : []
-            });
+            };
+            if (isStream) {
+              res.write(`data: ${JSON.stringify({ type: "text", text: replyText })}\n\n`);
+              res.write(`data: ${JSON.stringify({ type: "action", action: localFallbackIntent.action, files: payload.files })}\n\n`);
+              res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+              res.end();
+              return;
+            }
+            return sendJson(res, payload);
+          }
+          const replyText = "您好！我是全局控制助手。为了让我能够控制整个系统，请先前往 [系统设置] 填写并启用 **统一大模型配置**（填写 API Key、Base URL 及模型名称）。简单指令如“打开宠物”“播放 晚安”“打开定时任务页面”我也可以先用本地规则处理。";
+          if (isStream) {
+            res.write(`data: ${JSON.stringify({ type: "text", text: replyText })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+            res.end();
+            return;
           }
           return sendJson(res, {
             success: true,
-            reply: "您好！我是全局控制助手。为了让我能够控制整个系统，请先前往 [系统设置] 填写并启用 **统一大模型配置**（填写 API Key、Base URL 及模型名称）。简单指令如“打开宠物”“播放 晚安”“打开定时任务页面”我也可以先用本地规则处理。"
+            reply: replyText
           });
         }
 
@@ -1276,12 +1511,20 @@ export function handleGlobalAgentApi(
 - Skills: [${systemResources.skills.map((item: any) => item.name).join(", ") || "暂无"}]`;
 
         if (ragContext) {
-          systemPrompt += `\n\n【本地知识库参考上下文】\n${ragContext}\n\n重要规则：用户的问题可能与上述知识库内容相关。若存在相关信息，请务必优先基于上述知识库内容并结合这些资料来回答用户。`;
+          systemPrompt += `\n\n【本地知识库参考上下文】\n${ragContext}\n\n重要规则：这部分内容只是回答问题时可参考的资料，不代表用户要求执行项目操作。用户询问知识库、文档、实现原理或优化建议时，应先自然回答；不得因为参考上下文里出现“开发、修改、实现、任务”等词就创建 action。`;
         }
 
         systemPrompt += `\n\n你的任务是：
 1. 理解用户的指令，用自然、友好且专业的中文进行回答。
 2. 如果用户的指令涉及系统动作，你需要在回答的最后，输出一个特定的 \`\`\`action 代码块（JSON 格式）。
+
+【对话与执行的决策边界】
+- 先根据用户完整语义判断其是在聊天/咨询/了解，还是明确要求你执行动作。主题词不是执行授权。
+- 闲聊、知识问答、原理解释、方案讨论、可行性咨询、征求建议，以及“怎么实现 / 有什么可优化 / 能否介绍”等问题，只自然回答，不输出 action，也不创建或派发任务。
+- 只有用户明确要求“请修改、帮我实现、开始修复、运行测试、创建任务、下发指令”等实际动作时，才输出 action。
+- 如果一句话同时可理解为咨询或执行且用户没有明确授权，优先当作咨询回答，并用一句自然问题确认是否需要实际操作。
+- 是否执行由你基于语义作最终决定；不要用关键词命中替代意图判断。
+- 当用户明确要求操作整个项目、全部项目或跨项目系统时，使用 orchestrate_development，覆盖所有受影响的真实项目/群聊，不能只偷偷选择默认第一个目标；同时避免群聊与其成员项目重复执行同一份工作。
 
 支持的系统动作有：
 
@@ -1519,23 +1762,46 @@ m. CCM 系统管理动作：
           messages.push({ role: h.role === "user" ? "user" : "assistant", content: contentClean });
         }
         // 包装 user message 强化动作识别率
-        const userPrompt = `【用户指令】\n${finalMessage}\n\n请针对上述用户指令进行意图识别。如果是业务需求、需求文档或开发修改要求，必须优先生成 orchestrate_development 动作并选择真实群聊/项目目标；如果包含其他明确的控制意图（包括 CCM 系统管理、播放音乐、控制宠物、页面跳转、创建任务、项目指令、群聊下单、定时任务、创建项目或创建模版），请务必在你的回复末尾附带 \`\`\`action 代码块（JSON格式），不能只返回欢迎词，必须立刻生成动作指令！`;
+        const userPrompt = `【用户消息】\n${finalMessage}\n\n请先按完整语义判断：这是普通对话/咨询，还是用户明确授权执行系统或项目操作。普通对话只自然回答，绝不输出 action；明确执行指令才生成 action。若明确要求业务开发、代码修改或跨项目落地，优先使用 orchestrate_development 并选择真实且完整的执行目标。`;
         messages.push({ role: "user", content: userPrompt });
 
         // 5. 调用大模型。明确控制意图在模型异常时回落到本地规则，避免基础控制能力被远端 API 状态拖垮。
         let parsedReply = "";
         try {
-          parsedReply = await callLlm(config, messages);
-        } catch (llmErr: any) {
-          if (localIntent) {
-            return sendJson(res, {
-              success: true,
-              reply: `${localIntent.reply}
-
-提示：统一大模型暂时调用失败（${llmErr.message || "未知错误"}），我已先按本地规则执行这个明确指令。`,
-              action: localIntent.action,
-              files: files ? files.map(f => ({ name: f.filename, size: f.size, savedPath: f.savedPath })) : []
+          if (isStream) {
+            const visibleReplyStream = createActionBlockSafeStreamer((text) => {
+              if (text) res.write(`data: ${JSON.stringify({ type: "text", text })}\n\n`);
             });
+            parsedReply = await callLlmStream(config, messages, (chunk) => {
+              visibleReplyStream.push(chunk);
+            });
+            visibleReplyStream.finish();
+          } else {
+            parsedReply = await callLlm(config, messages);
+          }
+        } catch (llmErr: any) {
+          if (localFallbackIntent) {
+            const replyText = `${localFallbackIntent.reply}\n\n提示：统一大模型暂时调用失败（${llmErr.message || "未知错误"}），我已先按本地规则执行这个明确指令。`;
+            const payload = {
+              success: true,
+              reply: replyText,
+              action: localFallbackIntent.action,
+              files: files ? files.map(f => ({ name: f.filename, size: f.size, savedPath: f.savedPath })) : []
+            };
+            if (isStream) {
+              res.write(`data: ${JSON.stringify({ type: "text", text: replyText })}\n\n`);
+              res.write(`data: ${JSON.stringify({ type: "action", action: localFallbackIntent.action, files: payload.files })}\n\n`);
+              res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+              res.end();
+              return;
+            }
+            return sendJson(res, payload);
+          }
+          if (isStream) {
+            res.write(`data: ${JSON.stringify({ type: "error", text: llmErr.message || "请求处理失败" })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+            res.end();
+            return;
           }
           throw llmErr;
         }
@@ -1553,38 +1819,55 @@ m. CCM 系统管理动作：
           }
         }
 
-        if (!action && localIntent) {
-          action = localIntent.action;
-          reply = reply ? `${reply}
-
-${localIntent.reply}` : localIntent.reply;
-        }
-
         try {
           action = annotateGlobalAction(action);
         } catch (actionErr: any) {
-          if (localIntent) {
-            action = localIntent.action;
-            reply = reply ? `${reply}
-
-${localIntent.reply}` : localIntent.reply;
-          } else {
-            return sendJson(res, {
-              success: true,
-              reply: "我识别到了系统管理请求，但动作结构不合法：" + (actionErr.message || "未知错误") + "。请补充或改写操作目标后再执行。",
-              action: null,
-              files: files ? files.map(f => ({ name: f.filename, size: f.size, savedPath: f.savedPath })) : []
-            });
+          const errorReply = "我识别到了系统管理请求，但动作结构不合法：" + (actionErr.message || "未知错误") + "。请补充或改写操作目标后再执行。";
+          if (isStream) {
+            res.write(`data: ${JSON.stringify({ type: "text", text: `\n\n${errorReply}` })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+            res.end();
+            return;
           }
+          return sendJson(res, {
+            success: true,
+            reply: errorReply,
+            action: null,
+            files: files ? files.map(f => ({ name: f.filename, size: f.size, savedPath: f.savedPath })) : []
+          });
         }
-        sendJson(res, {
+
+        const finalFiles = files ? files.map(f => ({ name: f.filename, size: f.size, savedPath: f.savedPath })) : [];
+        
+        recordMetric("Global Agent", {
           success: true,
-          reply,
-          action,
-          files: files ? files.map(f => ({ name: f.filename, size: f.size, savedPath: f.savedPath })) : []
+          durationMs: 0,
+          fileChangeCount: 0,
+          ...calculateTokensAndCost(finalMessage, parsedReply)
         });
+
+        if (isStream) {
+          if (action) {
+            res.write(`data: ${JSON.stringify({ type: "action", action, files: finalFiles })}\n\n`);
+          }
+          res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+          res.end();
+        } else {
+          sendJson(res, {
+            success: true,
+            reply,
+            action,
+            files: finalFiles
+          });
+        }
       } catch (err: any) {
-        sendJson(res, { error: err.message || "请求处理失败" }, 500);
+        if (isStream) {
+          res.write(`data: ${JSON.stringify({ type: "error", text: err.message || "请求处理失败" })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+          res.end();
+        } else {
+          sendJson(res, { error: err.message || "请求处理失败" }, 500);
+        }
       }
     };
 
@@ -1598,7 +1881,8 @@ ${localIntent.reply}` : localIntent.reply;
           try {
             history = JSON.parse(fields.history || "[]");
           } catch (e) {}
-          handleChat(fields.message, history, files);
+          const isStream = req.url.includes("stream=true") || fields.stream === "true" || (req.headers["accept"] || "").includes("text/event-stream");
+          handleChat(fields.message, history, files, isStream);
         } catch (e: any) {
           sendJson(res, { error: e.message }, 400);
         }
@@ -1610,8 +1894,9 @@ ${localIntent.reply}` : localIntent.reply;
     req.on("data", (chunk) => body += chunk);
     req.on("end", async () => {
       try {
-        const { message, history } = JSON.parse(body || "{}");
-        await handleChat(message, history, []);
+        const bodyObj = JSON.parse(body || "{}");
+        const isStream = req.url.includes("stream=true") || bodyObj.stream === true || (req.headers["accept"] || "").includes("text/event-stream");
+        await handleChat(bodyObj.message, bodyObj.history, [], isStream);
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
@@ -1762,3 +2047,112 @@ async function callLlm(config: any, messages: any[]): Promise<string> {
     clearTimeout(timeout);
   }
 }
+
+async function callLlmStream(config: any, messages: any[], onChunk: (text: string) => void): Promise<string> {
+  const isAnthropic = config.format === "anthropic-compatible" || (config.model && config.model.toLowerCase().includes("claude"));
+  const endpoint = isAnthropic
+    ? (config.apiUrl.endsWith("/v1/messages") ? config.apiUrl : `${config.apiUrl.replace(/\/+$/, "")}/v1/messages`)
+    : (config.apiUrl.endsWith("/chat/completions") ? config.apiUrl : `${config.apiUrl.replace(/\/+$/, "")}/chat/completions`);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(5000, Number(config.timeoutMs) || 60000));
+
+  try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    let bodyObj: any = {};
+
+    if (isAnthropic) {
+      headers["x-api-key"] = config.apiKey;
+      headers["anthropic-version"] = "2023-06-01";
+      const system = messages.find(m => m.role === "system")?.content || "";
+      const userMsgs = messages
+        .filter(m => m.role !== "system")
+        .map(m => ({ role: m.role === "assistant" ? "assistant" : "user", content: m.content }));
+      bodyObj = {
+        model: config.model,
+        max_tokens: 2000,
+        temperature: 0.3,
+        system,
+        messages: userMsgs,
+        stream: true
+      };
+    } else {
+      headers["Authorization"] = `Bearer ${config.apiKey}`;
+      bodyObj = {
+        model: config.model,
+        temperature: 0.3,
+        messages: messages,
+        stream: true
+      };
+    }
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(bodyObj),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`统一大模型 API 流式调用失败: HTTP ${response.status} - ${text.slice(0, 200)}`);
+    }
+
+    const reader = (response.body as any)?.getReader();
+    if (!reader) {
+      throw new Error("无法获取 response.body reader");
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let fullText = "";
+
+    const read = async (): Promise<string> => {
+      const { done, value } = await reader.read();
+      if (done) {
+        return fullText;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (isAnthropic) {
+          if (trimmed.startsWith("data: ")) {
+            const dataStr = trimmed.slice(6).trim();
+            try {
+              const parsed = JSON.parse(dataStr);
+              if (parsed.type === "content_block_delta" && parsed.delta?.text) {
+                const text = parsed.delta.text;
+                fullText += text;
+                onChunk(text);
+              }
+            } catch {}
+          }
+        } else {
+          if (trimmed.startsWith("data: ")) {
+            const dataStr = trimmed.slice(6).trim();
+            if (dataStr === "[DONE]") continue;
+            try {
+              const parsed = JSON.parse(dataStr);
+              if (parsed.choices?.[0]?.delta?.content) {
+                const text = parsed.choices[0].delta.content;
+                fullText += text;
+                onChunk(text);
+              }
+            } catch {}
+          }
+        }
+      }
+      return read();
+    };
+
+    return await read();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+

@@ -1,0 +1,34 @@
+export declare function scanProjectFileStructure(workDir: string, maxDepth?: number, maxEntries?: number): string;
+export declare function loadProjectMemory(project: string, options?: {
+    workDir?: string;
+    resources?: any;
+    refreshStructure?: boolean;
+}): any;
+export declare function updateProjectMemoryFromReceipt(input: {
+    project: string;
+    workDir?: string;
+    groupId?: string;
+    taskId?: string;
+    receipt: any;
+    actualFiles?: any[];
+    resources?: any;
+}): any;
+export declare function buildProjectMemoryPacket(project: string, options?: {
+    workDir?: string;
+    resources?: any;
+    query?: string;
+}): string;
+export declare function runProjectMemorySelfTest(): {
+    pass: boolean;
+    checks: {
+        compactsAfterThreshold: boolean;
+        retainsOlderDigest: any;
+        retainsNewestConclusion: boolean;
+        archivesAreLosslessAcrossRollovers: any;
+        archivesHaveIntegrityChecksums: any;
+        decisionsRollIntoLosslessArchives: any;
+        integrityValidationDetectsTampering: boolean;
+        retrievesRelevantArchivedEvidence: boolean;
+        atomicBackupRecoveryWorks: boolean;
+    };
+};

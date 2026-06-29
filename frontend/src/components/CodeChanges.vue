@@ -587,10 +587,6 @@ onMounted(loadProjects)
         <button class="btn btn-outline btn-sm" @click="openHistory">📜 历史</button>
       </div>
       <div style="display:flex;align-items:center;gap:8px">
-        <div class="diff-mode-toggle" v-if="selectedFile">
-          <button class="btn btn-outline btn-sm" :class="{ active: diffMode === 'unified' }" @click="diffMode = 'unified'">单栏对比</button>
-          <button class="btn btn-outline btn-sm" :class="{ active: diffMode === 'split' }" @click="diffMode = 'split'">分栏对比</button>
-        </div>
         <button class="btn btn-outline btn-sm" :disabled="!selectedFile" @click="rollbackFile">↩ 回滚</button>
       </div>
     </div>

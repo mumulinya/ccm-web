@@ -19,6 +19,19 @@ const LOG_DIR = path.join(CCM_DIR, "logs");
 const TEMP_DIR = path.join(CCM_DIR, "temp");
 const PROJECTS_FILE = path.join(CCM_DIR, "projects.txt");
 
+function resolveCcConnectLauncher() {
+  if (process.platform === "win32") {
+    for (const entry of String(process.env.PATH || "").split(path.delimiter)) {
+      const base = entry.replace(/^"|"$/g, "").trim();
+      if (!base) continue;
+      const executable = path.join(base, "node_modules", "cc-connect", "bin", "cc-connect.exe");
+      if (fs.existsSync(executable)) return { command: executable, shell: false };
+    }
+    return { command: "cc-connect", shell: true };
+  }
+  return { command: "cc-connect", shell: false };
+}
+
 // 支持的 Agent 列表
 const AGENTS = [
   { type: "claudecode", name: "Claude Code", modes: ["default", "acceptEdits", "plan", "auto", "bypassPermissions"], defaultMode: "default" },
@@ -184,10 +197,12 @@ function startProject(config, agentType) {
   const logFile = path.join(LOG_DIR, `${config.name}.log`);
   const logStream = fs.openSync(logFile, "w");
 
-  const child = spawn("cc-connect", ["--config", configPath, "--force"], {
+  const launcher = resolveCcConnectLauncher();
+  const child = spawn(launcher.command, ["--config", configPath, "--force"], {
     stdio: ["ignore", logStream, logStream],
-    shell: true,
+    shell: launcher.shell,
     detached: true,
+    windowsHide: true,
   });
 
   child.unref();
@@ -214,7 +229,7 @@ function stopProject(name) {
   const pid = fs.readFileSync(pidFile, "utf-8").trim();
   try {
     if (process.platform === "win32") {
-      execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" });
+      execSync(`taskkill /T /F /PID ${pid}`, { stdio: "ignore" });
     } else {
       process.kill(parseInt(pid), "SIGTERM");
     }

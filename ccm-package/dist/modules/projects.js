@@ -45,6 +45,24 @@ const child_process_1 = require("child_process");
 const utils_1 = require("../utils");
 const db_1 = require("../db");
 const sessions_1 = require("./sessions");
+function resolveCcConnectLauncher() {
+    if (process.platform === "win32") {
+        for (const entry of String(process.env.PATH || "").split(path.delimiter)) {
+            const base = entry.replace(/^"|"$/g, "").trim();
+            if (!base)
+                continue;
+            const executable = path.join(base, "node_modules", "cc-connect", "bin", "cc-connect.exe");
+            if (fs.existsSync(executable))
+                return { command: executable, shell: false };
+        }
+        return { command: "cc-connect", shell: true };
+    }
+    return { command: "cc-connect", shell: false };
+}
+function spawnCcConnect(args, options) {
+    const launcher = resolveCcConnectLauncher();
+    return (0, child_process_1.spawn)(launcher.command, args, { ...options, shell: launcher.shell, windowsHide: true });
+}
 function getLogs(projectName, lines = 100) {
     const logFile = path.join(utils_1.LOG_DIR, `${projectName}.log`);
     if (!fs.existsSync(logFile))
@@ -147,11 +165,9 @@ function startControlBotConnection(port = 3080) {
     const configPath = writeControlBotConfig(port);
     fs.mkdirSync(utils_1.LOG_DIR, { recursive: true });
     const logStream = fs.openSync(CONTROL_BOT_LOG_FILE, "a");
-    const child = (0, child_process_1.spawn)("cc-connect", ["--config", configPath, "--force"], {
+    const child = spawnCcConnect(["--config", configPath, "--force"], {
         stdio: ["ignore", logStream, logStream],
-        shell: true,
         detached: true,
-        windowsHide: true,
     });
     child.unref();
     fs.writeFileSync(CONTROL_BOT_PID_FILE, String(child.pid));
@@ -180,9 +196,8 @@ function startProject(projectName, agentType, port) {
     }
     const logFile = path.join(utils_1.LOG_DIR, `${projectName}.log`);
     const logStream = fs.openSync(logFile, "w");
-    const child = (0, child_process_1.spawn)("cc-connect", ["--config", configPath, "--force"], {
+    const child = spawnCcConnect(["--config", configPath, "--force"], {
         stdio: ["ignore", logStream, logStream],
-        shell: true,
         detached: true,
     });
     child.unref();
@@ -198,7 +213,7 @@ function stopProject(projectName) {
         return { success: false, error: "项目未在运行" };
     try {
         if (process.platform === "win32") {
-            (0, child_process_1.execSync)(`taskkill /F /PID ${pid}`, { stdio: "ignore" });
+            (0, child_process_1.execSync)(`taskkill /T /F /PID ${pid}`, { stdio: "ignore" });
         }
         else {
             process.kill(parseInt(pid), "SIGTERM");
@@ -392,13 +407,29 @@ function handleProjectsApi(pathname, req, res, parsed, ctx) {
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
-                const { name, work_dir, agent, platform, platform_options } = JSON.parse(body);
+                const { name, work_dir, agent, platform } = JSON.parse(body);
                 if (!name || !work_dir) {
                     return (0, utils_1.sendJson)(res, { success: false, error: "项目名称和目录不能为空" }, 400);
                 }
                 const configPath = path.join(utils_1.CONFIGS_DIR, `config-${name}.toml`);
+                let existingAppId = "";
+                let existingAppSecret = "";
                 if (fs.existsSync(configPath)) {
-                    return (0, utils_1.sendJson)(res, { success: false, error: "项目已存在" }, 400);
+                    const content = fs.readFileSync(configPath, "utf-8");
+                    const appIdMatch = content.match(/app_id\s*=\s*"([^"]+)"/);
+                    const appSecretMatch = content.match(/app_secret\s*=\s*"([^"]+)"/);
+                    if (appIdMatch?.[1]) {
+                        existingAppId = appIdMatch[1];
+                        existingAppSecret = appSecretMatch?.[1] || "";
+                    }
+                    else {
+                        return (0, utils_1.sendJson)(res, { success: false, error: "项目已存在" }, 400);
+                    }
+                }
+                let platformOptionsToml = "";
+                const finalPlatform = platform || "feishu";
+                if (finalPlatform === "feishu" || finalPlatform === "lark") {
+                    platformOptionsToml = `\n[projects.platforms.options]\napp_id = "${escapeTomlString(existingAppId)}"\napp_secret = "${escapeTomlString(existingAppSecret)}"\nenable_feishu_card = true\nthread_isolation = true\nprogress_style = "card"`;
                 }
                 const template = `# cc-connect - ${name}
 language = "zh"
@@ -411,7 +442,7 @@ work_dir = "${work_dir.replace(/\\\\/g, "\\").replace(/\\/g, "\\\\")}"
 type = "${agent || "claudecode"}"
 
 [[projects.platforms]]
-type = "${platform || "weixin"}"
+type = "${finalPlatform}"${platformOptionsToml}
 `;
                 fs.writeFileSync(configPath, template);
                 (0, utils_1.sendJson)(res, { success: true, message: "项目配置已创建" });
@@ -428,7 +459,7 @@ type = "${platform || "weixin"}"
         req.on("data", (chunk) => body += chunk);
         req.on("end", () => {
             try {
-                const { name, work_dir, agent } = JSON.parse(body);
+                const { name, work_dir, agent, platform } = JSON.parse(body);
                 if (!name) {
                     return (0, utils_1.sendJson)(res, { success: false, error: "项目名称不能为空" }, 400);
                 }
@@ -436,15 +467,30 @@ type = "${platform || "weixin"}"
                 if (!fs.existsSync(configPath)) {
                     return (0, utils_1.sendJson)(res, { success: false, error: "项目不存在" }, 404);
                 }
-                const existingContent = fs.readFileSync(configPath, "utf-8");
-                let updatedContent = existingContent;
-                if (work_dir) {
-                    updatedContent = updatedContent.replace(/work_dir\s*=\s*"[^"]*"/g, `work_dir = "${work_dir.replace(/\\\\/g, "\\").replace(/\\/g, "\\\\")}"`);
+                const content = fs.readFileSync(configPath, "utf-8");
+                const appIdMatch = content.match(/app_id\s*=\s*"([^"]+)"/);
+                const appSecretMatch = content.match(/app_secret\s*=\s*"([^"]+)"/);
+                const existingAppId = appIdMatch?.[1] || "";
+                const existingAppSecret = appSecretMatch?.[1] || "";
+                let platformOptionsToml = "";
+                const finalPlatform = platform || "feishu";
+                if (finalPlatform === "feishu" || finalPlatform === "lark") {
+                    platformOptionsToml = `\n[projects.platforms.options]\napp_id = "${escapeTomlString(existingAppId)}"\napp_secret = "${escapeTomlString(existingAppSecret)}"\nenable_feishu_card = true\nthread_isolation = true\nprogress_style = "card"`;
                 }
-                if (agent) {
-                    updatedContent = updatedContent.replace(/type\s*=\s*"[^"]*"/g, `type = "${agent}"`);
-                }
-                fs.writeFileSync(configPath, updatedContent);
+                const template = `# cc-connect - ${name}
+language = "zh"
+
+[[projects]]
+name = "${name}"
+work_dir = "${work_dir.replace(/\\\\/g, "\\").replace(/\\/g, "\\\\")}"
+
+[projects.agent]
+type = "${agent || "claudecode"}"
+
+[[projects.platforms]]
+type = "${finalPlatform}"${platformOptionsToml}
+`;
+                fs.writeFileSync(configPath, template);
                 (0, utils_1.sendJson)(res, { success: true, message: "项目配置已更新" });
             }
             catch (e) {
@@ -520,9 +566,8 @@ type = "${platform || "weixin"}"
                 if (!fs.existsSync(utils_1.UPLOAD_DIR)) {
                     fs.mkdirSync(utils_1.UPLOAD_DIR, { recursive: true });
                 }
-                const child = (0, child_process_1.spawn)("cc-connect", ["feishu", "new", "--project", setupName, "--qr-image", qrImagePath, "--timeout", "300"], {
-                    shell: true,
-                    stdio: ["pipe", "pipe", "pipe"]
+                const child = spawnCcConnect(["feishu", "new", "--project", setupName, "--qr-image", qrImagePath, "--timeout", "300"], {
+                    stdio: ["pipe", "pipe", "pipe"],
                 });
                 let cmdOutput = "";
                 child.stdout.on("data", (data) => { cmdOutput += data.toString(); });
@@ -595,9 +640,8 @@ type = "${platform || "weixin"}"
                     fs.mkdirSync(utils_1.UPLOAD_DIR, { recursive: true });
                 }
                 console.log("[飞书配置] 二维码图片路径:", qrImagePath);
-                const child = (0, child_process_1.spawn)("cc-connect", ["feishu", "new", "--project", projectName, "--qr-image", qrImagePath, "--timeout", "300"], {
-                    shell: true,
-                    stdio: ["pipe", "pipe", "pipe"]
+                const child = spawnCcConnect(["feishu", "new", "--project", projectName, "--qr-image", qrImagePath, "--timeout", "300"], {
+                    stdio: ["pipe", "pipe", "pipe"],
                 });
                 let cmdOutput = "";
                 child.stdout.on("data", (data) => { cmdOutput += data.toString(); });

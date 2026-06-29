@@ -35,3 +35,11 @@ export declare function loadDevWeeklyReports(): any[];
 export declare function saveDevWeeklyReports(reports: any[]): void;
 export declare function loadAutoDevNotifyConfig(): any;
 export declare function saveAutoDevNotifyConfig(config: any): void;
+export declare function loadRagWatchPaths(): string[];
+export declare function saveRagWatchPaths(paths: string[]): void;
+export declare function loadRagMetadata(): Record<string, {
+    tags: string[];
+}>;
+export declare function saveRagMetadata(metadata: Record<string, {
+    tags: string[];
+}>): void;

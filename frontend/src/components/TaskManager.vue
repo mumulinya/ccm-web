@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { ref, onMounted } from 'vue'
 import { tasksApi, groupsApi, projectsApi } from '../api/index.js'
 import AgentPipeline from './AgentPipeline.vue'
@@ -13,6 +13,8 @@ const executionDashboard = ref(null)
 const executionDashboardLoading = ref(false)
 const dashboardFilter = ref('all')
 const expandedDashboardTaskId = ref('')
+const taskExecutions = ref({})
+const executionActionBusy = ref('')
 
 // 弹窗状态
 const showCreate = ref(false)
@@ -25,6 +27,8 @@ const showBacklog = ref(false)
 const currentTaskLogs = ref([])
 const currentTaskId = ref(null)
 const currentTaskReport = ref(null)
+const currentTaskTrace = ref(null)
+const taskTraceLoading = ref(false)
 const currentContinueTask = ref(null)
 const continueMessage = ref('')
 const dailyDevBacklogs = ref([])
@@ -155,6 +159,20 @@ const executionFixActions = (task) => {
   const actions = task?.execution_readiness?.fix_actions
   return Array.isArray(actions) ? actions.filter(Boolean).slice(0, 4) : []
 }
+
+const executionStateLabel = (state) => ({
+  queued: '排队', spawning: '启动中', ready: '已就绪', prompt_accepted: '已接单', running: '执行中',
+  waiting_input: '等待输入', reviewing: '验收中', succeeded: '已成功', failed: '失败',
+  cancel_requested: '正在停止', cancelled: '已取消'
+}[state] || state || '未启动')
+
+const greenLevelLabel = (level) => ({
+  none: '未验收', targeted: '局部绿', project: '项目绿', workspace: '工作区绿', merge_ready: '可合并'
+}[level] || level || '未验收')
+
+const taskKernelState = (task) => task?.execution_kernel?.state || (task?.status === 'in_progress' ? 'running' : '')
+const taskKernelGreen = (task) => task?.execution_kernel?.green?.level || 'none'
+const canCancelTask = (task) => ['pending', 'in_progress'].includes(task?.status) && taskKernelState(task) !== 'cancel_requested'
 
 const canManualCompleteDailyDev = (task) => {
   if (task?.workflow_type !== 'daily_dev') return true
@@ -892,9 +910,95 @@ const viewPipeline = (task) => {
   showPipeline.value = true
 }
 
-const viewReport = (task) => {
+const loadTaskExecutions = async (taskId) => {
+  if (!taskId) return []
+  try {
+    const data = await tasksApi.executions(taskId)
+    taskExecutions.value = { ...taskExecutions.value, [taskId]: data.executions || [] }
+    return data.executions || []
+  } catch (e) {
+    toast.error(e.message || '读取执行内核记录失败')
+    return []
+  }
+}
+
+const currentExecutions = () => taskExecutions.value[currentTaskReport.value?.id] || []
+
+const loadTaskTrace = async (task) => {
+  currentTaskTrace.value = null
+  if (!task?.trace_id) return
+  taskTraceLoading.value = true
+  try {
+    const response = await fetch(`/api/reliability/traces?id=${encodeURIComponent(task.trace_id)}`)
+    const data = await response.json()
+    if (!response.ok || data.success === false) throw new Error(data.error || '读取 Trace 失败')
+    currentTaskTrace.value = data.trace || null
+  } catch (e) {
+    toast.error(e.message || '读取 Trace 失败')
+  } finally {
+    taskTraceLoading.value = false
+  }
+}
+
+const viewReport = async (task) => {
   currentTaskReport.value = task
   showReport.value = true
+  await Promise.all([loadTaskExecutions(task.id), loadTaskTrace(task)])
+}
+
+const cancelTask = async (task) => {
+  const confirmed = await confirmDialog(`确定停止任务“${task.title}”？系统会终止正在运行的 Agent 子进程，并保留检查点供回滚。`)
+  if (!confirmed) return
+  try {
+    await tasksApi.cancel({ task_id: task.id, reason: '用户从任务管理页主动停止' })
+    toast.warning('停止请求已发送，正在终止 Agent 进程')
+    await refreshTaskWork()
+  } catch (e) {
+    toast.error(e.message || '停止任务失败')
+  }
+}
+
+const rollbackExecution = async (execution) => {
+  const checkpointId = execution?.checkpointIds?.[execution.checkpointIds.length - 1]
+  if (!checkpointId) return toast.warning('这个执行没有可用检查点')
+  const reason = window.prompt('请输入回滚原因（会写入审计记录）', '放弃本轮未验收变更')
+  if (!reason?.trim()) return
+  const shared = execution.workspace?.mode !== 'worktree'
+  const confirmed = await confirmDialog(shared
+    ? '这是共享工作目录。回滚可能覆盖同目录中的其他未完成修改，仍要继续吗？'
+    : `确定把 ${execution.project} 回滚到任务开始前的检查点吗？`)
+  if (!confirmed) return
+  executionActionBusy.value = `rollback:${execution.id}`
+  try {
+    await tasksApi.rollbackExecution({ checkpoint_id: checkpointId, reason: reason.trim(), allow_shared: shared })
+    toast.success('已回滚到任务检查点')
+    await loadTaskExecutions(currentTaskReport.value?.id)
+  } catch (e) { toast.error(e.message || '回滚失败') }
+  executionActionBusy.value = ''
+}
+
+const mergeExecution = async (execution) => {
+  const confirmed = await confirmDialog(`确定把 ${execution.project} 的 worktree 分支安全合并回主工作目录吗？系统会先检查绿灯和分支新鲜度。`)
+  if (!confirmed) return
+  executionActionBusy.value = `merge:${execution.id}`
+  try {
+    await tasksApi.mergeExecution({ execution_id: execution.id, commit: true })
+    toast.success('worktree 已安全合并')
+    await loadTaskExecutions(currentTaskReport.value?.id)
+  } catch (e) { toast.error(e.message || '合并失败') }
+  executionActionBusy.value = ''
+}
+
+const cleanupExecution = async (execution) => {
+  const confirmed = await confirmDialog(`确定清理 ${execution.project} 已合并的 worktree 和临时分支吗？`)
+  if (!confirmed) return
+  executionActionBusy.value = `cleanup:${execution.id}`
+  try {
+    await tasksApi.cleanupExecution({ execution_id: execution.id })
+    toast.success('worktree 已清理')
+    await loadTaskExecutions(currentTaskReport.value?.id)
+  } catch (e) { toast.error(e.message || '清理失败') }
+  executionActionBusy.value = ''
 }
 
 const openContinueTask = (task) => {
@@ -1303,10 +1407,15 @@ onMounted(() => {
                 </ul>
               </div>
               <div v-if="task.status_detail" class="task-status-detail">{{ task.status_detail }}</div>
+              <div v-if="task.execution_kernel" class="kernel-summary-row">
+                <span :class="['kernel-chip', taskKernelState(task)]">{{ executionStateLabel(taskKernelState(task)) }}</span>
+                <span :class="['kernel-chip', 'green-' + taskKernelGreen(task)]">{{ greenLevelLabel(taskKernelGreen(task)) }}</span>
+              </div>
               <div v-if="task.final_report || task.result" class="task-result">{{ (task.final_report || task.result)?.substring(0, 180) }}</div>
               <div class="task-meta">
                 <span class="meta-item">{{ task.assign_type === 'group' ? '💬' : '🤖' }} {{ task.assign_type === 'group' ? (groups.find(g => g.id === task.group_id)?.name || task.group_id) : task.target_project }}</span>
                 <span class="meta-item">🕐 {{ new Date(task.created_at).toLocaleString('zh-CN') }}</span>
+                <span v-if="task.trace_id" class="meta-item trace-meta" :title="task.trace_id">Trace {{ task.trace_id.slice(-12) }}</span>
               </div>
             </div>
             <div class="task-right">
@@ -1315,10 +1424,12 @@ onMounted(() => {
                 <option value="in_progress">进行中</option>
                 <option value="done" :disabled="task.status !== 'done' && !canManualCompleteDailyDev(task)">已完成</option>
                 <option value="failed">失败</option>
+                <option value="cancelled">已取消</option>
               </select>
             </div>
           </div>
           <div class="task-actions">
+            <button v-if="canCancelTask(task)" class="btn btn-danger btn-sm" @click="cancelTask(task)">停止任务</button>
             <button v-if="task.status === 'pending' || task.status === 'failed'" class="btn btn-primary btn-sm" @click="addToQueue(task.id)">📥 加入队列</button>
             <button v-if="task.final_report || task.result || task.receipt || task.review" class="btn btn-outline btn-sm" @click="viewReport(task)">📄 报告</button>
                     <button v-if="task.delivery_summary" class="btn btn-outline btn-sm" style="color: #00bcd4; border-color: rgba(0, 188, 212, 0.3); background: rgba(0, 188, 212, 0.08);" @click="viewPipeline(task)">协作看板</button>
@@ -1525,9 +1636,26 @@ onMounted(() => {
         <button class="modal-close" @click="showReport = false">&times;</button>
         <h3>📄 任务执行报告</h3>
         <div class="modal-body" style="flex: 1; overflow-y: auto; padding-right: 4px; margin-top: 12px; display: flex; flex-direction: column; gap: 16px;">
-          <div class="report-meta">
+        <div class="report-meta">
           <div><strong>{{ currentTaskReport?.title }}</strong></div>
           <div>{{ currentTaskReport?.status_detail || '暂无状态说明' }}</div>
+          <div v-if="currentTaskReport?.trace_id" class="trace-identity">
+            <span>Trace ID</span>
+            <code>{{ currentTaskReport.trace_id }}</code>
+          </div>
+        </div>
+        <div v-if="taskTraceLoading" class="trace-panel muted">正在读取全链路记录…</div>
+        <div v-else-if="currentTaskTrace?.events?.length" class="trace-panel">
+          <div class="trace-panel-head">
+            <strong>全链路 Trace</strong>
+            <span>{{ currentTaskTrace.events.length }} 个事件</span>
+          </div>
+          <div class="kernel-timeline trace-events">
+            <div v-for="event in currentTaskTrace.events.slice(-16)" :key="event.id" class="kernel-event">
+              <div><strong>{{ event.type }}</strong><span>{{ new Date(event.at).toLocaleString('zh-CN') }}</span></div>
+              <p>{{ event.message || event.status }}</p>
+            </div>
+          </div>
         </div>
         <div v-if="currentTaskReport?.delivery_summary" class="delivery-summary">
           <div class="delivery-grid">
@@ -1687,6 +1815,44 @@ onMounted(() => {
             <div class="receipt-summary">{{ currentTaskReport.review.content || currentTaskReport.review.summary || '暂无复盘摘要' }}</div>
           </div>
         </div>
+        <div v-if="currentExecutions().length" class="kernel-execution-section">
+          <div class="evidence-head">
+            <strong>开发执行内核</strong>
+            <span>真实进程、检查点、验收绿灯与 worktree 生命周期</span>
+          </div>
+          <div class="kernel-execution-list">
+            <div v-for="execution in currentExecutions()" :key="execution.id" class="kernel-execution-card">
+              <div class="kernel-execution-head">
+                <div>
+                  <strong>{{ execution.project }}</strong>
+                  <span>{{ execution.id }}</span>
+                </div>
+                <div class="kernel-summary-row">
+                  <span :class="['kernel-chip', execution.state]">{{ executionStateLabel(execution.state) }}</span>
+                  <span :class="['kernel-chip', 'green-' + (execution.green?.level || 'none')]">{{ greenLevelLabel(execution.green?.level) }}</span>
+                </div>
+              </div>
+              <div class="kernel-facts">
+                <span>工作区：{{ execution.workspace?.mode === 'worktree' ? '独立 worktree' : '共享目录' }}</span>
+                <span v-if="execution.processIds?.length">进程：{{ execution.processIds.join('、') }}</span>
+                <span>检查点：{{ execution.checkpointIds?.length || 0 }}</span>
+              </div>
+              <code v-if="execution.workspace?.worktreePath" class="kernel-path">{{ execution.workspace.worktreePath }}</code>
+              <div v-if="execution.failure" class="kernel-failure">{{ execution.failure.failureClass || 'unknown' }}：{{ execution.failure.message }}</div>
+              <div v-if="execution.events?.length" class="kernel-timeline">
+                <div v-for="event in execution.events.slice(-8).reverse()" :key="event.id" class="kernel-event">
+                  <span>{{ new Date(event.at).toLocaleTimeString('zh-CN') }}</span>
+                  <strong>{{ event.message }}</strong>
+                </div>
+              </div>
+              <div class="kernel-actions">
+                <button v-if="execution.checkpointIds?.length && !['running', 'spawning', 'cancel_requested'].includes(execution.state)" class="btn btn-outline btn-sm" :disabled="!!executionActionBusy" @click="rollbackExecution(execution)">回滚检查点</button>
+                <button v-if="execution.workspace?.mode === 'worktree' && execution.workspace?.mergeOwner !== false && execution.green?.level === 'merge_ready' && !execution.workspace?.mergedAt" class="btn btn-primary btn-sm" :disabled="!!executionActionBusy" @click="mergeExecution(execution)">安全合并</button>
+                <button v-if="execution.workspace?.mergedAt && !execution.workspace?.cleanedAt" class="btn btn-outline btn-sm" :disabled="!!executionActionBusy" @click="cleanupExecution(execution)">清理 worktree</button>
+              </div>
+            </div>
+          </div>
+        </div>
         <div v-if="currentTaskReport?.delivery_summary?.user_report" class="report-section">
           <h4>用户交付报告</h4>
           <pre class="report-block">{{ currentTaskReport.delivery_summary.user_report }}</pre>
@@ -1705,6 +1871,7 @@ onMounted(() => {
           <pre class="report-block">{{ JSON.stringify(currentTaskReport.followups, null, 2) }}</pre>
         </div>
         <div class="form-actions">
+          <button v-if="canCancelTask(currentTaskReport)" class="btn btn-danger" @click="cancelTask(currentTaskReport)">停止任务</button>
           <button v-if="currentTaskReport?.status !== 'done'" class="btn btn-primary" @click="autoContinueFromReport">按缺口自动继续</button>
           <button v-if="currentTaskReport?.status !== 'done'" class="btn btn-outline" @click="continueFromReport">按阻塞项继续</button>
           <button class="btn btn-primary" @click="showReport = false">关闭</button>
@@ -1924,9 +2091,39 @@ onMounted(() => {
   overflow-wrap: anywhere;
 }
 .task-status-detail { font-size: 12px; color: var(--accent-blue); margin-bottom: 6px; }
+.kernel-summary-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.kernel-chip { padding: 3px 8px; border-radius: 999px; background: rgba(100, 116, 139, 0.12); color: var(--text-muted); font-size: 10.5px; font-weight: 800; }
+.kernel-chip.running, .kernel-chip.spawning, .kernel-chip.ready, .kernel-chip.prompt_accepted, .kernel-chip.reviewing { background: rgba(59, 130, 246, 0.11); color: var(--accent-blue); }
+.kernel-chip.succeeded, .kernel-chip.green-project, .kernel-chip.green-workspace, .kernel-chip.green-merge_ready { background: rgba(34, 197, 94, 0.12); color: var(--accent-green); }
+.kernel-chip.failed, .kernel-chip.cancelled, .kernel-chip.cancel_requested { background: rgba(239, 68, 68, 0.11); color: #b91c1c; }
+.kernel-execution-section { display: flex; flex-direction: column; gap: 10px; }
+.kernel-execution-list { display: flex; flex-direction: column; gap: 10px; }
+.kernel-execution-card { padding: 12px; border: 1px solid var(--border-color); border-radius: 10px; background: rgba(255, 255, 255, 0.48); }
+.kernel-execution-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.kernel-execution-head > div:first-child { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.kernel-execution-head > div:first-child span { color: var(--text-muted); font-size: 10.5px; overflow-wrap: anywhere; }
+.kernel-facts { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 8px; color: var(--text-secondary); font-size: 11px; }
+.kernel-path { display: block; margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: rgba(15, 23, 42, 0.06); color: var(--text-secondary); font-size: 10.5px; overflow-wrap: anywhere; }
+.kernel-failure { margin-top: 8px; padding: 7px 9px; border-radius: 7px; background: rgba(239, 68, 68, 0.09); color: #991b1b; font-size: 11px; }
+.kernel-timeline { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; padding-left: 9px; border-left: 2px solid rgba(59, 130, 246, 0.18); }
+.kernel-event { display: grid; grid-template-columns: 70px 1fr; gap: 8px; color: var(--text-secondary); font-size: 10.5px; }
+.kernel-event span { color: var(--text-muted); }
+.kernel-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .task-result { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; white-space: pre-wrap; word-break: break-word; }
 .task-meta { display: flex; gap: 12px; font-size: 11px; color: var(--text-muted); }
 .meta-item { display: flex; align-items: center; gap: 4px; }
+.trace-meta { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.trace-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.trace-identity span { color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.trace-identity code { padding: 4px 7px; border-radius: 6px; background: rgba(15, 23, 42, 0.06); color: var(--text-secondary); overflow-wrap: anywhere; }
+.trace-panel { padding: 12px; border: 1px solid var(--border-color); border-radius: 10px; background: rgba(255, 255, 255, 0.48); }
+.trace-panel.muted { color: var(--text-muted); font-size: 12px; }
+.trace-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.trace-panel-head span { color: var(--text-muted); font-size: 11px; }
+.trace-events .kernel-event { display: block; padding: 5px 0; }
+.trace-events .kernel-event > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.trace-events .kernel-event strong { font-size: 11px; color: var(--text-primary); }
+.trace-events .kernel-event p { margin: 3px 0 0; color: var(--text-secondary); font-size: 10.5px; }
 .task-right { flex-shrink: 0; }
 .task-actions { display: flex; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color); }
 .table { width: 100%; border-collapse: collapse; }
@@ -1987,6 +2184,9 @@ onMounted(() => {
 .backlog-status.needs_user, .backlog-status.blocked, .backlog-status.failed { background: rgba(234, 179, 8, 0.12); color: #854d0e; }
 .backlog-status.ready { background: rgba(34, 197, 94, 0.1); color: var(--accent-green); }
 .backlog-status.planned, .backlog-status.dispatched, .backlog-status.queued, .backlog-status.running, .backlog-status.in_progress, .backlog-status.reviewing { background: rgba(59, 130, 246, 0.1); color: var(--accent-blue); }
+.backlog-status.running, .backlog-status.in_progress {
+  animation: glow-pulse 1.8s infinite ease-in-out !important;
+}
 .backlog-status.done { background: rgba(15, 23, 42, 0.06); color: var(--text-muted); }
 .backlog-goal { color: var(--text-secondary); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .backlog-state-grid { display: grid; grid-template-columns: 1.4fr 0.8fr 0.9fr 1fr; gap: 8px; margin-top: 10px; }
@@ -2067,6 +2267,64 @@ onMounted(() => {
   .modal-overlay { padding: 0 !important; align-items: flex-end !important; }
   .modal { min-width: 0 !important; width: 100% !important; max-height: 90vh; border-radius: 16px 16px 0 0 !important; }
 }
-</style>
+/* 暗黑模式深度适配 */
+[data-theme="dark"] .execution-dashboard,
+[data-theme="dark"] .dashboard-metric,
+[data-theme="dark"] .dashboard-task,
+[data-theme="dark"] .dashboard-panel,
+[data-theme="dark"] .backlog-item,
+[data-theme="dark"] .watchdog-grid span,
+[data-theme="dark"] .receipt-card,
+[data-theme="dark"] .review-card,
+[data-theme="dark"] .report-block,
+[data-theme="dark"] .delivery-grid > div {
+  background: var(--surface);
+  border-color: var(--border-color);
+}
 
+[data-theme="dark"] .dashboard-task.expanded {
+  box-shadow: inset 0 0 0 1px var(--accent-blue);
+}
+
+[data-theme="dark"] .dashboard-task:hover,
+[data-theme="dark"] .backlog-item:hover {
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+[data-theme="dark"] .status-select {
+  background: var(--bg-primary);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .dashboard-filter-tab.active {
+  background: var(--surface);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+
+[data-theme="dark"] .delivery-summary,
+[data-theme="dark"] .execution-evidence,
+[data-theme="dark"] .watchdog-box {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+[data-theme="dark"] .task-execution-block {
+  background: rgba(234, 179, 8, 0.15);
+  border-color: rgba(234, 179, 8, 0.3);
+}
+
+[data-theme="dark"] .dashboard-metric.warn strong,
+[data-theme="dark"] .dashboard-phase.warn,
+[data-theme="dark"] .dashboard-agent.warn,
+[data-theme="dark"] .dashboard-warning-line,
+[data-theme="dark"] .task-execution-block strong {
+  color: var(--accent-yellow);
+}
+
+[data-theme="dark"] .priority-high,
+[data-theme="dark"] .dashboard-phase.fail,
+[data-theme="dark"] .dashboard-agent.fail {
+  color: var(--accent-red);
+}
+</style>
 

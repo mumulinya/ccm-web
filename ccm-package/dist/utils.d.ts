@@ -160,3 +160,9 @@ export declare function describeFileStatus(statusCode: string, before?: any): {
     statusColor: string;
     statusKind: string;
 };
+export declare function calculateTokensAndCost(inputText: string, outputText: string): {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    totalCost: number;
+};

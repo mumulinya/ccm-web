@@ -104,8 +104,8 @@ const overviewItems = computed(() => [
 
 const workerRows = computed(() => {
   const rows = assignmentRows.value.map((assignment) => {
-    const receipt = findReceipt(assignment.project)
-    const notification = findNotification(assignment.project)
+    const receipt = findReceipt(assignment)
+    const notification = findNotification(assignment)
     const rawStatus = receipt?.status || assignment.status || notification?.status || inferPendingStatus()
     return {
       ...assignment,
@@ -172,7 +172,12 @@ function normalizeAssignment(item, index) {
     statusText: item.statusText || item.status_text || '',
     dependsOn: asArray(item.dependsOn || item.depends_on),
     attempt: item.attempt || 1,
-    rework: !!item.rework
+    rework: !!item.rework,
+    assignmentId: item.assignmentId || item.assignment_id || item.id || '',
+    dispatchKey: item.dispatchKey || item.dispatch_key || '',
+    taskFingerprint: item.taskFingerprint || item.task_fingerprint || '',
+    continuationOf: item.continuationOf || item.continuation_of || '',
+    continuationStrategy: item.continuationStrategy || item.continuation_strategy || ''
   }
 }
 
@@ -181,16 +186,30 @@ function normalizeReceipt(item) {
     ...item,
     agent: item.agent || item.project || item.target_project || '',
     status: item.status || 'unknown',
-    summary: item.summary || ''
+    summary: item.summary || '',
+    assignmentId: item.assignmentId || item.assignment_id || item.id || '',
+    dispatchKey: item.dispatchKey || item.dispatch_key || ''
   }
 }
 
-function findReceipt(project) {
-  return receiptRows.value.find((item) => sameAgent(item.agent || item.project, project))
+function findReceipt(assignment) {
+  const project = typeof assignment === 'string' ? assignment : assignment.project
+  return receiptRows.value.find((item) => sameDispatchIdentity(item, assignment) || sameAgent(item.agent || item.project, project))
 }
 
-function findNotification(project) {
-  return notificationRows.value.find((item) => sameAgent(item.agent || item.project, project))
+function findNotification(assignment) {
+  const project = typeof assignment === 'string' ? assignment : assignment.project
+  return notificationRows.value.find((item) => sameDispatchIdentity(item, assignment) || sameAgent(item.agent || item.project || item.task_id, project))
+}
+
+function sameDispatchIdentity(a, b) {
+  if (!a || !b || typeof b === 'string') return false
+  const aid = String(a.assignmentId || a.assignment_id || '')
+  const bid = String(b.assignmentId || b.assignment_id || '')
+  if (aid && bid && aid === bid) return true
+  const adk = String(a.dispatchKey || a.dispatch_key || '')
+  const bdk = String(b.dispatchKey || b.dispatch_key || '')
+  return !!adk && !!bdk && adk === bdk
 }
 
 function sameAgent(a, b) {
@@ -362,7 +381,7 @@ function formatListItem(item) {
           <span class="subtle">{{ assignmentRows.length }} 个任务</span>
         </div>
         <div v-if="assignmentRows.length" class="assignment-list">
-          <div v-for="assignment in assignmentRows" :key="assignment.project" class="assignment-item">
+          <div v-for="assignment in assignmentRows" :key="assignment.assignmentId || assignment.dispatchKey || assignment.project" class="assignment-item">
             <div class="assignment-top">
               <strong>{{ assignment.project }}</strong>
               <span :class="['status-pill', statusTone(assignment.status || inferPendingStatus())]">
@@ -388,7 +407,7 @@ function formatListItem(item) {
         <span class="subtle">按回执和通知合并</span>
       </div>
       <div v-if="workerRows.length" class="worker-list">
-        <div v-for="worker in workerRows" :key="worker.project" class="worker-row">
+        <div v-for="worker in workerRows" :key="worker.assignmentId || worker.dispatchKey || worker.project" class="worker-row">
           <div class="worker-main">
             <div class="worker-title">
               <strong>{{ worker.project }}</strong>
@@ -511,14 +530,18 @@ function formatListItem(item) {
 
 .eyebrow {
   margin: 0 0 4px;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .workboard-header h4,
 .panel h5 {
   margin: 0;
   color: var(--text-primary);
+  font-weight: 700;
 }
 
 .workboard-header h4 {
@@ -542,26 +565,27 @@ function formatListItem(item) {
 
 .status-pill,
 .mini-chip {
-  padding: 2px 7px;
+  padding: 2px 8px;
 }
 
+/* 状态色系变量化 */
 .ok {
-  color: var(--accent-green);
-  background: rgba(34, 197, 94, 0.12);
+  color: var(--accent-green, #10b981);
+  background: rgba(16, 185, 129, 0.12);
 }
 
 .active {
-  color: var(--accent-blue);
+  color: var(--accent-blue, #3b82f6);
   background: rgba(59, 130, 246, 0.12);
 }
 
 .warn {
-  color: #854d0e;
-  background: rgba(234, 179, 8, 0.14);
+  color: var(--accent-orange, #d97706);
+  background: rgba(245, 158, 11, 0.12);
 }
 
 .fail {
-  color: var(--accent-red);
+  color: var(--accent-red, #ef4444);
   background: rgba(239, 68, 68, 0.12);
 }
 
@@ -573,42 +597,57 @@ function formatListItem(item) {
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .metric-item {
   border: 1px solid var(--border-color);
-  background: rgba(255, 255, 255, 0.45);
-  border-radius: 8px;
-  padding: 10px;
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 12px;
   min-width: 0;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+}
+
+.metric-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .metric-item span {
   display: block;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-muted);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  font-weight: 600;
 }
 
 .metric-item strong {
-  font-size: 18px;
+  font-size: 20px;
   color: var(--text-primary);
+  font-weight: 700;
 }
 
 .workboard-grid {
   display: grid;
   grid-template-columns: 1.1fr 0.9fr;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 14px;
+  margin-bottom: 14px;
 }
 
 .panel {
   border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.52);
-  padding: 12px;
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 16px;
+  transition: box-shadow 0.2s ease;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.02);
+}
+
+.panel:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
 }
 
 .panel-head {
@@ -616,17 +655,18 @@ function formatListItem(item) {
   justify-content: space-between;
   align-items: center;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-bottom: 14px;
 }
 
 .panel h5 {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .subtle,
 .section-label {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-muted);
+  font-weight: 600;
 }
 
 .phase-list,
@@ -635,25 +675,25 @@ function formatListItem(item) {
 .qa-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .phase-item {
   display: flex;
-  gap: 10px;
+  gap: 12px;
 }
 
 .phase-index {
-  width: 22px;
-  height: 22px;
-  flex: 0 0 22px;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
   border-radius: 50%;
   background: rgba(59, 130, 246, 0.12);
   color: var(--accent-blue);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -662,14 +702,23 @@ function formatListItem(item) {
 .worker-row,
 .qa-row {
   min-width: 0;
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--bg-primary);
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.phase-body:hover,
+.assignment-item:hover,
+.worker-row:hover,
+.qa-row:hover {
+  transform: translateX(2px);
+  background: var(--bg-secondary);
 }
 
 .phase-body {
   flex: 1;
-  padding: 8px 10px;
+  padding: 10px 12px;
 }
 
 .phase-title-row,
@@ -679,32 +728,33 @@ function formatListItem(item) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
 }
 
 .phase-title-row strong,
 .assignment-top strong,
 .worker-title strong,
 .qa-top strong {
-  font-size: 12px;
+  font-size: 13px;
   overflow-wrap: anywhere;
+  color: var(--text-primary);
 }
 
 .phase-body p,
 .assignment-item p,
 .worker-main p,
 .qa-row p {
-  margin: 5px 0 0;
+  margin: 6px 0 0;
   color: var(--text-secondary);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
 .assignment-item,
 .worker-row,
 .qa-row {
-  padding: 9px 10px;
+  padding: 10px 12px;
 }
 
 .muted-line {
@@ -715,21 +765,22 @@ function formatListItem(item) {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 7px;
+  margin-top: 8px;
 }
 
 .assignment-meta span {
-  font-size: 10.5px;
-  color: var(--text-muted);
+  font-size: 11px;
+  color: var(--text-secondary);
   border: 1px solid var(--border-color);
+  background: var(--surface);
   border-radius: 999px;
-  padding: 2px 7px;
+  padding: 2px 8px;
 }
 
 .worker-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 12px;
 }
 
 .worker-main {
@@ -741,7 +792,7 @@ function formatListItem(item) {
   flex-direction: column;
   gap: 4px;
   align-items: flex-end;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-muted);
 }
 
@@ -749,29 +800,31 @@ function formatListItem(item) {
   grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 .worker-blockers span {
   font-size: 11px;
-  color: #854d0e;
-  background: rgba(234, 179, 8, 0.12);
+  color: var(--accent-orange, #d97706);
+  background: rgba(245, 158, 11, 0.12);
   border-radius: 6px;
-  padding: 3px 7px;
+  padding: 4px 8px;
+  font-weight: 600;
 }
 
 .delivery-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
 }
 
 .fact-list {
-  margin: 7px 0 0;
-  padding-left: 16px;
+  margin: 8px 0 0;
+  padding-left: 18px;
   color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: 12.5px;
+  line-height: 1.6;
 }
 
 .fact-list li {
@@ -781,12 +834,12 @@ function formatListItem(item) {
 .empty-note {
   margin: 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 12.5px;
   line-height: 1.5;
 }
 
 .empty-note.small {
-  margin-top: 7px;
+  margin-top: 8px;
 }
 
 @media (max-width: 860px) {
@@ -804,5 +857,46 @@ function formatListItem(item) {
     flex-direction: row;
     align-items: center;
   }
+}
+
+/* 暗黑模式深度适配 */
+[data-theme="dark"] .metric-item {
+  background: var(--surface);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+[data-theme="dark"] .metric-item:hover {
+  box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+}
+[data-theme="dark"] .panel {
+  background: var(--surface);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+[data-theme="dark"] .panel:hover {
+  box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+}
+[data-theme="dark"] .phase-body,
+[data-theme="dark"] .assignment-item,
+[data-theme="dark"] .worker-row,
+[data-theme="dark"] .qa-row {
+  background: var(--bg-primary);
+  border-color: var(--border-color);
+}
+[data-theme="dark"] .phase-body:hover,
+[data-theme="dark"] .assignment-item:hover,
+[data-theme="dark"] .worker-row:hover,
+[data-theme="dark"] .qa-row:hover {
+  background: var(--bg-secondary);
+  border-color: rgba(255,255,255,0.1);
+}
+[data-theme="dark"] .assignment-meta span {
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.1);
+  color: var(--text-secondary);
+}
+[data-theme="dark"] .worker-blockers span {
+  background: rgba(245, 158, 11, 0.15);
+}
+[data-theme="dark"] .phase-index {
+  background: rgba(59, 130, 246, 0.15);
 }
 </style>

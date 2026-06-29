@@ -845,8 +845,62 @@ onMounted(loadTools)
 .btn-cancel { background: rgba(0,0,0,0.02); border: 1px solid rgba(0, 0, 0, 0.06); color: var(--text-secondary); }
 .btn-outline { background: transparent; border: 1px solid rgba(0, 0, 0, 0.08); color: var(--text-secondary); }
 .btn-sm { padding: 5px 10px; font-size: 11.5px; border-radius: 8px; }
-.toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; }
-.toggle input { accent-color: var(--accent-blue); }
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.toggle input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 34px;
+  height: 18px;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 9px;
+  position: relative;
+  outline: none;
+  cursor: pointer;
+  transition: background 0.25s cubic-bezier(0.25, 0.8, 0.25, 1);
+  margin: 0;
+}
+:global([data-theme="dark"]) .toggle input {
+  background: rgba(255, 255, 255, 0.08);
+}
+.toggle input::before {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ffffff;
+  top: 3px;
+  left: 3px;
+  transition: transform 0.25s cubic-bezier(0.25, 0.8, 0.25, 1.25), width 0.2s, left 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+.toggle input:checked {
+  background: var(--accent-blue);
+}
+.toggle input:checked::before {
+  transform: translateX(16px);
+}
+.toggle:hover input::before {
+  transform: scale(1.08);
+}
+.toggle:hover input:checked::before {
+  transform: translateX(16px) scale(1.08);
+}
+.toggle:active input::before {
+  width: 15px;
+}
+.toggle input:checked:active::before {
+  transform: translateX(13px);
+  width: 15px;
+}
 
 /* 暗色模式兼容 */
 [data-theme="dark"] .sidebar,

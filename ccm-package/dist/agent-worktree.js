@@ -67,20 +67,23 @@ function createChildAgentWorktree(baseWorkDir, options = {}) {
     const repoRoot = runGit(originalWorkDir, ["rev-parse", "--show-toplevel"]);
     if (!repoRoot)
         throw new Error("当前工作目录不是 Git 仓库，无法创建 worktree");
+    const baseHead = runGit(repoRoot, ["rev-parse", "HEAD"]);
+    const baseBranch = runGit(repoRoot, ["branch", "--show-current"]);
     const taskPart = slugifyWorktreePart(options.taskId || "task");
     const agentPart = slugifyWorktreePart(options.agentName || "agent");
     const sourcePart = slugifyWorktreePart(options.sourceProject || "main");
-    const nonce = Date.now().toString(36);
-    const slug = slugifyWorktreePart([taskPart, sourcePart, agentPart, nonce].filter(Boolean).join("-")).slice(0, 64);
+    const reusePart = slugifyWorktreePart(options.reuseKey || options.sessionScopeId || "");
+    const nonce = reusePart ? "" : Date.now().toString(36);
+    const slug = slugifyWorktreePart([taskPart, sourcePart, agentPart, reusePart, nonce].filter(Boolean).join("-")).slice(0, 64);
     const worktreesDir = path.join(repoRoot, ".cc-connect", "worktrees");
     const worktreePath = path.join(worktreesDir, slug);
     const worktreeBranch = `ccm/${slug}`;
     if (fs.existsSync(worktreePath)) {
-        return { worktreePath, worktreeBranch, reused: true };
+        return { worktreePath, worktreeBranch, reused: true, baseHead, baseBranch };
     }
     fs.mkdirSync(worktreesDir, { recursive: true });
     runGit(repoRoot, ["worktree", "add", "-b", worktreeBranch, worktreePath, "HEAD"]);
-    return { worktreePath, worktreeBranch, reused: false };
+    return { worktreePath, worktreeBranch, reused: false, baseHead, baseBranch };
 }
 function prepareChildAgentWorkDir(baseWorkDir, options = {}) {
     const requestedMode = normalizeChildAgentIsolationMode(options.mode || options.isolation);
@@ -98,10 +101,14 @@ function prepareChildAgentWorkDir(baseWorkDir, options = {}) {
             originalWorkDir,
             worktreePath: info.worktreePath,
             worktreeBranch: info.worktreeBranch,
+            baseHead: info.baseHead,
+            baseBranch: info.baseBranch,
             reused: info.reused,
         };
     }
     catch (error) {
+        if (options.failClosed === true)
+            throw error;
         return {
             mode: "shared",
             requestedMode,

@@ -157,7 +157,7 @@ export declare function runCodedGroupOrchestrator(input: {
     content: string;
 };
 export declare function runCoordinatorProtocolSelfTest(): {
-    pass: any;
+    pass: boolean;
     contentHasPlan: boolean;
     coordinationPlan: any;
     assignmentCount: number;
@@ -179,6 +179,7 @@ export declare function runCoordinatorProtocolSelfTest(): {
     llmDocumentGuardPass: any;
     shortDocBackendFirstPass: any;
     shortDocExecutionOrder: any;
+    reactiveCompactionPass: boolean;
     documentFindings: any;
 };
 export declare function buildCodedCoordinatorSummary(group: any, outputs: string[]): {
@@ -193,6 +194,8 @@ export declare function runLlmCoordinatorReview(group: any, userMessage: string,
     allowFollowUps?: boolean;
     round?: number;
     maxRounds?: number;
+    requiresCodeChanges?: boolean;
+    requiresVerification?: boolean;
 }): Promise<{
     agent: any;
     status: string;
@@ -201,6 +204,21 @@ export declare function runLlmCoordinatorReview(group: any, userMessage: string,
     conflicts: any;
     content: string;
     confidence: any;
+    structured_review: {
+        schema_version: number;
+        verdict: string;
+        decision: {
+            can_complete: boolean;
+            reason: string;
+        };
+        summary: string;
+        checks: any;
+        worker_reviews: any;
+        gaps: any;
+        conflicts: any;
+        user_question: string;
+        confidence: any;
+    };
 }>;
 export declare function decomposeRequirementWithCodedCoordinator(group: any, requirement: string): any;
 export declare function runGroupOrchestrator(input: {
@@ -223,6 +241,12 @@ export declare function runGroupOrchestrator(input: {
         confidence: any;
     };
     runtime: string;
+    agentBoundary: {
+        layer: string;
+        planner: string;
+        runtime: string;
+        responsibility: string;
+    };
     content: string;
     coordinationPlan?: undefined;
     executionOrder?: undefined;
@@ -254,6 +278,12 @@ export declare function runGroupOrchestrator(input: {
         confidence: any;
     };
     runtime: string;
+    agentBoundary: {
+        layer: string;
+        planner: string;
+        runtime: string;
+        responsibility: string;
+    };
     executionOrder: string;
     coordinationStrategy: string;
     content: string;
@@ -262,5 +292,83 @@ export declare function runGroupOrchestrator(input: {
     delegated: any[];
     assignments: any[];
     runtime: string;
+    agentBoundary: {
+        layer: string;
+        planner: string;
+        runtime: string;
+        responsibility: string;
+    };
+    content: string;
+} | {
+    contextRecovery: {
+        type: string;
+        originalChars: number;
+        recoveredChars: number;
+    };
+    agent: any;
+    delegated: any[];
+    assignments: any[];
+    analysis: any;
+    dispatchPolicy: {
+        action: string;
+        reason: string;
+        requiresConfirmation: boolean;
+        risk: string;
+        nextStep: string;
+        confidence: any;
+    };
+    runtime: string;
+    agentBoundary: {
+        layer: string;
+        planner: string;
+        runtime: string;
+        responsibility: string;
+    };
+    content: string;
+    coordinationPlan?: undefined;
+    executionOrder?: undefined;
+    coordinationStrategy?: undefined;
+} | {
+    contextRecovery: {
+        type: string;
+        originalChars: number;
+        recoveredChars: number;
+    };
+    agent: any;
+    delegated: any[];
+    assignments: {
+        project: string;
+        task: string;
+        reason: string;
+        dependsOn: string;
+    }[];
+    analysis: any;
+    coordinationPlan: {
+        mode: string;
+        strategy: string;
+        executionOrder: string;
+        phases: string[];
+        targets: any[];
+        missingInfo: any;
+    };
+    dispatchPolicy: {
+        action: string;
+        reason: string;
+        requiresConfirmation: boolean;
+        risk: string;
+        nextStep: string;
+        confidence: any;
+    };
+    runtime: string;
+    agentBoundary: {
+        layer: string;
+        planner: string;
+        runtime: string;
+        responsibility: string;
+    };
+    executionOrder: string;
+    coordinationStrategy: string;
     content: string;
 }>;
+export declare function isContextLimitError(error: any): boolean;
+export declare function buildReactiveCompactionContext(context: string, maxChars?: number): string;

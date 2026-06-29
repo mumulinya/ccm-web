@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { toast } from '../../utils/toast.js'
+import { toast, confirmDialog } from '../../utils/toast.js'
 
 const props = defineProps({
   agents: { type: Array, default: () => [] }
@@ -568,7 +568,7 @@ const isCustomPet = (agentName) => {
 }
 
 const deleteCustomPet = async (agentName) => {
-  if (!confirm('确定要删除这只自定义宠物吗？它将从桌面消失。')) return
+  if (!(await confirmDialog('确定要删除这只自定义宠物吗？它将从桌面消失。'))) return
   const newConfigs = { ...petConfigs.value }
   delete newConfigs[agentName]
   petConfigs.value = newConfigs

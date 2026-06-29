@@ -1,0 +1,111 @@
+export type DispatchStatus = "pending" | "running" | "done" | "completed" | "partial" | "blocked" | "failed" | "missing_receipt" | "needs_info" | "skipped";
+export type ReceiptStatus = "done" | "partial" | "blocked" | "failed" | "needs_info" | "missing";
+export type DispatchIdentity = {
+    scopeId: string;
+    taskId: string;
+    sourceProject: string;
+    targetName: string;
+    taskText: string;
+    taskFingerprint: string;
+    dispatchKey: string;
+    assignmentId: string;
+    attempt: number;
+    continuationOf: string;
+    continuationStrategy: string;
+    rework: boolean;
+};
+export type DispatchAssignment = DispatchIdentity & {
+    project: string;
+    task: string;
+    reason: string;
+    dependsOn: string;
+    status: string;
+    statusText: string;
+};
+export type DispatchRecord = {
+    identity: DispatchIdentity;
+    assignment: DispatchAssignment;
+    status: DispatchStatus;
+    statusText: string;
+    receipt?: any | null;
+    fileChanges?: any | null;
+    workEvents?: any[];
+    outputs?: string[];
+    blockers?: string[];
+    needs?: string[];
+    startedAt?: string;
+    finishedAt?: string;
+    summary?: string;
+    resultExcerpt?: string;
+};
+export type DispatchContext = {
+    scopeId?: string;
+    taskId?: string;
+    sourceProject?: string;
+    defaultStatus?: string;
+    defaultStatusText?: string;
+};
+export declare function normalizeMentionTask(text: string): string;
+export declare function normalizeDispatchTask(text: string): string;
+export declare function buildDispatchKey(input?: any): string;
+export declare function normalizeReceiptStatus(status: any): ReceiptStatus;
+export declare function receiptStatusToDispatchStatus(status: any): DispatchStatus;
+export declare function dispatchStatusToAssignmentStatus(status: any): string;
+export declare function normalizeDispatchAssignment(raw?: any, context?: DispatchContext): DispatchAssignment;
+export declare function normalizeDispatchBatch(items?: any[], context?: DispatchContext): DispatchAssignment[];
+export declare function attachDispatchIdentityToMention(mention: any, context?: DispatchContext): any;
+export declare function createDispatchRecord(input: Partial<DispatchRecord> & {
+    assignment: DispatchAssignment;
+}): DispatchRecord;
+export declare function recordToAssignmentStatus(record: DispatchRecord): {
+    project: string;
+    assignmentId: string;
+    dispatchKey: string;
+    status: string;
+    statusText: string;
+};
+export declare function recordToWorkerLedger(record: DispatchRecord): {
+    taskId: string;
+    scopeId: string;
+    project: string;
+    sourceProject: string;
+    dispatchKey: string;
+    taskFingerprint: string;
+    assignmentId: string;
+    attempt: number;
+    continuationOf: string;
+    continuationStrategy: string;
+    status: DispatchStatus;
+    receiptStatus: any;
+    summary: any;
+    filesChanged: any;
+    verification: any;
+    blockers: any;
+    needs: any;
+};
+export declare function recordToTaskNotification(record: DispatchRecord): {
+    task_id: string;
+    status: "blocked" | "failed" | "running" | "completed" | "skipped" | "pending" | "partial" | "needs_info" | "missing_receipt";
+    receipt_status: ReceiptStatus;
+    assignment_id: string;
+    dispatch_key: string;
+    receipt_trusted: boolean;
+    receipt_trust_level: any;
+    receipt_trust_warnings: any;
+    summary: any;
+    result: string;
+};
+export declare function recordToCollectedOutput(record: DispatchRecord, formatter: (agent: string, text: string, receipt: any) => string): string;
+export declare function recordToTimelineEvent(record: DispatchRecord, type?: string): {
+    type: string;
+    title: string;
+    detail: string;
+    status: string;
+    phase: string;
+    agent: string;
+    data: {
+        assignmentId: string;
+        dispatchKey: string;
+        receipt: any;
+    };
+};
