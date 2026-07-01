@@ -24,6 +24,7 @@ export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
         queued: boolean;
         message: string;
         blocked?: undefined;
+        duplicate_block_suppressed?: undefined;
         reason?: undefined;
         readiness?: undefined;
         targetKey?: undefined;
@@ -31,6 +32,7 @@ export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
     } | {
         queued: boolean;
         blocked: boolean;
+        duplicate_block_suppressed: boolean;
         reason: string;
         message: any;
         readiness: any;
@@ -42,6 +44,7 @@ export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
         targetKey: string;
         position: number;
         blocked?: undefined;
+        duplicate_block_suppressed?: undefined;
         reason?: undefined;
         readiness?: undefined;
     };
@@ -83,19 +86,7 @@ export declare function runTaskWatchdog(ctx: CollabCtx, options?: any): {
         mode: string;
         message: string;
         fix_actions: string[];
-        childProcess: {
-            ok: boolean;
-            status: number;
-            stdout: string;
-            stderr: string;
-            error: string;
-        } | {
-            ok: boolean;
-            status: any;
-            stdout: string;
-            stderr: string;
-            error: any;
-        };
+        childProcess: any;
         externalRunner: {
             active: boolean;
             status: any;
@@ -121,19 +112,7 @@ export declare function runTaskWatchdog(ctx: CollabCtx, options?: any): {
         mode: string;
         message: string;
         fix_actions: any[];
-        childProcess: {
-            ok: boolean;
-            status: number;
-            stdout: string;
-            stderr: string;
-            error: string;
-        } | {
-            ok: boolean;
-            status: any;
-            stdout: string;
-            stderr: string;
-            error: any;
-        };
+        childProcess: any;
         probe: any;
         probeHealth: {
             status: string;
@@ -148,19 +127,7 @@ export declare function runTaskWatchdog(ctx: CollabCtx, options?: any): {
         mode: string;
         message: string;
         fix_actions: string[];
-        childProcess: {
-            ok: boolean;
-            status: number;
-            stdout: string;
-            stderr: string;
-            error: string;
-        } | {
-            ok: boolean;
-            status: any;
-            stdout: string;
-            stderr: string;
-            error: any;
-        };
+        childProcess: any;
         externalRunner: {
             active: boolean;
             status: any;
@@ -186,19 +153,7 @@ export declare function runTaskWatchdog(ctx: CollabCtx, options?: any): {
         mode: string;
         message: string;
         fix_actions: any[];
-        childProcess: {
-            ok: boolean;
-            status: number;
-            stdout: string;
-            stderr: string;
-            error: string;
-        } | {
-            ok: boolean;
-            status: any;
-            stdout: string;
-            stderr: string;
-            error: any;
-        };
+        childProcess: any;
         probe: any;
         probeHealth: {
             status: string;
@@ -342,6 +297,102 @@ export declare function runCollaborationProtocolSelfTest(): {
             hasReceipt: boolean;
         };
     };
+    agentCollaborationProtocol: {
+        pass: boolean;
+        checks: {
+            capabilityRouting: boolean;
+            taskAndExecutionBound: boolean;
+            permissionDoesNotExpand: boolean;
+            admissionPasses: boolean;
+            duplicateStops: boolean;
+            evidenceAccepted: boolean;
+            conflictingAnswerStops: boolean;
+            timeoutReturnsToCoordinator: boolean;
+            sideEffectDetected: boolean;
+        };
+        route: {
+            targetName: any;
+            strategy: string;
+            candidates: any;
+        };
+        contract: any;
+        admission: {
+            allowed: boolean;
+            code: string;
+            reason: string;
+            existing_id?: undefined;
+        } | {
+            allowed: boolean;
+            code: string;
+            reason: string;
+            existing_id: any;
+        };
+        duplicate: {
+            allowed: boolean;
+            code: string;
+            reason: string;
+            existing_id?: undefined;
+        } | {
+            allowed: boolean;
+            code: string;
+            reason: string;
+            existing_id: any;
+        };
+        answer: {
+            status: string;
+            accepted: boolean;
+            score: number;
+            evidence: string[];
+            polarity: string;
+            conflicts_with: any[];
+            reason: string;
+            arbitrated_by: string;
+            arbitrated_at: string;
+        };
+        opposing: {
+            status: string;
+            accepted: boolean;
+            score: number;
+            evidence: string[];
+            polarity: string;
+            conflicts_with: any[];
+            reason: string;
+            arbitrated_by: string;
+            arbitrated_at: string;
+        };
+        timeout: {
+            timed_out: boolean;
+            status: string;
+            deadline_at: string;
+            checked_at: string;
+            recovery: string;
+            reason: string;
+        };
+        permissionOk: {
+            pass: boolean;
+            mode: string;
+            violations: ({
+                type: string;
+                path: string;
+            } | {
+                type: string;
+                detail: string;
+            })[];
+            reason: string;
+        };
+        permissionDenied: {
+            pass: boolean;
+            mode: string;
+            violations: ({
+                type: string;
+                path: string;
+            } | {
+                type: string;
+                detail: string;
+            })[];
+            reason: string;
+        };
+    };
     taskDocumentContextPreview: string;
     taskDocumentChecks: {
         hasBusinessGoal: boolean;
@@ -393,12 +444,13 @@ export declare function runCollaborationProtocolSelfTest(): {
         doneDependencyPasses: boolean;
         blockedDependencyStopsDownstream: boolean;
         blockedDependencyExplainsReason: boolean;
+        latestRecoveredReceiptUnblocksDownstream: boolean;
     };
     notificationDeliveryChecks: {
         summaryHasWorkerNotification: boolean;
         summaryKeepsNotificationTaskId: boolean;
         summaryUsesNotificationAgent: any;
-        userReportMentionsNotification: boolean;
+        userReportHidesNotificationProtocol: boolean;
     };
     continuationGapChecks: {
         workerNotificationTriggersGap: any;
@@ -406,11 +458,23 @@ export declare function runCollaborationProtocolSelfTest(): {
         draftIncludesSameWorkerStrategy: boolean;
         missingCoordinationTriggersGap: any;
         draftIncludesCoordinationEvidenceGap: boolean;
+        firstGapCanAutoContinue: boolean;
+        unchangedGapDoesNotLoop: boolean;
+        changedGapAllowsNewTargetedAttempt: boolean;
+        exhaustedGapNeedsUserDecision: boolean;
+        automaticContinuationIsInternal: boolean;
+        userTaskCardExplainsNextAction: boolean;
+        userTaskCardHidesProtocolTerms: boolean;
     };
     scratchpadChecks: {
         storesWorkerLedger: boolean;
         contextIncludesScratchpad: boolean;
         contextIncludesWorkerSummary: boolean;
+    };
+    agentQaRequirementChecks: {
+        infersExplicitAskAgentRequirement: boolean;
+        explicitFalseDisablesRequirement: boolean;
+        missingQaBlocksAcceptance: boolean;
     };
 };
 export declare function importSharedDocsToDailyDevBacklog(options?: any): {

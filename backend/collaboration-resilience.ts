@@ -25,15 +25,33 @@ const DEFAULT_FALLBACK_ORDER: Record<string, AgentRuntimeId[]> = {
 
 function unique<T>(items: T[]) { return Array.from(new Set(items)); }
 
+function commandExistsOnPath(command: string) {
+  const raw = String(command || "").trim();
+  if (!raw) return false;
+  const hasPath = raw.includes("/") || raw.includes("\\");
+  const directories = hasPath ? [""] : unique([process.cwd(), ...String(process.env.PATH || "").split(path.delimiter).map(item => item.trim().replace(/^"|"$/g, "")).filter(Boolean)]);
+  const extensions = process.platform === "win32"
+    ? (path.extname(raw) ? [""] : String(process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean))
+    : [""];
+  for (const directory of directories) {
+    for (const extension of extensions) {
+      const candidate = hasPath ? `${raw}${extension}` : path.join(directory, `${raw}${extension}`);
+      try {
+        const stat = fs.statSync(candidate);
+        if (!stat.isFile()) continue;
+        if (process.platform === "win32") return true;
+        fs.accessSync(candidate, fs.constants.X_OK);
+        return true;
+      } catch {}
+    }
+  }
+  return false;
+}
+
 export function isRuntimeCommandAvailable(agentType: string) {
   const runtime = normalizeAgentRuntimeId(agentType);
   const commands = RUNTIME_COMMANDS[runtime] || [];
-  return commands.some(command => {
-    const probe = process.platform === "win32"
-      ? spawnSync("where.exe", [command], { windowsHide: true, stdio: "ignore" })
-      : spawnSync("sh", ["-lc", `command -v ${command}`], { stdio: "ignore" });
-    return probe.status === 0;
-  });
+  return commands.some(commandExistsOnPath);
 }
 
 export function buildRuntimeRecoveryCandidates(primary: string, configured: any = [], availability: (runtime: string) => boolean = isRuntimeCommandAvailable) {
@@ -47,11 +65,13 @@ export function buildRuntimeRecoveryCandidates(primary: string, configured: any 
 
 export function shouldSwitchRuntime(error: any) {
   const failure = classifyExecutionFailure(error);
-  const runtimeFailureSignal = /Agent Runner|Agent 错误|Agent 进程退出|spawn|exitCode|command not found|not recognized|ENOENT|ECONNREFUSED|429|provider|网关|响应超时/i.test(failure.message);
+  const runtimeFailureSignal = /Agent Runner|Agent 错误|Agent 进程退出|spawn|exitCode|command not found|not recognized|ENOENT|ECONNREFUSED|401|403|429|unauthorized|invalid api key|authentication|provider|网关|响应超时/i.test(failure.message);
+  const permissionDriftSignal = /(?:sandbox|沙箱).{0,24}(?:read[- ]?only|只读)|blocked by policy|所有文件写入.{0,16}(?:拦截|阻止)|无法写入(?:文件|项目)|workspace_write.{0,24}read_only/i.test(failure.message);
   return {
     ...failure,
-    switchRuntime: (failure.recoverable || (failure.failureClass === "unknown" && runtimeFailureSignal))
-      && ["timeout", "provider", "gateway_routing", "infra", "tool_runtime", "mcp_startup", "mcp_handshake", "plugin_startup", "unknown"].includes(failure.failureClass),
+    permissionDrift: permissionDriftSignal,
+    switchRuntime: permissionDriftSignal || ((failure.recoverable || (failure.failureClass === "unknown" && runtimeFailureSignal))
+      && ["timeout", "auth", "provider", "gateway_routing", "infra", "tool_runtime", "mcp_startup", "mcp_handshake", "plugin_startup", "unknown"].includes(failure.failureClass)),
   };
 }
 
@@ -95,9 +115,14 @@ export function inferTaskPathScopes(task: string) {
 }
 
 function getRepoKey(workDir: string) {
-  const resolved = path.resolve(String(workDir || process.cwd()));
-  const result = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: resolved, encoding: "utf-8", windowsHide: true });
-  return path.resolve(result.status === 0 ? String(result.stdout || "").trim() : resolved).toLowerCase();
+  let current = path.resolve(String(workDir || process.cwd()));
+  try { if (fs.statSync(current).isFile()) current = path.dirname(current); } catch {}
+  while (true) {
+    if (fs.existsSync(path.join(current, ".git"))) return current.toLowerCase();
+    const parent = path.dirname(current);
+    if (parent === current) return path.resolve(String(workDir || process.cwd())).toLowerCase();
+    current = parent;
+  }
 }
 
 function scopesOverlap(left: string[], right: string[]) {
@@ -167,6 +192,8 @@ export function runCollaborationResilienceSelfTest() {
     usesConfiguredFallbackNext: candidates[1] === "codex",
     classifiesProviderFailureForSwitch: shouldSwitchRuntime("provider API 429 unavailable").switchRuntime,
     nonzeroExitSwitchesWithoutReadableStderr: shouldSwitchRuntime("Agent 进程退出：������").switchRuntime,
+    permissionDriftForcesSessionRecovery: shouldSwitchRuntime("sandbox read-only: all writes blocked by policy").switchRuntime && shouldSwitchRuntime("sandbox read-only: all writes blocked by policy").permissionDrift,
+    authenticationFailureSwitchesRuntime: shouldSwitchRuntime("401 Unauthorized: Invalid API Key").switchRuntime,
     serializesOverlappingRepoLanes: conflict.protected && conflict.effectiveOrder === "sequential" && conflict.lanes.every(item => !!item.conflictWorkspaceKey),
     keepsSeparateReposParallel: !separate.protected && separate.effectiveOrder === "parallel",
     recoveryPromptPreservesOriginalTask: buildRuntimeRecoveryPrompt({ originalPrompt: "实现支付功能", fromRuntime: "cursor", toRuntime: "codex", attempt: 2, failure: "provider unavailable" }).includes("实现支付功能"),

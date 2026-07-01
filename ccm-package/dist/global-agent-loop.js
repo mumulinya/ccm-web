@@ -40,11 +40,13 @@ exports.completeGlobalAgentSupervision = completeGlobalAgentSupervision;
 exports.updateGlobalAgentSupervisionState = updateGlobalAgentSupervisionState;
 exports.listGlobalAgentRuns = listGlobalAgentRuns;
 exports.findWaitingGlobalAgentRun = findWaitingGlobalAgentRun;
+exports.findClarifyingGlobalAgentRun = findClarifyingGlobalAgentRun;
 exports.getGlobalAgentToolSpec = getGlobalAgentToolSpec;
 exports.classifyGlobalAgentToolRisk = classifyGlobalAgentToolRisk;
 exports.parseGlobalAgentDecision = parseGlobalAgentDecision;
 exports.startGlobalAgentRun = startGlobalAgentRun;
 exports.resumeGlobalAgentRun = resumeGlobalAgentRun;
+exports.continueGlobalAgentRunWithClarification = continueGlobalAgentRunWithClarification;
 exports.pauseGlobalAgentRun = pauseGlobalAgentRun;
 exports.cancelGlobalAgentRun = cancelGlobalAgentRun;
 exports.recoverInterruptedGlobalAgentRuns = recoverInterruptedGlobalAgentRuns;
@@ -55,6 +57,7 @@ const path = __importStar(require("path"));
 const utils_1 = require("./utils");
 const reliability_ledger_1 = require("./reliability-ledger");
 const agent_quality_center_1 = require("./agent-quality-center");
+const agent_reasoning_loop_1 = require("./agent-reasoning-loop");
 const STORE_DIR = path.join(utils_1.CCM_DIR, "global-agent-runs");
 const STORE_FILE = path.join(STORE_DIR, "runs.json");
 const STORE_BACKUP = `${STORE_FILE}.bak`;
@@ -98,6 +101,14 @@ function destructiveOperation(args) {
 }
 function nowIso(runtime) {
     return new Date(runtime?.now ? runtime.now() : Date.now()).toISOString();
+}
+function stripNonExecutionReportSections(value) {
+    return String(value || "")
+        .replace(/\n*验证\/证据\s*[:：][\s\S]*?(?=\n+\s*(?:风险|下一步)\s*[:：]|$)/g, "")
+        .replace(/\n*风险\s*[:：][\s\S]*?(?=\n+\s*下一步\s*[:：]|$)/g, "")
+        .replace(/\n*下一步\s*[:：][^\n]*(?:\n|$)/g, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
 }
 function writeJsonAtomic(file, value) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -146,6 +157,8 @@ function normalizeRun(run) {
         decision_summary: run?.decision_summary || null,
         clarification_question: String(run?.clarification_question || ""),
         shadow_mode: run?.shadow_mode === true,
+        original_user_message: String(run?.original_user_message || run?.user_message || "").slice(0, 50_000),
+        reasoning_loop: (0, agent_reasoning_loop_1.normalizeAgentReasoningState)(run?.reasoning_loop, run?.original_user_message || run?.user_message || ""),
     };
 }
 function loadStore() {
@@ -227,6 +240,12 @@ function listGlobalAgentRuns(options = {}) {
 }
 function findWaitingGlobalAgentRun(sessionId) {
     return listGlobalAgentRuns({ sessionId, status: "waiting_confirmation", limit: 1 })[0] || null;
+}
+function findClarifyingGlobalAgentRun(sessionId, maxAgeMs = 30 * 60_000) {
+    const run = listGlobalAgentRuns({ sessionId, status: "waiting_clarification", limit: 1 })[0] || null;
+    if (!run)
+        return null;
+    return Date.now() - Date.parse(run.updated_at) <= maxAgeMs ? run : null;
 }
 function getGlobalAgentToolSpec(name) {
     return exports.GLOBAL_AGENT_TOOL_SPECS.find(item => item.name === name) || null;
@@ -312,6 +331,7 @@ function buildToolPrompt() {
 }
 async function buildMessages(run, runtime) {
     const context = runtime.getContext ? await runtime.getContext(run) : {};
+    (0, agent_reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, "current_system_context", context);
     const priorSteps = run.steps.map(step => ({
         index: step.index,
         state: step.state,
@@ -330,9 +350,13 @@ async function buildMessages(run, runtime) {
 - 每轮最多选择一个工具。观察结果返回后再决定下一步。
 - 已经获得足够证据时必须 complete，禁止重复调用相同工具和空转。
 - 最终回复区分：实际完成、已派发/仍在执行、验证证据、风险、需要用户确认的事项。
+- 普通聊天、知识问答和原理说明如果没有调用工具，只给自然、直接的答案；不要附加“验证/证据”“风险”“下一步”等执行报告栏目，也不要向用户展示意图分类、置信度、授权依据、计划版本、断言、偏差或复盘。
+- 只有实际执行、派发或调用工具后，最终回复才需要交付证据、风险和后续动作。
 - state 为 answer 或 complete 时，message 必须直接写成给用户看的完整答案或完整执行回执，真正回答原问题；禁止只写“基于上下文回答”“准备总结”“已处理”等过程描述。
 - state 为 investigate、plan、execute 或 needs_confirmation 时，message 才是简短进度说明。
 - 每次都必须输出 intent：category、goal、action_required、target_refs、impact_scope、confidence、authorization_basis、reason。
+- 必须核对“推理闭环”：原始目标、澄清链、当前事实快照、计划版本、验证断言和已知偏差。事实变化、工具失败或验收缺口出现后必须重规划，不能机械继续旧计划。
+- 完成前必须逐项说明哪些目标断言已被证据证明；执行过写工具却没有可核验观察时不得声称完成。
 - category 只能是 conversation、question、analysis、execution、high_risk、ambiguous；confidence 为 0~1。
 - 目标没有在用户当前消息或读取工具结果中出现时，不得猜测；confidence 不足时使用 needs_confirmation 并提出一个具体澄清问题。
 
@@ -344,6 +368,7 @@ ${buildToolPrompt()}
 不调用工具时 tool 必须为 null。`;
     const state = JSON.stringify({
         run: { id: run.id, status: run.status, phase: run.phase, explicit_write_authorization: run.explicit_write_authorization, max_steps: run.max_steps, remaining_steps: Math.max(0, run.max_steps - run.steps.length) },
+        reasoning_loop: run.reasoning_loop,
         context,
         prior_steps: priorSteps,
     });
@@ -426,6 +451,8 @@ async function continueLoop(run, runtime) {
             run.phase = decision.state;
             const normalizedIntent = (0, agent_quality_center_1.normalizeAgentDecisionIntent)(decision.intent, run.user_message);
             decision.intent = normalizedIntent;
+            (0, agent_reasoning_loop_1.updateReasoningPlan)(run.reasoning_loop, decision.plan || [], normalizedIntent.reason || `decision:${decision.state}`);
+            (0, agent_reasoning_loop_1.explainReasoningDecision)(run.reasoning_loop, decision.state, normalizedIntent.reason || decision.message || "模型形成下一步决策");
             const step = {
                 index: run.steps.length + 1,
                 at: nowIso(runtime),
@@ -436,7 +463,7 @@ async function continueLoop(run, runtime) {
                 decision: { intent: normalizedIntent },
             };
             if (!decision.tool) {
-                const quality = (0, agent_quality_center_1.evaluateAgentDecision)({ message: run.user_message, decision, risk: "read", explicitWriteAuthorization: run.explicit_write_authorization, priorSteps: run.steps });
+                const quality = (0, agent_quality_center_1.evaluateAgentDecision)({ message: run.user_message, decision, risk: "read", explicitWriteAuthorization: run.explicit_write_authorization, priorSteps: run.steps, policyOverride: runtime.qualityPolicyOverride });
                 run.decision_summary = quality;
                 run.shadow_mode = quality.policy.shadowMode;
                 step.decision = quality;
@@ -452,6 +479,8 @@ async function continueLoop(run, runtime) {
                 });
                 emit(runtime, { type: "decision", step }, run);
                 if (decision.state === "needs_confirmation") {
+                    (0, agent_reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, { id: "clarification", label: "目标与影响范围已澄清", kind: "intent", status: "blocked", reason: decision.message });
+                    (0, agent_reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "ambiguous_intent", decision.message || normalizedIntent.reason, "warning");
                     run.status = "waiting_clarification";
                     run.phase = "needs_confirmation";
                     run.clarification_question = decision.message || "请补充要操作的目标、期望动作和允许的影响范围。";
@@ -464,12 +493,42 @@ async function continueLoop(run, runtime) {
                 }
                 if (["answer", "complete"].includes(decision.state)) {
                     const completion = decision.completion || {};
-                    const parts = [decision.message || completion.summary || "已完成。"];
-                    if (completion.evidence?.length)
+                    const executionIntent = ["execution", "high_risk"].includes(normalizedIntent.category) && normalizedIntent.action_required;
+                    const failedToolAssertions = run.reasoning_loop.assertions.filter(item => item.kind === "tool_outcome" && item.status === "failed");
+                    const passedToolAssertions = run.reasoning_loop.assertions.filter(item => item.kind === "tool_outcome" && item.status === "passed");
+                    if (executionIntent && run.explicit_write_authorization && run.tool_calls === 0) {
+                        const reason = "已识别明确执行意图，但尚未形成并执行可靠工具行动";
+                        (0, agent_reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "missed_execution", reason, "error");
+                        (0, agent_reasoning_loop_1.recordReasoningPostmortem)(run.reasoning_loop, { trigger: "missed_execution", whatHappened: reason, correction: "阻止终态并向用户索取可执行目标和验收范围", preventRepeat: "明确执行意图必须产生经过授权的工具行动或明确阻塞证据" });
+                        (0, agent_reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, { id: "goal", label: "用户要求的执行目标已实际完成", kind: "goal", status: "blocked", reason });
+                        run.status = "waiting_clarification";
+                        run.phase = "needs_confirmation";
+                        run.clarification_question = "我识别到你要求实际执行，但当前还没有形成可核验的行动方案。请确认目标对象、允许修改的范围和验收结果；我不会把一段说明冒充已完成。";
+                        run.final_reply = run.clarification_question;
+                        run.updated_at = nowIso(runtime);
+                        saveRun(run, runtime.persist !== false);
+                        emit(runtime, { type: "clarification_required", reply: run.final_reply, decision: quality }, run);
+                        return run;
+                    }
+                    if (executionIntent && failedToolAssertions.length && !passedToolAssertions.length) {
+                        (0, agent_reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "premature_completion", "模型试图结束，但执行结果仍失败；要求重新规划", "error");
+                        (0, agent_reasoning_loop_1.recordReasoningPostmortem)(run.reasoning_loop, { trigger: "premature_completion", whatHappened: "模型在所有执行结果仍失败时尝试结束", correction: "拒绝完成并回到计划阶段", preventRepeat: "完成前检查工具断言和验收证据，失败断言未消解时不得结束" });
+                        if (run.steps.length < run.max_steps)
+                            continue;
+                        return completeRun(run, runtime, "failed", "执行结果仍未通过验证，不能报告完成。", "unverified_completion");
+                    }
+                    (0, agent_reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, {
+                        id: "goal", label: "用户目标得到回答或可核验交付", kind: "goal", status: executionIntent ? (passedToolAssertions.length ? "passed" : "blocked") : "passed",
+                        evidence: [...(completion.evidence || []), ...passedToolAssertions.map(item => item.label)], reason: normalizedIntent.reason,
+                    });
+                    const includeDeliveryDetails = executionIntent || run.tool_calls > 0;
+                    const directReply = decision.message || completion.summary || "已完成。";
+                    const parts = [includeDeliveryDetails ? directReply : stripNonExecutionReportSections(directReply)];
+                    if (includeDeliveryDetails && completion.evidence?.length)
                         parts.push(`验证/证据：\n- ${completion.evidence.join("\n- ")}`);
-                    if (completion.risks?.length)
+                    if (includeDeliveryDetails && completion.risks?.length)
                         parts.push(`风险：\n- ${completion.risks.join("\n- ")}`);
-                    if (completion.next_action)
+                    if (includeDeliveryDetails && completion.next_action)
                         parts.push(`下一步：${completion.next_action}`);
                     return completeRun(run, runtime, "completed", parts.filter(Boolean).join("\n\n"));
                 }
@@ -503,11 +562,14 @@ async function continueLoop(run, runtime) {
                 risk,
                 explicitWriteAuthorization: run.explicit_write_authorization,
                 priorSteps: run.steps,
+                policyOverride: runtime.qualityPolicyOverride,
             });
             run.decision_summary = quality;
             run.shadow_mode = quality.policy.shadowMode;
             step.decision = quality;
             if (quality.requiresClarification) {
+                (0, agent_reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, { id: "clarification", label: "目标、授权与影响范围已澄清", kind: "intent", status: "blocked", reason: quality.clarificationReasons.join("；") });
+                (0, agent_reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "decision_quality_gap", quality.clarificationReasons.join("；"), "warning");
                 run.steps.push(step);
                 run.status = "waiting_clarification";
                 run.phase = "needs_confirmation";
@@ -569,6 +631,24 @@ async function continueLoop(run, runtime) {
             try {
                 const result = await runtime.executeTool(decision.tool.name, args, run);
                 step.observation = compactObservation(result);
+                (0, agent_reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, `tool:${decision.tool.name}`, result);
+                const toolSucceeded = result?.success !== false && !result?.error;
+                (0, agent_reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, {
+                    id: `tool_${signature}`,
+                    label: `工具 ${decision.tool.name} 产生可核验结果`,
+                    kind: "tool_outcome",
+                    status: toolSucceeded ? "passed" : "failed",
+                    evidence: [compactObservation(result)],
+                    reason: toolSucceeded ? "工具返回成功观察" : String(result?.error || "工具结果标记失败"),
+                });
+                if (toolSucceeded) {
+                    run.reasoning_loop.replan_required = false;
+                    run.reasoning_loop.last_replan_reason = "";
+                }
+                if (!toolSucceeded)
+                    (0, agent_reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "tool_result_mismatch", `${decision.tool.name} 返回失败结果，需要重新规划`, "error");
+                if (!toolSucceeded)
+                    (0, agent_reasoning_loop_1.recordReasoningPostmortem)(run.reasoning_loop, { trigger: "tool_result_mismatch", whatHappened: `${decision.tool.name} 返回失败观察`, correction: "把失败观察写入事实快照并要求模型调整计划", preventRepeat: "后续计划必须引用当前事实，不能机械重复旧工具参数" });
                 step.duration_ms = Math.max(0, (runtime.now ? runtime.now() : Date.now()) - toolStarted);
                 run.tool_calls += 1;
                 run.consecutive_failures = 0;
@@ -589,6 +669,9 @@ async function continueLoop(run, runtime) {
                 step.duration_ms = Math.max(0, (runtime.now ? runtime.now() : Date.now()) - toolStarted);
                 run.tool_calls += 1;
                 run.consecutive_failures += 1;
+                (0, agent_reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, { id: `tool_${signature}`, label: `工具 ${decision.tool.name} 产生可核验结果`, kind: "tool_outcome", status: "failed", reason: step.error });
+                (0, agent_reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "tool_execution_failed", `${decision.tool.name}: ${step.error}`, "error");
+                (0, agent_reasoning_loop_1.recordReasoningPostmortem)(run.reasoning_loop, { trigger: "tool_execution_failed", whatHappened: `${decision.tool.name}: ${step.error}`, correction: "保存失败断言并进入下一轮重规划或安全停止", preventRepeat: "优先核对当前状态、参数与执行器健康度后再重试" });
                 (0, agent_quality_center_1.recordAgentDecision)({
                     run_id: run.id, trace_id: run.trace_id, session_id: run.session_id, source: run.source, message: run.user_message,
                     intent: quality.intent, proposed_tool: { name: decision.tool.name, arguments: args }, risk,
@@ -620,6 +703,7 @@ async function startGlobalAgentRun(input, runtime) {
         session_id: input.sessionId || "default",
         source: input.source || "web",
         user_message: input.message,
+        original_user_message: input.message,
         history: input.history || [],
         status: "running",
         phase: "plan",
@@ -639,6 +723,11 @@ async function startGlobalAgentRun(input, runtime) {
         tool_calls: 0,
         consecutive_failures: 0,
         client_effects: [],
+        reasoning_loop: (0, agent_reasoning_loop_1.createAgentReasoningState)({
+            goal: input.message,
+            authorizationScope: input.explicitWriteAuthorization ? ["本次明确请求所涉及的目标与影响范围"] : [],
+            assertions: [{ id: "goal", label: "用户目标得到回答或可核验交付", kind: "goal" }],
+        }),
     });
     saveRun(run, runtime.persist !== false);
     (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:created`, type: "global_agent.run_created", status: "info", message: input.message.slice(0, 1000), data: { session_id: run.session_id, source: run.source, explicit_write_authorization: run.explicit_write_authorization } });
@@ -680,6 +769,8 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
         try {
             emit(runtime, { type: "tool_started", tool: pending, confirmed: true }, run);
             const result = await runtime.executeTool(pending.name, pending.arguments, run);
+            (0, agent_reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, `confirmed_tool:${pending.name}`, result);
+            (0, agent_reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, { id: `tool_${pending.signature}`, label: `确认后的工具 ${pending.name} 产生可核验结果`, kind: "tool_outcome", status: result?.success === false || result?.error ? "failed" : "passed", evidence: [result], reason: "用户确认后执行" });
             if (step) {
                 step.observation = compactObservation(result);
                 step.duration_ms = Math.max(0, (runtime.now ? runtime.now() : Date.now()) - started);
@@ -705,6 +796,9 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
             }
             run.tool_calls += 1;
             run.consecutive_failures += 1;
+            (0, agent_reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, { id: `tool_${pending.signature}`, label: `确认后的工具 ${pending.name} 产生可核验结果`, kind: "tool_outcome", status: "failed", reason: error?.message || String(error) });
+            (0, agent_reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "confirmed_tool_failed", `${pending.name}: ${error?.message || error}`, "error");
+            (0, agent_reasoning_loop_1.recordReasoningPostmortem)(run.reasoning_loop, { trigger: "confirmed_tool_failed", whatHappened: `${pending.name} 在用户确认后执行失败`, correction: "保留失败证据并重新核对当前状态", preventRepeat: "确认只授权动作，不代表工具结果可跳过验证" });
             (0, agent_quality_center_1.recordAgentDecision)({
                 run_id: run.id, trace_id: run.trace_id, session_id: run.session_id, source: run.source, message: run.user_message,
                 intent: run.decision_summary?.intent || (0, agent_quality_center_1.normalizeAgentDecisionIntent)(null, run.user_message),
@@ -722,6 +816,45 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
         run.status = "running";
         run.resume_count += 1;
     }
+    return continueLoop(run, runtime);
+}
+async function continueGlobalAgentRunWithClarification(id, answer, runtime, options = {}) {
+    if (activeRuns.has(id))
+        throw new Error("全局 Agent 当前仍在处理上一轮，请稍后再补充");
+    const stored = getGlobalAgentRun(id);
+    if (!stored)
+        throw new Error("全局 Agent 运行不存在");
+    const run = normalizeRun(stored);
+    if (run.status !== "waiting_clarification")
+        throw new Error("该运行当前不在等待澄清状态");
+    const clarification = String(answer || "").trim();
+    if (!clarification)
+        throw new Error("澄清内容不能为空");
+    const deniesAction = /(?:不要|不用|先别|暂时别|只分析|仅分析|不执行|不要执行)/.test(clarification);
+    const inheritedAuthorization = run.explicit_write_authorization && !deniesAction;
+    const currentAuthorization = options.explicitWriteAuthorization === true && !deniesAction;
+    (0, agent_reasoning_loop_1.appendReasoningClarification)(run.reasoning_loop, {
+        question: run.clarification_question || run.final_reply || "请补充目标和影响范围",
+        answer: clarification,
+        authorizationScope: currentAuthorization ? ["本轮澄清消息明确允许的范围"] : inheritedAuthorization ? ["同一澄清链中的原始明确执行范围"] : [],
+    });
+    if (deniesAction)
+        run.reasoning_loop.authorization_scope = [];
+    (0, agent_reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, { id: "clarification", label: "目标、授权与影响范围已澄清", kind: "intent", status: "passed", evidence: [clarification], reason: "用户已在同一待澄清运行中补充信息" });
+    (0, agent_reasoning_loop_1.explainReasoningDecision)(run.reasoning_loop, "continue_after_clarification", "合并原始目标与当前澄清，不新开无上下文运行");
+    run.history.push({ role: "assistant", content: run.clarification_question || run.final_reply || "请补充信息" }, { role: "user", content: clarification });
+    run.history = run.history.slice(-12);
+    run.user_message = run.reasoning_loop.effective_goal;
+    run.explicit_write_authorization = currentAuthorization || inheritedAuthorization;
+    run.status = "running";
+    run.phase = "plan";
+    run.clarification_question = "";
+    run.final_reply = "";
+    run.resume_count += 1;
+    run.consecutive_failures = 0;
+    run.updated_at = nowIso(runtime);
+    saveRun(run, runtime.persist !== false);
+    (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:clarified:${run.resume_count}`, type: "global_agent.clarification_received", status: "ok", message: clarification.slice(0, 1000), data: { plan_version: run.reasoning_loop.plan_version, authorization_inherited: inheritedAuthorization, authorization_current: currentAuthorization } });
     return continueLoop(run, runtime);
 }
 function pauseGlobalAgentRun(id) {
@@ -763,9 +896,13 @@ async function recoverInterruptedGlobalAgentRuns(runtime) {
     for (const stored of candidates) {
         const run = normalizeRun(stored);
         if (Date.now() > Date.parse(run.deadline_at)) {
+            (0, agent_reasoning_loop_1.recordReasoningRecoveryCheck)(run.reasoning_loop, { reason: "服务重启恢复时已超过截止时间", goalRevalidated: true, stateRevalidated: false, acceptanceRevalidated: false, remainingGaps: ["执行时间预算已耗尽"] });
             results.push(completeRun(run, runtime, "failed", "服务重启后发现运行已超过时间预算，已安全终止。", "recovery_deadline_exceeded"));
             continue;
         }
+        const currentContext = runtime.getContext ? await runtime.getContext(run) : {};
+        (0, agent_reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, "restart_recovery_context", currentContext);
+        (0, agent_reasoning_loop_1.recordReasoningRecoveryCheck)(run.reasoning_loop, { reason: "服务重启后恢复同一运行", goalRevalidated: !!run.reasoning_loop.original_goal, stateRevalidated: true, acceptanceRevalidated: run.reasoning_loop.assertions.length > 0, remainingGaps: run.reasoning_loop.assertions.filter(item => item.status !== "passed").map(item => item.label) });
         run.resume_count += 1;
         results.push(await continueLoop(run, runtime));
     }
@@ -807,6 +944,38 @@ async function runGlobalAgentLoopSelfTest() {
         persist: false,
         callModel: async () => ({ state: "execute", message: "需要修改代码", tool: { name: "send_project_cmd", arguments: { project: "demo", message: "实现支付" } } }),
         executeTool: async () => ({ success: true }),
+    });
+    const clarificationDecisions = [
+        { state: "execute", message: "按澄清后的目标执行", plan: ["确认 demo 当前状态", "实现支付", "验证结果"], intent: { category: "execution", goal: "给 demo 实现支付", action_required: true, target_refs: ["demo"], impact_scope: ["支付模块"], confidence: .96, authorization_basis: "current_message", reason: "用户已补充目标和范围" }, tool: { name: "send_project_cmd", arguments: { project: "demo", message: "实现支付并验证" } } },
+        { state: "complete", message: "澄清后的任务已执行", intent: { category: "execution", goal: "给 demo 实现支付", action_required: true, target_refs: ["demo"], confidence: .96, authorization_basis: "current_message", reason: "工具已返回可核验结果" }, tool: null, completion: { evidence: ["demo:success"] } },
+    ];
+    const clarified = await continueGlobalAgentRunWithClarification(waiting.id, "请给 demo 实现支付，只改支付模块并完成验证", {
+        persist: false,
+        callModel: async () => clarificationDecisions.shift(),
+        executeTool: async () => ({ success: true, project: "demo", verification: "passed" }),
+        getContext: () => ({ projects: ["demo"], current_head: "abc" }),
+    }, { explicitWriteAuthorization: true });
+    const analysisWaiting = await startGlobalAgentRun({ message: "帮我优化一下", explicitWriteAuthorization: true }, {
+        persist: false,
+        callModel: async () => ({ state: "needs_confirmation", message: "请说明目标和是否执行", intent: { category: "ambiguous", goal: "优化", action_required: true, confidence: .3, reason: "范围不清" }, tool: null }),
+        executeTool: async () => { throw new Error("不应执行"); },
+    });
+    const analysisClarified = await continueGlobalAgentRunWithClarification(analysisWaiting.id, "只分析 demo 的性能方向，不执行、不修改代码", {
+        persist: false,
+        callModel: async () => ({ state: "answer", message: "只提供分析建议", intent: { category: "analysis", goal: "分析 demo 性能", action_required: false, target_refs: ["demo"], confidence: .96, authorization_basis: "none", reason: "用户明确禁止执行" }, tool: null }),
+        executeTool: async () => { throw new Error("不应执行"); },
+    }, { explicitWriteAuthorization: false });
+    const replanDecisions = [
+        { state: "execute", message: "按初始方案执行", plan: ["直接修复", "验证"], intent: { category: "execution", goal: "修复 demo 登录", action_required: true, target_refs: ["demo"], confidence: .95, reason: "先尝试修复" }, tool: { name: "send_project_cmd", arguments: { project: "demo", message: "按旧入口修复登录" } } },
+        { state: "execute", message: "观察变化后重规划", plan: ["重新读取当前入口", "按新入口修复", "验证"], intent: { category: "execution", goal: "修复 demo 登录", action_required: true, target_refs: ["demo"], confidence: .96, reason: "旧入口不存在，依据工具观察调整方案" }, tool: { name: "send_project_cmd", arguments: { project: "demo", message: "读取当前入口后修复登录并验证" } } },
+        { state: "complete", message: "已按当前入口修复并验证", intent: { category: "execution", goal: "修复 demo 登录", action_required: true, target_refs: ["demo"], confidence: .97, reason: "重规划后的工具返回成功证据" }, tool: null, completion: { evidence: ["verification:passed"] } },
+    ];
+    let replanAttempt = 0;
+    const replanned = await startGlobalAgentRun({ message: "请修复 demo 登录并验证", explicitWriteAuthorization: true }, {
+        persist: false,
+        callModel: async () => replanDecisions.shift(),
+        executeTool: async () => (++replanAttempt === 1 ? { success: false, error: "旧登录入口已不存在" } : { success: true, verification: "passed" }),
+        getContext: () => ({ project: "demo", current_head: "new-head" }),
     });
     const destructiveDecisions = [
         { state: "execute", message: "删除前确认", tool: { name: "manage_task", arguments: { operation: "delete", id: "t1" } } },
@@ -861,6 +1030,18 @@ async function runGlobalAgentLoopSelfTest() {
     const paused = await pausingPromise;
     const resumed = await resumeGlobalAgentRun(paused.id, pauseRuntime);
     const parsedFence = parseGlobalAgentDecision("```json\n{\"state\":\"answer\",\"message\":\"ok\",\"tool\":null}\n```");
+    let shadowExecutions = 0;
+    const shadow = await startGlobalAgentRun({ message: "请给 demo 修复登录问题", explicitWriteAuthorization: true }, {
+        persist: false,
+        qualityPolicyOverride: { shadowMode: true },
+        callModel: async () => ({
+            state: "execute",
+            message: "准备修复",
+            intent: { category: "execution", goal: "修复 demo 登录", action_required: true, target_refs: ["demo"], confidence: .96, authorization_basis: "current_message", reason: "用户明确要求修复" },
+            tool: { name: "send_project_cmd", arguments: { project: "demo", message: "修复登录" } },
+        }),
+        executeTool: async () => { shadowExecutions += 1; return { success: true }; },
+    });
     const checks = {
         multiStepCompletes: multi.status === "completed",
         dispatchIsNotDeliveryCompletion: supervised.status === "supervising" && supervised.final_reply.includes("不代表任务已经完成"),
@@ -868,12 +1049,18 @@ async function runGlobalAgentLoopSelfTest() {
         modelObservesAndContinues: calls.join(",") === "inspect_system,orchestrate_development",
         consultationDoesNotDispatch: consultation.tool_calls === 0,
         ambiguousConsultationNeedsClarification: waiting.status === "waiting_clarification" && waiting.tool_calls === 0,
+        clarificationContinuesSameRun: clarified.id === waiting.id && clarified.status === "completed" && clarified.reasoning_loop.clarification_chain.length === 1,
+        clarificationPreservesOriginalGoal: clarified.reasoning_loop.original_goal === "支付功能怎么做" && clarified.reasoning_loop.effective_goal.includes("demo"),
+        reasoningPlanAndFactsAreAudited: clarified.reasoning_loop.plan_version >= 1 && clarified.reasoning_loop.fact_snapshots.length >= 1 && clarified.reasoning_loop.assertions.some(item => item.kind === "tool_outcome" && item.status === "passed"),
+        clarificationCanRevokeAuthorization: analysisClarified.id === analysisWaiting.id && analysisClarified.status === "completed" && analysisClarified.explicit_write_authorization === false && analysisClarified.reasoning_loop.authorization_scope.length === 0 && analysisClarified.tool_calls === 0,
+        toolFailureTriggersAuditedReplan: replanned.status === "completed" && replanned.reasoning_loop.plan_version === 2 && replanned.reasoning_loop.deviations.some(item => item.type === "tool_result_mismatch") && replanned.reasoning_loop.assertions.some(item => item.kind === "tool_outcome" && item.status === "failed") && replanned.reasoning_loop.assertions.some(item => item.kind === "tool_outcome" && item.status === "passed"),
         destructiveAlwaysNeedsConfirmation: destructive.status === "waiting_confirmation",
         confirmationExecutesExactPendingToolOnce: confirmed.status === "completed" && destructiveExecutions === 1,
         invalidToolsConvergeToFailure: invalid.status === "failed" && invalid.error.includes("未注册工具"),
         duplicateLoopIsStopped: duplicate.status === "failed" && duplicate.error === "duplicate_tool_loop",
         pauseAndResumeWorks: paused.status === "paused" && resumed.status === "completed",
         fencedJsonParses: parsedFence.state === "answer",
+        shadowModeHasNoSideEffect: shadow.status === "completed" && shadow.shadow_mode === true && shadow.tool_calls === 0 && shadowExecutions === 0,
     };
     return {
         pass: Object.values(checks).every(Boolean),

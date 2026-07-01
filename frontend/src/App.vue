@@ -1,25 +1,26 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch, provide } from 'vue'
-import ProjectManager from './components/ProjectManager.vue'
-import GroupChat from './components/GroupChat.vue'
-import ToolsConfig from './components/ToolsConfig.vue'
-import TaskManager from './components/TaskManager.vue'
-import AutoDevOps from './components/AutoDevOps.vue'
-import Terminal from './components/Terminal.vue'
-import Settings from './components/Settings.vue'
-import CodeChanges from './components/CodeChanges.vue'
-import CronJobs from './components/CronJobs.vue'
-import Templates from './components/Templates.vue'
-import Dashboard from './components/Dashboard.vue'
-import AgentMetrics from './components/AgentMetrics.vue'
-import SearchHistory from './components/SearchHistory.vue'
-import MusicPlayer from './components/MusicPlayer.vue'
-import MenuManager from './components/MenuManager.vue'
-import PetMenu from './components/pets/PetMenu.vue'
-import GlobalAgent from './components/GlobalAgent.vue'
-import KnowledgeBase from './components/KnowledgeBase.vue'
-import MemoryCenter from './components/MemoryCenter.vue'
-import SystemDiagnostics from './components/SystemDiagnostics.vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch, provide, defineAsyncComponent } from 'vue'
+import UsabilityWorkbench from './components/UsabilityWorkbench.vue'
+
+const ProjectManager = defineAsyncComponent(() => import('./components/ProjectManager.vue'))
+const GroupChat = defineAsyncComponent(() => import('./components/GroupChat.vue'))
+const ToolsConfig = defineAsyncComponent(() => import('./components/ToolsConfig.vue'))
+const TaskManager = defineAsyncComponent(() => import('./components/TaskManager.vue'))
+const AutoDevOps = defineAsyncComponent(() => import('./components/AutoDevOps.vue'))
+const Terminal = defineAsyncComponent(() => import('./components/Terminal.vue'))
+const Settings = defineAsyncComponent(() => import('./components/Settings.vue'))
+const CodeChanges = defineAsyncComponent(() => import('./components/CodeChanges.vue'))
+const CronJobs = defineAsyncComponent(() => import('./components/CronJobs.vue'))
+const Templates = defineAsyncComponent(() => import('./components/Templates.vue'))
+const AgentMetrics = defineAsyncComponent(() => import('./components/AgentMetrics.vue'))
+const SearchHistory = defineAsyncComponent(() => import('./components/SearchHistory.vue'))
+const MusicPlayer = defineAsyncComponent(() => import('./components/MusicPlayer.vue'))
+const MenuManager = defineAsyncComponent(() => import('./components/MenuManager.vue'))
+const PetMenu = defineAsyncComponent(() => import('./components/pets/PetMenu.vue'))
+const GlobalAgent = defineAsyncComponent(() => import('./components/GlobalAgent.vue'))
+const KnowledgeBase = defineAsyncComponent(() => import('./components/KnowledgeBase.vue'))
+const MemoryCenter = defineAsyncComponent(() => import('./components/MemoryCenter.vue'))
+const SystemDiagnostics = defineAsyncComponent(() => import('./components/SystemDiagnostics.vue'))
 
 const currentTab = ref('')
 const projects = ref([])
@@ -40,6 +41,7 @@ const isDark = ref(localStorage.getItem('theme') === 'dark')
 // 全局对话模板分发总线
 const activeSelectedTemplate = ref(null)
 provide('activeSelectedTemplate', activeSelectedTemplate)
+provide('slashNavigate', (tab) => switchTab(tab))
 provide('applyTemplate', (template, targetTab, targetId) => {
   currentTab.value = targetTab
   if (targetTab === 'groups') {
@@ -270,6 +272,7 @@ onUnmounted(() => {
 })
 
 const DEFAULT_TABS = [
+  { id: 'dashboard', icon: '✨', label: '我的工作台' },
   { id: 'projects', icon: '📂', label: '项目管理' },
   { id: 'groups', icon: '💬', label: '群聊协作' },
   { id: 'global-agent', icon: '🤖', label: '全局助手' },
@@ -284,7 +287,6 @@ const DEFAULT_TABS = [
   { id: 'cron', icon: '⏰', label: '定时任务' },
   { id: 'terminal', icon: '💻', label: '内置终端' },
   { id: 'templates', icon: '📚', label: '对话模板' },
-  { id: 'dashboard', icon: '📊', label: '协作仪表盘' },
   { id: 'metrics', icon: '📈', label: '性能监控' },
   { id: 'search', icon: '🔍', label: '对话搜索' },
   { id: 'music', icon: '🎵', label: '音乐播放' },
@@ -302,7 +304,7 @@ function getMergedTabs() {
 }
 
 const tabs = ref(loadTabOrder())
-currentTab.value = tabs.value[0]?.id || 'projects'
+currentTab.value = tabs.value.find(tab => tab.id === 'dashboard')?.id || tabs.value[0]?.id || 'projects'
 
 function loadTabOrder() {
   const merged = getMergedTabs()
@@ -336,9 +338,9 @@ const DEFAULT_GROUPS = [
   { id: 'system', label: '系统', icon: '⚙️' },
 ]
 const DEFAULT_TAB_GROUPS = {
-  projects: 'core', groups: 'collab', tasks: 'collab', autodev: 'collab', 'global-agent': 'core',
+  dashboard: 'core', projects: 'core', groups: 'collab', tasks: 'collab', autodev: 'collab', 'global-agent': 'core',
   tools: 'dev', changes: 'dev', terminal: 'dev', templates: 'dev',
-  dashboard: 'data', metrics: 'data', search: 'data', 'memory-center': 'data', knowledge: 'data', diagnostics: 'data',
+  metrics: 'data', search: 'data', 'memory-center': 'data', knowledge: 'data', diagnostics: 'data',
   cron: 'system', pets: 'system', music: 'system', settings: 'system',
 }
 
@@ -406,7 +408,14 @@ const endDrag = () => { dragIndex.value = null; saveTabOrder() }
 const resetTabOrder = () => { tabs.value = [...DEFAULT_TABS]; saveTabOrder() }
 
 // 浏览器风格标签页管理
-const openTabs = ref([tabs.value[0]]) // 默认打开项目管理
+const openTabs = ref([tabs.value.find(tab => tab.id === 'dashboard') || tabs.value[0]])
+
+const handleWorkbenchNavigate = (target = {}) => {
+  navigateTo.value = target
+  if (target.groupId) navigateTo.value = { tab: 'groups', groupId: target.groupId }
+  if (target.project) navigateTo.value = { tab: 'projects', project: target.project }
+  switchTab(target.tab || 'dashboard')
+}
 
 const switchTab = (tabId) => {
   currentTab.value = tabId
@@ -415,6 +424,8 @@ const switchTab = (tabId) => {
     if (tabInfo) openTabs.value.push(tabInfo)
   }
 }
+
+const isTabOpen = (tabId) => openTabs.value.some(tab => tab?.id === tabId)
 
 const closeTab = (tabId, event) => {
   const idx = openTabs.value.findIndex(t => t.id === tabId)
@@ -504,29 +515,29 @@ const closeTab = (tabId, event) => {
       </div>
 
       <div class="content-area" :class="{ 'has-bottom-bar': isMobile }" @wheel.stop>
-        <div v-show="currentTab === 'projects'" class="tab-pane"><ProjectManager :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
-        <div v-show="currentTab === 'groups'" class="tab-pane"><GroupChat :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
-        <div v-show="currentTab === 'global-agent'" class="tab-pane"><GlobalAgent @switch-tab="switchTab" @set-navigation="(target) => navigateTo = target" /></div>
-        <div v-show="currentTab === 'tools'" class="tab-pane"><ToolsConfig /></div>
-        <div v-show="currentTab === 'pets'" class="tab-pane"><PetMenu :agents="petAgents" @agents-updated="refreshMusicPetAgent" /></div>
-        <div v-show="currentTab === 'changes'" class="tab-pane"><CodeChanges /></div>
-        <div v-show="currentTab === 'tasks'" class="tab-pane"><TaskManager /></div>
-        <div v-show="currentTab === 'autodev'" class="tab-pane"><AutoDevOps /></div>
-        <div v-show="currentTab === 'diagnostics'" class="tab-pane"><SystemDiagnostics /></div>
-        <div v-show="currentTab === 'knowledge'" class="tab-pane"><KnowledgeBase /></div>
-        <div v-show="currentTab === 'memory-center'" class="tab-pane"><MemoryCenter /></div>
-        <div v-show="currentTab === 'cron'" class="tab-pane"><CronJobs /></div>
-        <div v-show="currentTab === 'terminal'" class="tab-pane"><Terminal /></div>
-        <div v-show="currentTab === 'templates'" class="tab-pane"><Templates /></div>
-        <div v-show="currentTab === 'dashboard'" class="tab-pane"><Dashboard /></div>
-        <div v-show="currentTab === 'metrics'" class="tab-pane"><AgentMetrics /></div>
-        <div v-show="currentTab === 'search'" class="tab-pane"><SearchHistory @go-to="goToResult" /></div>
-        <div v-show="currentTab === 'music'" class="tab-pane"><MusicPlayer :agent-label="musicPetLabel" /></div>
-        <div v-show="currentTab === 'settings'" class="tab-pane"><Settings /></div>
-        <div v-show="currentTab === 'menumanager'" class="tab-pane"><MenuManager :tabs="tabs" @update-groups="updateMenuGroups" /></div>
+        <div v-if="isTabOpen('projects')" v-show="currentTab === 'projects'" class="tab-pane"><ProjectManager :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
+        <div v-if="isTabOpen('groups')" v-show="currentTab === 'groups'" class="tab-pane"><GroupChat :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
+        <div v-if="isTabOpen('global-agent')" v-show="currentTab === 'global-agent'" class="tab-pane"><GlobalAgent @switch-tab="switchTab" @set-navigation="(target) => navigateTo = target" /></div>
+        <div v-if="isTabOpen('tools')" v-show="currentTab === 'tools'" class="tab-pane"><ToolsConfig /></div>
+        <div v-if="isTabOpen('pets')" v-show="currentTab === 'pets'" class="tab-pane"><PetMenu :agents="petAgents" @agents-updated="refreshMusicPetAgent" /></div>
+        <div v-if="isTabOpen('changes')" v-show="currentTab === 'changes'" class="tab-pane"><CodeChanges /></div>
+        <div v-if="isTabOpen('tasks')" v-show="currentTab === 'tasks'" class="tab-pane"><TaskManager :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
+        <div v-if="isTabOpen('autodev')" v-show="currentTab === 'autodev'" class="tab-pane"><AutoDevOps /></div>
+        <div v-if="isTabOpen('diagnostics')" v-show="currentTab === 'diagnostics'" class="tab-pane"><SystemDiagnostics /></div>
+        <div v-if="isTabOpen('knowledge')" v-show="currentTab === 'knowledge'" class="tab-pane"><KnowledgeBase /></div>
+        <div v-if="isTabOpen('memory-center')" v-show="currentTab === 'memory-center'" class="tab-pane"><MemoryCenter /></div>
+        <div v-if="isTabOpen('cron')" v-show="currentTab === 'cron'" class="tab-pane"><CronJobs /></div>
+        <div v-if="isTabOpen('terminal')" v-show="currentTab === 'terminal'" class="tab-pane"><Terminal /></div>
+        <div v-if="isTabOpen('templates')" v-show="currentTab === 'templates'" class="tab-pane"><Templates /></div>
+        <div v-if="isTabOpen('dashboard')" v-show="currentTab === 'dashboard'" class="tab-pane scrollable-pane"><UsabilityWorkbench @navigate="handleWorkbenchNavigate" /></div>
+        <div v-if="isTabOpen('metrics')" v-show="currentTab === 'metrics'" class="tab-pane"><AgentMetrics /></div>
+        <div v-if="isTabOpen('search')" v-show="currentTab === 'search'" class="tab-pane"><SearchHistory @go-to="goToResult" /></div>
+        <div v-if="isTabOpen('music')" v-show="currentTab === 'music'" class="tab-pane"><MusicPlayer :agent-label="musicPetLabel" /></div>
+        <div v-if="isTabOpen('settings')" v-show="currentTab === 'settings'" class="tab-pane"><Settings /></div>
+        <div v-if="isTabOpen('menumanager')" v-show="currentTab === 'menumanager'" class="tab-pane"><MenuManager :tabs="tabs" @update-groups="updateMenuGroups" /></div>
         
         <!-- 动态渲染自定义外部链接的 iframe 面板 -->
-        <div v-for="tab in tabs.filter(t => t.isExternal)" :key="tab.id" v-show="currentTab === tab.id" class="tab-pane">
+        <div v-for="tab in tabs.filter(t => t.isExternal && isTabOpen(t.id))" :key="tab.id" v-show="currentTab === tab.id" class="tab-pane">
           <iframe :src="tab.url" style="width: 100%; height: 100%; border: none; background: var(--bg-secondary); border-radius: 8px;"></iframe>
         </div>
       </div>
@@ -799,6 +810,13 @@ const closeTab = (tabId, event) => {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   box-shadow: var(--shadow-sm);
+}
+
+.tab-pane.scrollable-pane {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .empty-state {

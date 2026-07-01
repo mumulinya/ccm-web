@@ -40,6 +40,7 @@ exports.validateDevelopmentTaskPacket = validateDevelopmentTaskPacket;
 exports.ensureExecution = ensureExecution;
 exports.loadExecution = loadExecution;
 exports.listExecutions = listExecutions;
+exports.purgeTaskExecutionArtifacts = purgeTaskExecutionArtifacts;
 exports.transitionExecution = transitionExecution;
 exports.attachExecutionWorkspace = attachExecutionWorkspace;
 exports.registerExternalRunnerRequest = registerExternalRunnerRequest;
@@ -257,6 +258,43 @@ function listExecutions(filters = {}) {
     return records.filter(record => !filters.taskId || record.taskId === filters.taskId)
         .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
+function purgeTaskExecutionArtifacts(taskId) {
+    const id = String(taskId || "").trim();
+    if (!id)
+        throw new Error("缺少任务 ID");
+    const records = listExecutions({ taskId: id });
+    let checkpoints = 0;
+    let outputs = 0;
+    for (const record of records) {
+        for (const checkpointId of record.checkpointIds || []) {
+            try {
+                fs.unlinkSync(checkpointFile(checkpointId));
+                checkpoints++;
+            }
+            catch { }
+        }
+        try {
+            fs.unlinkSync(executionFile(record.id));
+        }
+        catch { }
+    }
+    const outputPrefix = `${safePart(id)}-`;
+    try {
+        for (const name of fs.readdirSync(OUTPUTS_DIR)) {
+            if (!name.startsWith(outputPrefix))
+                continue;
+            try {
+                fs.unlinkSync(path.join(OUTPUTS_DIR, name));
+                outputs++;
+            }
+            catch { }
+        }
+    }
+    catch { }
+    clearTaskCancellation(id);
+    activeProcesses.delete(id);
+    return { executions: records.length, checkpoints, outputs };
+}
 function transitionExecution(executionId, state, message = "", extra = {}) {
     const record = loadExecution(executionId);
     if (!record)
@@ -272,6 +310,14 @@ function transitionExecution(executionId, state, message = "", extra = {}) {
         record.failure = extra.failure;
     if (extra.green)
         record.green = extra.green;
+    if (Object.prototype.hasOwnProperty.call(extra, "receipt"))
+        record.receipt = extra.receipt;
+    if (Object.prototype.hasOwnProperty.call(extra, "fileChanges"))
+        record.fileChanges = extra.fileChanges;
+    if (Object.prototype.hasOwnProperty.call(extra, "runnerVerification"))
+        record.runnerVerification = extra.runnerVerification;
+    if (Object.prototype.hasOwnProperty.call(extra, "outputPreview"))
+        record.outputPreview = String(extra.outputPreview || "").slice(0, 12_000);
     if (extra.cancellation)
         record.cancellation = extra.cancellation;
     record.events = [...(record.events || []), createEvent(record, extra.name || `execution.${state}`, message || state, {
@@ -394,8 +440,12 @@ function requestTaskCancellation(taskId, reason = "用户取消任务", actor = 
     }
     catch { }
     const executions = listExecutions({ taskId });
-    for (const execution of executions)
-        transitionExecution(execution.id, "cancel_requested", reason, { cancellation: { reason, actor, requestedAt }, status: "warning" });
+    const hasLiveCancellationTarget = killed > 0 || runnerRequests > 0;
+    for (const execution of executions) {
+        if (["succeeded", "failed", "cancelled"].includes(execution.state))
+            continue;
+        transitionExecution(execution.id, hasLiveCancellationTarget ? "cancel_requested" : "cancelled", reason, { cancellation: { reason, actor, requestedAt }, status: "warning" });
+    }
     return { success: true, taskId, killedProcesses: killed, externalRunnerRequests: runnerRequests, executions: executions.map(item => item.id) };
 }
 async function runManagedCommand(input) {
@@ -773,6 +823,17 @@ function runExecutionKernelSelfTest() {
         fs.writeFileSync(path.join(tempRoot, "created.txt"), "new\n", "utf-8");
         const rollback = rollbackExecutionCheckpoint(checkpoint.id, "self test");
         const green = evaluateGreenContract({ receipt: { status: "done", verification: ["npm test passed"] }, fileChanges: [{ path: "tracked.txt" }], requiresChanges: true, requiresVerification: true, runnerVerification: { status: "passed", results: [{ command: "npm test", status: "passed" }] }, workspacePassed: true, branchFresh: true, reviewPassed: true, requiredLevel: "merge_ready" });
+        const persistedReceipt = { agent: "self-test", status: "done", verification: ["npm test passed by external runner (exit 0)"] };
+        const persistedFileChanges = { files: [{ path: "tracked.txt" }] };
+        const persistedRunner = { status: "passed", verification: persistedReceipt.verification, failed: [] };
+        transitionExecution(execution.id, "reviewing", "self-test evidence", {
+            green,
+            receipt: persistedReceipt,
+            fileChanges: persistedFileChanges,
+            runnerVerification: persistedRunner,
+            outputPreview: "CCM_AGENT_RECEIPT",
+        });
+        const reloadedExecution = loadExecution(execution.id);
         const failure = classifyExecutionFailure("MCP initialize handshake failed");
         const restored = fs.readFileSync(path.join(tempRoot, "tracked.txt"), "utf-8").replace(/\r\n/g, "\n") === "before\n" && !fs.existsSync(path.join(tempRoot, "created.txt"));
         const checks = {
@@ -782,6 +843,10 @@ function runExecutionKernelSelfTest() {
             checkpointRollbackRestoresFiles: rollback.success && restored,
             classifiesTypedFailure: failure.failureClass === "mcp_handshake" && failure.recoverable,
             evaluatesMergeReadyGreenContract: green.pass && green.level === "merge_ready",
+            persistsDeliveryEvidence: reloadedExecution?.receipt?.status === "done"
+                && reloadedExecution?.fileChanges?.files?.[0]?.path === "tracked.txt"
+                && reloadedExecution?.runnerVerification?.status === "passed"
+                && reloadedExecution?.outputPreview === "CCM_AGENT_RECEIPT",
             sanitizesEnvironment: sanitizeExecutionEnv({ CCM_SECRET_NOT_ALLOWED: "secret" }).CCM_SECRET_NOT_ALLOWED === undefined,
         };
         return { pass: Object.values(checks).every(Boolean), checks };

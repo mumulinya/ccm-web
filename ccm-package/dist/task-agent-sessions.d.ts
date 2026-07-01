@@ -19,6 +19,8 @@ export type TaskAgentSession = {
     nativeSessionHistory?: string[];
     lastNativeRecoveryAt?: string;
     lastError?: string;
+    permissionDriftCount?: number;
+    lastPermissionDriftAt?: string;
 };
 export declare function openTaskAgentSession(input: {
     scopeId: string;
@@ -32,18 +34,21 @@ export declare function recordTaskAgentSessionTurn(sessionId: string, result?: {
     success?: boolean;
     error?: string;
     nativeSessionInvalid?: boolean;
+    permissionDrift?: boolean;
 }): TaskAgentSession;
 export declare function advanceTaskAgentSession(current: TaskAgentSession, result?: {
     nativeSessionId?: string;
     success?: boolean;
     error?: string;
     nativeSessionInvalid?: boolean;
+    permissionDrift?: boolean;
 }): TaskAgentSession;
 export declare function closeTaskAgentSessions(input: {
     scopeId?: string;
     taskId?: string;
     groupId?: string;
 }, reason?: string): TaskAgentSession[];
+export declare function reopenTaskAgentSessions(taskId: string, reason?: string): TaskAgentSession[];
 export declare function getTaskAgentSessionOptions(session: TaskAgentSession): {
     sessionId: string;
     resumeSession: boolean;
@@ -65,6 +70,11 @@ export declare function listTaskAgentSessions(filter?: {
     project?: string;
     status?: string;
 }): any;
+export declare function purgeTaskAgentSessions(taskId: string): any;
+export declare function reconcileTaskAgentSessions(tasks: any[], nowMs?: number): {
+    closed: number;
+    sessions: TaskAgentSession[];
+};
 export declare function shouldCloseTaskAgentSessions(input: {
     taskId?: string;
     reviewStatus?: string;
@@ -83,5 +93,6 @@ export declare function runTaskAgentSessionSelfTest(): {
         missingNativeIdCanDegradeSafely: boolean;
         capturedNativeIdStaysResumable: boolean;
         invalidNativeSessionCreatesRecoveryPath: boolean;
+        permissionDriftRebuildsNativeSession: boolean;
     };
 };

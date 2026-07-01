@@ -40,7 +40,7 @@ export declare function evaluateAgentDecision(input: {
     risk: "high" | "read" | "write";
     targets: any[];
     groundedTarget: boolean;
-    authorizationBasis: "current_message" | "confirmation" | "none";
+    authorizationBasis: string;
     requiresClarification: boolean;
     clarificationReasons: string[];
     clarificationQuestion: string;
@@ -77,6 +77,8 @@ export declare function buildAgentQualitySnapshot(input?: {
         proposed_writes: number;
         tasks: number;
         completed_tasks: number;
+        scored_completed_tasks: number;
+        legacy_unscored_completed: number;
         sessions: number;
     };
     counts: {
@@ -91,6 +93,11 @@ export declare function buildAgentQualitySnapshot(input?: {
         conflict_tasks: number;
         handled_conflicts: number;
         first_pass_delivery: number;
+        reasoning_tasks: number;
+        recovery_revalidated: number;
+        replanned_tasks: number;
+        reasoning_error_tasks: number;
+        postmortem_tasks: number;
     };
     rates: {
         misdispatch_rate: number;
@@ -100,8 +107,22 @@ export declare function buildAgentQualitySnapshot(input?: {
         native_session_recovery_rate: number;
         conflict_handling_rate: number;
         first_pass_delivery_rate: number;
+        recovery_goal_revalidation_rate: number;
+        dynamic_replan_rate: number;
     };
     recent_decisions: any[];
+    recent_reasoning_tasks: {
+        task_id: any;
+        title: any;
+        status: any;
+        plan_version: number;
+        open_assertions: any;
+        deviations: any;
+        postmortems: any;
+        replan_required: boolean;
+        recovery_checks: any;
+        last_fact_hash: any;
+    }[];
 };
 export declare function runAgentQualityCenterSelfTest(): {
     pass: boolean;
@@ -111,5 +132,6 @@ export declare function runAgentQualityCenterSelfTest(): {
         lowConfidenceGuessIsBlocked: boolean;
         shadowModeRecordsWithoutExecution: boolean;
         historyCannotAuthorize: boolean;
+        clarificationDenialOverridesOriginalDirective: boolean;
     };
 };

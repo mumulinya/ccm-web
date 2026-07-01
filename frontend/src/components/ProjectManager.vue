@@ -2,6 +2,12 @@
 import { ref, onMounted, onUnmounted, nextTick, computed, watch, inject } from 'vue'
 import { api, projectsApi, sessionsApi } from '../api/index.js'
 import { toast, confirmDialog } from '../utils/toast.js'
+import SlashCommandMenu from './SlashCommandMenu.vue'
+import CommandResultCard from './CommandResultCard.vue'
+import TaskExperienceCard from './TaskExperienceCard.vue'
+import { useSlashCommands } from '../composables/useSlashCommands.js'
+import { downloadCommandJson } from '../utils/commandExport.js'
+import { projectExecutionTaskCard } from '../utils/taskExperience.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
 const emit = defineEmits(['navigated'])
@@ -68,11 +74,84 @@ const messages = ref([])
 const messagesEl = ref(null)
 const isMessagesPinnedToBottom = ref(true)
 const chatInput = ref('')
+const slashNavigate = inject('slashNavigate', () => {})
+const runProjectClientCommand = async (action) => {
+  if (!currentProject.value) throw new Error('请先选择项目')
+  if (action === 'new_session') {
+    await createSession()
+    return { success: true, summary: '已新建项目 Agent 会话。', metrics: { 项目: currentProject.value, 会话: currentSession.value || '新会话' } }
+  }
+  if (action === 'clear_session') {
+    if (!currentProject.value || !currentSession.value) throw new Error('请先选择项目会话')
+    const res = await fetch('/api/sessions/clear', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project: currentProject.value, sessionId: currentSession.value }) })
+    const data = await res.json()
+    if (!res.ok || !data.success) throw new Error(data.error || '清空项目会话失败')
+    messages.value = []
+    await loadSessions(currentProject.value)
+    return { success: true, summary: `已清空项目会话 ${currentSession.value}。`, metrics: { 已清空: data.cleared || 0 } }
+  }
+  if (action === 'context') {
+    const chars = messages.value.reduce((sum, item) => sum + String(item.content || '').length, 0)
+    return {
+      success: true,
+      summary: `项目 ${currentProject.value} 的会话 ${currentSession.value || '未选择'} 当前有 ${messages.value.length} 条消息。`,
+      metrics: { 项目: currentProject.value, 会话: currentSession.value, 消息: messages.value.length, 用户消息: messages.value.filter(item => item.role === 'user').length, 估算Token: Math.ceil(chars / 4) },
+      items: messages.value.slice(-8).reverse().map(item => ({ title: item.role === 'user' ? '用户' : 'Agent', detail: String(item.content || '').slice(0, 180), status: item.timestamp || '' }))
+    }
+  }
+  if (action === 'export_context') {
+    downloadCommandJson(`ccm-project-${currentProject.value}-${currentSession.value || 'context'}`, { project: currentProject.value, sessionId: currentSession.value, messages: messages.value })
+    return { success: true, summary: '项目 Agent 当前会话已导出为 JSON。', metrics: { 消息: messages.value.length } }
+  }
+  throw new Error(`不支持的客户端命令：${action}`)
+}
+const slash = useSlashCommands({
+  scope: 'project',
+  input: chatInput,
+  context: () => ({ project: currentProject.value, sessionId: currentSession.value || '' }),
+  focus: () => nextTick(() => document.getElementById('projectChatInput')?.focus()),
+  onNavigate: (tab) => slashNavigate(tab),
+  onPrompt: async (prompt) => {
+    chatInput.value = prompt
+    await nextTick()
+    await sendMessage()
+  },
+  onClientAction: runProjectClientCommand,
+  onResult: (result) => {
+    messages.value.push({ role: 'assistant', type: 'command_result', commandResult: result, content: '', timestamp: new Date().toISOString() })
+    nextTick(() => scrollToBottom())
+  },
+  onError: (message) => toast.error(message),
+  onConfirm: (message) => confirmDialog(message)
+})
 const userMessages = computed(() => {
   return messages.value
     .map((m, idx) => ({ ...m, originalIndex: idx }))
     .filter(m => m.role === 'user')
 })
+const navMessages = computed(() => {
+  const turns = [];
+  let currentTurn = null;
+  messages.value.forEach((m, idx) => {
+    if (m.role === 'user') {
+      if (currentTurn) turns.push(currentTurn);
+      currentTurn = {
+        originalIndex: idx,
+        userContent: m.content || '',
+        assistantContent: '',
+        role: 'user',
+        files: m.files || []
+      };
+    } else if (m.role === 'assistant' && currentTurn) {
+      if (!currentTurn.assistantContent) {
+        currentTurn.assistantContent = m.content || (m.agenticRun ? (m.agenticRun.final_reply || m.agenticRun.status) : '');
+      }
+    }
+  });
+  if (currentTurn) turns.push(currentTurn);
+  return turns.length > 40 ? turns.slice(-40) : turns;
+})
+
 
 const chatFiles = ref([])
 const chatFileInput = ref(null)
@@ -407,7 +486,7 @@ const sendMessage = async () => {
   scrollToBottom({ force: true })
 
   // 创建 Agent 回复消息
-  const agentMsg = { role: 'assistant', content: '', workEvents: [], timestamp: new Date().toISOString() }
+  const agentMsg = { role: 'assistant', content: '', workEvents: [], requestText: msg, streaming: true, timestamp: new Date().toISOString() }
 
   isStreaming.value = true
   thinkingMessages.value = []
@@ -493,6 +572,7 @@ const sendMessage = async () => {
           agentMsgAdded = true
         }
         agentMsg.content = '❌ 错误: ' + data.text
+        agentMsg.streaming = false
         isStreaming.value = false
       }
     } catch {}
@@ -513,6 +593,7 @@ const sendMessage = async () => {
   if (sseBuffer.trim()) handleSseEvent(sseBuffer)
 
   isStreaming.value = false
+  agentMsg.streaming = false
   // 确保移除思考消息
   const thinkingIdx = messages.value.indexOf(thinkingMsg);
   if (thinkingIdx !== -1) {
@@ -524,7 +605,7 @@ const sendMessage = async () => {
     sessionsApi.saveMessage({
       project: currentProject.value,
       sessionId: currentSession.value,
-      message: { role: 'assistant', content: agentMsg.content, timestamp: new Date().toISOString(), fileChanges: agentMsg.fileChanges || null, workEvents: agentMsg.workEvents || [] }
+      message: { role: 'assistant', content: agentMsg.content, requestText: agentMsg.requestText, task_id: agentMsg.task_id || '', taskExperience: agentMsg.taskExperience || null, timestamp: new Date().toISOString(), fileChanges: agentMsg.fileChanges || null, workEvents: agentMsg.workEvents || [] }
     }).catch(() => {})
   }
 
@@ -598,7 +679,7 @@ const tokenize = (str) => {
 const diffTokens = (oldStr, newStr) => {
   const oldTokens = tokenize(oldStr)
   const newTokens = tokenize(newStr)
-  
+
   const n = oldTokens.length
   const m = newTokens.length
   
@@ -1347,19 +1428,23 @@ const getFilteredTemplates = () => {
 
 const handleInput = (e) => {
   const value = e.target.value
-  
-  if (value.startsWith('/')) {
-    templateSearchQuery.value = value.substring(1)
-    showTemplateSelector.value = true
-    activeTemplateIndex.value = 0
-    showRecommendation.value = false
-  } else {
+  if (slash.onInput()) {
     showTemplateSelector.value = false
-    detectRecommendation(value)
+    showRecommendation.value = false
+    return
   }
+  if (value.startsWith('/')) {
+    showTemplateSelector.value = false
+    showRecommendation.value = false
+    return
+  }
+
+  showTemplateSelector.value = false
+  detectRecommendation(value)
 }
 
-const handleKeydown = (e) => {
+const handleKeydown = async (e) => {
+  if (await slash.onKeydown(e)) return
   // 1. 处理斜杠指令模板下拉菜单键盘控制
   if (showTemplateSelector.value) {
     const filtered = getFilteredTemplates()
@@ -1483,8 +1568,9 @@ const handleKeydown = (e) => {
           </div>
           <template v-else>
             <div v-for="(msg, i) in messages" :key="getMessageKey(msg)" :id="'msg-' + i" class="message" :class="[msg.role, { 'msg-highlight': highlightMsgIndex === i }]">
+              <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
               <!-- 思考过程消息 -->
-              <div v-if="msg.role === 'thinking'" class="thinking-bubble">
+              <div v-else-if="msg.role === 'thinking'" class="thinking-bubble">
                 <div class="thinking-header">
                   <span class="thinking-icon">🧠</span>
                   <span>Agent 思考中...</span>
@@ -1533,16 +1619,31 @@ const handleKeydown = (e) => {
             </div>
           </template>
         </div>
-        <!-- 消息锚点导航条 -->
-        <div v-if="userMessages.length > 1" class="msg-navigator">
-          <div 
-            v-for="msg in userMessages" 
-            :key="msg.originalIndex" 
-            class="navigator-dot"
-            @click="scrollToMessage(msg.originalIndex)"
-            :title="msg.content.slice(0, 30) + (msg.content.length > 30 ? '...' : '')"
-          >
-            <span class="dot-bar"></span>
+        <!-- 消息锚点导航条 (Codex 风格) -->
+        <div v-if="navMessages.length > 1" class="msg-navigator">
+          <div class="msg-nav-track">
+            <div 
+              v-for="msg in navMessages" 
+              :key="msg.originalIndex" 
+              class="navigator-dot"
+              :class="msg.role"
+              @click="scrollToMessage(msg.originalIndex)"
+            >
+              <div class="dot-cluster">
+                  <span class="dot-bar user-bar"></span>
+                  <span class="dot-bar assistant-bar" v-if="msg.assistantContent"></span>
+                </div>
+              <div class="nav-tooltip-card">
+                <div class="nav-tt-user">{{ (msg.userContent || '附件内容').slice(0, 80) + ((msg.userContent || '').length > 80 ? '...' : '') }}</div>
+                <div class="nav-tt-assistant" v-if="msg.assistantContent">{{ msg.assistantContent.slice(0, 80) + (msg.assistantContent.length > 80 ? '...' : '') }}</div>
+                <div class="nav-tt-tags" v-if="msg.files && msg.files.length">
+                  <span class="nav-tt-tag" v-for="f in msg.files" :key="f.name">📄 {{ f.name }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="msg-nav-scrollbar">
+            <div class="msg-nav-thumb"></div>
           </div>
         </div>
         <div class="chat-bar">
@@ -1563,8 +1664,16 @@ const handleKeydown = (e) => {
                 <button title="移除附件" @click="removeChatFile(index)">×</button>
               </span>
             </div>
-            <textarea id="projectChatInput" v-model="chatInput" placeholder="输入消息发送给 Agent... (Enter 发送，输入 / 唤起快捷模板)" rows="1"
+            <textarea id="projectChatInput" v-model="chatInput" placeholder="输入消息发送给 Agent…（Enter 发送，输入 / 打开命令中心）" rows="1"
               @keydown="handleKeydown" @input="handleInput"></textarea>
+            <SlashCommandMenu
+              :open="slash.open"
+              :commands="slash.filtered"
+              :active-index="slash.activeIndex"
+              :loading="slash.loading"
+              :query="slash.query"
+              @select="slash.select"
+            />
             <!-- 📚 模板快捷选择浮层 -->
             <div v-if="showTemplateSelector" class="template-dropdown">
               <div style="padding: 8px; border-bottom: 1px solid rgba(0,0,0,0.05); display:flex; gap:6px;">
@@ -3301,82 +3410,166 @@ const handleKeydown = (e) => {
 .work-event.fail .work-event-kind { background: rgba(239, 68, 68, 0.12); color: var(--accent-red); }
 .work-event.output .work-event-kind { background: rgba(59, 130, 246, 0.1); color: var(--accent-blue); }
 
-/* 消息节点锚点导航条 */
+/* 消息节点锚点导航条 (Codex 风格) */
 .msg-navigator {
   position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
+  right: 6px;
+  top: 8px;
+  bottom: 8px;
+  width: 28px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px 4px;
-  background: rgba(255, 255, 255, 0.45);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 20px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
   z-index: 100;
-  max-height: 70%;
-  overflow-y: auto;
+  overflow: hidden;
+  padding: 6px 0;
 }
 
 :global([data-theme="dark"]) .msg-navigator {
-  background: rgba(15, 23, 42, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
 }
 
+.msg-nav-track {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.msg-nav-track::-webkit-scrollbar { display: none; }
+
 .navigator-dot {
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  min-height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s ease;
   position: relative;
+  flex-shrink: 0;
+  padding: 2px 0;
+}
+
+.dot-cluster {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
 }
 
 .dot-bar {
-  width: 8px;
-  height: 2px;
-  background: var(--text-muted);
-  border-radius: 1px;
-  opacity: 0.5;
-  transition: all 0.2s;
+  width: 10px;
+  height: 3px;
+  border-radius: 1.5px;
+  transition: all 0.2s ease;
 }
 
+.user-bar {
+  background: var(--accent-blue, #3b82f6);
+  opacity: 0.5;
+}
+.assistant-bar {
+  background: var(--text-muted, #94a3b8);
+  opacity: 0.35;
+}
+
+.navigator-dot:hover {
+  transform: scale(1.3);
+}
 .navigator-dot:hover .dot-bar {
   width: 14px;
-  height: 3px;
-  background: var(--accent-blue);
+  height: 4px;
   opacity: 1;
 }
+.navigator-dot:hover .user-bar {
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.4);
+}
+.navigator-dot:hover .assistant-bar {
+  box-shadow: 0 0 6px rgba(148, 163, 184, 0.4);
+}
 
-/* Tooltip 悬停显示用户消息 */
-.navigator-dot::after {
-  content: attr(title);
+/* Tooltip 悬停显示消息摘要 */
+.nav-tooltip-card {
   position: absolute;
-  right: 24px;
+  right: 28px;
   top: 50%;
-  transform: translateY(-50%) scale(0.85);
-  background: rgba(15, 23, 42, 0.9);
-  color: #ffffff;
-  padding: 5px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  white-space: nowrap;
+  transform: translateY(-50%) scale(0.9);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
+  color: var(--text-primary, #333333);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  max-width: 320px;
+  width: max-content;
   opacity: 0;
   pointer-events: none;
-  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+  transition: all 0.18s cubic-bezier(0.25, 0.8, 0.25, 1);
   transform-origin: right center;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-
-.navigator-dot:hover::after {
+:global([data-theme="dark"]) .nav-tooltip-card {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #f1f5f9;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+.navigator-dot:hover .nav-tooltip-card {
   opacity: 1;
   transform: translateY(-50%) scale(1);
+}
+.nav-tt-user {
+  font-weight: 600;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.nav-tt-assistant {
+  font-size: 12px;
+  color: var(--text-muted, #777);
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+:global([data-theme="dark"]) .nav-tt-assistant {
+  color: #94a3b8;
+}
+.nav-tt-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+.nav-tt-tag {
+  background: rgba(0, 0, 0, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-secondary, #555);
+}
+:global([data-theme="dark"]) .nav-tt-tag {
+  background: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
 }
 </style>
 

@@ -438,6 +438,17 @@ function isSimpleMessage(message: string) {
   return SIMPLE_MESSAGE_PATTERNS.some(pattern => pattern.test(text));
 }
 
+export function isExplicitExecutionRequest(message: string) {
+  const text = String(message || "").trim();
+  if (!text) return false;
+  const explanationOnly = /^(?:请)?(?:介绍|说明|解释|分析|总结|概括|告诉我|这(?:个)?是|这是|什么是|为什么|为何|如何|怎么|是否|能否|能不能).{0,80}$/i.test(text)
+    || /(?:是什么项目|项目是做什么的|介绍一下项目|分析一下(?:项目|代码|架构)|有什么功能|采用什么技术|为什么会)/i.test(text);
+  const explicitAction = /(?:^|请|帮我|给我|需要|我要|现在|立即|开始|继续|然后|并且|把).{0,18}(?:修改|实现|开发|新增|添加|加上|加一个|创建|运行|执行|派发|修复|删除|清理|更新|重构|接入|安装|部署|提交|写入|生成|迁移|恢复|暂停|取消|启动|停止)/i.test(text)
+    || /^(?:修改|实现|开发|新增|添加|创建|运行|执行|派发|修复|删除|清理|更新|重构|接入|安装|部署|提交|写入|生成|迁移|恢复|暂停|取消|启动|停止)/i.test(text)
+    || /(?:按|照).{0,20}(?:文档|方案|要求).{0,8}(?:做|落地|实现|执行)/i.test(text);
+  return explicitAction && !explanationOnly;
+}
+
 export function analyzeRequirement(group: any, message: string, context = "") {
   const normalized = normalizeGroupOrchestrator(group);
   const raw = String(message || "").trim();
@@ -777,6 +788,12 @@ function inferCodedDispatchPolicy(group: any, message: string, analysis: any, ta
     });
   }
 
+  if (!isExplicitExecutionRequest(message)) {
+    return buildDispatchPolicy("direct_answer", "用户没有要求执行或修改，主 Agent 直接回答，不创建开发任务。", analysis, {
+      nextStep: "直接回答用户",
+    });
+  }
+
   if (getRoutableMembers(group).length === 0) {
     return buildDispatchPolicy("hold", "当前群聊没有可分派的项目 Agent。", analysis, {
       risk: "无法执行项目级排查或修改",
@@ -807,7 +824,10 @@ function normalizeDispatchPolicy(parsed: any, analysis: any, targets: any[]) {
   const allowed = new Set(["direct_answer", "ask_user", "delegate", "hold"]);
   const broadDevelopmentRequest = isBroadDevelopmentRequest(parsed?.summary || analysis.raw || "", analysis);
   const parsedRequiresConfirmation = !!(parsed?.dispatchPolicy?.requiresConfirmation || parsed?.requiresConfirmation);
-  const action = broadDevelopmentRequest && targets.length > 0 && !parsedRequiresConfirmation
+  const explicitExecution = isExplicitExecutionRequest(analysis?.raw || parsed?.summary || "");
+  const action = !explicitExecution
+    ? "direct_answer"
+    : broadDevelopmentRequest && targets.length > 0 && !parsedRequiresConfirmation
     ? "delegate"
     : allowed.has(rawAction)
     ? rawAction
@@ -852,6 +872,26 @@ export function runCodedGroupOrchestrator(input: {
       analysis,
       dispatchPolicy,
       content: friendlyReply,
+    };
+  }
+
+  if (!isExplicitExecutionRequest(input.message)) {
+    const memberNames = members.length ? members.map((m: any) => m.project).join("、") : "暂无已绑定项目";
+    const projectOverview = members.length
+      ? members.map((member: any) => {
+        const kind = memberKind(member);
+        const role = kind === "frontend" ? "前端/客户端" : kind === "backend" ? "后端/API" : "项目模块";
+        return `- ${member.project}：${role}`;
+      }).join("\n")
+      : "- 当前还没有绑定项目 Agent";
+    const dispatchPolicy = inferCodedDispatchPolicy(group, input.message, analysis, []);
+    return {
+      agent: coordinator.project,
+      delegated: [],
+      assignments: [],
+      analysis: { ...analysis, needsCoordination: false },
+      dispatchPolicy,
+      content: `这是一个信息咨询，我不会创建开发任务或修改文件。\n\n当前群聊关联项目：${memberNames}\n${projectOverview}\n\n从成员职责看，这是一个由上述项目共同组成的协作开发空间；需要更具体的架构、技术栈或功能说明时，我会直接基于群聊记忆和项目资料回答。`,
     };
   }
 
@@ -953,6 +993,13 @@ export function runCoordinatorProtocolSelfTest() {
     message: "请按这个文档做。",
     sharedFilesContext,
   });
+  const informationalResult = runCodedGroupOrchestrator({
+    group,
+    message: "这个是一个什么项目？请介绍一下架构和主要功能。",
+  });
+  const informationalBoundaryPass = informationalResult.dispatchPolicy?.action === "direct_answer"
+    && informationalResult.assignments?.length === 0
+    && informationalResult.delegated?.length === 0;
   const llmParsedWithoutDocumentFindings = {
     intent: "implementation",
     summary: "实现订单退款审核功能",
@@ -962,6 +1009,13 @@ export function runCoordinatorProtocolSelfTest() {
     missingInfo: [],
     shouldDelegate: true,
     executionOrder: "backend_first",
+    reasoning: {
+      knownFacts: ["接口 POST /api/refunds/:id/audit 已在共享文档定义"],
+      assumptionsToVerify: ["当前后端尚未实现该接口"],
+      verificationAssertions: ["权限校验、操作日志和前端结果提示均有真实证据"],
+      dependencyRationale: ["前端对接依赖后端先确认接口契约"],
+      replanTriggers: ["实际接口字段与文档不一致时重规划"],
+    },
     targets: [
       { project: "backend-service", task: "实现退款审核接口并完成权限校验。", reason: "后端负责 API 和业务规则", dependsOn: "" },
       { project: "web-app", task: "在订单详情页增加退款审核入口并对接后端接口。", reason: "前端负责页面交互", dependsOn: "backend-service" },
@@ -973,6 +1027,11 @@ export function runCoordinatorProtocolSelfTest() {
   const llmDocumentGuardPass = llmTargets.length >= 2
     && llmAnalysis.documentFindings.some((item: string) => item.includes("/api/refunds"))
     && llmTargets.every((item: any) => String(item.task || "").includes("文档依据/验收关注") && String(item.task || "").includes("/api/refunds"));
+  const semanticReasoningPass = llmAnalysis.reasoning.knownFacts.length === 1
+    && llmAnalysis.reasoning.assumptionsToVerify.length === 1
+    && llmAnalysis.reasoning.verificationAssertions.length === 1
+    && llmAnalysis.reasoning.dependencyRationale[0].includes("接口契约")
+    && llmAnalysis.reasoning.replanTriggers[0].includes("重规划");
   const assignments = Array.isArray(result.assignments) ? result.assignments : [];
   const taskChecks = assignments.map((assignment: any) => {
     const task = String(assignment.task || "");
@@ -1004,6 +1063,8 @@ export function runCoordinatorProtocolSelfTest() {
     && reactiveContext.includes("SUMMARY_START")
     && reactiveContext.includes("LATEST_USER_REQUIREMENT")
     && isContextLimitError(new Error("HTTP 413: prompt too long"));
+  const structuredFallbackPolicyPass = !isStructuredCoordinatorFallbackAllowed({ source: "group-chat", message: "帮我优化一下项目" })
+    && isStructuredCoordinatorFallbackAllowed({ source: "task", message: "【主 Agent 业务开发工作单】\n任务标题：退款审核\n业务目标：实现退款审核\n验收标准：接口和页面验证通过" });
   const pass = String(result.content || "").includes("主 Agent 计划")
     && Array.isArray((result as any).coordinationPlan?.phases)
     && (result as any).coordinationPlan.phases.length >= 5
@@ -1014,10 +1075,12 @@ export function runCoordinatorProtocolSelfTest() {
     && frontendDependsOnBackend
     && taskChecks.every((item: any) => item.hasWorkerPacket && item.hasUnderstanding && item.hasVerification && item.hasReceipt && item.hasDocumentEvidence && item.hasCoordinatorWorkerProtocol && item.forbidsLazyDelegation)
     && llmDocumentGuardPass
+    && semanticReasoningPass
     && shortDocBackendFirstPass
     && reactiveCompactionPass;
+  const finalPass = pass && structuredFallbackPolicyPass && informationalBoundaryPass;
   return {
-    pass,
+    pass: finalPass,
     contentHasPlan: String(result.content || "").includes("主 Agent 计划"),
     coordinationPlan: (result as any).coordinationPlan || null,
     assignmentCount: assignments.length,
@@ -1027,9 +1090,12 @@ export function runCoordinatorProtocolSelfTest() {
     coordinationStrategy: (result as any).coordinationStrategy || "",
     frontendDependsOnBackend,
     llmDocumentGuardPass,
+    semanticReasoningPass,
     shortDocBackendFirstPass,
     shortDocExecutionOrder: (shortDocResult as any).executionOrder || "",
     reactiveCompactionPass,
+    structuredFallbackPolicyPass,
+    informationalBoundaryPass,
     documentFindings: Array.isArray((result as any).analysis?.documentFindings) ? (result as any).analysis.documentFindings : [],
   };
 }
@@ -1464,7 +1530,12 @@ function buildLlmCoordinatorMessages(input: {
 - 复杂、跨项目、文档型或实现型需求默认采用 research_synthesis_implementation_verification：Worker 在各自项目研究/实现/验证，Coordinator 负责综合事实、判断缺口和继续返工。
 - Worker 失败、验证失败或回执证据不足时，优先继续同一个 Worker 补充，因为它保留了上下文；如果方向明显错误，再重新派给新的 Worker。
 - 如果一个项目依赖另一个项目的结论，在 dependsOn 写依赖项目名，并选择 sequential 或 backend_first。
+- 依赖关系必须来自接口契约、数据流、文件冲突或验收顺序等语义理由，不能只按“前端/后端”关键词机械排列。
+- 输出计划时区分已知事实、待 Worker 核验的假设和最终必须证明的断言；当前代码状态未知时明确要求 Worker 先读取真实状态。
+- 在 reasoning.replanTriggers 中写出何时必须停止旧计划并重新规划，例如接口契约变化、目标文件不存在、验证失败、依赖输出与假设不一致。
 - 如果用户需求太模糊，shouldDelegate=false，并用 questionForUser 问一个最关键的问题。
+- 普通聊天、知识问答、项目介绍、架构说明、原因分析和方案咨询必须 shouldDelegate=false、dispatchPolicy.action=direct_answer；不能为了满足代码变更门禁而把问答改造成修改 README 或开发任务。
+- 只有用户当前消息明确要求“修改、实现、创建、运行、执行、派发、修复、删除、更新、部署”等实际动作时，才允许 shouldDelegate=true。历史消息中的开发要求不能替代当前消息授权。
 - 对业务开发、PRD、需求文档、接口文档、功能实现类任务，只要群聊里存在可分派项目 Agent，默认 shouldDelegate=true；即使未明确前端/后端/具体项目，也要先派给相关或全部项目 Agent 让其按职责判断影响范围。
 - 缺少范围、字段或验收细节时，把缺口写入 missingInfo、dispatchPolicy.risk 和子 Agent task 的“待确认/风险”，不要因此直接 ask_user，除非完全没有业务目标、没有可分派项目 Agent，或涉及高风险操作必须用户确认。
 
@@ -1502,6 +1573,13 @@ JSON 格式：
   "coordinationPlan": {
     "phases": ["主 Agent 计划阶段，例如理解需求、研究与综合、分配任务、协同执行、复盘验收"],
     "synthesisStrategy": "你会如何综合子 Agent 回执并判断是否需要返工"
+  },
+  "reasoning": {
+    "knownFacts": ["来自用户当前消息、共享文档或当前群聊上下文的事实"],
+    "assumptionsToVerify": ["必须由 Worker 读取当前项目后核验的假设"],
+    "verificationAssertions": ["最终交付必须用证据证明的目标断言"],
+    "dependencyRationale": ["每条跨项目依赖为什么存在"],
+    "replanTriggers": ["出现什么事实变化或失败时必须重规划"]
   },
   "shouldDelegate": true,
   "executionOrder": "parallel | sequential | backend_first",
@@ -1694,6 +1772,13 @@ function normalizeLlmAnalysis(parsed: any, fallback: any) {
     missingInfo: Array.isArray(parsed?.missingInfo) ? parsed.missingInfo.map((x: any) => String(x)).filter(Boolean) : fallback.missingInfo,
     needsCoordination: parsed?.shouldDelegate !== false,
     coordinationStrategy: String(parsed?.coordinationStrategy || fallback?.coordinationStrategy || inferCoordinatorStrategy(fallback, Array.isArray(parsed?.targets) ? parsed.targets.length : 0)),
+    reasoning: {
+      knownFacts: Array.isArray(parsed?.reasoning?.knownFacts) ? parsed.reasoning.knownFacts.map((x: any) => String(x)).filter(Boolean).slice(0, 20) : [],
+      assumptionsToVerify: Array.isArray(parsed?.reasoning?.assumptionsToVerify) ? parsed.reasoning.assumptionsToVerify.map((x: any) => String(x)).filter(Boolean).slice(0, 20) : [],
+      verificationAssertions: Array.isArray(parsed?.reasoning?.verificationAssertions) ? parsed.reasoning.verificationAssertions.map((x: any) => String(x)).filter(Boolean).slice(0, 20) : [],
+      dependencyRationale: Array.isArray(parsed?.reasoning?.dependencyRationale) ? parsed.reasoning.dependencyRationale.map((x: any) => String(x)).filter(Boolean).slice(0, 20) : [],
+      replanTriggers: Array.isArray(parsed?.reasoning?.replanTriggers) ? parsed.reasoning.replanTriggers.map((x: any) => String(x)).filter(Boolean).slice(0, 20) : [],
+    },
     confidence: typeof parsed?.confidence === "number" ? parsed.confidence : fallback.confidence,
   };
 }
@@ -1762,6 +1847,7 @@ async function runLlmGroupOrchestrator(input: {
   message: string;
   context?: string;
   sharedFilesContext?: string;
+  source?: string;
 }) {
   const group = normalizeGroupOrchestrator(input.group);
   const config = loadOrchestratorConfig();
@@ -1771,8 +1857,18 @@ async function runLlmGroupOrchestrator(input: {
     ? await callAnthropicCompatibleOrchestrator(config, input)
     : await callOpenAiCompatibleOrchestrator(config, input);
   const analysis = normalizeLlmAnalysis(parsed, fallbackAnalysis);
-  const targets = sanitizeLlmTargets(group, parsed, input.message, analysis, !!config.fallbackToRules);
+  const targets = sanitizeLlmTargets(group, parsed, input.message, analysis, !!config.fallbackToRules && isStructuredCoordinatorFallbackAllowed(input));
   return buildCoordinatorResultFromAnalysis(group, input.message, analysis, targets, "llm-api", parsed);
+}
+
+export function isStructuredCoordinatorFallbackAllowed(input: { source?: string; message?: string }) {
+  const source = String(input?.source || "").toLowerCase();
+  const message = String(input?.message || "");
+  const trustedSource = /^(?:task|cron|daily[_-]?dev|daily-dev-dispatch-repair|mission|global-mission)/.test(source);
+  const structuredPacket = /(?:主 Agent .*工作单|任务标题[:：])/.test(message)
+    && /业务目标[:：]/.test(message)
+    && /验收标准[:：]/.test(message);
+  return trustedSource && structuredPacket;
 }
 
 export async function runGroupOrchestrator(input: {
@@ -1786,15 +1882,17 @@ export async function runGroupOrchestrator(input: {
   const coordinator = getCoordinatorMember(group);
   const config = loadOrchestratorConfig();
   const configIssue = getLlmConfigIssue(config);
+  const informationalFallback = !isExplicitExecutionRequest(input.message);
+  const safeCodedFallback = isStructuredCoordinatorFallbackAllowed(input) || informationalFallback;
 
   if (configIssue) {
-    if (config.fallbackToRules) {
+    if (config.fallbackToRules && safeCodedFallback) {
       const fallback = runCodedGroupOrchestrator({ ...input, group });
       return {
         ...fallback,
         runtime: "coded-fallback",
         agentBoundary: buildGroupMainAgentBoundary("coded_fallback"),
-        content: `${fallback.content}\n\n主 Agent API 回退：${configIssue}`,
+        content: informationalFallback ? fallback.content : `${fallback.content}\n\n主 Agent API 回退：${configIssue}`,
       };
     }
     return {
@@ -1836,13 +1934,13 @@ export async function runGroupOrchestrator(input: {
         error = recoveryError;
       }
     }
-    if (config.fallbackToRules) {
+    if (config.fallbackToRules && safeCodedFallback) {
       const fallback = runCodedGroupOrchestrator({ ...input, group });
       return {
         ...fallback,
         runtime: "coded-fallback",
         agentBoundary: buildGroupMainAgentBoundary("coded_fallback"),
-        content: `${fallback.content}\n\n主 Agent API 回退：${error.message}`,
+        content: informationalFallback ? fallback.content : `${fallback.content}\n\n主 Agent API 回退：${error.message}`,
       };
     }
     return {

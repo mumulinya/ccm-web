@@ -62,6 +62,7 @@ export declare function buildMemberPrompt(input: {
     toolsContext?: string;
     sharedFilesContext?: string;
 }): string;
+export declare function isExplicitExecutionRequest(message: string): boolean;
 export declare function analyzeRequirement(group: any, message: string, context?: string): {
     raw: string;
     summary: string;
@@ -177,9 +178,12 @@ export declare function runCoordinatorProtocolSelfTest(): {
     coordinationStrategy: any;
     frontendDependsOnBackend: boolean;
     llmDocumentGuardPass: any;
+    semanticReasoningPass: any;
     shortDocBackendFirstPass: any;
     shortDocExecutionOrder: any;
     reactiveCompactionPass: boolean;
+    structuredFallbackPolicyPass: boolean;
+    informationalBoundaryPass: boolean;
     documentFindings: any;
 };
 export declare function buildCodedCoordinatorSummary(group: any, outputs: string[]): {
@@ -221,6 +225,10 @@ export declare function runLlmCoordinatorReview(group: any, userMessage: string,
     };
 }>;
 export declare function decomposeRequirementWithCodedCoordinator(group: any, requirement: string): any;
+export declare function isStructuredCoordinatorFallbackAllowed(input: {
+    source?: string;
+    message?: string;
+}): boolean;
 export declare function runGroupOrchestrator(input: {
     group: any;
     message: string;

@@ -1,8 +1,11 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { tasksApi, groupsApi, projectsApi } from '../api/index.js'
 import AgentPipeline from './AgentPipeline.vue'
 import { toast, confirmDialog } from '../utils/toast.js'
+
+const props = defineProps({ navigateTo: { type: Object, default: null } })
+const emit = defineEmits(['navigated'])
 
 const tasks = ref([])
 const groups = ref([])
@@ -15,6 +18,10 @@ const dashboardFilter = ref('all')
 const expandedDashboardTaskId = ref('')
 const taskExecutions = ref({})
 const executionActionBusy = ref('')
+const showArchivedTasks = ref(false)
+const archivedTaskCount = ref(0)
+const selectedTaskIds = ref([])
+const editingTaskId = ref('')
 
 // 弹窗状态
 const showCreate = ref(false)
@@ -66,8 +73,11 @@ const dailyDevTask = ref(defaultDailyDevTask())
 
 // 加载数据
 const loadTasks = async () => {
-  const data = await tasksApi.list()
+  const response = await fetch(showArchivedTasks.value ? '/api/tasks?archived=true' : '/api/tasks')
+  const data = await response.json()
   tasks.value = (data.tasks || []).slice().reverse()
+  archivedTaskCount.value = Number(data.archived_count || 0)
+  selectedTaskIds.value = selectedTaskIds.value.filter(id => tasks.value.some(task => task.id === id))
   updateStats()
 }
 
@@ -618,7 +628,7 @@ const submitCreateTask = async () => {
   if (newTask.value.assignType === 'group' && !newTask.value.groupId) { toast.warning('请选择群聊'); return }
   if (newTask.value.assignType === 'project' && !newTask.value.projectId) { toast.warning('请选择项目 Agent'); return }
 
-  const res = await tasksApi.create({
+  const payload = {
     title: newTask.value.title,
     description: newTask.value.description,
     target_project: newTask.value.assignType === 'project' ? newTask.value.projectId : 'coordinator',
@@ -626,7 +636,10 @@ const submitCreateTask = async () => {
     priority: newTask.value.priority,
     assign_type: newTask.value.assignType,
     auto_execute: newTask.value.autoExecute
-  })
+  }
+  const res = editingTaskId.value
+    ? await tasksApi.update({ id: editingTaskId.value, ...payload })
+    : await tasksApi.create(payload)
 
   if (res.success) {
     showCreate.value = false
@@ -640,7 +653,8 @@ const submitCreateTask = async () => {
       autoExecute: true
     }
     refreshTaskWork()
-    toast.success(res.queued ? '任务已创建并加入执行队列' : '任务创建成功')
+    toast.success(editingTaskId.value ? '任务修改成功' : res.queued ? '任务已创建并加入执行队列' : '任务创建成功')
+    editingTaskId.value = ''
   } else {
     toast.error('创建失败: ' + (res.error || '未知错误'))
   }
@@ -711,11 +725,50 @@ const updateStatus = async (id, status) => {
 
 // 删除任务
 const deleteTask = async (id) => {
-  const confirmed = await confirmDialog('确定删除此任务？删除后无法恢复。')
+  const confirmed = await confirmDialog('确定删除此任务？系统会安全取消执行、清理运行现场并移入归档，可稍后恢复。')
   if (!confirmed) return
   await tasksApi.delete(id)
   refreshTaskWork()
-  toast.success('任务已删除')
+  toast.success('任务已清理并移入归档')
+}
+
+const openCreateTask = () => {
+  editingTaskId.value = ''
+  newTask.value = { title: '', description: '', assignType: 'group', groupId: groups.value[0]?.id || '', projectId: projects.value[0]?.name || '', priority: 'normal', autoExecute: true }
+  showCreate.value = true
+}
+
+const editTask = (task) => {
+  editingTaskId.value = task.id
+  newTask.value = {
+    title: task.title || '', description: task.description || '', assignType: task.assign_type || 'group',
+    groupId: task.group_id || groups.value[0]?.id || '', projectId: task.target_project || projects.value[0]?.name || '',
+    priority: task.priority || 'normal', autoExecute: task.auto_execute !== false,
+  }
+  showCreate.value = true
+}
+
+const restoreTask = async (id) => {
+  const res = await fetch('/api/tasks/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
+  const data = await res.json(); if (!res.ok || !data.success) return toast.error(data.error || '恢复失败')
+  await refreshTaskWork(); toast.success('任务已从归档恢复')
+}
+
+const purgeTask = async (id) => {
+  if (!await confirmDialog('永久清除此任务及其归档记录？此操作无法恢复。')) return
+  const res = await fetch('/api/tasks/purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
+  const data = await res.json(); if (!res.ok || !data.success) return toast.error(data.error || '永久清除失败')
+  await refreshTaskWork(); toast.success('任务已永久清除')
+}
+
+const runBulkTaskAction = async (action) => {
+  if (!selectedTaskIds.value.length) return toast.warning('请先选择任务')
+  const labels = { archive: '删除归档', restore: '恢复', purge: '永久清除', pause: '暂停', resume: '恢复执行', cancel: '取消' }
+  if (['archive', 'purge', 'cancel'].includes(action) && !await confirmDialog(`确定批量${labels[action]} ${selectedTaskIds.value.length} 个任务？`)) return
+  const res = await fetch('/api/tasks/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ids: selectedTaskIds.value }) })
+  const data = await res.json()
+  if (!res.ok && !data.results?.some(item => item.success)) return toast.error(data.error || '批量操作失败')
+  selectedTaskIds.value = []; await refreshTaskWork(); toast.success(`批量${labels[action]}完成`)
 }
 
 // 加入队列
@@ -1094,6 +1147,15 @@ const resendTask = async (task) => {
 
 const priorityLabel = { high: '🔴 高', normal: '🟡 中', low: '⚪ 低' }
 
+watch(() => props.navigateTo, async (target) => {
+  if (!target?.taskId || target.tab !== 'tasks') return
+  await loadTasks()
+  const task = tasks.value.find(item => item.id === target.taskId)
+  if (task) await viewReport(task)
+  else toast.warning('该任务可能已归档或删除')
+  emit('navigated')
+}, { deep: true, immediate: true })
+
 onMounted(() => {
   loadTasks()
   loadGroups()
@@ -1115,13 +1177,18 @@ onMounted(() => {
         <div class="stat"><span class="stat-label" style="color:var(--accent-red)">失败</span><span class="stat-value" style="color:var(--accent-red)">{{ stats.failed }}</span></div>
       </div>
       <div style="display:flex;gap:8px">
+        <button class="btn btn-outline btn-sm" @click="showArchivedTasks = !showArchivedTasks; selectedTaskIds = []; loadTasks()">{{ showArchivedTasks ? '返回活动任务' : `归档 (${archivedTaskCount})` }}</button>
+        <button v-if="selectedTaskIds.length && !showArchivedTasks" class="btn btn-outline btn-sm" @click="runBulkTaskAction('pause')">批量暂停</button>
+        <button v-if="selectedTaskIds.length && !showArchivedTasks" class="btn btn-danger btn-sm" @click="runBulkTaskAction('archive')">批量删除</button>
+        <button v-if="selectedTaskIds.length && showArchivedTasks" class="btn btn-primary btn-sm" @click="runBulkTaskAction('restore')">批量恢复</button>
+        <button v-if="selectedTaskIds.length && showArchivedTasks" class="btn btn-danger btn-sm" @click="runBulkTaskAction('purge')">永久清除</button>
         <button class="btn btn-outline btn-sm" @click="showQueueStatus()">📊 队列状态</button>
         <button class="btn btn-outline btn-sm" @click="openBacklog()">需求池</button>
         <button class="btn btn-outline btn-sm" @click="resumeQueue()">▶ 恢复队列</button>
         <button class="btn btn-outline btn-sm" @click="retryRuntimeFailures()">恢复执行失败</button>
         <button class="btn btn-outline btn-sm" @click="addAllToQueue()">📥 全部加入队列</button>
-        <button class="btn btn-primary" @click="showDailyDevCreate = true">业务开发任务</button>
-        <button class="btn btn-primary" @click="showCreate = true">+ 新建任务</button>
+        <button v-if="!showArchivedTasks" class="btn btn-primary" @click="showDailyDevCreate = true">业务开发任务</button>
+        <button v-if="!showArchivedTasks" class="btn btn-primary" @click="openCreateTask">+ 新建任务</button>
       </div>
     </div>
 
@@ -1381,6 +1448,7 @@ onMounted(() => {
       <div v-else class="task-list">
         <div v-for="task in tasks" :key="task.id" class="task-card">
           <div class="task-main">
+            <input v-model="selectedTaskIds" type="checkbox" :value="task.id" aria-label="选择任务">
             <div class="task-info">
               <div class="task-title-row">
                 <span class="task-title">{{ task.title }}</span>
@@ -1415,7 +1483,6 @@ onMounted(() => {
               <div class="task-meta">
                 <span class="meta-item">{{ task.assign_type === 'group' ? '💬' : '🤖' }} {{ task.assign_type === 'group' ? (groups.find(g => g.id === task.group_id)?.name || task.group_id) : task.target_project }}</span>
                 <span class="meta-item">🕐 {{ new Date(task.created_at).toLocaleString('zh-CN') }}</span>
-                <span v-if="task.trace_id" class="meta-item trace-meta" :title="task.trace_id">Trace {{ task.trace_id.slice(-12) }}</span>
               </div>
             </div>
             <div class="task-right">
@@ -1429,6 +1496,9 @@ onMounted(() => {
             </div>
           </div>
           <div class="task-actions">
+            <button v-if="showArchivedTasks" class="btn btn-primary btn-sm" @click="restoreTask(task.id)">恢复</button>
+            <button v-if="showArchivedTasks" class="btn btn-danger btn-sm" @click="purgeTask(task.id)">永久清除</button>
+            <template v-if="!showArchivedTasks">
             <button v-if="canCancelTask(task)" class="btn btn-danger btn-sm" @click="cancelTask(task)">停止任务</button>
             <button v-if="task.status === 'pending' || task.status === 'failed'" class="btn btn-primary btn-sm" @click="addToQueue(task.id)">📥 加入队列</button>
             <button v-if="task.final_report || task.result || task.receipt || task.review" class="btn btn-outline btn-sm" @click="viewReport(task)">📄 报告</button>
@@ -1436,7 +1506,9 @@ onMounted(() => {
             <button v-if="task.status !== 'done'" class="btn btn-outline btn-sm" @click="openContinueTask(task)">补充</button>
             <button class="btn btn-outline btn-sm" @click="viewTaskLogs(task.id)">📋 日志</button>
             <button v-if="task.status !== 'done'" class="btn btn-outline btn-sm" @click="resendTask(task)">🔄 重派</button>
+            <button class="btn btn-outline btn-sm" @click="editTask(task)">编辑</button>
             <button class="btn btn-danger btn-sm" @click="deleteTask(task.id)">🗑️ 删除</button>
+            </template>
           </div>
         </div>
       </div>
@@ -1522,7 +1594,7 @@ onMounted(() => {
     <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false">
       <div class="modal" style="min-width:500px">
         <button class="modal-close" @click="showCreate = false">&times;</button>
-        <h3>📋 新建任务</h3>
+        <h3>{{ editingTaskId ? '编辑任务' : '📋 新建任务' }}</h3>
         <div class="form-group">
           <label>任务标题</label>
           <input v-model="newTask.title" placeholder="简要描述任务">
@@ -1566,7 +1638,7 @@ onMounted(() => {
         </div>
         <div class="form-actions">
           <button class="btn btn-cancel" @click="showCreate = false">取消</button>
-          <button class="btn btn-primary" @click="submitCreateTask">{{ newTask.autoExecute ? '创建并加入队列' : '仅创建任务' }}</button>
+          <button class="btn btn-primary" @click="submitCreateTask">{{ editingTaskId ? '保存修改' : newTask.autoExecute ? '创建并加入队列' : '仅创建任务' }}</button>
         </div>
       </div>
     </div>
@@ -1639,24 +1711,27 @@ onMounted(() => {
         <div class="report-meta">
           <div><strong>{{ currentTaskReport?.title }}</strong></div>
           <div>{{ currentTaskReport?.status_detail || '暂无状态说明' }}</div>
+        </div>
+        <details v-if="currentTaskReport?.trace_id || taskTraceLoading || currentTaskTrace?.events?.length" class="technical-report-details">
+          <summary>Trace 技术详情</summary>
           <div v-if="currentTaskReport?.trace_id" class="trace-identity">
             <span>Trace ID</span>
             <code>{{ currentTaskReport.trace_id }}</code>
           </div>
-        </div>
-        <div v-if="taskTraceLoading" class="trace-panel muted">正在读取全链路记录…</div>
-        <div v-else-if="currentTaskTrace?.events?.length" class="trace-panel">
-          <div class="trace-panel-head">
-            <strong>全链路 Trace</strong>
-            <span>{{ currentTaskTrace.events.length }} 个事件</span>
-          </div>
-          <div class="kernel-timeline trace-events">
-            <div v-for="event in currentTaskTrace.events.slice(-16)" :key="event.id" class="kernel-event">
-              <div><strong>{{ event.type }}</strong><span>{{ new Date(event.at).toLocaleString('zh-CN') }}</span></div>
-              <p>{{ event.message || event.status }}</p>
+          <div v-if="taskTraceLoading" class="trace-panel muted">正在读取全链路记录…</div>
+          <div v-else-if="currentTaskTrace?.events?.length" class="trace-panel">
+            <div class="trace-panel-head">
+              <strong>全链路 Trace</strong>
+              <span>{{ currentTaskTrace.events.length }} 个事件</span>
+            </div>
+            <div class="kernel-timeline trace-events">
+              <div v-for="event in currentTaskTrace.events.slice(-16)" :key="event.id" class="kernel-event">
+                <div><strong>{{ event.type }}</strong><span>{{ new Date(event.at).toLocaleString('zh-CN') }}</span></div>
+                <p>{{ event.message || event.status }}</p>
+              </div>
             </div>
           </div>
-        </div>
+        </details>
         <div v-if="currentTaskReport?.delivery_summary" class="delivery-summary">
           <div class="delivery-grid">
             <div>
@@ -1724,6 +1799,12 @@ onMounted(() => {
             <span class="delivery-label">阻塞/待补充</span>
             <span v-for="item in [...(currentTaskReport.delivery_summary.blockers || []), ...(currentTaskReport.delivery_summary.needs || [])]" :key="item" class="delivery-pill">{{ item }}</span>
           </div>
+          <div v-if="currentTaskReport?.delivery_summary?.user_report" class="report-section user-delivery-report">
+            <h4>交付报告</h4>
+            <pre class="report-block">{{ currentTaskReport.delivery_summary.user_report }}</pre>
+          </div>
+          <details class="technical-report-details">
+            <summary>技术执行详情</summary>
           <div v-if="currentTaskReport.delivery_summary.latest_coordination_plan?.phases?.length" class="delivery-list">
             <span class="delivery-label">主 Agent 计划</span>
             <span v-for="phase in currentTaskReport.delivery_summary.latest_coordination_plan.phases" :key="phase" class="delivery-pill plan-pill">{{ phase }}</span>
@@ -1758,7 +1839,10 @@ onMounted(() => {
               {{ item.project ? `${item.project}：` : '' }}{{ item.attempt ? `第 ${item.attempt} 轮 ` : '' }}{{ item.reason || item.task }}
             </span>
           </div>
+          </details>
         </div>
+        <details class="technical-report-details">
+          <summary>Agent、执行器与原始回执</summary>
         <div v-if="hasExecutionEvidence(currentTaskReport)" class="execution-evidence">
           <div class="evidence-head">
             <strong>Agent 执行证据</strong>
@@ -1853,10 +1937,6 @@ onMounted(() => {
             </div>
           </div>
         </div>
-        <div v-if="currentTaskReport?.delivery_summary?.user_report" class="report-section">
-          <h4>用户交付报告</h4>
-          <pre class="report-block">{{ currentTaskReport.delivery_summary.user_report }}</pre>
-        </div>
         <pre class="report-block">{{ currentTaskReport?.final_report || currentTaskReport?.result || '暂无执行报告' }}</pre>
         <div v-if="currentTaskReport?.receipt" class="report-section">
           <h4>结构化回执</h4>
@@ -1870,6 +1950,7 @@ onMounted(() => {
           <h4>补充说明历史</h4>
           <pre class="report-block">{{ JSON.stringify(currentTaskReport.followups, null, 2) }}</pre>
         </div>
+          </details>
         <div class="form-actions">
           <button v-if="canCancelTask(currentTaskReport)" class="btn btn-danger" @click="cancelTask(currentTaskReport)">停止任务</button>
           <button v-if="currentTaskReport?.status !== 'done'" class="btn btn-primary" @click="autoContinueFromReport">按缺口自动继续</button>
@@ -2210,6 +2291,9 @@ onMounted(() => {
 .report-section { margin-top: 14px; }
 .report-section h4 { margin: 0 0 8px; font-size: 13px; color: var(--text-primary); }
 .report-block { margin: 0; padding: 12px; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(255, 255, 255, 0.78); color: var(--text-primary); font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow-y: auto; }
+.technical-report-details{margin-top:10px;padding:10px 12px;border:1px solid var(--border-color);border-radius:8px;background:rgba(15,23,42,.025)}
+.technical-report-details>summary{cursor:pointer;color:var(--text-muted);font-size:12px;font-weight:700;user-select:none}
+.technical-report-details[open]>summary{margin-bottom:10px}
 .delivery-summary { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; padding: 12px; border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.12); background: rgba(59, 130, 246, 0.04); }
 .delivery-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .delivery-grid > div { min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 8px; border-radius: 8px; background: rgba(255,255,255,0.64); }

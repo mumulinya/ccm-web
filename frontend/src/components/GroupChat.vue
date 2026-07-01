@@ -3,6 +3,11 @@ import { ref, onMounted, onUnmounted, nextTick, watch, inject, computed } from '
 import { groupsApi, projectsApi } from '../api/index.js'
 import AgentPipeline from './AgentPipeline.vue'
 import { toast, confirmDialog } from '../utils/toast.js'
+import SlashCommandMenu from './SlashCommandMenu.vue'
+import CommandResultCard from './CommandResultCard.vue'
+import TaskCollaborationCard from './TaskCollaborationCard.vue'
+import { useSlashCommands } from '../composables/useSlashCommands.js'
+import { downloadCommandJson } from '../utils/commandExport.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
 const emit = defineEmits(['navigated'])
@@ -49,6 +54,7 @@ const messages = ref([])
 const groupMemory = ref(null)
 const mainAgentStatus = ref(null)
 const groupAgentQa = ref([])
+const collaborationProtocol = ref(null)
 const groupMessagesEl = ref(null)
 const groupMessagesContentEl = ref(null)
 const isGroupMessagesPinnedToBottom = ref(true)
@@ -57,6 +63,29 @@ const userMessages = computed(() => {
     .map((m, idx) => ({ ...m, originalIndex: idx }))
     .filter(m => m.role === 'user')
 })
+const navMessages = computed(() => {
+  const turns = [];
+  let currentTurn = null;
+  messages.value.forEach((m, idx) => {
+    if (m.role === 'user') {
+      if (currentTurn) turns.push(currentTurn);
+      currentTurn = {
+        originalIndex: idx,
+        userContent: m.content || '',
+        assistantContent: '',
+        role: 'user',
+        files: m.files || []
+      };
+    } else if (m.role === 'assistant' && currentTurn) {
+      if (!currentTurn.assistantContent) {
+        currentTurn.assistantContent = m.content || (m.agenticRun ? (m.agenticRun.final_reply || m.agenticRun.status) : '');
+      }
+    }
+  });
+  if (currentTurn) turns.push(currentTurn);
+  return turns.length > 40 ? turns.slice(-40) : turns;
+})
+
 
 const scrollToMessage = (originalIndex) => {
   const el = document.getElementById(`gc-msg-${originalIndex}`)
@@ -65,6 +94,42 @@ const scrollToMessage = (originalIndex) => {
   }
 }
 const newMessage = ref('')
+const slashNavigate = inject('slashNavigate', () => {})
+const runGroupClientCommand = async (action) => {
+  if (action === 'context') {
+    const chars = messages.value.reduce((sum, item) => sum + String(item.content || '').length, 0)
+    return {
+      success: true,
+      summary: `群聊“${currentGroup.value?.name || '未选择'}”当前加载了 ${messages.value.length} 条消息。`,
+      metrics: { 群聊: currentGroup.value?.name, 群聊ID: currentGroup.value?.id, 消息: messages.value.length, 成员: currentGroup.value?.members?.length || 0, 估算Token: Math.ceil(chars / 4) },
+      items: messages.value.slice(-8).reverse().map(item => ({ title: item.agent || item.role || '消息', detail: String(item.content || item.type || '').slice(0, 180), status: item.timestamp || '' }))
+    }
+  }
+  if (action === 'export_context') {
+    downloadCommandJson(`ccm-group-${currentGroup.value?.id || 'context'}`, { group: currentGroup.value, messages: messages.value })
+    return { success: true, summary: '当前群聊上下文已导出为 JSON。', metrics: { 消息: messages.value.length } }
+  }
+  throw new Error(`当前群聊不支持客户端命令：${action}`)
+}
+const slash = useSlashCommands({
+  scope: 'group',
+  input: newMessage,
+  context: () => ({ group: currentGroup.value?.name || '', groupId: currentGroup.value?.id || '', target: targetAgent.value }),
+  focus: () => nextTick(() => document.getElementById('groupChatInput')?.focus()),
+  onNavigate: (tab) => slashNavigate(tab),
+  onPrompt: async (prompt) => {
+    newMessage.value = prompt
+    await nextTick()
+    await sendMessage()
+  },
+  onClientAction: runGroupClientCommand,
+  onResult: (result) => {
+    messages.value.push({ role: 'assistant', agent: 'command-center', type: 'command_result', commandResult: result, content: '', timestamp: new Date().toISOString() })
+    nextTick(() => scrollToBottom())
+  },
+  onError: (message) => toast.error(message),
+  onConfirm: (message) => confirmDialog(message)
+})
 const messageFiles = ref([])
 const messageFileInput = ref(null)
 const targetAgent = ref('all')
@@ -256,6 +321,79 @@ const getAgentMessageStatus = (msg) => {
   return { tone: 'idle', label: '回复' }
 }
 const getTaskRuntime = (msg) => msg?.taskRuntime || msg?.task_runtime || null
+const getTaskCard = (msg) => getTaskRuntime(msg)?.taskCard || getTaskRuntime(msg)?.task_card || null
+const isInternalProtocolMessage = (msg) => {
+  const content = String(msg?.content || '')
+  if (msg?.task_id && ['agent_qa', 'agent_qa_resume', 'conflict_plan', 'task_rehearsal'].includes(String(msg?.type || ''))) return true
+  const protocolPayload = /CCM_AGENT_RECEIPT|"ccm_receipt"|<task-notification>|【主 Agent 业务开发工作单】|主 Agent 返工工作单|任务前沙盘演练|主 Agent 派发修复|【任务需要继续处理】|📋\s*\*{0,2}(?:规则)?协调复盘/i.test(content)
+  const generatedContinuation = /^任务补充说明[：:]\s*请继续推进任务/.test(content)
+    || (content.includes('需要补齐的主 Agent 协作证据') && content.includes('继续执行要求'))
+  return protocolPayload || generatedContinuation
+}
+const getMessageTaskId = (msg) => msg?.task_id || msg?.task?.id || ''
+const isPrimaryTaskMessage = (msg, index) => {
+  const taskId = getMessageTaskId(msg)
+  if (!taskId || isInternalProtocolMessage(msg)) return false
+  return messages.value.findIndex((item) => getMessageTaskId(item) === taskId && !isInternalProtocolMessage(item)) === index
+}
+const shouldShowGroupMessage = (msg, index) => {
+  if (isInternalProtocolMessage(msg)) return false
+  const taskId = getMessageTaskId(msg)
+  if (!taskId) return true
+  if (isPrimaryTaskMessage(msg, index)) return true
+  // 用户主动补充仍属于对话；Agent 工作单、回执、执行输出统一进入任务卡技术详情。
+  return msg.role === 'user' && !/【主 Agent 业务开发工作单】|任务前沙盘演练|CCM_AGENT_RECEIPT|task-notification/i.test(String(msg.content || ''))
+}
+const isPrimaryTaskCard = (msg, index) => {
+  return !!getTaskCard(msg) && isPrimaryTaskMessage(msg, index)
+}
+const postTaskCardAction = async (path, body) => {
+  const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
+  const payload = await response.json()
+  if (!response.ok || payload.success === false) throw new Error(payload.error || `操作失败 (${response.status})`)
+  return payload
+}
+const handleTaskCardAction = async (msg, action) => {
+  const card = getTaskCard(msg)
+  const id = card?.task_id
+  if (!id) return
+  try {
+    if (action.kind === 'view_pipeline' || action.kind === 'view_report' || action.kind === 'view_changes') return openPipelineViewer(msg)
+    if (action.kind === 'cancel') {
+      if (!await confirmDialog(`确定取消任务“${card.title}”？运行中的 Agent 会被安全终止。`)) return
+      await postTaskCardAction('/api/tasks/cancel', { id, reason: '用户从群聊任务卡取消任务' })
+    } else if (action.kind === 'pause') {
+      await postTaskCardAction('/api/tasks/update', { id, status: 'paused', is_paused: true, status_detail: '用户从群聊任务卡暂停' })
+    } else if (action.kind === 'resume') {
+      await postTaskCardAction('/api/tasks/update', { id, status: 'pending', is_paused: false, paused: false, status_detail: '用户从群聊任务卡恢复' })
+      await postTaskCardAction('/api/tasks/queue', { task_id: id })
+    } else if (action.kind === 'retry') {
+      await postTaskCardAction('/api/tasks/retry', { id, reason: '用户从群聊任务卡重新派发', auto_execute: true })
+    } else if (action.kind === 'switch_executor') {
+      const runtime = window.prompt('切换执行器（claudecode / codex / cursor）：', 'codex')
+      if (!runtime) return
+      await postTaskCardAction('/api/tasks/switch-executor', { id, runtime: runtime.trim(), reason: '用户从群聊任务卡切换执行器', auto_execute: true })
+    } else if (action.kind === 'queue') {
+      await postTaskCardAction('/api/tasks/queue', { task_id: id })
+    } else if (action.kind === 'gap_continue') {
+      await postTaskCardAction('/api/tasks/continue-from-gaps', { id, source: 'user_gap_rework', auto_execute: true })
+    } else if (action.kind === 'continue') {
+      const prompt = action.id === 'replan' ? '请重新检查目标、当前事实和验收标准，只调整未完成部分。' : window.prompt(card.status === 'done' ? '继续修改什么？' : '追加要求：', '')
+      if (!prompt) return
+      await postTaskCardAction('/api/tasks/continue', { id, message: prompt, source: 'user', auto_execute: true })
+    } else if (action.kind === 'rollback') {
+      if (!await confirmDialog(`确定安全撤销任务“${card.title}”的最近一轮改动？`)) return
+      await postTaskCardAction('/api/tasks/rollback', { id, reason: '用户从群聊任务卡安全撤销' })
+    } else {
+      toast.info('该操作请在任务管理页的技术详情中执行')
+      return
+    }
+    toast.success(`${action.label}已提交`)
+    await loadMessages()
+  } catch (error) {
+    toast.error(error.message || `${action.label}失败`)
+  }
+}
 const taskRuntimeStatusLabel = (status) => ({ pending: '待执行', in_progress: '执行中', done: '已完成', failed: '失败', cancelled: '已取消' }[status] || status || '执行中')
 const taskRuntimeAgentState = (state) => ({ queued: '排队', spawning: '启动', ready: '就绪', prompt_accepted: '已接单', running: '执行中', reviewing: '验收', succeeded: '完成', failed: '失败', cancel_requested: '停止中', cancelled: '已取消' }[state] || state || '等待')
 const taskRuntimeGreenLabel = (green) => ({ none: '未验收', targeted: '局部绿', project: '项目绿', workspace: '工作区绿', merge_ready: '可合并' }[green] || green || '未验收')
@@ -341,11 +479,16 @@ const getQaMeta = (msg) => {
   if (qa.retry_count) parts.push(`重试 ${qa.retry_count} 次`)
   if (qa.injected_at) parts.push('已注入上下文')
   if (qa.resumed_at) parts.push('已续跑')
+  if (qa.routing?.strategy === 'capability_and_load') parts.push('能力路由')
+  if (qa.execution_id) parts.push(`Execution ${qa.execution_id}`)
+  if (qa.acceptance?.score != null) parts.push(`证据评分 ${qa.acceptance.score}`)
+  if (qa.permission_contract?.mode === 'advisory_read_only') parts.push('只读问答')
   if (qa.arbitration?.decision) parts.push(`仲裁：${qa.arbitration.decision}`)
   return parts.join(' · ')
 }
 const canRetryAgentQa = (msg) => ['failed', 'timeout', 'manual'].includes(msg?.qa?.status)
 const canTakeoverAgentQa = (msg) => ['waiting', 'asking', 'timeout', 'needs_user'].includes(msg?.qa?.status)
+const canArbitrateAgentQa = (msg) => msg?.qa?.status === 'rejected' || ['conflict', 'needs_evidence'].includes(msg?.qa?.acceptance?.status)
 const runAgentQaAction = async (msg, action) => {
   const qa = msg?.qa || {}
   if (!qa.id) return
@@ -360,15 +503,19 @@ const runAgentQaAction = async (msg, action) => {
   const key = `${qa.id}:${action}`
   agentQaActionLoading.value = { ...agentQaActionLoading.value, [key]: true }
   try {
-    const endpoint = action === 'retry' ? '/api/agent-qa/retry' : '/api/agent-qa/manual-takeover'
+    const endpoint = action === 'retry'
+      ? '/api/agent-qa/retry'
+      : action === 'manual'
+        ? '/api/agent-qa/manual-takeover'
+        : '/api/agent-qa/arbitrate'
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: qa.id, reason: '用户在群聊界面接管该问答' })
+      body: JSON.stringify({ id: qa.id, decision: action, reason: action === 'accept' ? '主 Agent 在群聊界面采纳该回答' : action === 'reject' ? '主 Agent 在群聊界面拒绝该回答' : '用户在群聊界面接管该问答' })
     })
     const data = await res.json()
     if (!res.ok || data.success === false) throw new Error(data.error || '操作失败')
-    toast.success(action === 'retry' ? '已重试 Agent 问答' : '已标记人工接管')
+    toast.success(action === 'retry' ? '已重试 Agent 问答' : action === 'manual' ? '已标记人工接管' : action === 'accept' ? '主 Agent 已采纳回答' : '主 Agent 已拒绝回答')
     await loadMessages()
   } catch (err) {
     toast.error((action === 'retry' ? '重试失败：' : '接管失败：') + (err?.message || err))
@@ -479,6 +626,12 @@ let selectGroup = async (id) => {
 const loadMessages = async () => {
   if (!currentGroup.value) return
   const data = await groupsApi.messages(currentGroup.value.id)
+  try {
+    const protocolRes = await fetch(`/api/agent-collaboration/protocol?group_id=${encodeURIComponent(currentGroup.value.id)}&limit=100`)
+    collaborationProtocol.value = protocolRes.ok ? await protocolRes.json() : null
+  } catch {
+    collaborationProtocol.value = null
+  }
   groupMemory.value = data.memory || null
   mainAgentStatus.value = data.mainAgentStatus || null
   groupAgentQa.value = data.agentQa || []
@@ -1009,29 +1162,31 @@ const handleInput = (e) => {
   const cursorPos = e.target.selectionStart
   const beforeCursor = value.substring(0, cursorPos)
 
-  // 1. 斜杠指令联想拦截
+  if (slash.onInput()) {
+    mentionDropdown.value = false
+    showTemplateSelector.value = false
+    showRecommendation.value = false
+    return
+  }
   if (value.startsWith('/')) {
-    templateSearchQuery.value = value.substring(1)
-    showTemplateSelector.value = true
-    activeTemplateIndex.value = 0
-    mentionDropdown.value = false // 互斥
+    mentionDropdown.value = false
+    showTemplateSelector.value = false
+    showRecommendation.value = false
+    return
+  }
+
+  // @提及指令拦截
+  const atIndex = beforeCursor.lastIndexOf('@')
+  if (atIndex >= 0 && !beforeCursor.substring(atIndex).includes(' ')) {
+    mentionFilter.value = beforeCursor.substring(atIndex + 1).toLowerCase()
+    mentionDropdown.value = true
+    mentionIndex.value = 0
+    showTemplateSelector.value = false
     showRecommendation.value = false
   } else {
-    // 2. @提及指令拦截
-    const atIndex = beforeCursor.lastIndexOf('@')
-    if (atIndex >= 0 && !beforeCursor.substring(atIndex).includes(' ')) {
-      mentionFilter.value = beforeCursor.substring(atIndex + 1).toLowerCase()
-      mentionDropdown.value = true
-      mentionIndex.value = 0
-      showTemplateSelector.value = false
-      showRecommendation.value = false
-    } else {
-      mentionDropdown.value = false
-      showTemplateSelector.value = false
-      
-      // 3. 智能推荐意图检测
-      detectRecommendation(value)
-    }
+    mentionDropdown.value = false
+    showTemplateSelector.value = false
+    detectRecommendation(value)
   }
 }
 
@@ -1050,7 +1205,8 @@ const getFilteredTemplates = () => {
   )
 }
 
-const handleKeydown = (e) => {
+const handleKeydown = async (e) => {
+  if (await slash.onKeydown(e)) return
   // 1. 处理 @提及下拉菜单键盘控制
   if (mentionDropdown.value) {
     const agents = getFilteredAgents()
@@ -1955,6 +2111,7 @@ const applyRecommendation = () => {
           <div class="group-title-line">
             <span>{{ currentGroup ? '💬 ' + currentGroup.name : '选择或创建一个群聊' }}</span>
             <span v-if="currentGroup" class="memory-chip" :class="{ active: hasCompressedMemory() }" :title="getMemoryCompressionTitle()">{{ getMemoryCompressionLabel() }}</span>
+            <span v-if="currentGroup && collaborationProtocol?.success" class="memory-chip active" :title="`开放 ${collaborationProtocol.summary?.open || 0}；采纳 ${collaborationProtocol.summary?.accepted || 0}；权限违规 ${collaborationProtocol.summary?.permission_violations || 0}`">Agent 协作 {{ collaborationProtocol.version }} · 开放 {{ collaborationProtocol.summary?.open || 0 }}</span>
           </div>
           <div v-if="currentGroup" style="display:flex;gap:6px">
             <button class="btn btn-outline btn-sm" @click="loadGroupTools()">🔧 工具</button>
@@ -1993,6 +2150,12 @@ const applyRecommendation = () => {
                     <span class="item-label">开放问答</span>
                     <span class="item-value">{{ mainAgentStatus?.open_qa_count || groupAgentQa.filter(q => ['waiting','asking','queued','needs_user','timeout','manual'].includes(q.status)).length || 0 }} 个</span>
                   </div>
+                  <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary">
+                    <span class="item-label">交付进度</span>
+                    <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.actual_file_change_count || 0 }} 个文件 · {{ mainAgentStatus.latest_delivery_summary.external_runner_verification_count || 0 }} 项验证</span>
+                  </div>
+                  <details class="main-agent-technical-detail">
+                    <summary>技术详情</summary>
                   <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary?.lifecycle">
                     <span class="item-label">任务阶段</span>
                     <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.lifecycle.state }} · {{ mainAgentStatus.latest_delivery_summary.lifecycle.terminal ? '终态' : '会话保留' }}</span>
@@ -2005,19 +2168,25 @@ const applyRecommendation = () => {
                     <span class="item-label">文件 / 验证</span>
                     <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.actual_file_change_count || 0 }} 个文件 · {{ mainAgentStatus.latest_delivery_summary.external_runner_verification_count || 0 }} 条外部验证</span>
                   </div>
+                  <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary?.reasoning_loop">
+                    <span class="item-label">推理闭环</span>
+                    <span class="item-value">计划 v{{ mainAgentStatus.latest_delivery_summary.reasoning_loop.plan_version || 0 }} · 待证明 {{ mainAgentStatus.latest_delivery_summary.reasoning_open_assertions || 0 }} · 偏差 {{ mainAgentStatus.latest_delivery_summary.reasoning_deviation_count || 0 }} · 复盘 {{ mainAgentStatus.latest_delivery_summary.reasoning_loop.postmortems?.length || 0 }}</span>
+                  </div>
                   <div class="main-agent-status-item warning" v-if="mainAgentStatus?.failed_gates?.length">
                     <span class="item-label">未过门禁</span>
                     <span class="item-value">{{ mainAgentStatus.failed_gates.map(g => g.label || g.id).join('、') }}</span>
                   </div>
+                  </details>
                   <div class="main-agent-status-item warning" v-if="mainAgentStatus?.blockers?.length || mainAgentStatus?.needs?.length">
                     <span class="item-label">阻塞/待补</span>
                     <span class="item-value">{{ [...(mainAgentStatus.blockers || []), ...(mainAgentStatus.needs || [])].slice(0, 3).map(x => compactStatusText(x)).join('；') }}</span>
                   </div>
                 </div>
               </div>
-              <div v-for="(msg, i) in messages" :key="getGroupMessageKey(msg)" :id="'gc-msg-' + i" class="message" :class="[msg.role, { 'msg-highlight': highlightMsgIndex === i }]">
+              <div v-for="(msg, i) in messages" v-show="shouldShowGroupMessage(msg, i)" :key="getGroupMessageKey(msg)" :id="'gc-msg-' + i" class="message" :class="[msg.role, { 'msg-highlight': highlightMsgIndex === i }]">
+                <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
                 <!-- 思考过程消息 -->
-                <div v-if="msg.role === 'thinking'" class="thinking-bubble">
+                <div v-else-if="msg.role === 'thinking'" class="thinking-bubble">
                   <div class="thinking-header">
                     <span class="thinking-icon">🧠</span>
                     <span>Agent 思考中...</span>
@@ -2029,6 +2198,7 @@ const applyRecommendation = () => {
                 <div v-else-if="msg.role === 'user'" class="bubble">
                   <span class="label">👤 → @{{ getTargetDisplayName(msg.target) }}</span>
                   <div v-html="highlightMentions(msg.content)"></div>
+                  <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
                 </div>
                 <!-- 项目主 Agent 任务接管 -->
                 <div v-else-if="msg.type === 'project_task_intake'" class="bubble project-task-intake" :style="getAgentAccentStyle(msg.agent)">
@@ -2040,34 +2210,7 @@ const applyRecommendation = () => {
                     <span class="project-task-status">{{ msg.queue?.queued === false ? '已保存' : '执行中' }}</span>
                   </div>
                   <div class="project-task-content">{{ msg.content }}</div>
-                  <div class="project-task-meta">
-                    <code>{{ msg.task_id || msg.task?.id }}</code>
-                    <span v-if="msg.task?.attachment_count">{{ msg.task.attachment_count }} 个附件</span>
-                    <span>持久任务</span>
-                    <span>验收后报告</span>
-                  </div>
-                  <div v-if="getTaskRuntime(msg)" class="inline-task-runtime">
-                    <div class="inline-runtime-head">
-                      <strong>{{ taskRuntimeStatusLabel(getTaskRuntime(msg).status) }}</strong>
-                      <span>{{ getTaskRuntime(msg).lifecycle?.state || getTaskRuntime(msg).statusText || '主 Agent 正在协调任务' }} · {{ getTaskRuntime(msg).lifecycle?.keepsSession ? '会话保留' : '终态关闭' }}</span>
-                    </div>
-                    <div class="inline-runtime-counts">
-                      <span>执行 {{ getTaskRuntime(msg).counts?.running || 0 }}</span>
-                      <span>验收 {{ getTaskRuntime(msg).counts?.reviewing || 0 }}</span>
-                      <span>失败 {{ getTaskRuntime(msg).counts?.failed || 0 }}</span>
-                      <span>可合并 {{ getTaskRuntime(msg).counts?.mergeReady || 0 }}</span>
-                    </div>
-                    <div v-if="getTaskRuntime(msg).agents?.length" class="inline-runtime-agents">
-                      <span v-for="agent in getTaskRuntime(msg).agents" :key="`${agent.project}:${agent.state}`" :class="['inline-agent-state', agent.state]">
-                        {{ agent.project }} · {{ taskRuntimeAgentState(agent.state) }} · {{ taskRuntimeGreenLabel(agent.green) }}<template v-if="agent.runtimeFallbacks"> · 切换 {{ agent.runtimeFallbacks }}</template>
-                      </span>
-                    </div>
-                    <div v-if="getTaskRuntime(msg).sessions?.length" class="inline-runtime-sessions">
-                      <span v-for="session in getTaskRuntime(msg).sessions" :key="`${session.project}:${session.agentType}`">
-                        {{ session.project }} · {{ session.agentType }} · {{ session.native ? '原生续跑' : session.degraded ? 'scratchpad 保护' : session.mode }} · 第 {{ session.turnCount || session.turn || 1 }} 轮
-                      </span>
-                    </div>
-                  </div>
+                  <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
                 </div>
                 <div v-else-if="msg.type === 'conflict_plan'" class="bubble conflict-plan-bubble">
                   <div class="conflict-plan-head">
@@ -2095,7 +2238,10 @@ const applyRecommendation = () => {
                   <div v-if="getQaMeta(msg)" class="agent-qa-meta">{{ getQaMeta(msg) }}</div>
                   <div v-if="msg.qa?.question && msg.qa?.kind !== 'question'" class="agent-qa-question">问：{{ msg.qa.question }}</div>
                   <div class="agent-qa-content" v-html="highlightMentions(msg.content)"></div>
-                  <div v-if="canRetryAgentQa(msg) || canTakeoverAgentQa(msg)" class="agent-qa-actions">
+                  <div v-if="msg.qa?.answer_evidence?.length" class="agent-qa-meta">证据：{{ msg.qa.answer_evidence.slice(0, 4).join(' · ') }}</div>
+                  <div v-if="msg.qa?.acceptance?.reason" class="agent-qa-meta">主 Agent 仲裁：{{ msg.qa.acceptance.reason }}</div>
+                  <div v-if="msg.qa?.permission_boundary?.pass === false" class="agent-qa-question">权限门禁：检测到问答外副作用，回答未采纳。</div>
+                  <div v-if="canRetryAgentQa(msg) || canTakeoverAgentQa(msg) || canArbitrateAgentQa(msg)" class="agent-qa-actions">
                     <button
                       v-if="canRetryAgentQa(msg)"
                       class="btn btn-sm btn-outline"
@@ -2108,6 +2254,18 @@ const applyRecommendation = () => {
                       :disabled="agentQaActionLoading[`${msg.qa.id}:manual`]"
                       @click="runAgentQaAction(msg, 'manual')"
                     >人工接管</button>
+                    <button
+                      v-if="canArbitrateAgentQa(msg)"
+                      class="btn btn-sm btn-outline"
+                      :disabled="agentQaActionLoading[`${msg.qa.id}:accept`]"
+                      @click="runAgentQaAction(msg, 'accept')"
+                    >主 Agent 采纳</button>
+                    <button
+                      v-if="canArbitrateAgentQa(msg)"
+                      class="btn btn-sm btn-outline"
+                      :disabled="agentQaActionLoading[`${msg.qa.id}:reject`]"
+                      @click="runAgentQaAction(msg, 'reject')"
+                    >拒绝</button>
                   </div>
                 </div>
                 <!-- Agent 回复 -->
@@ -2127,22 +2285,12 @@ const applyRecommendation = () => {
                     </span>
                   </div>
                   <div v-if="msg.content" class="agent-message-content" v-html="highlightMentions(msg.content)"></div>
-                  <div v-if="getTaskRuntime(msg)" class="inline-task-runtime compact">
-                    <div class="inline-runtime-head">
-                      <strong>{{ taskRuntimeStatusLabel(getTaskRuntime(msg).status) }}</strong>
-                      <span>{{ getTaskRuntime(msg).lifecycle?.state || 'workflow' }} · {{ getTaskRuntime(msg).counts?.running || 0 }} 执行 · {{ getTaskRuntime(msg).counts?.reviewing || 0 }} 验收 · {{ getTaskRuntime(msg).counts?.failed || 0 }} 失败</span>
-                    </div>
-                    <div v-if="getTaskRuntime(msg).agents?.length" class="inline-runtime-agents">
-                      <span v-for="agent in getTaskRuntime(msg).agents.slice(0, 6)" :key="`${agent.project}:${agent.state}`" :class="['inline-agent-state', agent.state]">
-                        {{ agent.project }} · {{ taskRuntimeAgentState(agent.state) }} · {{ taskRuntimeGreenLabel(agent.green) }}
-                      </span>
-                    </div>
-                  </div>
-                  <div v-if="msg.delivery_summary || msg.deliverySummary" class="delivery-summary-actions">
+                  <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
+                  <div v-if="(msg.delivery_summary || msg.deliverySummary) && !getTaskCard(msg)" class="delivery-summary-actions">
                     <button class="btn btn-sm btn-outline" @click="openPipelineViewer(msg)">查看交付协作看板</button>
                     <span v-if="(msg.delivery_summary || msg.deliverySummary)?.acceptance_gate_passed === false" class="delivery-gate-warning">验收门禁未通过</span>
                   </div>
-                  <div v-if="msg.dispatchPolicy || (msg.assignments && msg.assignments.length)" class="orchestration-plan">
+                  <div v-if="(msg.dispatchPolicy || (msg.assignments && msg.assignments.length)) && !getTaskCard(msg)" class="orchestration-plan">
                     <div class="plan-header">
                       <span>{{ getPlanTitle(msg) }}</span>
                       <span class="plan-order">{{ getExecutionOrderLabel(msg.executionOrder) }}</span>
@@ -2194,7 +2342,7 @@ const applyRecommendation = () => {
                   </div>
                   <span v-if="msg.streaming" class="stream-cursor">▌</span>
                   <div
-                    v-if="getWorkEvents(msg).length"
+                    v-if="getWorkEvents(msg).length && !getTaskCard(msg)"
                     class="agent-work-events"
                     :class="getWorkPanelState(msg).tone"
                     :style="getAgentAccentStyle(msg.agent)"
@@ -2249,16 +2397,31 @@ const applyRecommendation = () => {
             </div>
           </div>
         </div>
-        <!-- 消息锚点导航条 -->
-        <div v-if="userMessages.length > 1" class="msg-navigator">
-          <div 
-            v-for="msg in userMessages" 
-            :key="msg.originalIndex" 
-            class="navigator-dot"
-            @click="scrollToMessage(msg.originalIndex)"
-            :title="msg.content.slice(0, 30) + (msg.content.length > 30 ? '...' : '')"
-          >
-            <span class="dot-bar"></span>
+        <!-- 消息锚点导航条 (Codex 风格) -->
+        <div v-if="navMessages.length > 1" class="msg-navigator">
+          <div class="msg-nav-track">
+            <div 
+              v-for="msg in navMessages" 
+              :key="msg.originalIndex" 
+              class="navigator-dot"
+              :class="msg.role"
+              @click="scrollToMessage(msg.originalIndex)"
+            >
+              <div class="dot-cluster">
+                  <span class="dot-bar user-bar"></span>
+                  <span class="dot-bar assistant-bar" v-if="msg.assistantContent"></span>
+                </div>
+              <div class="nav-tooltip-card">
+                <div class="nav-tt-user">{{ (msg.userContent || '附件内容').slice(0, 80) + ((msg.userContent || '').length > 80 ? '...' : '') }}</div>
+                <div class="nav-tt-assistant" v-if="msg.assistantContent">{{ msg.assistantContent.slice(0, 80) + (msg.assistantContent.length > 80 ? '...' : '') }}</div>
+                <div class="nav-tt-tags" v-if="msg.files && msg.files.length">
+                  <span class="nav-tt-tag" v-for="f in msg.files" :key="f.name">📄 {{ f.name }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="msg-nav-scrollbar">
+            <div class="msg-nav-thumb"></div>
           </div>
         </div>
 
@@ -2299,11 +2462,19 @@ const applyRecommendation = () => {
             <textarea
               id="groupChatInput"
               v-model="newMessage"
-              placeholder="输入消息...（需要时可 @ 项目 Agent，输入 / 唤起快捷模板）"
+              placeholder="输入消息…（可 @ 项目 Agent，输入 / 打开命令中心）"
               rows="1"
               @keydown="handleKeydown"
               @input="handleInput"
             ></textarea>
+            <SlashCommandMenu
+              :open="slash.open"
+              :commands="slash.filtered"
+              :active-index="slash.activeIndex"
+              :loading="slash.loading"
+              :query="slash.query"
+              @select="slash.select"
+            />
             <!-- @提及下拉框 -->
             <div v-if="mentionDropdown && getFilteredAgents().length > 0" class="mention-dropdown">
               <div v-for="(agent, i) in getFilteredAgents()" :key="agent"
@@ -2628,6 +2799,10 @@ const applyRecommendation = () => {
 .main-agent-status-title { font-size: 12px; font-weight: 900; color: var(--text-primary); margin-right: 8px; }
 .main-agent-phase { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; background: rgba(59, 130, 246, 0.12); color: var(--accent-blue); font-size: 11px; font-weight: 800; }
 .main-agent-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.main-agent-technical-detail{grid-column:1/-1;padding:7px 9px;border:1px solid var(--border-color);border-radius:9px;color:var(--text-muted)}
+.main-agent-technical-detail>summary{cursor:pointer;font-size:10px;font-weight:800;user-select:none}
+.main-agent-technical-detail[open]{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
+.main-agent-technical-detail[open]>summary{grid-column:1/-1;margin-bottom:2px}
 .main-agent-status-item { min-width: 0; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.55); border: 1px solid rgba(148, 163, 184, 0.16); }
 .main-agent-status-item.warning { border-color: rgba(245, 158, 11, 0.25); background: rgba(245, 158, 11, 0.08); }
 .main-agent-status-item .item-label { display: block; font-size: 10px; color: var(--text-muted); font-weight: 800; margin-bottom: 4px; }
@@ -3985,81 +4160,165 @@ const applyRecommendation = () => {
   border-top-color: rgba(255, 255, 255, 0.08);
 }
 
-/* 消息节点锚点导航条 */
+/* 消息节点锚点导航条 (Codex 风格) */
 .msg-navigator {
   position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
+  right: 6px;
+  top: 8px;
+  bottom: 8px;
+  width: 28px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px 4px;
-  background: rgba(255, 255, 255, 0.45);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 20px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 14px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
   z-index: 100;
-  max-height: 70%;
-  overflow-y: auto;
+  overflow: hidden;
+  padding: 6px 0;
 }
 
 :global([data-theme="dark"]) .msg-navigator {
-  background: rgba(15, 23, 42, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
 }
 
+.msg-nav-track {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.msg-nav-track::-webkit-scrollbar { display: none; }
+
 .navigator-dot {
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  min-height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s ease;
   position: relative;
+  flex-shrink: 0;
+  padding: 2px 0;
+}
+
+.dot-cluster {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
 }
 
 .dot-bar {
-  width: 8px;
-  height: 2px;
-  background: var(--text-muted);
-  border-radius: 1px;
-  opacity: 0.5;
-  transition: all 0.2s;
+  width: 10px;
+  height: 3px;
+  border-radius: 1.5px;
+  transition: all 0.2s ease;
 }
 
+.user-bar {
+  background: var(--accent-blue, #3b82f6);
+  opacity: 0.5;
+}
+.assistant-bar {
+  background: var(--text-muted, #94a3b8);
+  opacity: 0.35;
+}
+
+.navigator-dot:hover {
+  transform: scale(1.3);
+}
 .navigator-dot:hover .dot-bar {
   width: 14px;
-  height: 3px;
-  background: var(--accent-blue);
+  height: 4px;
   opacity: 1;
 }
+.navigator-dot:hover .user-bar {
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.4);
+}
+.navigator-dot:hover .assistant-bar {
+  box-shadow: 0 0 6px rgba(148, 163, 184, 0.4);
+}
 
-/* Tooltip 悬停显示用户消息 */
-.navigator-dot::after {
-  content: attr(title);
+/* Tooltip 悬停显示消息摘要 */
+.nav-tooltip-card {
   position: absolute;
-  right: 24px;
+  right: 28px;
   top: 50%;
-  transform: translateY(-50%) scale(0.85);
-  background: rgba(15, 23, 42, 0.9);
-  color: #ffffff;
-  padding: 5px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  white-space: nowrap;
+  transform: translateY(-50%) scale(0.9);
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
+  color: var(--text-primary, #333333);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  max-width: 320px;
+  width: max-content;
   opacity: 0;
   pointer-events: none;
-  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
+  transition: all 0.18s cubic-bezier(0.25, 0.8, 0.25, 1);
   transform-origin: right center;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
-
-.navigator-dot:hover::after {
+:global([data-theme="dark"]) .nav-tooltip-card {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #f1f5f9;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+.navigator-dot:hover .nav-tooltip-card {
   opacity: 1;
   transform: translateY(-50%) scale(1);
+}
+.nav-tt-user {
+  font-weight: 600;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.nav-tt-assistant {
+  font-size: 12px;
+  color: var(--text-muted, #777);
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+:global([data-theme="dark"]) .nav-tt-assistant {
+  color: #94a3b8;
+}
+.nav-tt-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+.nav-tt-tag {
+  background: rgba(0, 0, 0, 0.05);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-secondary, #555);
+}
+:global([data-theme="dark"]) .nav-tt-tag {
+  background: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
 }
 </style>

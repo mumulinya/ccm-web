@@ -104,7 +104,7 @@ function setAgentQualityPolicy(input) {
 }
 function fallbackIntent(message) {
     const text = String(message || "").trim();
-    const deniesAction = /(?:不要|不用|先别|暂时别|只|仅).{0,12}(?:执行|操作|修改|创建|派发|启动|删除|提交)/.test(text);
+    const deniesAction = /(?:不要|不用|先别|暂时别|只|仅|不|禁止).{0,12}(?:执行|操作|修改|创建|派发|启动|删除|提交)/.test(text);
     const question = /[?？]|(?:怎么|如何|为什么|是什么|原理|介绍|讲讲|说明|建议|觉得|能否|能不能|可不可以|是否|会不会|有哪些|有什么)/.test(text);
     const highRisk = /(?:删除|移除|清空|覆盖|强制|重置|提交|合并|发布|部署到生产)/.test(text);
     const directive = /(?:请|帮我|麻烦|给我|需要你|我要你|直接|立即|马上|开始|继续).{0,40}(?:实现|新增|修改|修复|重构|优化|运行|执行|测试|创建|派发|启动|停止|删除|提交|合并)/.test(text)
@@ -173,7 +173,8 @@ function evaluateAgentDecision(input) {
     ].filter(Boolean);
     const requiresClarification = clarificationReasons.length > 0;
     const shadowed = !requiresClarification && policy.shadowMode && risk !== "read";
-    const authorizationBasis = input.explicitWriteAuthorization ? "current_message" : intent.authorization_basis;
+    // 授权来源只能由服务端根据当前消息/本轮确认判定，模型和历史记忆无权自报授权。
+    const authorizationBasis = input.explicitWriteAuthorization ? "current_message" : "none";
     return {
         intent,
         policy,
@@ -238,7 +239,12 @@ function buildAgentQualitySnapshot(input = {}) {
     const executionIntents = decisions.filter(item => ["execution", "high_risk"].includes(item.intent?.category));
     const missedExecution = executionIntents.filter(item => ["answered", "completed_without_action"].includes(item.outcome));
     const unauthorized = proposedWrites.filter(item => item.outcome === "executed" && item.authorization_basis === "none");
-    const doneTasks = tasks.filter(task => task.status === "done");
+    const allDoneTasks = tasks.filter(task => task.status === "done");
+    // 5.0 introduced an evidence-bearing delivery summary. Older completed tasks do
+    // not contain enough information to score, so keep them visible but do not
+    // silently count them as false completions.
+    const doneTasks = allDoneTasks.filter(task => typeof task.delivery_summary?.acceptance_gate_passed === "boolean");
+    const legacyUnscoredCompleted = allDoneTasks.length - doneTasks.length;
     const falseCompletions = doneTasks.filter(task => task.delivery_summary?.acceptance_gate_passed !== true);
     const recoveredSessions = sessions.filter(session => Number(session.turnCount || 0) > 1);
     const healthyRecovered = recoveredSessions.filter(session => session.resumeMode === "native" && !!session.nativeSessionId && session.lastTurnSucceeded !== false);
@@ -249,10 +255,25 @@ function buildAgentQualitySnapshot(input = {}) {
         return task.status !== "failed" && plan.effectiveOrder === "sequential";
     });
     const firstPass = doneTasks.filter(task => Number(task.delivery_summary?.rework_count || 0) === 0);
+    const reasoningTasks = tasks.filter(task => !!(task.reasoning_loop || task.delivery_summary?.reasoning_loop));
+    const reasoningState = (task) => task.reasoning_loop || task.delivery_summary?.reasoning_loop || {};
+    const recoveredReasoningTasks = reasoningTasks.filter(task => (reasoningState(task).recovery_checks || []).length > 0);
+    const fullyRevalidatedRecoveries = recoveredReasoningTasks.filter(task => (reasoningState(task).recovery_checks || []).every((item) => item.goal_revalidated && item.state_revalidated && item.acceptance_revalidated));
+    const replannedTasks = reasoningTasks.filter(task => Number(reasoningState(task).plan_version || 0) > 1);
+    const tasksWithOpenReasoningErrors = reasoningTasks.filter(task => (reasoningState(task).deviations || []).some((item) => item.severity === "error"));
+    const postmortemTasks = reasoningTasks.filter(task => (reasoningState(task).postmortems || []).length > 0);
     return {
         generated_at: now(),
         policy: getAgentQualityPolicy(),
-        totals: { decisions: decisions.length, proposed_writes: proposedWrites.length, tasks: tasks.length, completed_tasks: doneTasks.length, sessions: sessions.length },
+        totals: {
+            decisions: decisions.length,
+            proposed_writes: proposedWrites.length,
+            tasks: tasks.length,
+            completed_tasks: allDoneTasks.length,
+            scored_completed_tasks: doneTasks.length,
+            legacy_unscored_completed: legacyUnscoredCompleted,
+            sessions: sessions.length,
+        },
         counts: {
             potential_misdispatch: misdispatch.length,
             missed_execution: missedExecution.length,
@@ -265,6 +286,11 @@ function buildAgentQualitySnapshot(input = {}) {
             conflict_tasks: conflictTasks.length,
             handled_conflicts: handledConflicts.length,
             first_pass_delivery: firstPass.length,
+            reasoning_tasks: reasoningTasks.length,
+            recovery_revalidated: fullyRevalidatedRecoveries.length,
+            replanned_tasks: replannedTasks.length,
+            reasoning_error_tasks: tasksWithOpenReasoningErrors.length,
+            postmortem_tasks: postmortemTasks.length,
         },
         rates: {
             misdispatch_rate: rate(misdispatch.length, proposedWrites.length),
@@ -274,11 +300,29 @@ function buildAgentQualitySnapshot(input = {}) {
             native_session_recovery_rate: rate(healthyRecovered.length, recoveredSessions.length),
             conflict_handling_rate: rate(handledConflicts.length, conflictTasks.length),
             first_pass_delivery_rate: rate(firstPass.length, doneTasks.length),
+            recovery_goal_revalidation_rate: rate(fullyRevalidatedRecoveries.length, recoveredReasoningTasks.length),
+            dynamic_replan_rate: rate(replannedTasks.length, reasoningTasks.length),
         },
         recent_decisions: decisions.slice(-100).reverse(),
+        recent_reasoning_tasks: reasoningTasks.slice().sort((a, b) => String(b.updated_at || b.created_at || "").localeCompare(String(a.updated_at || a.created_at || ""))).slice(0, 30).map(task => {
+            const reasoning = reasoningState(task);
+            return {
+                task_id: task.id,
+                title: task.title,
+                status: task.status,
+                plan_version: Number(reasoning.plan_version || 0),
+                open_assertions: (reasoning.assertions || []).filter((item) => item.status !== "passed").length,
+                deviations: (reasoning.deviations || []).length,
+                postmortems: (reasoning.postmortems || []).length,
+                replan_required: reasoning.replan_required === true,
+                recovery_checks: (reasoning.recovery_checks || []).length,
+                last_fact_hash: reasoning.fact_snapshots?.[reasoning.fact_snapshots.length - 1]?.hash || "",
+            };
+        }),
     };
 }
 function runAgentQualityCenterSelfTest() {
+    const clarifiedAnalysis = normalizeAgentDecisionIntent(null, "帮我优化一下\n澄清：只分析 demo 的性能方向，不执行、不修改代码");
     const consultation = evaluateAgentDecision({
         message: "知识库还可以怎么优化？",
         decision: { intent: { category: "question", action_required: false, confidence: 0.94, reason: "咨询" } },
@@ -318,6 +362,7 @@ function runAgentQualityCenterSelfTest() {
         lowConfidenceGuessIsBlocked: guessed.requiresClarification && !guessed.groundedTarget,
         shadowModeRecordsWithoutExecution: shadow.shadowed && !shadow.allowed,
         historyCannotAuthorize: evaluateAgentDecision({ message: "继续聊聊", decision: { intent: { category: "conversation", action_required: false, confidence: .9, authorization_basis: "none" } }, toolName: "send_group_cmd", args: { group_id: "g1" }, risk: "write", explicitWriteAuthorization: false }).authorizationBasis === "none",
+        clarificationDenialOverridesOriginalDirective: clarifiedAnalysis.category === "analysis" && clarifiedAnalysis.action_required === false && clarifiedAnalysis.authorization_basis === "none",
     };
     return { pass: Object.values(checks).every(Boolean), checks };
 }

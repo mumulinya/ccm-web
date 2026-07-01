@@ -37,9 +37,12 @@ exports.openTaskAgentSession = openTaskAgentSession;
 exports.recordTaskAgentSessionTurn = recordTaskAgentSessionTurn;
 exports.advanceTaskAgentSession = advanceTaskAgentSession;
 exports.closeTaskAgentSessions = closeTaskAgentSessions;
+exports.reopenTaskAgentSessions = reopenTaskAgentSessions;
 exports.getTaskAgentSessionOptions = getTaskAgentSessionOptions;
 exports.getTaskAgentSessionContinuity = getTaskAgentSessionContinuity;
 exports.listTaskAgentSessions = listTaskAgentSessions;
+exports.purgeTaskAgentSessions = purgeTaskAgentSessions;
+exports.reconcileTaskAgentSessions = reconcileTaskAgentSessions;
 exports.shouldCloseTaskAgentSessions = shouldCloseTaskAgentSessions;
 exports.runTaskAgentSessionSelfTest = runTaskAgentSessionSelfTest;
 const crypto = __importStar(require("crypto"));
@@ -152,6 +155,7 @@ function recordTaskAgentSessionTurn(sessionId, result = {}) {
 function advanceTaskAgentSession(current, result = {}) {
     const errorText = String(result.error || "");
     const invalidNativeSession = result.nativeSessionInvalid === true || /(?:session|thread).*(?:not found|invalid|expired|不存在|无效|过期)|无法恢复.*(?:session|会话)/i.test(errorText);
+    const permissionDrift = result.permissionDrift === true;
     const capturedNativeId = String(result.nativeSessionId || current.nativeSessionId || "").trim();
     const requiresCapturedId = current.resumeMode === "native"
         && (0, agent_runtime_1.getAgentRuntime)(current.agentType).capabilities.sessionResume
@@ -160,15 +164,17 @@ function advanceTaskAgentSession(current, result = {}) {
     const previousIds = [...new Set([...(current.nativeSessionHistory || []), current.nativeSessionId].filter(Boolean))].slice(-10);
     const next = {
         ...current,
-        nativeSessionId: invalidNativeSession ? "" : capturedNativeId,
-        resumeMode: captureFailed ? "scratchpad" : invalidNativeSession && (0, agent_runtime_1.getAgentRuntime)(current.agentType).capabilities.sessionResume ? "native" : current.resumeMode,
+        nativeSessionId: permissionDrift ? createNativeSessionId(current.agentType) : invalidNativeSession ? "" : capturedNativeId,
+        resumeMode: permissionDrift ? "native" : captureFailed ? "scratchpad" : invalidNativeSession && (0, agent_runtime_1.getAgentRuntime)(current.agentType).capabilities.sessionResume ? "native" : current.resumeMode,
         nativeCaptureFailures: Number(current.nativeCaptureFailures || 0) + (captureFailed ? 1 : 0),
-        nativeRecoveryAttempts: Number(current.nativeRecoveryAttempts || 0) + (invalidNativeSession ? 1 : 0),
+        nativeRecoveryAttempts: Number(current.nativeRecoveryAttempts || 0) + (invalidNativeSession || permissionDrift ? 1 : 0),
         nativeSessionHistory: previousIds,
-        lastNativeRecoveryAt: invalidNativeSession ? new Date().toISOString() : current.lastNativeRecoveryAt || "",
-        turnCount: Number(current.turnCount || 0) + 1,
+        lastNativeRecoveryAt: invalidNativeSession || permissionDrift ? new Date().toISOString() : current.lastNativeRecoveryAt || "",
+        turnCount: permissionDrift ? 0 : Number(current.turnCount || 0) + 1,
         lastTurnSucceeded: result.success !== false,
-        lastError: invalidNativeSession ? "原生会话已失效，下轮将创建恢复会话并承接工作区" : result.success === false ? (errorText || "Agent 执行失败") : captureFailed ? "CLI 未返回原生 session ID，已安全降级为 scratchpad 续跑" : "",
+        lastError: permissionDrift ? "检测到实际只读权限与可写任务声明不一致；已隔离旧 native session，下轮创建可写恢复会话" : invalidNativeSession ? "原生会话已失效，下轮将创建恢复会话并承接工作区" : result.success === false ? (errorText || "Agent 执行失败") : captureFailed ? "CLI 未返回原生 session ID，已安全降级为 scratchpad 续跑" : "",
+        permissionDriftCount: Number(current.permissionDriftCount || 0) + (permissionDrift ? 1 : 0),
+        lastPermissionDriftAt: permissionDrift ? new Date().toISOString() : current.lastPermissionDriftAt || "",
         lastUsedAt: new Date().toISOString(),
     };
     return next;
@@ -194,6 +200,34 @@ function closeTaskAgentSessions(input, reason = "主 Agent 已完成最终验收
         saveStore(store);
     return closed;
 }
+function reopenTaskAgentSessions(taskId, reason = "用户在同一任务中继续修改") {
+    const id = String(taskId || "").trim();
+    if (!id)
+        return [];
+    const store = loadStore();
+    const now = new Date().toISOString();
+    const latestByLane = new Map();
+    for (const session of store.sessions) {
+        if (session.taskId !== id && session.scopeId !== id)
+            continue;
+        const key = `${session.groupId}::${session.project}::${session.agentType}`;
+        const previous = latestByLane.get(key);
+        if (!previous || String(session.lastUsedAt || session.createdAt) > String(previous.lastUsedAt || previous.createdAt))
+            latestByLane.set(key, session);
+    }
+    const ids = new Set(Array.from(latestByLane.values()).map(item => item.id));
+    const reopened = [];
+    store.sessions = store.sessions.map((session) => {
+        if (!ids.has(session.id) || session.status === "open")
+            return session;
+        const next = { ...session, status: "open", closedAt: "", closeReason: "", lastUsedAt: now, lastError: reason };
+        reopened.push(next);
+        return next;
+    });
+    if (reopened.length)
+        saveStore(store);
+    return reopened;
+}
 function getTaskAgentSessionOptions(session) {
     return {
         sessionId: session.nativeSessionId,
@@ -218,6 +252,40 @@ function listTaskAgentSessions(filter = {}) {
         && (!filter.groupId || item.groupId === filter.groupId)
         && (!filter.project || item.project === filter.project)
         && (!filter.status || item.status === filter.status));
+}
+function purgeTaskAgentSessions(taskId) {
+    const id = String(taskId || "").trim();
+    if (!id)
+        return [];
+    const store = loadStore();
+    const removed = store.sessions.filter((item) => item.taskId === id || item.scopeId === id);
+    if (!removed.length)
+        return [];
+    store.sessions = store.sessions.filter((item) => item.taskId !== id && item.scopeId !== id);
+    saveStore(store);
+    return removed;
+}
+function reconcileTaskAgentSessions(tasks, nowMs = Date.now()) {
+    const taskMap = new Map((Array.isArray(tasks) ? tasks : []).map((task) => [String(task.id || ""), task]));
+    const store = loadStore();
+    const closed = [];
+    const now = new Date(nowMs).toISOString();
+    store.sessions = store.sessions.map((session) => {
+        if (session.status !== "open")
+            return session;
+        const task = taskMap.get(session.taskId || session.scopeId);
+        const inactiveMs = nowMs - Date.parse(session.lastUsedAt || session.createdAt || now);
+        const terminal = !task || task.archived || task.deleted_at || ["done", "cancelled", "archived"].includes(String(task.status || ""));
+        const abandoned = inactiveMs > 30 * 24 * 60 * 60 * 1000 && String(task?.status || "") !== "in_progress";
+        if (!terminal && !abandoned)
+            return session;
+        const next = { ...session, status: "closed", closedAt: now, lastUsedAt: now, closeReason: terminal ? "任务已终态、归档或不存在，自动关闭残留会话" : "会话超过 30 天未使用，自动关闭" };
+        closed.push(next);
+        return next;
+    });
+    if (closed.length)
+        saveStore(store);
+    return { closed: closed.length, sessions: closed };
 }
 function shouldCloseTaskAgentSessions(input) {
     const hasPersistentTask = !!String(input.taskId || "").trim();
@@ -246,6 +314,10 @@ function runTaskAgentSessionSelfTest() {
         missingNativeIdCanDegradeSafely: cursorWithoutCapturedId.resumeMode === "scratchpad" && cursorWithoutCapturedId.nativeCaptureFailures === 1,
         capturedNativeIdStaysResumable: codexWithCapturedId.resumeMode === "native" && getTaskAgentSessionOptions(codexWithCapturedId).resumeSession,
         invalidNativeSessionCreatesRecoveryPath: invalidCursor.resumeMode === "native" && invalidCursor.nativeSessionId === "" && invalidCursor.nativeSessionHistory?.includes("cursor-thread-old") && invalidCursor.nativeRecoveryAttempts === 1,
+        permissionDriftRebuildsNativeSession: (() => {
+            const drifted = advanceTaskAgentSession({ ...claude, id: "codex-drift", agentType: "codex", nativeSessionId: "codex-readonly", turnCount: 3 }, { success: false, error: "sandbox read-only", permissionDrift: true });
+            return drifted.resumeMode === "native" && drifted.nativeSessionId === "" && drifted.turnCount === 0 && drifted.nativeSessionHistory?.includes("codex-readonly") && drifted.permissionDriftCount === 1;
+        })(),
     };
     return { pass: Object.values(checks).every(Boolean), checks };
 }

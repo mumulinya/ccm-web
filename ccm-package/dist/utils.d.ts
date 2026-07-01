@@ -37,7 +37,7 @@ export declare function truncateInlineContent(content: string, maxChars?: number
 export declare function decodeXmlEntities(text: string): string;
 export declare function xmlToPlainText(xml: string): string;
 export declare function getZipEntries(buffer: Buffer): any[];
-export declare function readZipEntry(buffer: Buffer, entry: any): Buffer<ArrayBuffer>;
+export declare function readZipEntry(buffer: Buffer, entry: any): NonSharedBuffer;
 export declare function extractOoxmlText(filePath: string, name: string): string;
 export declare function looksBinaryString(content: string): boolean;
 export declare function describeFileFromPath(filePath: string, name: string, maxChars?: number): {

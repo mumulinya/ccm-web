@@ -1,0 +1,31 @@
+{
+  "commands": [
+    {
+      "name": "release-check",
+      "aliases": ["发布检查"],
+      "description": "按项目发布清单执行检查，但不自动发布",
+      "category": "自定义",
+      "icon": "✓",
+      "scopes": ["project", "group"],
+      "argumentHint": "[环境]",
+      "risk": "guarded",
+      "action": {
+        "type": "prompt",
+        "prompt": "请按当前项目的发布清单检查 $ARGS 环境，给出验证证据和风险；不要执行发布。"
+      }
+    },
+    {
+      "name": "roadmap",
+      "aliases": ["路线图"],
+      "description": "打开任务中心查看开发路线",
+      "category": "自定义",
+      "icon": "◇",
+      "scopes": ["global", "group"],
+      "risk": "safe",
+      "action": {
+        "type": "navigate",
+        "tab": "tasks"
+      }
+    }
+  ]
+}

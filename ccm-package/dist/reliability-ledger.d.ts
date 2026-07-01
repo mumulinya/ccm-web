@@ -31,17 +31,39 @@ export declare function getReliabilityLedgerStats(): {
         failed: number;
         duplicate_suppressed: any;
         stale_in_progress: number;
+        stale_items: {
+            operation_id: any;
+            scope: any;
+            trace_id: any;
+            owner_pid: any;
+            lease_expires_at: any;
+        }[];
     };
     leases: {
         total: number;
         active: number;
         stale: number;
+        stale_items: {
+            task_id: any;
+            trace_id: any;
+            owner_pid: any;
+            expires_at: any;
+            recovery_count: any;
+        }[];
         recoveries: any;
     };
     traces: {
         total: number;
         bytes: number;
     };
+};
+export declare function reconcileReliabilityLedgerDebt(reason?: string): {
+    reconciled_at: string;
+    reason: string;
+    operations: any[];
+    leases: any[];
+    operation_count: number;
+    lease_count: number;
 };
 export declare function acquireTaskLease(taskId: string, traceId: string, ttlMs?: number): {
     acquired: boolean;

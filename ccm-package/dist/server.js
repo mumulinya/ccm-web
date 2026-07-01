@@ -59,8 +59,12 @@ const music_1 = require("./modules/music");
 const collaboration_1 = require("./modules/collaboration");
 const reliability_drills_1 = require("./reliability-drills");
 const soak_test_1 = require("./soak-test");
+const process_lifecycle_1 = require("./process-lifecycle");
 const global_agent_1 = require("./modules/global-agent");
 const rag_1 = require("./modules/rag");
+const slash_commands_1 = require("./modules/slash-commands");
+const credential_store_1 = require("./credential-store");
+const usability_1 = require("./modules/usability");
 const sessions_2 = require("./modules/sessions");
 // === 运行时内存状态与心跳推送 ===
 const petStatusClients = new Set();
@@ -471,6 +475,42 @@ function getProjectVerificationCommandsForRunner(projectName) {
         || projectConfig.check_commands
         || projectConfig.checkCommands);
 }
+async function runIndependentProjectVerification(projectName, workDir, timeoutMs, taskId, executionId, agentType) {
+    const commands = getProjectVerificationCommandsForRunner(projectName).filter(execution_kernel_1.isSafeVerificationCommand);
+    if (!commands.length || !workDir)
+        return "";
+    const verification = [];
+    const failed = [];
+    const results = [];
+    const perCommandTimeout = Math.max(30_000, Math.min(timeoutMs || 300_000, 180_000));
+    for (const command of commands) {
+        try {
+            const managed = await (0, execution_kernel_1.runManagedCommand)({
+                taskId,
+                executionId,
+                command,
+                cwd: workDir,
+                timeoutMs: perCommandTimeout,
+                maxOutputBytes: 5 * 1024 * 1024,
+                env: (0, execution_kernel_1.sanitizeExecutionEnv)((0, runtime_tool_sync_1.getRuntimeExecutionEnv)(agentType), []),
+            });
+            verification.push(`${command} passed by external runner (exit 0)`);
+            results.push({ command, status: "passed", exitCode: 0, output: String(managed.stdout || "").slice(-4000) });
+        }
+        catch (error) {
+            const exitCode = error?.exitCode ?? error?.status ?? null;
+            failed.push(`${command} failed by external runner${exitCode === null ? "" : ` (exit ${exitCode})`}`);
+            results.push({ command, status: "failed", exitCode, output: String(error?.stdout || error?.stderr || error?.message || error || "").slice(-4000) });
+        }
+    }
+    return "\n\nCCM_RUNNER_VERIFICATION\n```json\n" + JSON.stringify({
+        ccm_runner_verification: true,
+        status: failed.length ? "failed" : "passed",
+        verification,
+        failed,
+        results,
+    }, null, 2) + "\n```";
+}
 function extractVerificationCommandsFromMessage(message) {
     const text = String(message || "");
     const commands = [];
@@ -626,7 +666,10 @@ async function callAgent(projectName, message, workDir, agentType, timeoutMs, wo
         catch { }
         const normalized = (0, agent_runtime_1.normalizeAgentCommandOutput)(agentType, managed.stdout);
         const bounded = (0, execution_kernel_1.persistBoundedOutput)(taskId, normalized.output, Number(workspaceTarget?.maxContextOutputBytes || 256 * 1024));
-        const output = await appendToolResults(bounded.content, workspaceTarget?.allowedTools);
+        let output = await appendToolResults(bounded.content, workspaceTarget?.allowedTools);
+        if (!/CCM_AGENT_PROBE_OK|执行通道健康探针/i.test(message)) {
+            output += await runIndependentProjectVerification(projectName, workDir, timeoutMs, taskId, executionId, agentType);
+        }
         const fileChanges = (0, utils_1.getFileChanges)(projectName, changeSnapshot);
         (0, db_1.recordMetric)(projectName, {
             success: true,
@@ -807,8 +850,12 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             const normalized = isError ? { output: finalText, sessionId: "" } : (0, agent_runtime_1.normalizeAgentCommandOutput)(agentType, finalText);
             finalText = normalized.output;
             finalText = (0, execution_kernel_1.persistBoundedOutput)(taskId, finalText, Number(options.maxContextOutputBytes || 256 * 1024)).content;
-            if (!isError)
+            if (!isError) {
                 finalText = await appendToolResults(finalText, options.allowedTools);
+                if (!/CCM_AGENT_PROBE_OK|执行通道健康探针/i.test(message)) {
+                    finalText += await runIndependentProjectVerification(projectName, workDir, options.timeoutMs || 300000, taskId, executionId, agentType);
+                }
+            }
             const fileChanges = (0, utils_1.getFileChanges)(projectName, changeSnapshot);
             (0, db_1.recordMetric)(projectName, {
                 success: !isError,
@@ -1321,6 +1368,10 @@ function handleRequest(req, res) {
         return;
     if ((0, rag_1.handleRagApi)(pathname, req, res, parsed))
         return;
+    if ((0, slash_commands_1.handleSlashCommandsApi)(pathname, req, res, parsed))
+        return;
+    if ((0, usability_1.handleUsabilityApi)(pathname, req, res))
+        return;
     const { handleMemoryCenterApi } = require("./modules/memory-control-center");
     if (handleMemoryCenterApi(pathname, req, res, parsed))
         return;
@@ -1328,11 +1379,17 @@ function handleRequest(req, res) {
     (0, utils_1.sendJson)(res, { error: "Not Found" }, 404);
 }
 // === 启动服务器 ===
-function startServer(port) {
-    PORT = port;
+function bootstrapServerRuntime(startupCollabCtx, port) {
     (0, utils_1.refreshEnvPath)();
+    const credentialMigration = (0, credential_store_1.migrateConfigDirectory)(utils_1.CONFIGS_DIR);
+    const controlBotMigration = (0, credential_store_1.migrateTomlCredentials)(path.join(utils_1.CCM_DIR, "control-bot", "config.toml"));
+    const protectedFeishuConfig = (0, db_1.loadFeishuConfig)();
+    if (Object.keys(protectedFeishuConfig || {}).length)
+        (0, db_1.saveFeishuConfig)(protectedFeishuConfig);
+    const migratedCredentials = credentialMigration.credentials + controlBotMigration.count;
+    if (migratedCredentials > 0)
+        console.log(`[凭据安全] 已迁移 ${migratedCredentials} 个明文凭据到本机加密存储；建议轮换曾以明文保存的密钥`);
     tool_manager_1.toolManager.loadTools().catch((e) => console.error("[ToolManager]", e.message));
-    const startupCollabCtx = createCollabCtx();
     (0, cron_1.startCronScheduler)(startupCollabCtx);
     (0, collaboration_1.startTaskWatchdog)(startupCollabCtx);
     (0, collaboration_1.startAgentRecoveryMonitor)(startupCollabCtx);
@@ -1343,6 +1400,7 @@ function startServer(port) {
     if (missionSupervisor.resumed > 0)
         console.log(`[全局任务监工] 启动恢复 ${missionSupervisor.resumed} 个异步监督任务`);
     (0, reliability_drills_1.startReliabilityDrillScheduler)();
+    (0, usability_1.startUsabilityArchiveScheduler)();
     const soakResume = (0, soak_test_1.resumeSoakTest)();
     if (soakResume.resumed)
         console.log("[Soak Test] 已恢复未完成的稳定性浸泡测试");
@@ -1350,6 +1408,10 @@ function startServer(port) {
     if (resumeResult.total > 0) {
         console.log(`[任务队列] 启动恢复 ${resumeResult.resumed}/${resumeResult.total} 个自动执行任务`);
     }
+}
+function startServer(port) {
+    PORT = port;
+    const startupCollabCtx = createCollabCtx();
     const server = http.createServer(handleRequest);
     server.on("close", () => {
         (0, cron_1.stopCronScheduler)();
@@ -1357,9 +1419,13 @@ function startServer(port) {
         (0, collaboration_1.stopAgentRecoveryMonitor)();
         (0, global_agent_1.stopGlobalMissionSupervisionForServer)();
         (0, reliability_drills_1.stopReliabilityDrillScheduler)();
+        (0, usability_1.stopUsabilityArchiveScheduler)();
         (0, soak_test_1.shutdownSoakMonitor)();
     });
     server.listen(port, () => {
+        // Port ownership is the fail-closed singleton gate. No schedulers, queue
+        // recovery, soak resume, or mutable startup work may run before it succeeds.
+        bootstrapServerRuntime(startupCollabCtx, port);
         console.log(`\n╔══════════════════════════════════════╗`);
         console.log(`║     ccm Web 控制台                    ║`);
         console.log(`╚══════════════════════════════════════╝\n`);
@@ -1386,7 +1452,28 @@ function startServer(port) {
 let PORT = 3080;
 if (require.main === module) {
     PORT = parseInt(process.argv[2]) || 3080;
-    startServer(PORT);
+    (0, process_lifecycle_1.installProcessLifecycleFaultHandlers)();
+    const server = startServer(PORT);
+    let lifecycleHeartbeat = null;
+    server.prependOnceListener("listening", () => {
+        (0, process_lifecycle_1.initializeProcessLifecycle)();
+        lifecycleHeartbeat = setInterval(() => (0, process_lifecycle_1.touchProcessLifecycle)(), 30_000);
+        lifecycleHeartbeat.unref?.();
+    });
+    let shuttingDown = false;
+    const shutdown = (signal) => {
+        if (shuttingDown)
+            return;
+        shuttingDown = true;
+        if (lifecycleHeartbeat)
+            clearInterval(lifecycleHeartbeat);
+        (0, process_lifecycle_1.markProcessShutdown)({ category: "system_shutdown", reason: `收到 ${signal}，执行受控退出`, signal, exit_code: 0 });
+        server.close(() => process.exit(0));
+        setTimeout(() => process.exit(0), 5_000).unref?.();
+    };
+    process.once("SIGINT", () => shutdown("SIGINT"));
+    process.once("SIGTERM", () => shutdown("SIGTERM"));
+    process.once("exit", code => (0, process_lifecycle_1.markProcessShutdown)({ category: code === 0 ? "system_shutdown" : "unexpected_crash", reason: `进程退出，exit code ${code}`, exit_code: code }));
 }
 module.exports = { startServer };
 //# sourceMappingURL=server.js.map

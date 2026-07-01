@@ -26,11 +26,14 @@ const { runCollaborationResilienceSelfTest, runCollaborationResilienceIntegratio
 const { runReliabilityLedgerSelfTest } = require("../dist/reliability-ledger.js");
 const { runProductionReliabilityDrills } = require("../dist/reliability-drills.js");
 const { runSoakTestSelfTest } = require("../dist/soak-test.js");
+const { runProcessLifecycleSelfTest } = require("../dist/process-lifecycle.js");
 const { runGlobalAgentLoopSelfTest } = require("../dist/global-agent-loop.js");
 const { runGlobalMissionSupervisorSelfTest, runGlobalMissionSupervisorAsyncSelfTest } = require("../dist/global-mission-supervisor.js");
 const { runGlobalAgentMemorySelfTest, runGlobalAgentMemoryStressSelfTest } = require("../dist/global-agent-memory.js");
 const { runAgentQualityCenterSelfTest } = require("../dist/agent-quality-center.js");
+const { runAgentReasoningLoopSelfTest } = require("../dist/agent-reasoning-loop.js");
 const { runGlobalMemoryControlSelfTest } = require("../dist/modules/memory-control-center.js");
+const { runSlashCommandSelfTest } = require("../dist/modules/slash-commands.js");
 
 async function main() {
   const result = runCoordinatorProtocolSelfTest();
@@ -53,6 +56,7 @@ async function main() {
   const reliabilityLedger = runReliabilityLedgerSelfTest();
   const productionReliabilityDrills = runProductionReliabilityDrills();
   const soakTest = runSoakTestSelfTest();
+  const processLifecycle = runProcessLifecycleSelfTest();
   const globalAgentLoop = await runGlobalAgentLoopSelfTest();
   const globalMissionSupervisor = runGlobalMissionSupervisorSelfTest();
   const globalMissionSupervisorAsyncE2E = await runGlobalMissionSupervisorAsyncSelfTest();
@@ -60,6 +64,8 @@ async function main() {
   const globalAgentMemoryStress = runGlobalAgentMemoryStressSelfTest();
   const globalMemoryControl = runGlobalMemoryControlSelfTest();
   const agentQualityCenter = runAgentQualityCenterSelfTest();
+  const agentReasoningLoop = runAgentReasoningLoopSelfTest();
+  const slashCommandCenter = runSlashCommandSelfTest();
   const taskLifecycle = {
     waitingDependencyKeepsSession: deriveTaskLifecycle({ status: "in_progress", delivery_summary: { agent_qa_open_count: 1 } }).state === "waiting_dependency",
     reworkKeepsSession: deriveTaskLifecycle({ status: "in_progress", delivery_summary: { rework_count: 1 } }).keepsSession === true,
@@ -88,6 +94,7 @@ async function main() {
   assert.ok(reliabilityLedger.pass, "生产可靠性账本/幂等/租约自测未通过");
   assert.ok(productionReliabilityDrills.pass, "生产级 E2E 与故障演练未通过");
   assert.ok(soakTest.pass, "24 小时稳定性浸泡测试聚合与报告自测未通过");
+  assert.ok(processLifecycle.pass, "进程生命周期与重启分类自测未通过");
   assert.ok(globalAgentLoop.pass, "全局 Agent Agentic Loop 多步执行与授权边界自测未通过");
   assert.ok(globalMissionSupervisor.pass, "全局任务最终交付门禁与固定报告自测未通过");
   assert.ok(globalMissionSupervisorAsyncE2E.pass, "全局任务异步监工、恢复与持久化 E2E 未通过");
@@ -95,6 +102,8 @@ async function main() {
   assert.ok(globalAgentMemoryStress.pass, "全局 Agent 长会话增量压缩与防漂移压力测试未通过");
   assert.ok(globalMemoryControl.pass, "记忆控制中心全局记忆编辑、锁定、删除和审计自测未通过");
   assert.ok(agentQualityCenter.pass, "Agent 决策质量、低置信度与目标落地门禁自测未通过");
+  assert.ok(agentReasoningLoop.pass, "Agent 推理、澄清、重规划、偏差与恢复复核自测未通过");
+  assert.ok(slashCommandCenter.pass, "Slash Command 命令中心解析、作用域与安全边界自测未通过");
   assert.ok(Object.values(taskLifecycle).every(Boolean), "群聊任务统一生命周期与会话关闭门禁自测未通过");
 
   console.log(JSON.stringify({
@@ -118,6 +127,7 @@ async function main() {
     reliabilityLedger,
     productionReliabilityDrills,
     soakTest,
+    processLifecycle,
     globalAgentLoop,
     globalMissionSupervisor,
     globalMissionSupervisorAsyncE2E,
@@ -125,6 +135,8 @@ async function main() {
     globalAgentMemoryStress,
     globalMemoryControl,
     agentQualityCenter,
+    agentReasoningLoop,
+    slashCommandCenter,
     taskLifecycle: { pass: Object.values(taskLifecycle).every(Boolean), checks: taskLifecycle },
     assignments: result.assignments,
     phases: result.coordinationPlan?.phases || [],

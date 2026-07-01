@@ -14,6 +14,7 @@ import {
 } from "./agent-runtime";
 import { buildRuntimeToolSyncPrompt, getRuntimeExecutionEnv, recordRuntimeToolSyncAudit, syncRuntimeTools } from "./runtime-tool-sync";
 import {
+  isSafeVerificationCommand,
   persistBoundedOutput,
   registerExternalRunnerRequest,
   runManagedCommand,
@@ -30,6 +31,7 @@ import {
   PID_DIR,
   LOG_DIR,
   UPLOAD_DIR,
+  CONFIGS_DIR,
   PUBLIC_DIR,
   PETS_FILE,
   looksBinaryString,
@@ -86,8 +88,12 @@ import { handleMusicApi } from "./modules/music";
 import { handleCollaborationApi, resumeTaskQueues, startAgentRecoveryMonitor, startTaskWatchdog, stopAgentRecoveryMonitor, stopTaskWatchdog } from "./modules/collaboration";
 import { startReliabilityDrillScheduler, stopReliabilityDrillScheduler } from "./reliability-drills";
 import { resumeSoakTest, shutdownSoakMonitor } from "./soak-test";
+import { initializeProcessLifecycle, installProcessLifecycleFaultHandlers, markProcessShutdown, touchProcessLifecycle } from "./process-lifecycle";
 import { bootstrapGlobalAgentMemoryForServer, handleGlobalAgentApi, resumeGlobalAgentLoopsForServer, startGlobalMissionSupervisionForServer, stopGlobalMissionSupervisionForServer } from "./modules/global-agent";
 import { handleRagApi } from "./modules/rag";
+import { handleSlashCommandsApi } from "./modules/slash-commands";
+import { migrateConfigDirectory, migrateTomlCredentials } from "./credential-store";
+import { handleUsabilityApi, startUsabilityArchiveScheduler, stopUsabilityArchiveScheduler } from "./modules/usability";
 
 import { getSessions } from "./modules/sessions";
 
@@ -511,6 +517,41 @@ function getProjectVerificationCommandsForRunner(projectName: string) {
   );
 }
 
+async function runIndependentProjectVerification(projectName: string, workDir: string, timeoutMs: number, taskId: string, executionId: string, agentType: string) {
+  const commands = getProjectVerificationCommandsForRunner(projectName).filter(isSafeVerificationCommand);
+  if (!commands.length || !workDir) return "";
+  const verification: string[] = [];
+  const failed: string[] = [];
+  const results: any[] = [];
+  const perCommandTimeout = Math.max(30_000, Math.min(timeoutMs || 300_000, 180_000));
+  for (const command of commands) {
+    try {
+      const managed = await runManagedCommand({
+        taskId,
+        executionId,
+        command,
+        cwd: workDir,
+        timeoutMs: perCommandTimeout,
+        maxOutputBytes: 5 * 1024 * 1024,
+        env: sanitizeExecutionEnv(getRuntimeExecutionEnv(agentType), []),
+      });
+      verification.push(`${command} passed by external runner (exit 0)`);
+      results.push({ command, status: "passed", exitCode: 0, output: String(managed.stdout || "").slice(-4000) });
+    } catch (error: any) {
+      const exitCode = error?.exitCode ?? error?.status ?? null;
+      failed.push(`${command} failed by external runner${exitCode === null ? "" : ` (exit ${exitCode})`}`);
+      results.push({ command, status: "failed", exitCode, output: String(error?.stdout || error?.stderr || error?.message || error || "").slice(-4000) });
+    }
+  }
+  return "\n\nCCM_RUNNER_VERIFICATION\n```json\n" + JSON.stringify({
+    ccm_runner_verification: true,
+    status: failed.length ? "failed" : "passed",
+    verification,
+    failed,
+    results,
+  }, null, 2) + "\n```";
+}
+
 function extractVerificationCommandsFromMessage(message: string) {
   const text = String(message || "");
   const commands: string[] = [];
@@ -665,7 +706,10 @@ async function callAgent(projectName: string, message: string, workDir: string, 
     try { fs.unlinkSync(tmpMsg); } catch {}
     const normalized = normalizeAgentCommandOutput(agentType, managed.stdout);
     const bounded = persistBoundedOutput(taskId, normalized.output, Number(workspaceTarget?.maxContextOutputBytes || 256 * 1024));
-    const output = await appendToolResults(bounded.content, workspaceTarget?.allowedTools);
+    let output = await appendToolResults(bounded.content, workspaceTarget?.allowedTools);
+    if (!/CCM_AGENT_PROBE_OK|执行通道健康探针/i.test(message)) {
+      output += await runIndependentProjectVerification(projectName, workDir, timeoutMs, taskId, executionId, agentType);
+    }
     const fileChanges = getFileChanges(projectName, changeSnapshot);
     recordMetric(projectName, {
       success: true,
@@ -829,7 +873,12 @@ function callAgentForGroupStream(projectName: string, message: string, workDir: 
       const normalized = isError ? { output: finalText, sessionId: "" } : normalizeAgentCommandOutput(agentType, finalText);
       finalText = normalized.output;
       finalText = persistBoundedOutput(taskId, finalText, Number(options.maxContextOutputBytes || 256 * 1024)).content;
-      if (!isError) finalText = await appendToolResults(finalText, options.allowedTools);
+      if (!isError) {
+        finalText = await appendToolResults(finalText, options.allowedTools);
+        if (!/CCM_AGENT_PROBE_OK|执行通道健康探针/i.test(message)) {
+          finalText += await runIndependentProjectVerification(projectName, workDir, options.timeoutMs || 300000, taskId, executionId, agentType);
+        }
+      }
       const fileChanges = getFileChanges(projectName, changeSnapshot);
       recordMetric(projectName, {
         success: !isError,
@@ -1329,6 +1378,8 @@ function handleRequest(req: any, res: any) {
   if (handleCollaborationApi(pathname, req, res, parsed, collabCtx)) return;
   if (handleGlobalAgentApi(pathname, req, res, parsed, collabCtx)) return;
   if (handleRagApi(pathname, req, res, parsed)) return;
+  if (handleSlashCommandsApi(pathname, req, res, parsed)) return;
+  if (handleUsabilityApi(pathname, req, res)) return;
   const { handleMemoryCenterApi } = require("./modules/memory-control-center");
   if (handleMemoryCenterApi(pathname, req, res, parsed)) return;
 
@@ -1337,11 +1388,15 @@ function handleRequest(req: any, res: any) {
 }
 
 // === 启动服务器 ===
-function startServer(port: number) {
-  PORT = port;
+function bootstrapServerRuntime(startupCollabCtx: any, port: number) {
   refreshEnvPath();
+  const credentialMigration = migrateConfigDirectory(CONFIGS_DIR);
+  const controlBotMigration = migrateTomlCredentials(path.join(CCM_DIR, "control-bot", "config.toml"));
+  const protectedFeishuConfig = loadFeishuConfig();
+  if (Object.keys(protectedFeishuConfig || {}).length) saveFeishuConfig(protectedFeishuConfig);
+  const migratedCredentials = credentialMigration.credentials + controlBotMigration.count;
+  if (migratedCredentials > 0) console.log(`[凭据安全] 已迁移 ${migratedCredentials} 个明文凭据到本机加密存储；建议轮换曾以明文保存的密钥`);
   toolManager.loadTools().catch((e: any) => console.error("[ToolManager]", e.message));
-  const startupCollabCtx = createCollabCtx();
   startCronScheduler(startupCollabCtx);
   startTaskWatchdog(startupCollabCtx);
   startAgentRecoveryMonitor(startupCollabCtx);
@@ -1350,12 +1405,18 @@ function startServer(port: number) {
   const missionSupervisor = startGlobalMissionSupervisionForServer(startupCollabCtx);
   if (missionSupervisor.resumed > 0) console.log(`[全局任务监工] 启动恢复 ${missionSupervisor.resumed} 个异步监督任务`);
   startReliabilityDrillScheduler();
+  startUsabilityArchiveScheduler();
   const soakResume = resumeSoakTest();
   if (soakResume.resumed) console.log("[Soak Test] 已恢复未完成的稳定性浸泡测试");
   const resumeResult = resumeTaskQueues(startupCollabCtx);
   if (resumeResult.total > 0) {
     console.log(`[任务队列] 启动恢复 ${resumeResult.resumed}/${resumeResult.total} 个自动执行任务`);
   }
+}
+
+function startServer(port: number) {
+  PORT = port;
+  const startupCollabCtx = createCollabCtx();
   const server = http.createServer(handleRequest);
   server.on("close", () => {
     stopCronScheduler();
@@ -1363,9 +1424,13 @@ function startServer(port: number) {
     stopAgentRecoveryMonitor();
     stopGlobalMissionSupervisionForServer();
     stopReliabilityDrillScheduler();
+    stopUsabilityArchiveScheduler();
     shutdownSoakMonitor();
   });
   server.listen(port, () => {
+    // Port ownership is the fail-closed singleton gate. No schedulers, queue
+    // recovery, soak resume, or mutable startup work may run before it succeeds.
+    bootstrapServerRuntime(startupCollabCtx, port);
     console.log(`\n╔══════════════════════════════════════╗`);
     console.log(`║     ccm Web 控制台                    ║`);
     console.log(`╚══════════════════════════════════════╝\n`);
@@ -1391,7 +1456,26 @@ function startServer(port: number) {
 let PORT = 3080;
 if (require.main === module) {
   PORT = parseInt(process.argv[2]) || 3080;
-  startServer(PORT);
+  installProcessLifecycleFaultHandlers();
+  const server = startServer(PORT);
+  let lifecycleHeartbeat: NodeJS.Timeout | null = null;
+  server.prependOnceListener("listening", () => {
+    initializeProcessLifecycle();
+    lifecycleHeartbeat = setInterval(() => touchProcessLifecycle(), 30_000);
+    lifecycleHeartbeat.unref?.();
+  });
+  let shuttingDown = false;
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    if (lifecycleHeartbeat) clearInterval(lifecycleHeartbeat);
+    markProcessShutdown({ category: "system_shutdown", reason: `收到 ${signal}，执行受控退出`, signal, exit_code: 0 });
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 5_000).unref?.();
+  };
+  process.once("SIGINT", () => shutdown("SIGINT"));
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("exit", code => markProcessShutdown({ category: code === 0 ? "system_shutdown" : "unexpected_crash", reason: `进程退出，exit code ${code}`, exit_code: code }));
 }
 
 module.exports = { startServer };

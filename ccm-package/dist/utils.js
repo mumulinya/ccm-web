@@ -488,7 +488,7 @@ function parseGitStatus(workDir) {
         const status = (0, child_process_1.execFileSync)("git", ["-c", "core.quotepath=false", "status", "--porcelain"], {
             encoding: "utf-8", cwd: workDir, timeout: 5000,
             stdio: ["pipe", "pipe", "pipe"]
-        }).trim();
+        }).trimEnd();
         if (!status)
             return [];
         return status.split("\n").filter(Boolean).map(line => {

@@ -63,6 +63,10 @@ export interface ExecutionRecord {
     workspace: any;
     checkpointIds: string[];
     green: any;
+    receipt?: any;
+    fileChanges?: any;
+    runnerVerification?: any;
+    outputPreview?: string;
     failure: any;
     cancellation: any;
     createdAt: string;
@@ -88,6 +92,11 @@ export declare function ensureExecution(input: {
 }): ExecutionRecord;
 export declare function loadExecution(executionId: string): ExecutionRecord | null;
 export declare function listExecutions(filters?: any): ExecutionRecord[];
+export declare function purgeTaskExecutionArtifacts(taskId: string): {
+    executions: number;
+    checkpoints: number;
+    outputs: number;
+};
 export declare function transitionExecution(executionId: string, state: ExecutionState, message?: string, extra?: any): ExecutionRecord;
 export declare function attachExecutionWorkspace(executionId: string, workspace: any): ExecutionRecord;
 export declare function registerExternalRunnerRequest(executionId: string, requestId: string): void;
@@ -201,6 +210,7 @@ export declare function runExecutionKernelSelfTest(): {
         checkpointRollbackRestoresFiles: boolean;
         classifiesTypedFailure: boolean;
         evaluatesMergeReadyGreenContract: boolean;
+        persistsDeliveryEvidence: boolean;
         sanitizesEnvironment: boolean;
     };
 };

@@ -275,6 +275,31 @@ function handleSessionsApi(pathname, req, res, parsed) {
         });
         return true;
     }
+    if (pathname === "/api/sessions/clear" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const { project, sessionId } = JSON.parse(body || "{}");
+                if (!project || !sessionId)
+                    return (0, utils_1.sendJson)(res, { error: "缺少参数" }, 400);
+                const filePath = path.join(exports.WEB_SESSIONS_DIR, project, `${sessionId}.json`);
+                if (!fs.existsSync(filePath))
+                    return (0, utils_1.sendJson)(res, { error: "会话不存在" }, 404);
+                const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+                const cleared = Array.isArray(data.history) ? data.history.length : 0;
+                data.history = [];
+                data.updated_at = new Date().toISOString();
+                fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+                syncToFilesystemToCc(project);
+                (0, utils_1.sendJson)(res, { success: true, cleared });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+            }
+        });
+        return true;
+    }
     if (pathname === "/api/sessions/delete" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);

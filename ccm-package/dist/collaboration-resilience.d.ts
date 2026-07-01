@@ -2,6 +2,7 @@ import { type AgentRuntimeId } from "./agent-runtime";
 export declare function isRuntimeCommandAvailable(agentType: string): boolean;
 export declare function buildRuntimeRecoveryCandidates(primary: string, configured?: any, availability?: (runtime: string) => boolean): AgentRuntimeId[];
 export declare function shouldSwitchRuntime(error: any): {
+    permissionDrift: boolean;
     switchRuntime: boolean;
     failureClass: import("./execution-kernel").FailureClass;
     recoverable: boolean;
@@ -51,6 +52,8 @@ export declare function runCollaborationResilienceSelfTest(): {
         usesConfiguredFallbackNext: boolean;
         classifiesProviderFailureForSwitch: boolean;
         nonzeroExitSwitchesWithoutReadableStderr: boolean;
+        permissionDriftForcesSessionRecovery: boolean;
+        authenticationFailureSwitchesRuntime: boolean;
         serializesOverlappingRepoLanes: boolean;
         keepsSeparateReposParallel: boolean;
         recoveryPromptPreservesOriginalTask: boolean;

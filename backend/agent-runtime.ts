@@ -53,10 +53,10 @@ function buildCodexExecCommand(msgFile: string, options: AgentCommandOptions = {
   const homePrefix = runtimeHome ? `set "CODEX_HOME=${runtimeHome}" && ` : "";
   const sessionId = String(options.sessionId || "").trim();
   if (options.persistSession && options.resumeSession && sessionId) {
-    return `${homePrefix}type "${msgFile}" | codex exec resume --full-auto --skip-git-repo-check --json ${quoteCmdArg(sessionId)} -`;
+    return `${homePrefix}type "${msgFile}" | codex exec resume --full-auto --sandbox workspace-write --skip-git-repo-check --json ${quoteCmdArg(sessionId)} -`;
   }
   const persistence = options.persistSession ? " --json" : " --ephemeral";
-  return `${homePrefix}type "${msgFile}" | codex exec --full-auto${persistence} --skip-git-repo-check -`;
+  return `${homePrefix}type "${msgFile}" | codex exec --full-auto --sandbox workspace-write${persistence} --skip-git-repo-check -`;
 }
 
 function buildCursorAgentCommand(msgFile: string, options: AgentCommandOptions = {}) {

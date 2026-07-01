@@ -72,6 +72,7 @@ exports.saveRagMetadata = saveRagMetadata;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
+const credential_store_1 = require("./credential-store");
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
 const PID_DIR = path.join(CCM_DIR, "pids");
@@ -408,14 +409,21 @@ function saveMusicConfig(cfg) {
 function loadFeishuConfig() {
     try {
         if (fs.existsSync(FEISHU_CONFIG_FILE)) {
-            return JSON.parse(fs.readFileSync(FEISHU_CONFIG_FILE, "utf-8"));
+            return (0, credential_store_1.resolveObjectSecrets)(JSON.parse(fs.readFileSync(FEISHU_CONFIG_FILE, "utf-8")));
         }
     }
     catch { }
     return {};
 }
 function saveFeishuConfig(config) {
-    fs.writeFileSync(FEISHU_CONFIG_FILE, JSON.stringify(config, null, 2));
+    const protectedConfig = (0, credential_store_1.protectObjectSecrets)(config, "feishu-global");
+    fs.mkdirSync(path.dirname(FEISHU_CONFIG_FILE), { recursive: true });
+    const temp = `${FEISHU_CONFIG_FILE}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify(protectedConfig, null, 2), "utf-8");
+    fs.renameSync(temp, FEISHU_CONFIG_FILE);
+    // The generic atomic writer preserves the previous file verbatim. Credentials
+    // are different: both the live file and its recovery copy must be protected.
+    fs.writeFileSync(`${FEISHU_CONFIG_FILE}.bak`, JSON.stringify(protectedConfig, null, 2), "utf-8");
 }
 // === Cron Jobs ===
 function loadCronJobs() {

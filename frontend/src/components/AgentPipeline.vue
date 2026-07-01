@@ -90,6 +90,7 @@ const blockers = computed(() => [...asArray(summary.value.blockers), ...asArray(
 const sessionRows = computed(() => asArray(summary.value.session_continuity))
 const lifecycle = computed(() => summary.value.lifecycle || { state: props.taskStatus || 'pending', terminal: false })
 const verificationSources = computed(() => asArray(summary.value.verification_sources))
+const reasoningLoop = computed(() => summary.value.reasoning_loop || props.task?.reasoning_loop || null)
 
 const fileChangeCount = computed(() => {
   return summary.value.actual_file_change_count || props.fileChanges?.count || changedFiles.value.length || 0
@@ -258,6 +259,7 @@ function qaStatusText(status) {
   if (value === 'manual') return '人工接管'
   if (value === 'timeout') return '超时'
   if (value === 'failed') return '失败'
+  if (value === 'rejected') return '未采纳'
   return status || '问答中'
 }
 
@@ -265,7 +267,7 @@ function qaStatusTone(status) {
   const value = String(status || '').toLowerCase()
   if (['answered', 'injected', 'resumed'].includes(value)) return 'ok'
   if (['timeout', 'failed', 'rejected'].includes(value)) return 'fail'
-  if (['needs_user', 'manual'].includes(value)) return 'warn'
+  if (['needs_user', 'manual', 'rejected'].includes(value)) return 'warn'
   return 'active'
 }
 
@@ -446,15 +448,54 @@ function formatListItem(item) {
           </div>
           <p class="muted-line">{{ qa.type === 'request_review' ? '评审' : '询问' }}：{{ compactText(qa.question, 180) }}</p>
           <p v-if="qa.answer" class="muted-line">回答：{{ compactText(qa.answer, 220) }}</p>
+          <p v-if="qa.acceptance?.reason" class="muted-line">主 Agent 仲裁：{{ compactText(qa.acceptance.reason, 180) }}</p>
+          <p v-if="qa.answer_evidence?.length" class="muted-line">证据：{{ qa.answer_evidence.slice(0, 4).join(' · ') }}</p>
           <div v-if="qa.injected_at || qa.resumed_at || qa.retry_count || qa.manual_takeover" class="assignment-meta">
             <span v-if="qa.injected_at">已注入</span>
             <span v-if="qa.resumed_at">已续跑</span>
             <span v-if="qa.retry_count">重试 {{ qa.retry_count }} 次</span>
             <span v-if="qa.manual_takeover">人工接管</span>
           </div>
+          <div class="assignment-meta">
+            <span v-if="qa.routing?.strategy === 'capability_and_load'">能力路由</span>
+            <span v-if="qa.execution_id">Execution {{ qa.execution_id }}</span>
+            <span v-if="qa.acceptance?.score != null">证据评分 {{ qa.acceptance.score }}</span>
+            <span v-if="qa.permission_contract?.mode === 'advisory_read_only'">只读问答</span>
+          </div>
         </div>
       </div>
       <p v-else class="empty-note">本次任务暂无子 Agent 工作中问答。</p>
+    </section>
+    <section class="panel reasoning-panel">
+      <div class="panel-head">
+        <h5>主 Agent 推理—验证闭环</h5>
+        <span class="subtle">计划 v{{ reasoningLoop?.plan_version || 0 }} · 偏差 {{ reasoningLoop?.deviations?.length || 0 }}</span>
+      </div>
+      <div v-if="reasoningLoop" class="delivery-grid">
+        <p v-if="reasoningLoop.replan_required" class="empty-note">当前事实或失败结果要求重新规划：{{ reasoningLoop.last_replan_reason }}</p>
+        <div>
+          <span class="section-label">当前计划</span>
+          <ul v-if="reasoningLoop.plan?.length" class="fact-list">
+            <li v-for="(item, index) in reasoningLoop.plan.slice(0, 8)" :key="`${index}-${item}`">{{ item }}</li>
+          </ul>
+          <p v-else class="empty-note small">尚未形成可审计计划。</p>
+        </div>
+        <div>
+          <span class="section-label">验证断言</span>
+          <ul class="fact-list">
+            <li v-for="item in (reasoningLoop.assertions || []).slice(0, 10)" :key="item.id">{{ item.status === 'passed' ? '✅' : item.status === 'failed' ? '❌' : '⏳' }} {{ item.label }}</li>
+          </ul>
+        </div>
+        <div v-if="reasoningLoop.deviations?.length || reasoningLoop.recovery_checks?.length || reasoningLoop.postmortems?.length">
+          <span class="section-label">偏差 / 恢复复核</span>
+          <ul class="fact-list warn">
+            <li v-for="item in reasoningLoop.deviations.slice(-5)" :key="item.id">{{ item.type }}：{{ item.detail }}</li>
+            <li v-for="(item, index) in reasoningLoop.recovery_checks.slice(-3)" :key="`recovery-${index}`">恢复复核：{{ item.reason }}；剩余 {{ item.remaining_gaps?.length || 0 }} 项</li>
+            <li v-for="(item, index) in (reasoningLoop.postmortems || []).slice(-3)" :key="`postmortem-${index}`">自动复盘：{{ item.what_happened }}；纠正：{{ item.correction }}</li>
+          </ul>
+        </div>
+      </div>
+      <p v-else class="empty-note">这是 6.0 之前创建的历史任务，尚未生成推理账本；任务再次执行或恢复时会自动补齐。</p>
     </section>
     <section class="panel session-panel">
       <div class="panel-head">

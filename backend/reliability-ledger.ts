@@ -227,6 +227,8 @@ export function getReliabilityLedgerStats() {
   const leases = listTaskLeases();
   const traceFiles = fs.readdirSync(TRACE_DIR).filter(name => name.endsWith(".json") && !name.endsWith(".bak"));
   const now = Date.now();
+  const staleOperations = operationRecords.filter((item: any) => item.status === "in_progress" && (Date.parse(item.lease_expires_at || 0) <= now || !processAlive(Number(item.owner_pid || 0))));
+  const staleLeases = leases.filter((item: any) => item.status === "active" && (Date.parse(item.expires_at || 0) <= now || !processAlive(Number(item.owner_pid || 0))));
   return {
     operations: {
       total: operationRecords.length,
@@ -234,12 +236,14 @@ export function getReliabilityLedgerStats() {
       completed: operationRecords.filter((item: any) => item.status === "completed").length,
       failed: operationRecords.filter((item: any) => item.status === "failed").length,
       duplicate_suppressed: operationRecords.reduce((sum: number, item: any) => sum + Number(item.duplicate_count || 0), 0),
-      stale_in_progress: operationRecords.filter((item: any) => item.status === "in_progress" && (Date.parse(item.lease_expires_at || 0) <= now || !processAlive(Number(item.owner_pid || 0)))).length,
+      stale_in_progress: staleOperations.length,
+      stale_items: staleOperations.slice(0, 50).map((item: any) => ({ operation_id: item.operation_id, scope: item.scope, trace_id: item.trace_id, owner_pid: item.owner_pid, lease_expires_at: item.lease_expires_at })),
     },
     leases: {
       total: leases.length,
       active: leases.filter((item: any) => item.status === "active" && Date.parse(item.expires_at || 0) > now && processAlive(Number(item.owner_pid || 0))).length,
-      stale: leases.filter((item: any) => item.status === "active" && (Date.parse(item.expires_at || 0) <= now || !processAlive(Number(item.owner_pid || 0)))).length,
+      stale: staleLeases.length,
+      stale_items: staleLeases.slice(0, 50).map((item: any) => ({ task_id: item.task_id, trace_id: item.trace_id, owner_pid: item.owner_pid, expires_at: item.expires_at, recovery_count: item.recovery_count || 0 })),
       recoveries: leases.reduce((sum: number, item: any) => sum + Number(item.recovery_count || 0), 0),
     },
     traces: {
@@ -249,6 +253,48 @@ export function getReliabilityLedgerStats() {
       }, 0),
     },
   };
+}
+
+export function reconcileReliabilityLedgerDebt(reason = "稳定性验收前清理失效账本") {
+  ensureDirectories();
+  const at = new Date().toISOString();
+  const operations: any[] = [];
+  const leases: any[] = [];
+  for (const name of fs.readdirSync(IDEMPOTENCY_DIR).filter(item => item.endsWith(".json") && !item.endsWith(".bak"))) {
+    const file = path.join(IDEMPOTENCY_DIR, name);
+    const current = readJson(file, null);
+    if (!current || current.status !== "in_progress") continue;
+    const stale = Date.parse(current.lease_expires_at || 0) <= Date.now() || !processAlive(Number(current.owner_pid || 0));
+    if (!stale) continue;
+    current.status = "failed";
+    current.updated_at = at;
+    current.failed_at = at;
+    current.result = { error: reason, reconciled: true, previous_owner_pid: current.owner_pid || 0 };
+    current.reconciled_at = at;
+    current.reconcile_reason = reason;
+    delete current.lease_expires_at;
+    writeJsonAtomic(file, current);
+    appendTraceEvent(current.trace_id, { type: "idempotency.stale_reconciled", status: "warning", message: reason, data: { operation_id: current.operation_id, scope: current.scope, previous_owner_pid: current.owner_pid || 0 } });
+    operations.push({ operation_id: current.operation_id, scope: current.scope, trace_id: current.trace_id });
+  }
+  for (const name of fs.readdirSync(LEASE_DIR).filter(item => item.endsWith(".json") && !item.endsWith(".bak"))) {
+    const file = path.join(LEASE_DIR, name);
+    const current = readJson(file, null);
+    if (!current || current.status !== "active") continue;
+    const stale = Date.parse(current.expires_at || 0) <= Date.now() || !processAlive(Number(current.owner_pid || 0));
+    if (!stale) continue;
+    current.status = "released";
+    current.final_status = "orphaned_reconciled";
+    current.released_at = at;
+    current.updated_at = at;
+    current.reconciled_at = at;
+    current.reconcile_reason = reason;
+    delete current.expires_at;
+    writeJsonAtomic(file, current);
+    appendTraceEvent(current.trace_id, { type: "task.lease_stale_reconciled", status: "warning", task_id: current.task_id, message: reason, data: { previous_owner_pid: current.owner_pid || 0 } });
+    leases.push({ task_id: current.task_id, trace_id: current.trace_id });
+  }
+  return { reconciled_at: at, reason, operations, leases, operation_count: operations.length, lease_count: leases.length };
 }
 
 export function acquireTaskLease(taskId: string, traceId: string, ttlMs = 45_000) {

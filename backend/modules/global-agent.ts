@@ -38,7 +38,9 @@ import {
   cancelGlobalAgentRun,
   attachGlobalAgentRunSupervision,
   completeGlobalAgentSupervision,
+  continueGlobalAgentRunWithClarification,
   updateGlobalAgentSupervisionState,
+  findClarifyingGlobalAgentRun,
   findWaitingGlobalAgentRun,
   getGlobalAgentRun,
   GLOBAL_AGENT_TOOL_SPECS,
@@ -79,6 +81,7 @@ import {
 } from "../global-agent-memory";
 import { buildAgentQualitySnapshot, getAgentQualityPolicy, runAgentQualityCenterSelfTest, setAgentQualityPolicy } from "../agent-quality-center";
 import { listTaskAgentSessions } from "../task-agent-sessions";
+import { runAgentReasoningLoopSelfTest } from "../agent-reasoning-loop";
 
 
 type LocalIntentResult = {
@@ -558,6 +561,7 @@ function inferLocalGlobalAction(message: string, projects: string[], groups: any
       : /(立即运行|执行一次|马上执行)/.test(text) ? "run"
       : /(修改|更新)/.test(text) ? "update"
       : "list";
+    if (["create", "update"].includes(operation) && !matchedGroup && !matchedProject) return null;
     const schedule = guessCronSchedule(text);
     const targetType = matchedGroup || !matchedProject ? "group" : "project";
     const group = matchedGroup || groups[0] || null;
@@ -878,6 +882,7 @@ export function runGlobalAgentIntentSelfTest() {
     { message: "修复 backend-api 的知识库检索错误", expected: "orchestrate_development", authorized: true },
     { message: "请给 frontend-app 新增登录页面并运行测试", expected: "orchestrate_development", authorized: true },
     { message: "直接运行 backend-api 的测试", expected: "orchestrate_development", authorized: true },
+    { message: "我明确授权：现在给 backend-api 运行测试，影响范围仅限测试，不修改代码", expected: "send_project_cmd", authorized: true },
     { message: "给开发群派发任务，修复登录问题", expected: "send_group_cmd", authorized: true },
     { message: "创建一个每天早上八点检查 backend-api 的定时任务", expected: "manage_cron", authorized: true },
     { message: "启动 backend-api 项目", expected: "manage_project", authorized: true },
@@ -899,7 +904,9 @@ export function runGlobalAgentIntentSelfTest() {
   safeStreamer.finish();
   const visibleReply = visibleChunks.join("");
   const actionBlockHidden = visibleReply === "这是自然回答。\n";
-  return { passed: results.every(item => item.passed) && actionBlockHidden, results, actionBlockHidden, visibleReply };
+  const modelUnavailableWrite = localActionToAgenticDecision({ reply: "准备派发", action: { type: "send_group_cmd", params: { group_id: "dev-group", message: "修复登录" } } }, { steps: [], user_message: "给开发群派发修复登录", explicit_write_authorization: true } as any);
+  const keywordFallbackCannotWrite = modelUnavailableWrite?.state === "answer" && !modelUnavailableWrite.tool && String(modelUnavailableWrite.message || "").includes("没有执行任何写操作");
+  return { passed: results.every(item => item.passed) && actionBlockHidden && keywordFallbackCannotWrite, results, actionBlockHidden, keywordFallbackCannotWrite, visibleReply };
 }
 
 function decryptFeishuEvent(encrypted: string, encryptKey: string): any {
@@ -1193,10 +1200,12 @@ function hasExplicitGlobalWriteAuthorization(message: string) {
   if (/(?:不要|不用|先别|暂时别|仅|只)(?:执行|操作|修改|创建|派发|启动|停止|删除|提交)/.test(text)) return false;
   if (hasExplicitDevelopmentExecutionIntent(text)) return true;
   const explicitVerb = /(创建|新建|添加|派发|启动|开启|停止|关闭|暂停|恢复|继续|重试|提交|删除|移除|播放|打开|运行|执行)/;
+  const explicitAuthorization = /(?:我)?明确授权(?:你|系统|全局Agent|全局agent)?/.test(text) && explicitVerb.test(text);
   const directive = explicitVerb.test(text) && (/^(请|帮我|麻烦|给我|直接|立即|马上|开始|创建|新建|添加|派发|启动|开启|停止|关闭|暂停|恢复|继续|重试|提交|删除|移除|播放|打开|运行|执行)/.test(text) || /(?:我要你|需要你|由你|替我)/.test(text));
   const explicitDispatch = /^(?:请)?给.+(?:群|项目|Agent|agent).*(?:派发|下发|修复|实现|修改|处理|执行)/.test(text);
+  const explicitGenericTarget = /^给(?:某个|这个|该)?(?:项目|群聊|Agent|agent).*(?:加|新增|实现|修改|修复|处理|执行)/.test(text);
   const explanatory = /(?:怎么|如何|为什么|是什么|原理|介绍|讲讲|说明|能否|能不能|可不可以|是否|有哪些|有什么)[^。！？]*[?？]?$/i.test(text);
-  return (directive || explicitDispatch) && !explanatory;
+  return (explicitAuthorization || directive || explicitDispatch || explicitGenericTarget) && !explanatory;
 }
 
 function safeProjectRows() {
@@ -1261,6 +1270,16 @@ function localActionToAgenticDecision(localIntent: LocalIntentResult | null, run
   const toolName = action.type === "system_status" ? "inspect_system" : action.type;
   if (!GLOBAL_AGENT_TOOL_SPECS.some(spec => spec.name === toolName)) {
     return { state: "answer", message: `${localIntent.reply}\n\n当前动作还没有接入 Agentic Loop 后端工具，未执行。`, tool: null };
+  }
+  const spec = GLOBAL_AGENT_TOOL_SPECS.find(item => item.name === toolName)!;
+  const fallbackRisk = typeof spec.risk === "function" ? spec.risk(action.params || {}) : spec.risk;
+  if (fallbackRisk !== "read") {
+    return {
+      state: "answer",
+      message: "当前统一大模型不可用。规则兜底只能做确定性只读检查，不能代替大模型理解你的自然语言并修改、创建或派发任务；本次没有执行任何写操作。请恢复模型配置后重试。",
+      tool: null,
+      intent: { category: "ambiguous", goal: run.user_message, action_required: false, confidence: 0.2, authorization_basis: "none", reason: "模型不可用，禁止关键词规则代替语义决策执行写操作" },
+    };
   }
   return { state: "execute", message: localIntent.reply, tool: { name: toolName, arguments: action.params || {} } };
 }
@@ -1456,16 +1475,22 @@ async function runAgenticGlobalRequest(baseUrl: string, ctx: CollabCtx, input: {
       console.warn(`[全局记忆] Agentic 请求写入失败：${error?.message || error}`);
     }
   }
-  const run = await startGlobalAgentRun({
-    message: input.message,
-    history: input.history || [],
-    sessionId,
-    source: input.source || "web",
-    traceId: input.traceId,
-    explicitWriteAuthorization: hasExplicitGlobalWriteAuthorization(input.message),
-    maxSteps: 10,
-    timeoutMs: 12 * 60 * 1000,
-  }, runtime);
+  const startsNewTopic = /^(?:新问题|换个问题|另外(?:一个)?问题|忽略刚才|取消刚才|重新开始)/.test(String(input.message || "").trim());
+  const waitingClarification = startsNewTopic ? null : findClarifyingGlobalAgentRun(sessionId);
+  const run = waitingClarification
+    ? await continueGlobalAgentRunWithClarification(waitingClarification.id, input.message, runtime, {
+        explicitWriteAuthorization: hasExplicitGlobalWriteAuthorization(input.message),
+      })
+    : await startGlobalAgentRun({
+        message: input.message,
+        history: input.history || [],
+        sessionId,
+        source: input.source || "web",
+        traceId: input.traceId,
+        explicitWriteAuthorization: hasExplicitGlobalWriteAuthorization(input.message),
+        maxSteps: 10,
+        timeoutMs: 12 * 60 * 1000,
+      }, runtime);
   if (!/feishu/i.test(input.source || "")) {
     try {
       ingestGlobalAgentConversation({ sessionId, source: input.source || "web", messages: [{ role: "assistant", content: run.final_reply || "", timestamp: new Date().toISOString(), trace_id: run.trace_id, mission_id: run.mission_id }] });
@@ -1547,6 +1572,8 @@ function publicGlobalAgentRun(run: GlobalAgentRun | null, includeObservations = 
     decision_summary: run.decision_summary,
     clarification_question: run.clarification_question,
     shadow_mode: run.shadow_mode,
+    original_user_message: run.original_user_message,
+    reasoning_loop: run.reasoning_loop,
   };
 }
 
@@ -1945,6 +1972,12 @@ export function handleGlobalAgentApi(
 
   if (pathname === "/api/global-agent/quality/self-test" && req.method === "GET") {
     const result = runAgentQualityCenterSelfTest();
+    sendJson(res, { success: result.pass, result }, result.pass ? 200 : 500);
+    return true;
+  }
+
+  if (pathname === "/api/global-agent/reasoning/self-test" && req.method === "GET") {
+    const result = runAgentReasoningLoopSelfTest();
     sendJson(res, { success: result.pass, result }, result.pass ? 200 : 500);
     return true;
   }

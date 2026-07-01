@@ -9,6 +9,9 @@ const groups = ref([])
 const scheduler = ref({ running: false, running_job_ids: [] })
 const orchestratorDiagnostics = ref(null)
 const showCreate = ref(false)
+const editingId = ref('')
+const showArchived = ref(false)
+const archivedCount = ref(0)
 const runningJobIds = ref(new Set())
 let refreshTimer = null
 
@@ -136,10 +139,50 @@ const readResponse = async (res) => {
 }
 
 const loadJobs = async () => {
-  const res = await fetch('/api/cron')
+  const res = await fetch(showArchived.value ? '/api/cron?archived=true' : '/api/cron')
   const data = await readResponse(res)
   jobs.value = data.jobs || []
+  archivedCount.value = Number(data.archived_count || 0)
   scheduler.value = data.scheduler || { running: false, running_job_ids: [] }
+}
+
+const scheduleFormFromCron = (schedule) => {
+  const value = String(schedule || '').trim()
+  let match = value.match(/^\*\/(\d+) \* \* \* \*$/)
+  if (match) return { scheduleMode: 'interval', intervalMinutes: Number(match[1]) }
+  if (value === '0 * * * *') return { scheduleMode: 'hourly' }
+  match = value.match(/^(\d+) (\d+) \* \* \*$/)
+  if (match) return { scheduleMode: 'daily', dailyTime: `${String(match[2]).padStart(2, '0')}:${String(match[1]).padStart(2, '0')}` }
+  match = value.match(/^(\d+) (\d+) \* \* 1-5$/)
+  if (match) return { scheduleMode: 'workdays', dailyTime: `${String(match[2]).padStart(2, '0')}:${String(match[1]).padStart(2, '0')}` }
+  return { scheduleMode: 'custom', customSchedule: value }
+}
+
+const openCreateJob = () => {
+  editingId.value = ''
+  newJob.value = defaultJob()
+  showCreate.value = true
+}
+
+const editJob = (job) => {
+  editingId.value = job.id
+  newJob.value = {
+    ...defaultJob(),
+    name: job.name,
+    targetType: job.target_type || 'project',
+    project: job.project || '',
+    groupId: job.group_id || '',
+    priority: job.priority || 'normal',
+    workflowType: job.workflow_type || 'general',
+    requiresCodeChanges: job.requires_code_changes !== false,
+    backlogBatchLimit: job.backlog_batch_limit || 1,
+    importSharedDocs: job.import_shared_docs !== false,
+    continueGaps: job.continue_gaps !== false,
+    gapContinueLimit: job.gap_continue_limit || 3,
+    prompt: job.prompt || '',
+    ...scheduleFormFromCron(job.schedule),
+  }
+  showCreate.value = true
 }
 
 const loadOrchestratorDiagnostics = async () => {
@@ -260,7 +303,7 @@ const runJob = async (id) => {
 }
 
 const deleteJob = async (id) => {
-  const confirmed = await confirmDialog('确定删除此定时任务？删除后无法恢复。')
+  const confirmed = await confirmDialog('确定删除此定时任务？它会停止调度并移入归档，可稍后恢复。')
   if (!confirmed) return
   try {
     const res = await fetch('/api/cron/delete', {
@@ -270,10 +313,25 @@ const deleteJob = async (id) => {
     })
     await readResponse(res)
     await loadJobs()
-    toast.success('定时任务已删除')
+    toast.success('定时任务已停止并移入归档')
   } catch (e) {
     toast.error(e.message)
   }
+}
+
+const restoreJob = async (id) => {
+  try {
+    await readResponse(await fetch('/api/cron/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }))
+    await loadJobs(); toast.success('定时任务已恢复')
+  } catch (e) { toast.error(e.message) }
+}
+
+const purgeJob = async (id) => {
+  if (!await confirmDialog('永久清除此定时任务？此操作无法恢复。')) return
+  try {
+    await readResponse(await fetch('/api/cron/purge', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }))
+    await loadJobs(); toast.success('定时任务已永久清除')
+  } catch (e) { toast.error(e.message) }
 }
 
 const submitCreate = async () => {
@@ -318,16 +376,17 @@ const submitCreate = async () => {
   }
 
   try {
-    const res = await fetch('/api/cron/create', {
+    const res = await fetch(editingId.value ? '/api/cron/update' : '/api/cron/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(editingId.value ? { id: editingId.value, ...payload } : payload)
     })
     await readResponse(res)
     showCreate.value = false
     newJob.value = defaultJob()
     await loadJobs()
-    toast.success('定时任务创建成功')
+    toast.success(editingId.value ? '定时任务修改成功' : '定时任务创建成功')
+    editingId.value = ''
   } catch (e) {
     toast.error(e.message)
   }
@@ -353,7 +412,10 @@ onBeforeUnmount(() => {
         <div class="stat"><span class="stat-label muted">禁用</span><span class="stat-value muted">{{ jobs.filter(j => !j.enabled).length }}</span></div>
         <div class="scheduler-pill" :class="{ online: scheduler.running }">{{ scheduler.running ? '调度器运行中' : '调度器未启动' }}</div>
       </div>
-      <button class="btn btn-primary" @click="showCreate = true">新建定时任务</button>
+      <div class="actions">
+        <button class="btn btn-outline" @click="showArchived = !showArchived; loadJobs()">{{ showArchived ? '返回运行中' : `归档 (${archivedCount})` }}</button>
+        <button v-if="!showArchived" class="btn btn-primary" @click="openCreateJob">新建定时任务</button>
+      </div>
     </div>
 
     <div v-if="hasEnabledDailyDevJobs() && isExecutionBlocked()" class="cron-execution-warning">
@@ -416,10 +478,13 @@ onBeforeUnmount(() => {
               </td>
               <td>
                 <div class="actions">
-                  <button class="btn btn-secondary btn-sm" :disabled="isJobRunning(job.id)" @click="runJob(job.id)">
+                  <button v-if="!showArchived" class="btn btn-secondary btn-sm" :disabled="isJobRunning(job.id)" @click="runJob(job.id)">
                     {{ isJobRunning(job.id) ? '运行中' : '立即运行' }}
                   </button>
-                  <button class="btn btn-danger btn-sm" @click="deleteJob(job.id)">删除</button>
+                  <button v-if="!showArchived" class="btn btn-outline btn-sm" @click="editJob(job)">编辑</button>
+                  <button v-if="!showArchived" class="btn btn-danger btn-sm" @click="deleteJob(job.id)">删除</button>
+                  <button v-if="showArchived" class="btn btn-primary btn-sm" @click="restoreJob(job.id)">恢复</button>
+                  <button v-if="showArchived" class="btn btn-danger btn-sm" @click="purgeJob(job.id)">永久清除</button>
                 </div>
               </td>
             </tr>
@@ -431,7 +496,7 @@ onBeforeUnmount(() => {
     <div v-if="showCreate" class="modal-overlay" @click.self="showCreate = false">
       <div class="modal">
         <button class="modal-close" @click="showCreate = false">&times;</button>
-        <h3>新建定时任务</h3>
+        <h3>{{ editingId ? '编辑定时任务' : '新建定时任务' }}</h3>
         <div class="form-group">
           <label>任务名称</label>
           <input v-model="newJob.name" placeholder="如 每日代码检查">
@@ -562,7 +627,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="form-actions">
           <button class="btn btn-cancel" @click="showCreate = false">取消</button>
-          <button class="btn btn-primary" @click="submitCreate">创建</button>
+          <button class="btn btn-primary" @click="submitCreate">{{ editingId ? '保存修改' : '创建' }}</button>
         </div>
       </div>
     </div>

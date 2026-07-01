@@ -12,6 +12,8 @@
     "build:mcp-feishu": "tsc -p integrations/mcp-feishu/tsconfig.json",
     "build": "npm run build:frontend && npm run build:mcp-feishu && npm run build:backend",
     "test:coordinator": "npm run build:backend && node ccm-package/scripts/coordinator-smoke.js",
+    "stability:9:start": "node scripts/start-clean-soak-9.js",
+    "stability:9:check": "node scripts/check-clean-soak-9.js",
     "pack": "npm pack ./ccm-package"
   },
   "dependencies": {

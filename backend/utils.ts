@@ -426,7 +426,7 @@ export function parseGitStatus(workDir: string) {
     const status = execFileSync("git", ["-c", "core.quotepath=false", "status", "--porcelain"], {
       encoding: "utf-8", cwd: workDir, timeout: 5000,
       stdio: ["pipe", "pipe", "pipe"]
-    }).trim();
+    }).trimEnd();
     if (!status) return [];
     return status.split("\n").filter(Boolean).map(line => {
       const statusCode = line.substring(0, 2);

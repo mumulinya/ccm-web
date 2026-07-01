@@ -27,6 +27,7 @@ const showAdvanced = ref(false)
 const soakState = ref(null)
 const soakReport = ref(null)
 const soakLoading = ref(false)
+const soakPreflight = ref(null)
 let soakPollTimer = null
 
 const soakProgress = computed(() => {
@@ -53,6 +54,7 @@ const loadSoakStatus = async (silent = true) => {
     if (!res.ok || data.success === false) throw new Error(data.error || '读取浸泡测试状态失败')
     soakState.value = data.state || null
     soakReport.value = data.report || null
+    soakPreflight.value = data.state?.preflight || soakPreflight.value
   } catch (e) {
     if (!silent) toast.error(e.message || '读取浸泡测试状态失败')
   }
@@ -61,13 +63,31 @@ const loadSoakStatus = async (silent = true) => {
 const startSoak = async () => {
   soakLoading.value = true
   try {
-    const res = await fetch('/api/reliability/soak/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ duration_ms: 24 * 60 * 60 * 1000, interval_ms: 60 * 1000 }) })
+    const res = await fetch('/api/reliability/soak/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ duration_ms: 24 * 60 * 60 * 1000, interval_ms: 60 * 1000, clean_mode: true, reconcile_debt: true, startup_grace_seconds: 30 }) })
     const data = await res.json()
     if (!res.ok || data.success === false) throw new Error(data.error || '启动浸泡测试失败')
+    if (data.blocked) {
+      soakPreflight.value = data.preflight || null
+      const missing = (data.preflight?.missing_feishu_connections || []).map(item => item.project || item.config).join('、')
+      throw new Error(`干净验收前置条件未满足${missing ? `：未在线 ${missing}` : ''}`)
+    }
     soakState.value = data.state
+    soakPreflight.value = data.state?.preflight || null
     soakReport.value = null
-    toast.success(data.already_running ? '24 小时浸泡测试已经在运行' : '24 小时浸泡测试已启动')
+    toast.success(data.already_running ? '生产级 24 小时验收已经在运行' : '生产级无人工重启 24 小时验收已启动')
   } catch (e) { toast.error(e.message || '启动浸泡测试失败') }
+  soakLoading.value = false
+}
+
+const reconcileSoakDebt = async () => {
+  soakLoading.value = true
+  try {
+    const res = await fetch('/api/reliability/debt/reconcile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reason: '用户从系统自检页面执行 9.0 稳定性债务清理' }) })
+    const data = await res.json()
+    if (!res.ok || data.success === false) throw new Error(data.error || '稳定性债务清理未完全通过')
+    toast.success(`清理完成：任务 ${data.result?.recovered_tasks?.length || 0}，飞书锁 ${data.result?.removed_feishu_locks?.length || 0}`)
+    await loadSoakStatus(true)
+  } catch (e) { toast.error(e.message || '稳定性债务清理失败') }
   soakLoading.value = false
 }
 
@@ -631,8 +651,8 @@ onUnmounted(() => {
       <div class="glass-card soak-card" :class="soakState?.status || 'not-started'">
         <div class="soak-head">
           <div>
-            <strong>24 小时稳定性浸泡测试</strong>
-            <span v-if="soakState?.status === 'running'">持续检查服务、Runner、飞书、任务租约、重复任务、内存和 Trace 增长</span>
+            <strong>生产级无人工重启稳定性验收 9.0</strong>
+            <span v-if="soakState?.status === 'running'">冻结代码与配置，检查非预期重启、全部机器人、租约/幂等、事件循环和同进程内存趋势</span>
             <span v-else-if="soakReport?.summary">最近结论：{{ soakReport.summary.verdict }}</span>
             <span v-else>尚未启动首轮长期稳定性验证</span>
           </div>
@@ -647,28 +667,36 @@ onUnmounted(() => {
         <div v-if="soakState?.latest_sample" class="soak-metrics">
           <div><span>采样</span><strong>{{ soakState.samples_count || 0 }}</strong></div>
           <div><span>Server RSS</span><strong>{{ formatBytesMb(soakState.latest_sample.memory?.rss) }}</strong></div>
-          <div><span>事件循环</span><strong>{{ soakState.latest_sample.event_loop_lag_ms || 0 }} ms</strong></div>
+          <div><span>连续事件循环峰值</span><strong>{{ soakState.latest_sample.event_loop_delay_window_ms?.max || soakState.latest_sample.event_loop_lag_ms || 0 }} ms</strong></div>
           <div><span>Runner</span><strong>{{ soakState.latest_sample.runner?.healthy ? '正常' : '异常' }}</strong></div>
-          <div><span>飞书连接</span><strong>{{ soakState.latest_sample.feishu?.healthy ? '正常' : '异常' }}</strong></div>
-          <div><span>告警</span><strong>{{ soakState.alerts?.length || 0 }}</strong></div>
+          <div><span>全部预期飞书</span><strong>{{ soakState.latest_sample.feishu?.active_connections || 0 }}/{{ soakState.latest_sample.feishu?.expected_connections || 0 }}</strong></div>
+          <div><span>独立告警</span><strong>{{ (soakState.incidents || []).filter(item => item.severity !== 'info').length }}</strong></div>
         </div>
 
         <div v-if="soakReport?.summary" class="soak-report-summary">
           <span>Runner 可用率 {{ soakReport.summary.availability?.runner_percent || 0 }}%</span>
           <span>飞书可用率 {{ soakReport.summary.availability?.feishu_percent || 0 }}%</span>
           <span>重启 {{ soakReport.summary.restarts_observed || 0 }} 次</span>
+          <span>非预期 {{ soakReport.summary.restart_classification?.unexpected_restarts || 0 }} 次</span>
+          <span>连续 {{ soakReport.summary.single_process?.max_contiguous_hours || 0 }} 小时</span>
           <span>RSS 峰值 {{ formatBytesMb(soakReport.summary.memory?.rss?.max) }}</span>
+          <span>运行期延迟峰值 {{ soakReport.summary.event_loop_lag_ms?.runtime_max || 0 }} ms</span>
         </div>
 
         <div v-if="soakState?.alerts?.length" class="soak-alerts">
           <div v-for="alert in soakState.alerts.slice(-4)" :key="alert.code" :class="alert.severity">
-            <strong>{{ alert.code }}</strong><span>{{ alert.message }} · {{ alert.count || 1 }} 次</span>
+            <strong>{{ alert.code }}</strong><span>{{ alert.message }} · 独立事故 {{ alert.count || 1 }} 次 / 采样 {{ alert.observations || alert.count || 1 }} 次</span>
           </div>
         </div>
 
+        <div v-if="soakPreflight && soakPreflight.ready === false" class="soak-alerts">
+          <div class="critical"><strong>preflight_blocked</strong><span>Runner {{ soakPreflight.runner_healthy ? '正常' : '异常' }}；飞书 {{ soakPreflight.feishu_healthy ? '正常' : '未全部在线' }}；历史债务 {{ Object.values(soakPreflight.debt?.counts || {}).reduce((sum, value) => sum + Number(value || 0), 0) }} 项</span></div>
+        </div>
+
         <div class="soak-actions">
-          <button v-if="soakState?.status !== 'running'" class="btn btn-primary btn-sm" :disabled="soakLoading" @click="startSoak">{{ soakLoading ? '启动中...' : '启动 24 小时测试' }}</button>
+          <button v-if="soakState?.status !== 'running'" class="btn btn-primary btn-sm" :disabled="soakLoading" @click="startSoak">{{ soakLoading ? '启动中...' : '启动干净 24 小时验收' }}</button>
           <button v-else class="btn btn-outline btn-sm" :disabled="soakLoading" @click="stopSoak">提前停止并生成报告</button>
+          <button v-if="soakState?.status !== 'running'" class="btn btn-outline btn-sm" :disabled="soakLoading" @click="reconcileSoakDebt">清理稳定性债务</button>
           <button class="btn btn-outline btn-sm" :disabled="soakLoading" @click="loadSoakStatus(false)">刷新</button>
         </div>
       </div>

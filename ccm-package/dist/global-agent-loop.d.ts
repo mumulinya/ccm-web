@@ -1,4 +1,5 @@
 import { type AgentDecisionIntent } from "./agent-quality-center";
+import { type AgentReasoningState } from "./agent-reasoning-loop";
 export type GlobalAgentRunStatus = "running" | "supervising" | "paused" | "waiting_confirmation" | "waiting_clarification" | "completed" | "failed" | "cancelled";
 export type GlobalAgentDecisionState = "answer" | "investigate" | "plan" | "execute" | "needs_confirmation" | "complete";
 export type GlobalAgentToolRisk = "read" | "write" | "high";
@@ -83,6 +84,8 @@ export interface GlobalAgentRun {
     decision_summary?: any;
     clarification_question?: string;
     shadow_mode?: boolean;
+    original_user_message?: string;
+    reasoning_loop: AgentReasoningState;
 }
 export interface GlobalAgentLoopRuntime {
     callModel: (messages: Array<{
@@ -95,6 +98,7 @@ export interface GlobalAgentLoopRuntime {
     onEvent?: (event: any, run: GlobalAgentRun) => void;
     persist?: boolean;
     now?: () => number;
+    qualityPolicyOverride?: any;
 }
 export declare const GLOBAL_AGENT_TOOL_SPECS: GlobalAgentToolSpec[];
 export declare function getGlobalAgentRun(id: string): GlobalAgentRun;
@@ -111,6 +115,7 @@ export declare function listGlobalAgentRuns(options?: {
     limit?: number;
 }): GlobalAgentRun[];
 export declare function findWaitingGlobalAgentRun(sessionId: string): GlobalAgentRun;
+export declare function findClarifyingGlobalAgentRun(sessionId: string, maxAgeMs?: number): GlobalAgentRun;
 export declare function getGlobalAgentToolSpec(name: string): GlobalAgentToolSpec;
 export declare function classifyGlobalAgentToolRisk(name: string, args: any): GlobalAgentToolRisk;
 export declare function parseGlobalAgentDecision(raw: string | GlobalAgentDecision): GlobalAgentDecision;
@@ -128,6 +133,9 @@ export declare function resumeGlobalAgentRun(id: string, runtime: GlobalAgentLoo
     approved?: boolean;
     cancelled?: boolean;
 }): Promise<GlobalAgentRun>;
+export declare function continueGlobalAgentRunWithClarification(id: string, answer: string, runtime: GlobalAgentLoopRuntime, options?: {
+    explicitWriteAuthorization?: boolean;
+}): Promise<GlobalAgentRun>;
 export declare function pauseGlobalAgentRun(id: string): GlobalAgentRun;
 export declare function cancelGlobalAgentRun(id: string): GlobalAgentRun;
 export declare function recoverInterruptedGlobalAgentRuns(runtime: GlobalAgentLoopRuntime): Promise<{
@@ -142,11 +150,17 @@ export declare function runGlobalAgentLoopSelfTest(): Promise<{
     modelObservesAndContinues: boolean;
     consultationDoesNotDispatch: boolean;
     ambiguousConsultationNeedsClarification: boolean;
+    clarificationContinuesSameRun: boolean;
+    clarificationPreservesOriginalGoal: boolean;
+    reasoningPlanAndFactsAreAudited: boolean;
+    clarificationCanRevokeAuthorization: boolean;
+    toolFailureTriggersAuditedReplan: boolean;
     destructiveAlwaysNeedsConfirmation: boolean;
     confirmationExecutesExactPendingToolOnce: boolean;
     invalidToolsConvergeToFailure: boolean;
     duplicateLoopIsStopped: boolean;
     pauseAndResumeWorks: boolean;
     fencedJsonParses: boolean;
+    shadowModeHasNoSideEffect: boolean;
     pass: boolean;
 }>;

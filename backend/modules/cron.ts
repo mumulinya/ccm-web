@@ -824,8 +824,33 @@ function updateCronJob(id: string, updates: any) {
 }
 
 function deleteCronJob(id: string) {
-  const jobs = loadCronJobs().filter(j => j.id !== id);
+  const jobs = loadCronJobs();
+  const index = jobs.findIndex(j => j.id === id);
+  if (index < 0) return null;
+  const now = new Date().toISOString();
+  jobs[index] = { ...jobs[index], enabled_before_archive: jobs[index].enabled !== false, enabled: false, archived: true, archived_at: now, deleted_at: now, next_run: null, updated_at: now };
   saveCronJobs(jobs);
+  return jobs[index];
+}
+
+function restoreCronJob(id: string) {
+  const jobs = loadCronJobs();
+  const index = jobs.findIndex(j => j.id === id);
+  if (index < 0) return null;
+  const now = new Date().toISOString();
+  const enabled = jobs[index].enabled_before_archive !== false;
+  jobs[index] = { ...jobs[index], archived: false, archived_at: null, deleted_at: null, enabled, restored_at: now, updated_at: now, next_run: enabled ? computeNextRun(jobs[index].schedule) : null };
+  saveCronJobs(jobs);
+  return jobs[index];
+}
+
+function purgeCronJob(id: string) {
+  const jobs = loadCronJobs();
+  const current = jobs.find(j => j.id === id);
+  if (!current) return null;
+  if (!current.archived && !current.deleted_at) throw new Error("定时任务必须先删除归档，才能永久清除");
+  saveCronJobs(jobs.filter(j => j.id !== id));
+  return current;
 }
 
 function buildTaskFromCronJob(job: any, trigger: "manual" | "schedule") {
@@ -1068,6 +1093,7 @@ async function runCronJobCore(id: string, ctx: CollabCtx, trigger: "manual" | "s
   const jobs = loadCronJobs();
   const job = jobs.find(j => j.id === id);
   if (!job) throw new Error("定时任务不存在");
+  if (job.archived || job.deleted_at) throw new Error("定时任务已归档，请先恢复后再运行");
 
   if (runningCronJobs.has(id)) {
     return { success: false, message: "定时任务正在触发中，请稍后再试" };
@@ -1242,6 +1268,7 @@ async function tickCronScheduler(ctx: CollabCtx) {
   const jobs = loadCronJobs();
 
   for (const rawJob of jobs) {
+    if (rawJob.archived || rawJob.deleted_at) continue;
     const job = normalizeCronJob(rawJob);
     if (!job.enabled) continue;
     if (job.schedule_error) {
@@ -1303,7 +1330,11 @@ function readJsonBody(req: any, onDone: (payload: any) => void, onError: (error:
 // === Cron API 路由分流 ===
 export function handleCronApi(pathname: string, req: any, res: any, parsed: any, ctx: CollabCtx): boolean {
   if (pathname === "/api/cron" && req.method === "GET") {
-    sendJson(res, { jobs: loadCronJobs().map(normalizeCronJob), scheduler: schedulerStatus() });
+    const includeArchived = String(parsed.query.include_archived || parsed.query.includeArchived || "") === "true";
+    const onlyArchived = String(parsed.query.archived || "") === "true";
+    const allJobs = loadCronJobs();
+    const jobs = onlyArchived ? allJobs.filter(job => job.archived || job.deleted_at) : includeArchived ? allJobs : allJobs.filter(job => !job.archived && !job.deleted_at);
+    sendJson(res, { jobs: jobs.map(normalizeCronJob), archived_count: allJobs.filter(job => job.archived || job.deleted_at).length, scheduler: schedulerStatus() });
     return true;
   }
 
@@ -1341,11 +1372,56 @@ export function handleCronApi(pathname: string, req: any, res: any, parsed: any,
   if (pathname === "/api/cron/delete" && req.method === "POST") {
     readJsonBody(req, (payload) => {
       try {
-        deleteCronJob(payload.id);
-        sendJson(res, { success: true });
+        const job = deleteCronJob(payload.id);
+        if (!job) return sendJson(res, { error: "定时任务不存在" }, 404);
+        sendJson(res, { success: true, archived: true, job: normalizeCronJob(job) });
       } catch (e: any) {
         sendJson(res, { error: e.message }, 400);
       }
+    }, (e) => sendJson(res, { error: e.message }, 400));
+    return true;
+  }
+
+  if (pathname === "/api/cron/restore" && req.method === "POST") {
+    readJsonBody(req, (payload) => {
+      try {
+        const job = restoreCronJob(payload.id);
+        if (!job) return sendJson(res, { error: "定时任务不存在" }, 404);
+        sendJson(res, { success: true, job: normalizeCronJob(job) });
+      } catch (e: any) { sendJson(res, { error: e.message }, 400); }
+    }, (e) => sendJson(res, { error: e.message }, 400));
+    return true;
+  }
+
+  if (pathname === "/api/cron/purge" && req.method === "POST") {
+    readJsonBody(req, (payload) => {
+      try {
+        const job = purgeCronJob(payload.id);
+        if (!job) return sendJson(res, { error: "定时任务不存在" }, 404);
+        sendJson(res, { success: true, purged: true, id: job.id });
+      } catch (e: any) { sendJson(res, { error: e.message }, 409); }
+    }, (e) => sendJson(res, { error: e.message }, 400));
+    return true;
+  }
+
+  if (pathname === "/api/cron/bulk" && req.method === "POST") {
+    readJsonBody(req, (payload) => {
+      try {
+        const ids = Array.from(new Set((Array.isArray(payload.ids) ? payload.ids : []).map((id: any) => String(id || "")).filter(Boolean)));
+        const action = String(payload.action || "");
+        if (!ids.length) return sendJson(res, { error: "请选择定时任务" }, 400);
+        if (!["archive", "restore", "purge", "enable", "disable"].includes(action)) return sendJson(res, { error: "不支持的批量操作" }, 400);
+        const results = ids.map((id: string) => {
+          try {
+            const job = action === "archive" ? deleteCronJob(id)
+              : action === "restore" ? restoreCronJob(id)
+              : action === "purge" ? purgeCronJob(id)
+              : updateCronJob(id, { enabled: action === "enable" });
+            return { id, success: !!job };
+          } catch (error: any) { return { id, success: false, error: error.message }; }
+        });
+        sendJson(res, { success: results.every((item: any) => item.success), results }, results.some((item: any) => item.success) ? 200 : 409);
+      } catch (e: any) { sendJson(res, { error: e.message }, 400); }
     }, (e) => sendJson(res, { error: e.message }, 400));
     return true;
   }

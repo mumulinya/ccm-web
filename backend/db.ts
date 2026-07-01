@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { protectObjectSecrets, resolveObjectSecrets } from "./credential-store";
 
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const CONFIGS_DIR = path.join(CCM_DIR, "configs");
@@ -317,14 +318,21 @@ export function saveMusicConfig(cfg: any) {
 export function loadFeishuConfig(): any {
   try {
     if (fs.existsSync(FEISHU_CONFIG_FILE)) {
-      return JSON.parse(fs.readFileSync(FEISHU_CONFIG_FILE, "utf-8"));
+      return resolveObjectSecrets(JSON.parse(fs.readFileSync(FEISHU_CONFIG_FILE, "utf-8")));
     }
   } catch {}
   return {};
 }
 
 export function saveFeishuConfig(config: any) {
-  fs.writeFileSync(FEISHU_CONFIG_FILE, JSON.stringify(config, null, 2));
+  const protectedConfig = protectObjectSecrets(config, "feishu-global");
+  fs.mkdirSync(path.dirname(FEISHU_CONFIG_FILE), { recursive: true });
+  const temp = `${FEISHU_CONFIG_FILE}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(protectedConfig, null, 2), "utf-8");
+  fs.renameSync(temp, FEISHU_CONFIG_FILE);
+  // The generic atomic writer preserves the previous file verbatim. Credentials
+  // are different: both the live file and its recovery copy must be protected.
+  fs.writeFileSync(`${FEISHU_CONFIG_FILE}.bak`, JSON.stringify(protectedConfig, null, 2), "utf-8");
 }
 
 // === Cron Jobs ===
