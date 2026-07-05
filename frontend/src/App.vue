@@ -21,20 +21,36 @@ const GlobalAgent = defineAsyncComponent(() => import('./components/GlobalAgent.
 const KnowledgeBase = defineAsyncComponent(() => import('./components/KnowledgeBase.vue'))
 const MemoryCenter = defineAsyncComponent(() => import('./components/MemoryCenter.vue'))
 const SystemDiagnostics = defineAsyncComponent(() => import('./components/SystemDiagnostics.vue'))
+const CleanupCenter = defineAsyncComponent(() => import('./components/CleanupCenter.vue'))
 
 const currentTab = ref('')
 const projects = ref([])
+const GLOBAL_PET_AGENT_NAME = 'global-agent'
 const MUSIC_PET_AGENT_NAME = 'music-agent'
 const DEFAULT_MUSIC_PET_LABEL = '乖乖'
 const musicPetLabel = ref(DEFAULT_MUSIC_PET_LABEL)
+const runtimePetAgents = ref([])
+const globalPetAgent = computed(() => ({
+  name: GLOBAL_PET_AGENT_NAME,
+  displayName: '全局 Agent',
+  petLabel: '全局 Agent',
+  virtual: true,
+  type: 'global',
+  state: 'idle',
+  stateDetail: '等待全局指令',
+  ...(runtimePetAgents.value.find(agent => agent.name === GLOBAL_PET_AGENT_NAME) || {})
+}))
 const musicPetAgent = computed(() => ({
   name: MUSIC_PET_AGENT_NAME,
   displayName: musicPetLabel.value,
   petLabel: musicPetLabel.value,
   virtual: true,
-  type: 'music'
+  type: 'music',
+  state: 'idle',
+  stateDetail: '等待音乐指令',
+  ...(runtimePetAgents.value.find(agent => agent.name === MUSIC_PET_AGENT_NAME) || {})
 }))
-const petAgents = computed(() => [...projects.value, musicPetAgent.value])
+const petAgents = computed(() => [globalPetAgent.value, musicPetAgent.value])
 const isMobile = ref(window.innerWidth <= 768)
 const isDark = ref(localStorage.getItem('theme') === 'dark')
 
@@ -138,6 +154,34 @@ const applyPetNavigationTarget = async (target) => {
   switchTab(target.tab)
 }
 
+const isSystemPetAgent = (name) => [GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME].includes(name)
+
+const syncRuntimePetAgents = (agents = []) => {
+  const next = [...runtimePetAgents.value]
+  for (const agent of agents || []) {
+    if (!agent || !isSystemPetAgent(agent.name)) continue
+    const index = next.findIndex(item => item.name === agent.name)
+    if (index >= 0) next[index] = { ...next[index], ...agent }
+    else next.push(agent)
+    if (agent.name === MUSIC_PET_AGENT_NAME) updateMusicPetLabelFromAgent(agent)
+  }
+  runtimePetAgents.value = next.filter(agent => isSystemPetAgent(agent.name))
+}
+
+const patchRuntimePetAgent = (name, patch = {}) => {
+  if (!isSystemPetAgent(name)) return
+  const normalizedPatch = { ...patch }
+  if (normalizedPatch.displayName === name) delete normalizedPatch.displayName
+  if (normalizedPatch.petLabel === name) delete normalizedPatch.petLabel
+  const current = runtimePetAgents.value.find(agent => agent.name === name) || { name }
+  const nextAgent = { ...current, ...normalizedPatch }
+  runtimePetAgents.value = [
+    ...runtimePetAgents.value.filter(agent => agent.name !== name),
+    nextAgent
+  ]
+  if (name === MUSIC_PET_AGENT_NAME) updateMusicPetLabelFromAgent(nextAgent)
+}
+
 const updateMusicPetLabelFromAgent = (agent) => {
   if (!agent || agent.name !== MUSIC_PET_AGENT_NAME) return
   const label = String(agent.petLabel || agent.displayName || agent.label || '').trim()
@@ -148,6 +192,7 @@ const refreshMusicPetAgent = async () => {
   try {
     const res = await fetch('/api/pets/agents')
     const data = await res.json()
+    syncRuntimePetAgents(data.agents || [])
     const agent = (data.agents || []).find(a => a.name === MUSIC_PET_AGENT_NAME)
     updateMusicPetLabelFromAgent(agent)
   } catch {}
@@ -164,10 +209,28 @@ const connectPetNavigationStream = () => {
     try {
       const data = JSON.parse(event.data)
       if (data.type === 'snapshot') {
-        const agent = (data.agents || []).find(a => a.name === MUSIC_PET_AGENT_NAME)
-        updateMusicPetLabelFromAgent(agent)
+        syncRuntimePetAgents(data.agents || [])
       } else if (data.type === 'state' && data.agent === MUSIC_PET_AGENT_NAME) {
-        updateMusicPetLabelFromAgent({ name: data.agent, displayName: data.displayName })
+        patchRuntimePetAgent(data.agent, {
+          displayName: data.displayName,
+          petLabel: data.displayName,
+          state: data.state,
+          lastActivity: data.lastActivity,
+          stateDetail: data.detail || data.stateDetail || ''
+        })
+      } else if (data.type === 'state' && data.agent === GLOBAL_PET_AGENT_NAME) {
+        patchRuntimePetAgent(data.agent, {
+          displayName: data.displayName,
+          petLabel: data.displayName,
+          state: data.state,
+          lastActivity: data.lastActivity,
+          stateDetail: data.detail || data.stateDetail || ''
+        })
+      } else if (data.type === 'speech' && isSystemPetAgent(data.agent)) {
+        patchRuntimePetAgent(data.agent, {
+          lastActivity: data.timestamp,
+          stateDetail: data.text || ''
+        })
       } else if (data.type === 'config') {
         refreshMusicPetAgent()
       }
@@ -284,6 +347,7 @@ const DEFAULT_TABS = [
   { id: 'diagnostics', icon: '🩺', label: '系统自检与体检' },
   { id: 'knowledge', icon: '📖', label: '知识库与文档' },
   { id: 'memory-center', icon: '🧠', label: '记忆控制中心' },
+  { id: 'cleanup-center', icon: '🧹', label: '清理中心' },
   { id: 'cron', icon: '⏰', label: '定时任务' },
   { id: 'terminal', icon: '💻', label: '内置终端' },
   { id: 'templates', icon: '📚', label: '对话模板' },
@@ -514,18 +578,19 @@ const closeTab = (tabId, event) => {
         </div>
       </div>
 
-      <div class="content-area" :class="{ 'has-bottom-bar': isMobile }" @wheel.stop>
+      <div class="content-area" :class="{ 'has-bottom-bar': isMobile, 'pets-content-area': currentTab === 'pets' }" @wheel.stop>
         <div v-if="isTabOpen('projects')" v-show="currentTab === 'projects'" class="tab-pane"><ProjectManager :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
         <div v-if="isTabOpen('groups')" v-show="currentTab === 'groups'" class="tab-pane"><GroupChat :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
         <div v-if="isTabOpen('global-agent')" v-show="currentTab === 'global-agent'" class="tab-pane"><GlobalAgent @switch-tab="switchTab" @set-navigation="(target) => navigateTo = target" /></div>
         <div v-if="isTabOpen('tools')" v-show="currentTab === 'tools'" class="tab-pane"><ToolsConfig /></div>
-        <div v-if="isTabOpen('pets')" v-show="currentTab === 'pets'" class="tab-pane"><PetMenu :agents="petAgents" @agents-updated="refreshMusicPetAgent" /></div>
+        <div v-if="isTabOpen('pets')" v-show="currentTab === 'pets'" class="tab-pane pet-tab-pane"><PetMenu :agents="petAgents" :projects="projects" @agents-updated="refreshMusicPetAgent" /></div>
         <div v-if="isTabOpen('changes')" v-show="currentTab === 'changes'" class="tab-pane"><CodeChanges /></div>
         <div v-if="isTabOpen('tasks')" v-show="currentTab === 'tasks'" class="tab-pane"><TaskManager :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
         <div v-if="isTabOpen('autodev')" v-show="currentTab === 'autodev'" class="tab-pane"><AutoDevOps /></div>
         <div v-if="isTabOpen('diagnostics')" v-show="currentTab === 'diagnostics'" class="tab-pane"><SystemDiagnostics /></div>
         <div v-if="isTabOpen('knowledge')" v-show="currentTab === 'knowledge'" class="tab-pane"><KnowledgeBase /></div>
         <div v-if="isTabOpen('memory-center')" v-show="currentTab === 'memory-center'" class="tab-pane"><MemoryCenter /></div>
+        <div v-if="isTabOpen('cleanup-center')" v-show="currentTab === 'cleanup-center'" class="tab-pane"><CleanupCenter @navigate="switchTab" /></div>
         <div v-if="isTabOpen('cron')" v-show="currentTab === 'cron'" class="tab-pane"><CronJobs /></div>
         <div v-if="isTabOpen('terminal')" v-show="currentTab === 'terminal'" class="tab-pane"><Terminal /></div>
         <div v-if="isTabOpen('templates')" v-show="currentTab === 'templates'" class="tab-pane"><Templates /></div>
@@ -817,6 +882,28 @@ const closeTab = (tabId, event) => {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+.tab-pane.pet-tab-pane {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.content-area.pets-content-area {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.content-area.pets-content-area .tab-pane.pet-tab-pane {
+  position: relative;
+  inset: auto;
+  min-height: calc(100% - 24px);
+  margin: 12px;
+  overflow: visible;
 }
 
 .empty-state {

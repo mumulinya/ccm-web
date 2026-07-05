@@ -89,6 +89,10 @@ export declare function runTaskAgentSessionSelfTest(): {
         cursorUsesNativeContinuation: boolean;
         persistentTaskWaitsForDoneState: boolean;
         persistentTaskClosesAfterDoneState: boolean;
+        persistentTaskKeepsSessionOnFailed: boolean;
+        persistentTaskKeepsSessionOnPaused: boolean;
+        persistentTaskClosesAfterCancelled: boolean;
+        persistentTaskClosesAfterArchived: boolean;
         conversationalTaskClosesAfterReview: boolean;
         missingNativeIdCanDegradeSafely: boolean;
         capturedNativeIdStaysResumable: boolean;

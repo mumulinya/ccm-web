@@ -12,6 +12,9 @@
     "build:mcp-feishu": "tsc -p integrations/mcp-feishu/tsconfig.json",
     "build": "npm run build:frontend && npm run build:mcp-feishu && npm run build:backend",
     "test:coordinator": "npm run build:backend && node ccm-package/scripts/coordinator-smoke.js",
+    "test:chat-experience": "node scripts/unified-chat-task-experience-selftest.mjs && node scripts/unified-chat-task-experience-e2e.mjs",
+    "test:code-changes": "node scripts/agent-code-change-visualization-selftest.mjs",
+    "test:project-agent-soak": "node scripts/project-agent-real-soak.mjs",
     "stability:9:start": "node scripts/start-clean-soak-9.js",
     "stability:9:check": "node scripts/check-clean-soak-9.js",
     "pack": "npm pack ./ccm-package"

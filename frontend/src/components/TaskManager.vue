@@ -14,6 +14,10 @@ const stats = ref({ total: 0, pending: 0, inProgress: 0, done: 0, failed: 0 })
 const orchestratorDiagnostics = ref(null)
 const executionDashboard = ref(null)
 const executionDashboardLoading = ref(false)
+const activeAgentRuns = ref([])
+const activeAgentRunsLoading = ref(false)
+const runtimeDebtPreview = ref(null)
+const runtimeDebtLoading = ref(false)
 const dashboardFilter = ref('all')
 const expandedDashboardTaskId = ref('')
 const taskExecutions = ref({})
@@ -22,6 +26,8 @@ const showArchivedTasks = ref(false)
 const archivedTaskCount = ref(0)
 const selectedTaskIds = ref([])
 const editingTaskId = ref('')
+
+const AGENT_PROBE_TIMEOUT_MS = 45000
 
 // 弹窗状态
 const showCreate = ref(false)
@@ -125,8 +131,85 @@ const loadExecutionDashboard = async () => {
   executionDashboardLoading.value = false
 }
 
+const loadActiveAgentRuns = async () => {
+  activeAgentRunsLoading.value = true
+  try {
+    const res = await fetch('/api/agent-runs')
+    const data = await res.json()
+    activeAgentRuns.value = data.runs || []
+  } catch {
+    activeAgentRuns.value = []
+  }
+  activeAgentRunsLoading.value = false
+}
+
 const refreshTaskWork = async () => {
-  await Promise.all([loadTasks(), loadExecutionDashboard(), loadOrchestratorDiagnostics()])
+  await Promise.all([loadTasks(), loadExecutionDashboard(), loadOrchestratorDiagnostics(), loadActiveAgentRuns()])
+}
+
+const formatDuration = (ms) => {
+  const value = Math.max(0, Number(ms || 0))
+  const minutes = Math.floor(value / 60000)
+  const seconds = Math.floor((value % 60000) / 1000)
+  return minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`
+}
+
+const stopAgentRun = async (run) => {
+  const confirmed = await confirmDialog(`确定停止 ${run.project || 'Agent'} 当前运行吗？这会尝试终止底层 CLI 进程，并把关联任务标记为等待人工处理。`)
+  if (!confirmed) return
+  try {
+    const res = await fetch('/api/agent-runs/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_id: run.id, task_id: run.taskId, reason: '用户在运行治理中心停止 Agent 运行' })
+    })
+    const data = await res.json()
+    if (!data.success) throw new Error(data.error || '停止失败')
+    toast.success(`已发送停止请求：匹配 ${data.matched || 0} 个运行，终止 ${data.killed || 0} 个进程`)
+    await refreshTaskWork()
+  } catch (e) {
+    toast.error(e.message || '停止 Agent 运行失败')
+  }
+}
+
+const previewRuntimeDebtCleanup = async () => {
+  runtimeDebtLoading.value = true
+  try {
+    const res = await fetch('/api/tasks/runtime-debt/cleanup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: true })
+    })
+    const data = await res.json()
+    runtimeDebtPreview.value = data
+    if (data.total > 0) toast.info(`发现 ${data.total} 个可清理运行债务`)
+    else toast.success('没有发现需要清理的运行债务')
+  } catch (e) {
+    toast.error(e.message || '预览运行债务失败')
+  }
+  runtimeDebtLoading.value = false
+}
+
+const cleanupRuntimeDebt = async () => {
+  const count = runtimeDebtPreview.value?.total ?? '若干'
+  const confirmed = await confirmDialog(`确定清理 ${count} 个运行债务吗？系统会暂停旧任务、释放租约并移出队列，不会删除任务数据。`)
+  if (!confirmed) return
+  runtimeDebtLoading.value = true
+  try {
+    const res = await fetch('/api/tasks/runtime-debt/cleanup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dry_run: false })
+    })
+    const data = await res.json()
+    if (!data.success) throw new Error(data.error || '清理失败')
+    runtimeDebtPreview.value = data
+    toast.success(`运行债务已清理：${data.cleaned || 0}/${data.total || 0}`)
+    await refreshTaskWork()
+  } catch (e) {
+    toast.error(e.message || '清理运行债务失败')
+  }
+  runtimeDebtLoading.value = false
 }
 
 const updateStats = () => {
@@ -352,6 +435,12 @@ const normalizeReceiptEvidence = (receipt, fallbackAgent = '') => {
       ? (receipt.filesChanged || receipt.files_changed || receipt.files)
       : [],
     verification: Array.isArray(receipt.verification || receipt.tests) ? (receipt.verification || receipt.tests) : [],
+    memoryUsed: Array.isArray(receipt.memoryUsed || receipt.memory_used || receipt.used)
+      ? (receipt.memoryUsed || receipt.memory_used || receipt.used)
+      : [],
+    memoryIgnored: Array.isArray(receipt.memoryIgnored || receipt.memory_ignored || receipt.ignored)
+      ? (receipt.memoryIgnored || receipt.memory_ignored || receipt.ignored)
+      : [],
     blockers: Array.isArray(receipt.blockers) ? receipt.blockers : [],
     needs: Array.isArray(receipt.needs || receipt.followUps || receipt.follow_ups) ? (receipt.needs || receipt.followUps || receipt.follow_ups) : []
   }
@@ -905,16 +994,17 @@ const autoContinueDashboardItem = async (item) => {
 }
 
 const runDashboardProbe = async () => {
+  const confirmed = await confirmDialog('复检执行通道会真实启动底层 Agent CLI 做探针，可能消耗少量模型 token；本次只检查通道，不会自动恢复或续跑任务。确定继续？')
+  if (!confirmed) return
   try {
     const res = await fetch('/api/orchestrator/agent-cli-probe/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ limit: 10 })
+      body: JSON.stringify({ limit: 10, timeout_ms: AGENT_PROBE_TIMEOUT_MS })
     })
     const data = await res.json()
-    if (data.success) toast.success(`复检完成：通过 ${data.passed || 0}/${data.total || 0}`)
+    if (data.success) toast.success(`复检完成：通过 ${data.passed || 0}/${data.total || 0}；未自动恢复任务`)
     else toast.warning(data.message || `复检完成：通过 ${data.passed || 0}/${data.total || 0}`)
-    try { await fetch('/api/tasks/watchdog/resume', { method: 'POST' }) } catch {}
     await refreshTaskWork()
   } catch {
     toast.error('复检执行通道失败')
@@ -1218,6 +1308,36 @@ onMounted(() => {
         <span>运行目标 {{ dashboardQueue().running_targets || 0 }}</span>
         <span>待处理 {{ dashboardQueue().pending_tasks || 0 }}</span>
         <span>失败 {{ dashboardQueue().failed_tasks || 0 }}</span>
+      </div>
+
+      <div class="runtime-governance-card">
+        <div class="runtime-governance-head">
+          <div>
+            <strong>Agent 运行治理</strong>
+            <span>查看正在运行的底层 Agent CLI，必要时停止进程；清理旧的无租约任务不会删除数据。</span>
+          </div>
+          <div class="runtime-governance-actions">
+            <button class="btn btn-outline btn-sm" :disabled="activeAgentRunsLoading" @click="loadActiveAgentRuns">{{ activeAgentRunsLoading ? '刷新中...' : '刷新运行' }}</button>
+            <button class="btn btn-outline btn-sm" :disabled="runtimeDebtLoading" @click="previewRuntimeDebtCleanup">预览运行债务</button>
+            <button class="btn btn-outline btn-sm" :disabled="runtimeDebtLoading || !(runtimeDebtPreview?.total > 0)" @click="cleanupRuntimeDebt">清理运行债务</button>
+          </div>
+        </div>
+        <div v-if="activeAgentRuns.length" class="runtime-run-list">
+          <div v-for="run in activeAgentRuns" :key="run.id" class="runtime-run-row">
+            <div>
+              <strong>{{ run.project || 'Agent' }} · {{ run.agentType || 'runtime' }}</strong>
+              <span>{{ run.source || 'agent' }} · PID {{ run.pid || '未知' }} · 已运行 {{ formatDuration(run.ageMs) }}</span>
+              <small>{{ run.title || run.cwd || run.id }}</small>
+            </div>
+            <button class="btn btn-outline btn-sm danger" @click="stopAgentRun(run)">停止</button>
+          </div>
+        </div>
+        <div v-else class="runtime-governance-empty">当前没有正在运行的底层 Agent。</div>
+        <div v-if="runtimeDebtPreview" class="runtime-debt-result">
+          <span>可清理 {{ runtimeDebtPreview.total || 0 }}</span>
+          <span>已清理 {{ runtimeDebtPreview.cleaned || 0 }}</span>
+          <span>{{ runtimeDebtPreview.dry_run ? '预览模式' : '已执行清理' }}</span>
+        </div>
       </div>
 
       <div class="dashboard-filter-row">
@@ -1885,6 +2005,11 @@ onMounted(() => {
                 <span class="receipt-label">验证</span>
                 <span v-for="verify in item.verification" :key="verify" class="delivery-pill">{{ verify }}</span>
               </div>
+              <div v-if="item.memoryUsed.length || item.memoryIgnored.length" class="receipt-row memory">
+                <span class="receipt-label">记忆</span>
+                <span v-for="memory in item.memoryUsed" :key="memory" class="delivery-pill">{{ memory }}</span>
+                <span v-for="memory in item.memoryIgnored" :key="`ignored:${memory}`" class="delivery-pill muted">未用：{{ memory }}</span>
+              </div>
               <div v-if="item.blockers.length || item.needs.length" class="receipt-row warning">
                 <span class="receipt-label">阻塞</span>
                 <span v-for="need in [...item.blockers, ...item.needs]" :key="need" class="delivery-pill">{{ need }}</span>
@@ -2008,13 +2133,13 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.task-manager { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow-y: auto; }
+.task-manager { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
 .toolbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: rgba(255, 255, 255, 0.25); border-bottom: 1px solid rgba(0, 0, 0, 0.05); flex-wrap: wrap; gap: 12px; }
 .stats { display: flex; gap: 20px; }
 .stat { display: flex; align-items: center; gap: 6px; }
 .stat-label { font-size: 11px; color: var(--text-muted); }
 .stat-value { font-size: 14px; font-weight: 600; color: var(--text-primary); }
-.content { flex: 1; overflow-y: auto; padding: 16px; }
+.content { flex: 0 0 auto; min-height: auto; overflow: visible; padding: 16px; }
 .execution-dashboard { flex: 0 0 auto; margin: 14px 16px 0; padding: 14px; border: 1px solid rgba(15, 23, 42, 0.08); border-radius: 10px; background: rgba(255, 255, 255, 0.56); box-shadow: 0 10px 28px rgba(15, 23, 42, 0.05); }
 .dashboard-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
 .dashboard-kicker { margin-bottom: 3px; font-size: 11px; font-weight: 700; color: var(--accent-blue); }
@@ -2028,6 +2153,21 @@ onMounted(() => {
 .dashboard-metric.warn strong { color: #854d0e; }
 .dashboard-queue-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .dashboard-queue-row span { padding: 4px 8px; border-radius: 999px; background: rgba(59, 130, 246, 0.08); color: var(--text-secondary); font-size: 11px; font-weight: 700; }
+.runtime-governance-card { margin-bottom: 12px; padding: 12px; border: 1px solid rgba(59, 130, 246, 0.14); border-radius: 10px; background: rgba(59, 130, 246, 0.05); }
+.runtime-governance-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.runtime-governance-head strong { display: block; color: var(--text-primary); font-size: 13px; }
+.runtime-governance-head span { display: block; margin-top: 3px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.runtime-governance-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.runtime-run-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.runtime-run-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.72); border: 1px solid rgba(15, 23, 42, 0.06); }
+.runtime-run-row div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.runtime-run-row strong { color: var(--text-primary); font-size: 12px; overflow-wrap: anywhere; }
+.runtime-run-row span { color: var(--text-secondary); font-size: 11px; }
+.runtime-run-row small { color: var(--text-muted); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-governance-empty { margin-top: 10px; padding: 10px; border-radius: 8px; color: var(--text-muted); font-size: 12px; background: rgba(255,255,255,0.55); }
+.runtime-debt-result { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.runtime-debt-result span { padding: 4px 8px; border-radius: 999px; color: var(--text-secondary); font-size: 11px; font-weight: 700; background: rgba(15,23,42,0.06); }
+.btn.danger { color: #dc2626; border-color: rgba(239, 68, 68, 0.28); background: rgba(239, 68, 68, 0.06); }
 .dashboard-filter-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .dashboard-filter-tabs { display: inline-flex; gap: 4px; padding: 3px; border-radius: 8px; background: rgba(15, 23, 42, 0.05); }
 .dashboard-filter-tab { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 4px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); font-size: 12px; font-weight: 700; cursor: pointer; }
@@ -2326,6 +2466,7 @@ onMounted(() => {
 .receipt-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; }
 .receipt-row code { max-width: 100%; padding: 3px 7px; border-radius: 6px; background: rgba(15, 23, 42, 0.06); color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
 .receipt-row.warning .delivery-pill { background: rgba(234, 179, 8, 0.12); color: #854d0e; }
+.receipt-row.memory .delivery-pill.muted { background: rgba(100, 116, 139, 0.1); color: var(--text-muted); }
 .receipt-label { flex: 0 0 36px; padding-top: 3px; color: var(--text-muted); font-size: 10.5px; font-weight: 700; }
 .watchdog-box { margin-top: 12px; padding: 12px; border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.12); background: rgba(59, 130, 246, 0.04); }
 .watchdog-title { font-size: 12px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px; }
@@ -2353,6 +2494,9 @@ onMounted(() => {
 }
 /* 暗黑模式深度适配 */
 [data-theme="dark"] .execution-dashboard,
+[data-theme="dark"] .runtime-governance-card,
+[data-theme="dark"] .runtime-run-row,
+[data-theme="dark"] .runtime-governance-empty,
 [data-theme="dark"] .dashboard-metric,
 [data-theme="dark"] .dashboard-task,
 [data-theme="dark"] .dashboard-panel,

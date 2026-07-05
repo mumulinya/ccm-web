@@ -44,6 +44,8 @@ exports.purgeTaskExecutionArtifacts = purgeTaskExecutionArtifacts;
 exports.transitionExecution = transitionExecution;
 exports.attachExecutionWorkspace = attachExecutionWorkspace;
 exports.registerExternalRunnerRequest = registerExternalRunnerRequest;
+exports.listActiveAgentRuns = listActiveAgentRuns;
+exports.cancelActiveAgentRun = cancelActiveAgentRun;
 exports.trackManagedChildProcess = trackManagedChildProcess;
 exports.terminateManagedChildProcess = terminateManagedChildProcess;
 exports.clearTaskCancellation = clearTaskCancellation;
@@ -72,6 +74,7 @@ const OUTPUTS_DIR = path.join(KERNEL_DIR, "outputs");
 const CANCELLATIONS_DIR = path.join(KERNEL_DIR, "cancellations");
 const AGENT_RUNNER_REQUESTS_DIR = path.join(utils_1.CCM_DIR, "agent-runner", "requests");
 const activeProcesses = new Map();
+const activeAgentRuns = new Map();
 const MAX_EVENTS = 300;
 function now() { return new Date().toISOString(); }
 function ensureDirs() {
@@ -358,8 +361,89 @@ function unregisterProcess(taskId, child) {
     if (!group.size)
         activeProcesses.delete(taskId);
 }
-function trackManagedChildProcess(taskId, executionId, child) {
+function publicActiveAgentRun(run) {
+    return {
+        id: run.id,
+        taskId: run.taskId,
+        executionId: run.executionId,
+        project: run.project,
+        agentType: run.agentType,
+        source: run.source,
+        pid: run.pid || null,
+        cwd: run.cwd || "",
+        status: run.status,
+        startedAt: run.startedAt,
+        updatedAt: run.updatedAt,
+        timeoutMs: run.timeoutMs || 0,
+        ageMs: Date.now() - Date.parse(run.startedAt || new Date().toISOString()),
+        commandLabel: run.commandLabel || "",
+        title: run.title || "",
+        cancellable: true,
+    };
+}
+function registerActiveAgentRun(taskId, executionId, child, meta = {}) {
+    const runId = String(meta.runId || `run-${safePart(taskId || executionId || "standalone")}-${Date.now().toString(36)}-${crypto.randomBytes(3).toString("hex")}`);
+    const at = now();
+    const run = {
+        id: runId,
+        taskId: String(taskId || ""),
+        executionId: String(executionId || ""),
+        project: String(meta.project || ""),
+        agentType: String(meta.agentType || ""),
+        source: String(meta.source || "agent-cli"),
+        pid: child.pid || null,
+        cwd: String(meta.cwd || ""),
+        status: "running",
+        startedAt: at,
+        updatedAt: at,
+        timeoutMs: Number(meta.timeoutMs || 0),
+        commandLabel: String(meta.commandLabel || ""),
+        title: String(meta.title || ""),
+        child,
+    };
+    activeAgentRuns.set(runId, run);
+    return runId;
+}
+function finishActiveAgentRun(runId, status = "finished") {
+    const run = activeAgentRuns.get(runId);
+    if (!run)
+        return;
+    run.status = status;
+    run.updatedAt = now();
+    activeAgentRuns.delete(runId);
+}
+function listActiveAgentRuns(filters = {}) {
+    const taskId = String(filters.taskId || filters.task_id || "").trim();
+    const project = String(filters.project || "").trim();
+    return Array.from(activeAgentRuns.values())
+        .map(publicActiveAgentRun)
+        .filter(run => !taskId || run.taskId === taskId)
+        .filter(run => !project || run.project === project)
+        .sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
+}
+function cancelActiveAgentRun(input = {}) {
+    const runId = String(input.runId || input.run_id || "").trim();
+    const taskId = String(input.taskId || input.task_id || "").trim();
+    const reason = String(input.reason || "用户停止 Agent 运行").trim();
+    if (!runId && !taskId)
+        throw new Error("缺少 runId 或 taskId");
+    const matched = Array.from(activeAgentRuns.values()).filter(run => (runId && run.id === runId) || (taskId && run.taskId === taskId));
+    let killed = 0;
+    for (const run of matched) {
+        try {
+            if (run.child && killProcessTree(run.child))
+                killed++;
+            run.status = "cancel_requested";
+            run.updatedAt = now();
+        }
+        catch { }
+    }
+    const cancellation = taskId || matched[0]?.taskId ? requestTaskCancellation(taskId || matched[0]?.taskId, reason, "local-user") : null;
+    return { success: true, matched: matched.length, killed, cancellation, runs: matched.map(publicActiveAgentRun) };
+}
+function trackManagedChildProcess(taskId, executionId, child, meta = {}) {
     const safeTaskId = String(taskId || executionId || "standalone");
+    const runId = registerActiveAgentRun(safeTaskId, executionId, child, meta);
     registerProcess(safeTaskId, child);
     if (executionId) {
         const record = loadExecution(executionId);
@@ -383,6 +467,7 @@ function trackManagedChildProcess(taskId, executionId, child) {
         stopped = true;
         clearInterval(cancellationPoll);
         unregisterProcess(safeTaskId, child);
+        finishActiveAgentRun(runId, isTaskCancellationRequested(safeTaskId) ? "cancelled" : "finished");
     };
 }
 function killProcessTree(child) {
@@ -463,6 +548,15 @@ async function runManagedCommand(input) {
         detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],
     });
+    const runId = registerActiveAgentRun(taskId, executionId, child, {
+        project: input.project,
+        agentType: input.agentType,
+        source: input.source || "managed-command",
+        cwd: input.cwd,
+        timeoutMs: input.timeoutMs,
+        commandLabel: input.commandLabel,
+        title: input.title,
+    });
     registerProcess(taskId, child);
     if (executionId) {
         const record = loadExecution(executionId);
@@ -527,6 +621,7 @@ async function runManagedCommand(input) {
             clearTimeout(timeout);
             clearInterval(cancelPoll);
             unregisterProcess(taskId, child);
+            finishActiveAgentRun(runId, cancelled ? "cancelled" : (error ? "failed" : "finished"));
             outputStream?.end();
             const result = { stdout, stderr, exitCode: code, signal, outputFile, totalOutputBytes: stdoutBytes + stderrBytes, cancelled };
             if (error)

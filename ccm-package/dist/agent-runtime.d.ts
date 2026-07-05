@@ -40,9 +40,21 @@ export declare function getPublicAgentRuntimes(): {
         scratchpadContinuation: boolean;
     };
 }[];
+export declare function isAgentRuntimeAvailable(agentType: string): boolean;
+export declare function getAgentRuntimeFallbackChain(preferred?: string): AgentRuntimeId[];
+export declare function resolveAvailableAgentRuntime(preferred?: string): {
+    selected: AgentRuntimeId;
+    preferred: AgentRuntimeId;
+    chain: AgentRuntimeId[];
+    switched: boolean;
+};
 export declare function normalizeAgentCommandOutput(agentType: string, rawOutput: string): {
     output: string;
     sessionId: string;
+};
+export declare function detectAgentCommandFailure(agentType: string, rawOutput: string, exitCode?: number | null, rawError?: string): {
+    failed: boolean;
+    message: string;
 };
 export declare function runAgentRuntimeSessionSelfTest(): {
     pass: boolean;
@@ -55,5 +67,7 @@ export declare function runAgentRuntimeSessionSelfTest(): {
         cursorInitialCapturesSession: boolean;
         cursorResumesSameSession: boolean;
         cursorParsesNativeSession: boolean;
+        codexJsonFailureDetected: boolean;
+        cursorJsonFailureDetected: boolean;
     };
 };

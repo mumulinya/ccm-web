@@ -30,6 +30,12 @@ const soakLoading = ref(false)
 const soakPreflight = ref(null)
 let soakPollTimer = null
 
+const AGENT_PROBE_TIMEOUT_MS = 45000
+
+const confirmAgentProbeRun = async (scope = '当前子 Agent') => confirmDialog(
+  `${scope}会真实启动底层 Agent CLI 做执行通道探针，可能消耗少量模型 token；本次只检查通道，不会自动恢复或续跑任务。确定继续？`
+)
+
 const soakProgress = computed(() => {
   const state = soakState.value
   if (!state?.started_at || !state?.ends_at) return 0
@@ -243,6 +249,8 @@ const loadDailyDevSmokeStatus = async (taskId = '', options = {}) => {
 }
 
 const runAgentCliProbe = async () => {
+  const ok = await confirmAgentProbeRun(selectedAgentCliProbeTarget.value?.target_member || selectedAgentCliProbeTarget.value?.project || '当前子 Agent')
+  if (!ok) return
   agentCliProbeLoading.value = true
   try {
     const res = await fetch('/api/orchestrator/agent-cli-probe', {
@@ -250,23 +258,15 @@ const runAgentCliProbe = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(selectedAgentCliProbeTarget.value ? {
         group_id: selectedAgentCliProbeTarget.value.group_id,
-        target_member: selectedAgentCliProbeTarget.value.target_member
-      } : {})
+        target_member: selectedAgentCliProbeTarget.value.target_member,
+        timeout_ms: AGENT_PROBE_TIMEOUT_MS
+      } : { timeout_ms: AGENT_PROBE_TIMEOUT_MS })
     })
     const data = await res.json()
     agentCliProbe.value = data
     agentCliProbeRecovery.value = null
     if (data.success) {
       toast.success('执行通道探针通过')
-      try {
-        const resumeRes = await fetch('/api/tasks/watchdog/resume', { method: 'POST' })
-        const resumeData = await resumeRes.json()
-        agentCliProbeRecovery.value = resumeData
-        if (resumeData.success) {
-          const total = (resumeData.recovered || 0) + (resumeData.runtime_queued || 0) + (resumeData.gap_queued || 0)
-          if (total > 0) toast.success(`已自动恢复 ${total} 个任务`)
-        }
-      } catch {}
       loadOrchestratorDiagnostics()
     } else if (data.blocked) {
       toast.warning(data.message || '执行通道仍不可用')
@@ -280,22 +280,19 @@ const runAgentCliProbe = async () => {
 }
 
 const runAgentCliProbeBatch = async () => {
+  const ok = await confirmAgentProbeRun('待复检子 Agent')
+  if (!ok) return
   agentCliProbeBatchLoading.value = true
   try {
     const res = await fetch('/api/orchestrator/agent-cli-probe/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ limit: 10 })
+      body: JSON.stringify({ limit: 10, timeout_ms: AGENT_PROBE_TIMEOUT_MS })
     })
     const data = await res.json()
     agentCliProbeBatch.value = data
     if (data.success) {
-      toast.success(`批量复检完成：通过 ${data.passed || 0}/${data.total || 0}`)
-      try {
-        const resumeRes = await fetch('/api/tasks/watchdog/resume', { method: 'POST' })
-        const resumeData = await resumeRes.json()
-        agentCliProbeRecovery.value = resumeData
-      } catch {}
+      toast.success(`批量复检完成：通过 ${data.passed || 0}/${data.total || 0}；未自动恢复任务`)
     } else if ((data.total || 0) === 0) {
       toast.info(data.message || '没有需要复检的项目 Agent')
     } else {
@@ -805,7 +802,7 @@ onUnmounted(() => {
             <ol>
               <li>在项目目录启动外部执行器：<code>npm run agent-runner:ps</code></li>
               <li>在同一台机器确认 Claude CLI 可用：<code>claude -p</code></li>
-              <li>点击顶部“复检执行通道”。探针通过后会自动触发看门狗恢复任务。</li>
+              <li>点击“复检执行通道”只检查真实 Agent CLI；需要续跑任务时再点击“恢复自动任务”。</li>
             </ol>
           </div>
 
@@ -816,8 +813,11 @@ onUnmounted(() => {
                 <span>检查项目 Agent 真实调用情况。通过 {{ agentProbeMatrixCounts?.ready || 0 }}/{{ agentProbeMatrixCounts?.executable || 0 }} · 未检查 {{ agentProbeMatrixCounts?.missing || 0 }}</span>
               </div>
               <div class="agent-probe-actions">
+                <button class="btn btn-outline btn-sm" @click="runAgentRecoveryMonitor" :disabled="agentRecoveryMonitorLoading">
+                  {{ agentRecoveryMonitorLoading ? '恢复中...' : '恢复等待任务' }}
+                </button>
                 <button class="btn btn-outline btn-sm" @click="runAgentCliProbeBatch" :disabled="agentCliProbeBatchLoading || agentCliProbeLoading || !(agentProbeMatrixCounts?.executable > 0)">
-                  {{ agentCliProbeBatchLoading ? '批量检查中...' : '检查全部子 Agent' }}
+                  {{ agentCliProbeBatchLoading ? '批量检查中...' : '复检待检查子 Agent' }}
                 </button>
               </div>
             </div>
@@ -826,6 +826,7 @@ onUnmounted(() => {
               <span>批量复检 {{ agentCliProbeBatch.passed || 0 }}/{{ agentCliProbeBatch.total || 0 }}</span>
               <span>失败 {{ agentCliProbeBatch.failed || 0 }}</span>
               <span>跳过 {{ agentCliProbeBatch.skipped || 0 }}</span>
+              <span>仅检查，不自动恢复任务</span>
             </div>
 
             <div class="agent-probe-grid mt-3">

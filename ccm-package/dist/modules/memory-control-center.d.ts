@@ -45,6 +45,7 @@ export declare function runMemoryAcceptanceSnapshot(): {
     };
     scopes: any[];
 };
+export declare function buildMemoryQualityReport(options?: any): any;
 export declare function buildMemoryCenterOverview(): {
     generatedAt: string;
     groups: {

@@ -52,6 +52,7 @@ export declare function buildCoordinatorPrompt(input: {
     message: string;
     toolsContext?: string;
     sharedFilesContext?: string;
+    ragContext?: string;
     extraInstructions?: string;
 }): string;
 export declare function buildMemberPrompt(input: {
@@ -82,12 +83,20 @@ export declare function runCodedGroupOrchestrator(input: {
     context?: string;
     source?: string;
     sharedFilesContext?: string;
+    ragContext?: string;
+    ragCitations?: string[];
+    ragScoped?: boolean;
 }): {
     agent: any;
     delegated: any[];
     assignments: any[];
     analysis: {
         documentFindings: string[];
+        ragContext: {
+            citations: string[];
+            scoped: boolean;
+            injected: boolean;
+        };
         coordinationStrategy: string;
         constraints: string[];
         needsCoordination: boolean;
@@ -126,6 +135,11 @@ export declare function runCodedGroupOrchestrator(input: {
     coordinationStrategy: string;
     analysis: {
         documentFindings: string[];
+        ragContext: {
+            citations: string[];
+            scoped: boolean;
+            injected: boolean;
+        };
         coordinationStrategy: string;
         constraints: string[];
         needsCoordination: boolean;
@@ -158,7 +172,7 @@ export declare function runCodedGroupOrchestrator(input: {
     content: string;
 };
 export declare function runCoordinatorProtocolSelfTest(): {
-    pass: boolean;
+    pass: any;
     contentHasPlan: boolean;
     coordinationPlan: any;
     assignmentCount: number;
@@ -181,6 +195,8 @@ export declare function runCoordinatorProtocolSelfTest(): {
     semanticReasoningPass: any;
     shortDocBackendFirstPass: any;
     shortDocExecutionOrder: any;
+    ragInjectionPass: any;
+    ragCitations: any;
     reactiveCompactionPass: boolean;
     structuredFallbackPolicyPass: boolean;
     informationalBoundaryPass: boolean;
@@ -235,6 +251,9 @@ export declare function runGroupOrchestrator(input: {
     context?: string;
     source?: string;
     sharedFilesContext?: string;
+    ragContext?: string;
+    ragCitations?: string[];
+    ragScoped?: boolean;
 }): Promise<{
     agent: any;
     delegated: any[];

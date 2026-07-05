@@ -1,4 +1,5 @@
 import { execFileSync, execSync } from "child_process";
+import path from "path";
 import { createUnifiedDiff, describeFileStatus, readWorkingFileText, sendJson } from "../utils";
 import { getConfigs, getConfigInfo } from "../db";
 
@@ -137,7 +138,44 @@ export function handleGitApi(pathname: string, req: any, res: any, parsed: any):
     return true;
   }
 
-  // 3. 提交更改
+  // 3. 读取当前完整文件内容（用于聊天里的代码改动抽屉）
+  if (pathname === "/api/git/file" && req.method === "GET") {
+    const project = parsed.query.project;
+    const filePath = parsed.query.file;
+
+    if (!project || !filePath) return sendJson(res, { error: "缺少参数" }, 400);
+    if (path.isAbsolute(filePath) || String(filePath).split(/[\\/]+/).includes("..")) {
+      return sendJson(res, { error: "非法文件路径" }, 400);
+    }
+
+    const configs = getConfigs();
+    const config = configs.find(c => c.name === project);
+    if (!config) return sendJson(res, { error: "项目不存在" }, 404);
+
+    const info = getConfigInfo(config.path);
+    const workDir = info[0]?.workDir;
+    if (!workDir) return sendJson(res, { error: "项目目录不存在" }, 400);
+
+    const root = path.resolve(workDir);
+    const absPath = path.resolve(root, filePath);
+    if (absPath !== root && !absPath.startsWith(root + path.sep)) {
+      return sendJson(res, { error: "文件不在项目目录内" }, 400);
+    }
+
+    const state = readWorkingFileText(workDir, filePath);
+    return sendJson(res, {
+      success: true,
+      project,
+      file: filePath,
+      exists: !!state.exists,
+      binary: !!state.binary,
+      text: state.binary ? "" : (state.text || ""),
+      truncated: !!(state.truncated || state.tooLarge),
+      size: state.size || 0
+    });
+  }
+
+  // 4. 提交更改
   if (pathname === "/api/git/commit" && req.method === "POST") {
     let body = "";
     req.on("data", (chunk) => body += chunk);

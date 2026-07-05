@@ -1,6 +1,10 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { toast, confirmDialog } from '../utils/toast.js'
+import TaskExperienceCard from './TaskExperienceCard.vue'
+import AgentCodeChangeDrawer from './AgentCodeChangeDrawer.vue'
+import { globalAgentRunTaskCard, globalMissionTaskCard } from '../utils/taskExperience.js'
+import { buildGlobalConversationKnowledgePayload, buildGlobalTaskKnowledgePayload, postKnowledgeCapture } from '../utils/knowledgeCapture.js'
 
 const emit = defineEmits(['switch-tab', 'set-navigation'])
 
@@ -16,6 +20,7 @@ const DEFAULT_WELCOME = {
 const sessions = ref([])
 const currentSessionId = ref('')
 const isSidebarOpen = ref(true)
+const codeChangeDrawer = ref({ visible: false, title: '', subtitle: '', project: '', fileChanges: null, files: [], selectedPath: '' })
 
 const currentSession = computed(() => {
   return sessions.value.find(s => s.id === currentSessionId.value) || null
@@ -558,6 +563,118 @@ const getActionParam = (action, ...keys) => {
   return ''
 }
 
+const GLOBAL_STREAM_EVENT_LIMIT = 12
+
+const compactStreamText = (value, max = 220) => {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  return text.length > max ? text.slice(0, max) + '...' : text
+}
+
+const globalToolLabels = {
+  inspect_system: '读取系统状态',
+  list_projects: '读取项目列表',
+  inspect_project: '读取项目上下文',
+  list_groups: '读取群聊列表',
+  list_tasks: '读取任务列表',
+  list_cron: '读取定时任务',
+  query_knowledge: '查询知识库',
+  query_global_memory: '查询全局记忆',
+  manage_global_memory: '管理全局记忆',
+  inspect_mission: '查询全局任务',
+  inspect_supervision: '查询监工状态',
+  orchestrate_development: '创建跨项目开发任务',
+  manage_supervision: '管理异步监工',
+  create_task: '创建开发任务',
+  send_project_cmd: '发送项目 Agent 指令',
+  send_group_cmd: '发送群聊主 Agent 指令',
+  manage_cron: '管理定时任务',
+  manage_group: '管理群聊',
+  manage_project: '管理项目',
+  manage_task: '管理任务',
+  manage_tool: '管理工具',
+  git_review: '审查代码变更',
+  git_commit: '提交代码',
+  create_template: '创建模板',
+  play_music: '播放音乐',
+  toggle_pet: '控制桌面宠物',
+  navigate: '切换页面'
+}
+
+const getGlobalToolLabel = (name) => globalToolLabels[String(name || '').trim()] || String(name || '工具操作')
+
+const globalEventToVisibleLine = (event = {}) => {
+  if (event.ui?.title || event.ui?.text) {
+    const icons = {
+      understanding: '🧠',
+      planning: '🧭',
+      answering: '✍️',
+      executing: '🛠️',
+      reviewing: '✅',
+      debugging: '⚠️',
+      waiting: '⏳',
+      paused: '⏸️',
+      supervising: '📡',
+      completed: '✨',
+      failed: '❌',
+      cancelled: '🛑'
+    }
+    return {
+      tone: event.ui.tone || 'running',
+      icon: event.ui.icon || icons[event.ui.phase] || '•',
+      title: event.ui.title || '状态更新',
+      text: compactStreamText(event.ui.text || '')
+    }
+  }
+  const type = String(event.type || '')
+  const toolName = event.tool?.name || event.pending_tool?.name || event.step?.tool?.name || ''
+  const toolLabel = getGlobalToolLabel(toolName)
+  if (type === 'started') return { tone: 'running', icon: '🧠', title: '理解需求', text: '正在理解你的消息，判断是普通对话还是需要执行操作。' }
+  if (type === 'decision') {
+    const state = event.step?.state || ''
+    const message = compactStreamText(event.step?.message || event.step?.decision?.intent?.reason || '')
+    if (toolName) return { tone: 'running', icon: '🧭', title: '形成行动计划', text: message || `准备执行：${toolLabel}` }
+    if (state === 'answer' || state === 'complete') return { tone: 'running', icon: '✍️', title: '组织回复', text: message || '已经形成回答，正在整理给你。' }
+    if (state === 'needs_confirmation') return { tone: 'waiting', icon: '⏳', title: '需要确认', text: message || '需要你确认目标或授权范围。' }
+    return { tone: 'running', icon: '🧭', title: '规划下一步', text: message || '正在规划下一步。' }
+  }
+  if (type === 'tool_started') return { tone: 'running', icon: '🛠️', title: '执行工具', text: `正在${toolLabel}。` }
+  if (type === 'tool_completed') return { tone: 'ok', icon: '✅', title: '工具完成', text: `${toolLabel}已完成，正在检查结果。` }
+  if (type === 'tool_failed' || type === 'tool_validation_failed') {
+    return { tone: 'error', icon: '⚠️', title: '执行遇到问题', text: compactStreamText(event.error || event.step?.error || `${toolLabel}失败`) }
+  }
+  if (type === 'clarification_required') return { tone: 'waiting', icon: '❓', title: '需要补充信息', text: compactStreamText(event.reply || '需要你补充目标、范围或验收标准。') }
+  if (type === 'confirmation_required') return { tone: 'waiting', icon: '🔐', title: '等待授权确认', text: compactStreamText(event.reply || '这个操作需要你确认后才会继续。') }
+  if (type === 'paused') return { tone: 'waiting', icon: '⏸️', title: '已暂停', text: compactStreamText(event.reply || '全局 Agent 已暂停。') }
+  if (type === 'supervising') return { tone: 'running', icon: '📡', title: '监工中', text: compactStreamText(event.reply || '已经创建长期任务，正在监督群聊/项目 Agent 交付。') }
+  if (type === 'completed') return { tone: 'ok', icon: '✨', title: '完成', text: compactStreamText(event.reply || '本轮处理完成。') }
+  if (type === 'failed') return { tone: 'error', icon: '❌', title: '失败', text: compactStreamText(event.error || event.reply || '本轮处理失败。') }
+  if (type === 'cancelled') return { tone: 'waiting', icon: '🛑', title: '已取消', text: compactStreamText(event.reply || '本轮处理已取消。') }
+  return null
+}
+
+const ensureGlobalStreamMessage = (agentMsg, addedRef) => {
+  if (!addedRef.value && currentSession.value) {
+    currentSession.value.messages.push(agentMsg)
+    addedRef.value = true
+  }
+}
+
+const appendGlobalStreamEvent = (agentMsg, event) => {
+  const visible = globalEventToVisibleLine(event)
+  if (!visible) return false
+  if (!Array.isArray(agentMsg.streamEvents)) agentMsg.streamEvents = []
+  const key = `${visible.title}:${visible.text}`
+  const previous = agentMsg.streamEvents[agentMsg.streamEvents.length - 1]
+  if (previous && `${previous.title}:${previous.text}` === key) return false
+  agentMsg.streamEvents.push({ ...visible, at: new Date().toISOString() })
+  if (agentMsg.streamEvents.length > GLOBAL_STREAM_EVENT_LIMIT) {
+    agentMsg.streamEvents.splice(0, agentMsg.streamEvents.length - GLOBAL_STREAM_EVENT_LIMIT)
+  }
+  const lines = agentMsg.streamEvents.map(item => `${item.icon} ${item.title}：${item.text}`)
+  agentMsg.content = lines.join('\n')
+  return true
+}
+
 watch(messages, () => {
   scrollToBottom()
 }, { deep: true, immediate: true, flush: 'post' })
@@ -613,9 +730,12 @@ const sendMessage = async () => {
       role: 'assistant',
       content: '',
       timestamp: new Date().toISOString(),
-      files: []
+      files: [],
+      type: 'global_stream',
+      streaming: true,
+      streamEvents: []
     }
-    let agentMsgAdded = false
+    const agentMsgAdded = { value: false }
     const requestId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     
     let res
@@ -660,17 +780,11 @@ const sendMessage = async () => {
       try {
         const data = JSON.parse(dataText)
         if (data.type === 'text') {
-          if (!agentMsgAdded) {
-            currentSession.value.messages.push(agentMsg)
-            agentMsgAdded = true
-          }
+          ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
           agentMsg.content += data.text
           scrollToBottom()
         } else if (data.type === 'result') {
-          if (!agentMsgAdded) {
-            currentSession.value.messages.push(agentMsg)
-            agentMsgAdded = true
-          }
+          ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
           const run = data.run || {}
           const confirmationHint = run.status === 'waiting_confirmation'
             ? `\n\n⚠️ 等待确认：${run.pending_tool?.name || '写入操作'}。请使用下方按钮决定是否继续。`
@@ -678,16 +792,22 @@ const sendMessage = async () => {
           agentMsg.content = (run.final_reply || '已处理。') + confirmationHint
           agentMsg.files = data.files || []
           agentMsg.agenticRun = run
+          agentMsg.streaming = false
+          agentMsg.type = 'global_agent_result'
           if (run.status === 'supervising' && run.mission_id) trackGlobalMission(run.mission_id, currentSessionId.value)
           for (const effect of (run.client_effects || [])) {
             if (effect?.type === 'navigate' && effect.params?.tab) emit('switch-tab', effect.params.tab)
           }
         } else if (data.type === 'error') {
-          if (!agentMsgAdded) {
-            currentSession.value.messages.push(agentMsg)
-            agentMsgAdded = true
-          }
+          ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
           agentMsg.content = `❌ 出错啦: ${data.text}`
+          agentMsg.streaming = false
+          agentMsg.type = 'global_agent_error'
+        } else if (data.type !== 'done') {
+          ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
+          if (appendGlobalStreamEvent(agentMsg, data)) scrollToBottom()
+        } else {
+          agentMsg.streaming = false
         }
       } catch {}
     }
@@ -709,6 +829,17 @@ const sendMessage = async () => {
     saveHistory()
 
   } catch (err) {
+    if (currentSession.value) {
+      const last = currentSession.value.messages[currentSession.value.messages.length - 1]
+      if (last?.type === 'global_stream' && last.streaming) {
+        last.streaming = false
+        last.type = 'global_agent_error'
+        last.content = `❌ 连接服务器失败：${err.message || '请检查网络或配置'}`
+        saveHistory()
+        scrollToBottom()
+        return
+      }
+    }
     currentSession.value.messages.push({
       role: 'assistant',
       content: `❌ 连接服务器失败：${err.message || '请检查网络或配置'}`,
@@ -826,6 +957,148 @@ const controlAgenticRun = async (msg, operation, approved = true) => {
   } finally {
     msg.agenticRunLoading = false
     scrollToBottom()
+  }
+}
+
+const saveCurrentGlobalSessionKnowledge = async () => {
+  if (!currentSession.value || messages.value.length <= 1) return toast.info('当前全局会话还没有可沉淀的内容')
+  try {
+    const data = await postKnowledgeCapture(buildGlobalConversationKnowledgePayload({
+      sessionId: currentSessionId.value,
+      messages: messages.value,
+    }))
+    toast.success(`已保存到知识库：${data.entry?.title || '全局会话'}`)
+  } catch (error) {
+    toast.error(error?.message || '保存全局会话知识失败')
+  }
+}
+
+const applyGlobalMissionPayload = (msg, payload = {}) => {
+  if (!msg) return
+  const missionEnvelope = payload.mission?.mission ? payload.mission : payload
+  const mission = missionEnvelope.mission || payload.mission
+  const children = missionEnvelope.children || payload.children || []
+  if (mission?.id) msg.globalMission = mission
+  if (Array.isArray(children)) msg.globalMissionChildren = children.map(task => task?.task ? task : ({ task, target: task?.mission_target || null }))
+  if (payload.supervisor) msg.globalMissionSupervisor = payload.supervisor
+  if (mission?.status === 'cancelled') msg.content = '全局任务已取消。'
+  else if (payload.supervisor?.status === 'paused') msg.content = '全局任务监工已暂停。'
+  else if (payload.supervisor?.status === 'monitoring') msg.content = '全局任务监工已恢复，会继续跟踪执行与验收。'
+}
+
+const getGlobalTaskCard = (msg) => {
+  if (!msg || msg.role !== 'assistant') return null
+  return globalMissionTaskCard(msg) || globalAgentRunTaskCard(msg)
+}
+
+const inferGlobalChangeProject = (msg) => {
+  const direct = msg?.agenticRun?.project || msg?.agenticRun?.target_project || msg?.globalMission?.target_project
+  if (direct) return direct
+  const children = Array.isArray(msg?.globalMissionChildren) ? msg.globalMissionChildren : []
+  const projects = [...new Set(children.map(row => row?.target?.name || row?.task?.target_project || row?.task?.mission_target?.name).filter(Boolean))]
+  return projects.length === 1 ? projects[0] : ''
+}
+
+const openGlobalCodeChangeDrawer = (msg, card) => {
+  const project = inferGlobalChangeProject(msg)
+  const files = (card?.delivery?.changes?.length ? card.delivery.changes : card?.delivery?.files || []).map(item => {
+    if (typeof item === 'string') return { path: item, project, statusText: '变更', statusColor: '#64748b' }
+    return { ...item, project: item.project || project, statusText: item.statusText || item.status || '变更', statusColor: item.statusColor || '#64748b' }
+  }).filter(item => item.path)
+  codeChangeDrawer.value = {
+    visible: true,
+    title: card?.title || '全局 Agent 代码改动',
+    subtitle: card?.goal || '',
+    project,
+    fileChanges: { files, count: files.length },
+    files,
+    selectedPath: files[0]?.path || '',
+  }
+}
+
+const closeCodeChangeDrawer = () => {
+  codeChangeDrawer.value.visible = false
+}
+
+const openGlobalChangesTab = () => {
+  emit('switch-tab', 'changes')
+}
+
+const handleGlobalTaskAction = async (msg, action) => {
+  const card = getGlobalTaskCard(msg)
+  try {
+    if (action.kind === 'view_changes') {
+      openGlobalCodeChangeDrawer(msg, card)
+      return
+    }
+    if (action.kind === 'save_knowledge') {
+      const data = await postKnowledgeCapture(buildGlobalTaskKnowledgePayload({
+        msg,
+        card,
+        sessionId: currentSessionId.value,
+      }))
+      toast.success(`已保存到知识库：${data.entry?.title || card?.title || '全局任务'}`)
+      return
+    }
+    if (msg?.agenticRun?.id) {
+      if (action.kind === 'confirm') return controlAgenticRun(msg, 'confirm', true)
+      if (action.kind === 'reject_confirmation') return controlAgenticRun(msg, 'confirm', false)
+      if (action.kind === 'cancel') return controlAgenticRun(msg, 'cancel')
+      if (action.kind === 'resume' || action.kind === 'continue') return controlAgenticRun(msg, 'resume')
+      if (action.kind === 'retry') {
+        chatInput.value = msg.agenticRun.user_message || card?.goal || card?.title || '继续处理这个全局任务'
+        await nextTick()
+        return sendMessage()
+      }
+    }
+    const missionId = msg?.globalMission?.id || card?.task_id || msg?.agenticRun?.mission_id
+    const supervisorId = msg?.globalMissionSupervisor?.id || msg?.agenticRun?.supervisor_id || missionId
+    const controlMission = async (operation, extra = {}) => {
+      if (!supervisorId && !missionId) throw new Error('当前全局任务没有可控制的任务 ID')
+      const data = await postJson('/api/global-agent/supervisors/control', {
+        id: supervisorId || missionId,
+        mission_id: missionId,
+        operation,
+        actor: 'global-agent-task-card',
+        ...extra,
+      })
+      applyGlobalMissionPayload(msg, data)
+      saveHistory()
+      scrollToBottom()
+      toast.success(operation === 'cancel' ? '全局任务已取消' : operation === 'resume' ? '全局任务已恢复' : '全局任务已更新')
+      return data
+    }
+    if (action.kind === 'continue') {
+      const requirement = window.prompt('继续补充什么要求？', '')
+      if (!requirement) return
+      if (missionId && card?.phase !== 'completed') {
+        return controlMission('update_goal', {
+          business_goal: `${card?.goal || msg?.globalMission?.business_goal || msg?.globalMission?.title || ''}\n补充要求：${requirement}`.trim(),
+          reason: '用户从全局任务卡继续修改',
+        })
+      }
+      chatInput.value = missionId ? `继续全局任务 ${missionId}：${requirement}` : requirement
+      await nextTick()
+      return sendMessage()
+    }
+    if (action.kind === 'cancel') {
+      if (!await confirmDialog(`确定取消全局任务“${card?.title || missionId}”？`)) return
+      return controlMission('cancel', { reason: '用户从全局任务卡取消' })
+    }
+    if (action.kind === 'retry') {
+      if (missionId) return controlMission('resume', { reason: '用户从全局任务卡重新执行/恢复' })
+      chatInput.value = card?.goal || card?.title || '重新执行这个全局任务'
+      await nextTick()
+      return sendMessage()
+    }
+    if (action.kind === 'resume') {
+      return controlMission('resume', { reason: '用户从全局任务卡恢复' })
+    }
+    if (action.kind === 'rollback') {
+      toast.info('跨项目安全撤销需要在具体任务/项目的交付卡中执行，以避免误回滚无关改动。')
+    }
+  } catch (error) {
+    toast.error(error?.message || `${action.label || '操作'}失败`)
   }
 }
 
@@ -1521,6 +1794,7 @@ const handleGitCommitCardSubmit = async (msg) => {
         </div>
         <div class="quality-header-actions">
           <span :class="['quality-mode', qualitySnapshot?.policy?.shadowMode ? 'shadow' : 'live']">{{ qualitySnapshot?.policy?.shadowMode ? '影子模式' : '真实执行' }}</span>
+          <button class="btn btn-outline" @click="saveCurrentGlobalSessionKnowledge">保存知识</button>
           <button class="btn btn-outline" :disabled="qualityLoading" @click="qualityExpanded = !qualityExpanded; qualityExpanded && loadQualitySnapshot()">决策评测</button>
         </div>
       </div>
@@ -1555,8 +1829,39 @@ const handleGitCommitCardSubmit = async (msg) => {
             <div class="chat-bubble">
               <!-- 助手消息判定 -->
               <template v-if="msg.role === 'assistant'">
+                <div v-if="msg.type === 'global_stream'" class="global-stream-card">
+                  <div class="global-stream-head">
+                    <span class="stream-dot" :class="{ active: msg.streaming }"></span>
+                    <div>
+                      <strong>{{ msg.streaming ? '全局 Agent 正在处理' : '全局 Agent 处理过程' }}</strong>
+                      <p>{{ msg.streaming ? '正在实时更新理解、规划和工具执行状态' : '本轮过程已结束' }}</p>
+                    </div>
+                  </div>
+                  <div class="global-stream-events">
+                    <div
+                      v-for="(event, eventIndex) in msg.streamEvents || []"
+                      :key="eventIndex"
+                      class="global-stream-event"
+                      :class="event.tone"
+                    >
+                      <span class="event-icon">{{ event.icon }}</span>
+                      <div>
+                        <strong>{{ event.title }}</strong>
+                        <p>{{ event.text }}</p>
+                      </div>
+                    </div>
+                    <div v-if="!(msg.streamEvents || []).length" class="global-stream-event running">
+                      <span class="event-icon">🧠</span>
+                      <div>
+                        <strong>准备中</strong>
+                        <p>正在连接全局 Agent...</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- CCM 系统管理回执 -->
-                <div v-if="msg.type === 'management_action'" class="management-action-card" :class="{ failed: !msg.managementReceipt?.success, cancelled: msg.managementReceipt?.cancelled }">
+                <div v-else-if="msg.type === 'management_action'" class="management-action-card" :class="{ failed: !msg.managementReceipt?.success, cancelled: msg.managementReceipt?.cancelled }">
                   <div class="management-action-head">
                     <div>
                       <span class="management-action-kicker">全局 Agent 系统工具</span>
@@ -1573,40 +1878,13 @@ const handleGitCommitCardSubmit = async (msg) => {
                 </div>
 
                 <!-- 全局总控任务 -->
-                <div v-else-if="msg.type === 'global_mission' || msg.type === 'global_mission_complete'" class="global-mission-card">
-                  <div class="global-mission-head">
-                    <div>
-                      <span class="global-mission-kicker">全局总控 Agent</span>
-                      <strong>{{ msg.globalMission?.title || '跨项目开发任务' }}</strong>
-                    </div>
-                    <span class="global-mission-status" :class="msg.globalMission?.status">{{ missionStatusLabel(msg.globalMission) }}</span>
-                  </div>
-                  <div class="global-mission-progress">
-                    <div class="mission-progress-track">
-                      <span :style="{ width: ((msg.globalMission?.mission_summary?.passed || 0) / Math.max(1, msg.globalMission?.mission_summary?.total || msg.globalMissionChildren?.length || 1) * 100) + '%' }"></span>
-                    </div>
-                    <div class="mission-metrics">
-                      <span>任务 {{ msg.globalMission?.id }}</span>
-                      <span>目标 {{ msg.globalMission?.mission_summary?.total || msg.globalMissionChildren?.length || 0 }}</span>
-                      <span>通过 {{ msg.globalMission?.mission_summary?.passed || 0 }}</span>
-                      <span v-if="msg.globalMission?.mission_summary?.blocked">阻塞 {{ msg.globalMission.mission_summary.blocked }}</span>
-                      <span v-if="msg.globalMissionSupervisor">监工 {{ msg.globalMissionSupervisor.status }} · 第 {{ msg.globalMissionSupervisor.cycle_count || 0 }} 轮</span>
-                    </div>
-                  </div>
-                  <div class="global-mission-targets">
-                    <div v-for="row in msg.globalMissionChildren || []" :key="row.task?.id" class="global-mission-target">
-                      <div class="mission-target-main">
-                        <span class="mission-target-type">{{ (row.target?.type || row.task?.mission_target?.type) === 'group' ? '群聊主 Agent' : '项目 Agent' }}</span>
-                        <strong>{{ row.target?.name || row.task?.mission_target?.name || row.task?.target_project }}</strong>
-                      </div>
-                      <span class="mission-child-status" :class="row.task?.status">{{ childStatusLabel(row.task) }}</span>
-                      <small>{{ row.task?.status_detail || row.target?.reason || '等待执行回执' }}</small>
-                    </div>
-                  </div>
-                  <div class="global-mission-gate">
-                    {{ msg.globalMission?.status === 'done' ? '所有交付门禁已通过，可以报告完成。' : '全局 Agent正在等待所有子任务完成并通过交付门禁。' }}
-                  </div>
-                </div>
+                <TaskExperienceCard
+                  v-else-if="getGlobalTaskCard(msg) && (msg.type === 'global_mission' || msg.type === 'global_mission_complete')"
+                  :card="getGlobalTaskCard(msg)"
+                  context="global"
+                  :busy="!!msg.agenticRunLoading"
+                  @action="handleGlobalTaskAction(msg, $event)"
+                />
 
                 <!-- RAG/Git 新增 1: 智能代码审查卡片 -->
                 <div v-else-if="msg.type === 'git_review'" class="git-review-card" style="width: 100%;">
@@ -1681,44 +1959,16 @@ const handleGitCommitCardSubmit = async (msg) => {
                   </div>
                 </div>
 
-                <div v-else-if="msg.agenticRun" class="agentic-run-card" :class="'run-' + msg.agenticRun.status">
-                  <div class="agentic-run-head">
-                    <div>
-                      <span>Agentic Loop</span>
-                      <strong>{{ msg.agenticRun.phase || msg.agenticRun.status }}</strong>
-                    </div>
-                    <code>{{ msg.agenticRun.id }}</code>
-                  </div>
-                  <div class="bubble-content">{{ msg.content }}</div>
-                  <div class="agentic-run-metrics">
-                    <span>状态 {{ msg.agenticRun.status }}</span>
-                    <span v-if="msg.agenticRun.supervision_state">监工 {{ msg.agenticRun.supervision_state }}</span>
-                    <span v-if="msg.agenticRun.mission_id">任务 {{ msg.agenticRun.mission_id }}</span>
-                    <span>步骤 {{ msg.agenticRun.steps?.length || 0 }}/{{ msg.agenticRun.max_steps || 0 }}</span>
-                    <span>模型 {{ msg.agenticRun.model_calls || 0 }}</span>
-                    <span>工具 {{ msg.agenticRun.tool_calls || 0 }}</span>
-                  </div>
-                  <div v-if="msg.agenticRun.decision_summary?.intent" class="agentic-decision-summary">
-                    <span>意图 {{ msg.agenticRun.decision_summary.intent.category }}</span>
-                    <span>置信度 {{ Math.round((msg.agenticRun.decision_summary.intent.confidence || 0) * 100) }}%</span>
-                    <span>授权 {{ msg.agenticRun.decision_summary.authorizationBasis || 'none' }}</span>
-                    <p>{{ msg.agenticRun.decision_summary.intent.reason }}</p>
-                  </div>
-                  <div v-if="msg.agenticRun.status === 'waiting_confirmation'" class="agentic-run-actions">
-                    <button class="btn btn-outline" :disabled="msg.agenticRunLoading" @click="controlAgenticRun(msg, 'confirm', false)">取消</button>
-                    <button class="btn btn-primary" :disabled="msg.agenticRunLoading" @click="controlAgenticRun(msg, 'confirm', true)">确认并继续</button>
-                  </div>
-                  <div v-else-if="msg.agenticRun.status === 'waiting_clarification'" class="agentic-clarification">{{ msg.agenticRun.clarification_question || msg.content }}</div>
-                  <div v-else-if="msg.agenticRun.status === 'supervising'" class="agentic-run-actions">
-                    <button v-if="['waiting_user', 'manual_takeover'].includes(msg.agenticRun.supervision_state)" class="btn btn-primary" :disabled="msg.agenticRunLoading" @click="controlAgenticRun(msg, 'resume')">恢复自动监工</button>
-                    <button class="btn btn-outline" :disabled="msg.agenticRunLoading" @click="controlAgenticRun(msg, 'pause')">暂停监工</button>
-                    <button class="btn btn-outline" :disabled="msg.agenticRunLoading" @click="controlAgenticRun(msg, 'cancel')">取消任务</button>
-                  </div>
-                  <div v-else-if="msg.agenticRun.status === 'paused'" class="agentic-run-actions">
-                    <button class="btn btn-primary" :disabled="msg.agenticRunLoading" @click="controlAgenticRun(msg, 'resume')">继续运行</button>
-                    <button class="btn btn-outline" :disabled="msg.agenticRunLoading" @click="controlAgenticRun(msg, 'cancel')">取消运行</button>
-                  </div>
-                </div>
+                <template v-else-if="msg.agenticRun">
+                  <TaskExperienceCard
+                    v-if="getGlobalTaskCard(msg)"
+                    :card="getGlobalTaskCard(msg)"
+                    context="global"
+                    :busy="!!msg.agenticRunLoading"
+                    @action="handleGlobalTaskAction(msg, $event)"
+                  />
+                  <div v-else class="bubble-content">{{ msg.content }}</div>
+                </template>
 
                 <!-- 1. 系统回执高阶卡片 -->
                 <div v-else-if="isSystemReceipt(msg.content)" class="system-receipt-card" :class="parseReceipt(msg.content).type">
@@ -1888,6 +2138,18 @@ const handleGitCommitCardSubmit = async (msg) => {
         </div>
       </div>
     </div>
+
+    <AgentCodeChangeDrawer
+      :visible="codeChangeDrawer.visible"
+      :title="codeChangeDrawer.title"
+      :subtitle="codeChangeDrawer.subtitle"
+      :project="codeChangeDrawer.project"
+      :fileChanges="codeChangeDrawer.fileChanges"
+      :files="codeChangeDrawer.files"
+      :selectedPath="codeChangeDrawer.selectedPath"
+      @close="closeCodeChangeDrawer"
+      @open-changes="openGlobalChangesTab"
+    />
 
     <!-- Lightbox 图片放大查看 -->
     <div v-if="zoomedImage" class="lightbox-overlay" @click="closeZoom">
@@ -2480,6 +2742,98 @@ const handleGitCommitCardSubmit = async (msg) => {
 
 .bubble-content {
   white-space: pre-wrap;
+}
+
+.global-stream-card {
+  min-width: min(520px, 72vw);
+  padding: 13px;
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(99, 102, 241, 0.13), transparent 34%),
+    rgba(15, 23, 42, 0.03);
+}
+
+.global-stream-head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.global-stream-head strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.global-stream-head p {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.stream-dot {
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.1);
+}
+
+.stream-dot.active {
+  animation: streamPulse 1.1s ease-in-out infinite;
+}
+
+.global-stream-events {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.global-stream-event {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.global-stream-event strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.global-stream-event p {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.global-stream-event.running { border-color: rgba(59, 130, 246, 0.2); background: rgba(59, 130, 246, 0.07); }
+.global-stream-event.ok { border-color: rgba(34, 197, 94, 0.2); background: rgba(34, 197, 94, 0.07); }
+.global-stream-event.waiting { border-color: rgba(245, 158, 11, 0.24); background: rgba(245, 158, 11, 0.08); }
+.global-stream-event.error { border-color: rgba(239, 68, 68, 0.24); background: rgba(239, 68, 68, 0.08); }
+
+.event-icon {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+@keyframes streamPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.35); opacity: 0.68; }
 }
 
 .bubble-time {

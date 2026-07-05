@@ -1,7 +1,11 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handleGitApi = handleGitApi;
 const child_process_1 = require("child_process");
+const path_1 = __importDefault(require("path"));
 const utils_1 = require("../utils");
 const db_1 = require("../db");
 function parseDiffHunks(diff) {
@@ -136,7 +140,41 @@ function handleGitApi(pathname, req, res, parsed) {
         }
         return true;
     }
-    // 3. 提交更改
+    // 3. 读取当前完整文件内容（用于聊天里的代码改动抽屉）
+    if (pathname === "/api/git/file" && req.method === "GET") {
+        const project = parsed.query.project;
+        const filePath = parsed.query.file;
+        if (!project || !filePath)
+            return (0, utils_1.sendJson)(res, { error: "缺少参数" }, 400);
+        if (path_1.default.isAbsolute(filePath) || String(filePath).split(/[\\/]+/).includes("..")) {
+            return (0, utils_1.sendJson)(res, { error: "非法文件路径" }, 400);
+        }
+        const configs = (0, db_1.getConfigs)();
+        const config = configs.find(c => c.name === project);
+        if (!config)
+            return (0, utils_1.sendJson)(res, { error: "项目不存在" }, 404);
+        const info = (0, db_1.getConfigInfo)(config.path);
+        const workDir = info[0]?.workDir;
+        if (!workDir)
+            return (0, utils_1.sendJson)(res, { error: "项目目录不存在" }, 400);
+        const root = path_1.default.resolve(workDir);
+        const absPath = path_1.default.resolve(root, filePath);
+        if (absPath !== root && !absPath.startsWith(root + path_1.default.sep)) {
+            return (0, utils_1.sendJson)(res, { error: "文件不在项目目录内" }, 400);
+        }
+        const state = (0, utils_1.readWorkingFileText)(workDir, filePath);
+        return (0, utils_1.sendJson)(res, {
+            success: true,
+            project,
+            file: filePath,
+            exists: !!state.exists,
+            binary: !!state.binary,
+            text: state.binary ? "" : (state.text || ""),
+            truncated: !!(state.truncated || state.tooLarge),
+            size: state.size || 0
+        });
+    }
+    // 4. 提交更改
     if (pathname === "/api/git/commit" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);

@@ -485,6 +485,7 @@ const searchQuery = ref('')
 const testQueryText = ref('')
 const queryResult = ref(null)
 const activeChunkIndex = ref(0)
+const embeddingConfig = ref({ enabled: false, apiUrl: 'https://api.openai.com/v1', apiKey: '', model: 'text-embedding-3-small', hasKey: false })
 
 const sandboxTab = ref('chat') // 'chat' | 'query'
 const selectedFilterTags = ref([]) // 选中的检索过滤标签
@@ -551,6 +552,16 @@ const loadDocuments = async () => {
     console.error('获取知识库文档列表失败', e)
   } finally {
     loading.value = false
+  }
+}
+
+const loadEmbeddingConfig = async () => {
+  try {
+    const res = await fetch('/api/rag/embedding-config')
+    const data = await res.json()
+    if (data.success) embeddingConfig.value = { ...embeddingConfig.value, ...data.config, apiKey: '' }
+  } catch (e) {
+    console.error('加载向量模型配置失败', e)
   }
 }
 
@@ -882,6 +893,7 @@ const highlightKeywords = (text, query) => {
 
 onMounted(() => {
   loadDocuments()
+  loadEmbeddingConfig()
   loadWatchPaths()
 })
 </script>
@@ -897,6 +909,21 @@ onMounted(() => {
   overflow-y: auto;
   box-sizing: border-box;
   background: var(--bg-primary, #f5f7fa);
+}
+
+.dir-input-group.stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 /* 全局卡片体系设计 (自适应提升高奢质感) */

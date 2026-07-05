@@ -3,7 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
 
 const props = defineProps({
-  agents: { type: Array, default: () => [] }
+  agents: { type: Array, default: () => [] },
+  projects: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['agents-updated'])
 
@@ -13,11 +14,12 @@ const agentLabelDraft = ref('')
 const desktopPetRunning = ref(false)
 const petConfigs = ref({})
 const petPositions = ref({})
-const actionPetType = ref('cat')
+const actionPetType = ref('yuexinmiao')
 const assetVersion = ref(Date.now())
 const uploadInputs = ref({})
 const uploadingAsset = ref('')
 const projectPetStrategy = ref({ idle: [], active: [], idleCycleSeconds: 0 })
+const GLOBAL_PET_AGENT_NAME = 'global-agent'
 const MUSIC_PET_AGENT_NAME = 'music-agent'
 
 const customPetTypes = ref([])
@@ -25,18 +27,16 @@ const imageErrors = ref({})
 const handleImageError = (row) => {
   imageErrors.value[row.assetPath] = true
 }
-const isPixelated = (type) => {
-  return type === 'clawd'
-}
+const isPixelated = () => false
 
 // 加载宠物配置
 const loadConfigs = async () => {
   try {
     const res = await fetch('/api/pets/config')
     const data = await res.json()
-    petConfigs.value = data.configs || {}
-    petPositions.value = data.positions || {}
     customPetTypes.value = data.customTypes || []
+    petConfigs.value = normalizePetConfigs(data.configs || {})
+    petPositions.value = data.positions || {}
   } catch {
     petConfigs.value = {}
     petPositions.value = {}
@@ -96,37 +96,52 @@ const closeDesktopPet = async () => {
   }
 }
 
+const BUILTIN_FALLBACK_PET_TYPE = 'yuexinmiao'
 const fallbackPetTypes = [
-  { id: 'cat', name: '小猫咪', emoji: '🐱', color: '#FF9800' },
-  { id: 'crab', name: '小螃蟹', emoji: '🦀', color: '#FF5722' },
-  { id: 'clawd', name: 'Clawd', emoji: '🦀', color: '#E4572E' },
-  { id: 'robot', name: '机器人', emoji: '🤖', color: '#607D8B' },
-  { id: 'ghost', name: '小幽灵', emoji: '👻', color: '#B39DDB' },
-  { id: 'panda', name: '大熊猫', emoji: '🐼', color: '#3f3f46' },
-  { id: 'fox', name: '小狐狸', emoji: '🦊', color: '#f97316' },
-  { id: 'rabbit', name: '小兔子', emoji: '🐰', color: '#cbd5e1' },
+  { id: 'clawd', name: 'Clawd', emoji: '🦀', color: '#f97316' },
   { id: 'yuexinmiao', name: '月薪喵', emoji: '🐱', color: '#22c55e' },
   { id: 'cloudling', name: '小云朵', emoji: '☁️', color: '#38bdf8' },
-  { id: 'calico', name: '三花猫', emoji: '🐱', color: '#d97706' }
+  { id: 'calico', name: '三花猫', emoji: '🐱', color: '#d97706' },
+  { id: 'ghost', name: '小幽灵', emoji: '👻', color: '#B39DDB' },
+  { id: 'robot', name: '机器人', emoji: '🤖', color: '#607D8B' },
 ]
 
 const petTypes = computed(() => {
   return [...fallbackPetTypes, ...customPetTypes.value]
 })
 
+const normalizePetType = (type) => {
+  const id = String(type || '').trim()
+  if (!id) return BUILTIN_FALLBACK_PET_TYPE
+  return petTypes.value.some(p => p.id === id) ? id : BUILTIN_FALLBACK_PET_TYPE
+}
+
+const normalizePetConfigs = (configs = {}) => {
+  const next = {}
+  for (const [agent, cfg] of Object.entries(configs || {})) {
+    next[agent] = { ...(cfg || {}), type: normalizePetType(cfg?.type) }
+  }
+  return next
+}
+
 const getPetIconPath = (type) => {
   const custom = customPetTypes.value.find(c => c.id === type)
   if (custom) {
     return `/pets/${type}.${custom.format || 'png'}`
   }
-  if (type === 'miao') return `/pets/miao.png`
-  return `/pets/${type || 'cat'}.svg`
+  const safeType = normalizePetType(type)
+  return `/pets/${safeType}.svg`
 }
 
 const stateActions = [
   { state: 'idle', label: '待机' },
   { state: 'thinking', label: '思考' },
+  { state: 'planning', label: '规划/拆任务' },
   { state: 'working', label: '工作' },
+  { state: 'building', label: '执行/开发' },
+  { state: 'debugging', label: '调试/返工' },
+  { state: 'reviewing', label: '验收/复盘' },
+  { state: 'waiting', label: '等待确认' },
   { state: 'juggling', label: '音乐/律动' },
   { state: 'sweeping', label: '整理上下文' },
   { state: 'carrying', label: '搬运资料' },
@@ -149,22 +164,23 @@ const reactionActions = [
 ]
 
 const fallbackProjectPetStrategy = {
-  idleCycleSeconds: 80,
+  idleCycleSeconds: 60,
   idle: [
-    { order: 1, state: 'idle', seconds: 10, detail: '空闲，等待指令' },
-    { order: 2, state: 'thinking', seconds: 10, detail: '例行观察项目状态' },
-    { order: 3, state: 'carrying', seconds: 10, detail: '整理任务资料' },
-    { order: 4, state: 'sweeping', seconds: 10, detail: '清扫工作区上下文' },
-    { order: 5, state: 'notification', seconds: 10, detail: '有空可以看看待处理任务' },
-    { order: 6, state: 'juggling', seconds: 10, detail: '休息一下，保持节奏' },
-    { order: 7, state: 'happy', seconds: 10, detail: '保持在线' },
-    { order: 8, state: 'idle', seconds: 10, detail: '空闲，等待指令' },
+    { order: 1, state: 'idle', seconds: 20, detail: '空闲，等待指令' },
+    { order: 2, state: 'idle', seconds: 20, detail: '待机小动作随机播放' },
+    { order: 3, state: 'yawning', seconds: 8, detail: '长时间无任务时轻微放松' },
+    { order: 4, state: 'idle', seconds: 12, detail: '回到安静待机' },
   ],
   active: [
     { order: 1, state: 'working', seconds: 90, detail: 'Agent 调用中', trigger: '用户向项目 Agent 提问、群聊协作、定时任务执行' },
-    { order: 2, state: 'happy', seconds: 12, detail: '任务完成', trigger: '项目 Agent 成功完成回复或协作任务' },
-    { order: 3, state: 'error', seconds: 45, detail: '错误', trigger: '项目 Agent 调用失败或任务执行报错' },
-    { order: 4, state: 'attention', seconds: 12, detail: '正在展示回复', trigger: '项目 Agent 输出消息气泡时' },
+    { order: 2, state: 'planning', seconds: 15, detail: '主 Agent 正在规划下一步', trigger: '全局 Agent 形成决策或拆解任务' },
+    { order: 3, state: 'building', seconds: 90, detail: '正在执行/开发', trigger: '全局 Agent 或子 Agent 开始执行开发任务' },
+    { order: 4, state: 'debugging', seconds: 60, detail: '正在排查失败', trigger: '工具失败、测试失败、执行器恢复或返工' },
+    { order: 5, state: 'reviewing', seconds: 45, detail: '正在验收/复盘', trigger: '工具完成、代码审查、最终验收' },
+    { order: 6, state: 'waiting', seconds: 300, detail: '等待用户确认', trigger: '需要用户确认、澄清或继续授权' },
+    { order: 7, state: 'happy', seconds: 12, detail: '任务完成', trigger: '项目 Agent 成功完成回复或协作任务' },
+    { order: 8, state: 'error', seconds: 45, detail: '错误', trigger: '项目 Agent 调用失败或任务执行报错' },
+    { order: 9, state: 'attention', seconds: 12, detail: '正在展示回复', trigger: '项目 Agent 输出消息气泡时' },
   ],
 }
 
@@ -192,7 +208,13 @@ const loadPetActionStrategy = async () => {
 const stateFileMap = (type) => ({
   idle: `${type}-idle.svg`,
   thinking: `${type}-thinking.svg`,
+  planning: `${type}-thinking.svg`,
   working: `${type}-working.svg`,
+  building: `${type}-working.svg`,
+  debugging: `${type}-sweeping.svg`,
+  reviewing: `${type}-attention.svg`,
+  waiting: `${type}-notification.svg`,
+  drag: `${type}-react-drag.svg`,
   error: `${type}-error.svg`,
   attention: `${type}-attention.svg`,
   happy: `${type}-happy.svg`,
@@ -215,6 +237,39 @@ const defaultReactions = (type) => ({
 })
 
 const specialPetAssets = {
+  yuexinmiao: {
+    dir: '',
+    files: {
+      idle: 'yuexinmiao-idle.svg',
+      yawning: 'yuexinmiao-yawning.svg',
+      dozing: 'yuexinmiao-dozing.svg',
+      collapsing: 'yuexinmiao-collapsing.svg',
+      thinking: 'yuexinmiao-thinking.svg',
+      planning: 'yuexinmiao-thinking.svg',
+      working: 'yuexinmiao-working.svg',
+      building: 'yuexinmiao-working.svg',
+      debugging: 'yuexinmiao-working.svg',
+      reviewing: 'yuexinmiao-thinking.svg',
+      waiting: 'yuexinmiao-notification.svg',
+      juggling: 'yuexinmiao-juggling.svg',
+      sweeping: 'yuexinmiao-sweeping.svg',
+      error: 'yuexinmiao-error.svg',
+      attention: 'yuexinmiao-attention.svg',
+      happy: 'yuexinmiao-happy.svg',
+      notification: 'yuexinmiao-notification.svg',
+      carrying: 'yuexinmiao-carrying.svg',
+      drag: 'yuexinmiao-react-drag.svg',
+      sleeping: 'yuexinmiao-sleeping.svg',
+      waking: 'yuexinmiao-waking.svg',
+    },
+    idleAnimations: ['yuexinmiao-idle-action1.svg'],
+    reactions: {
+      drag: 'yuexinmiao-react-drag.svg',
+      clickLeft: 'yuexinmiao-react-left.svg',
+      clickRight: 'yuexinmiao-react-right.svg',
+      double: 'yuexinmiao-react-double.svg',
+    }
+  },
   clawd: {
     dir: 'clawd',
     files: {
@@ -223,7 +278,12 @@ const specialPetAssets = {
       dozing: 'clawd-idle-doze.svg',
       collapsing: 'clawd-collapse-sleep.svg',
       thinking: 'clawd-working-thinking.svg',
+      planning: 'clawd-working-ultrathink.svg',
       working: 'clawd-working-typing.svg',
+      building: 'clawd-working-building.svg',
+      debugging: 'clawd-working-debugger.svg',
+      reviewing: 'clawd-working-wizard.svg',
+      waiting: 'clawd-notification.svg',
       juggling: 'clawd-headphones-groove.svg',
       sweeping: 'clawd-working-sweeping.svg',
       error: 'clawd-error.svg',
@@ -231,6 +291,7 @@ const specialPetAssets = {
       happy: 'clawd-happy.svg',
       notification: 'clawd-notification.svg',
       carrying: 'clawd-working-carrying.svg',
+      drag: 'clawd-react-drag.svg',
       sleeping: 'clawd-sleeping.svg',
       waking: 'clawd-wake.svg',
     },
@@ -250,7 +311,12 @@ const specialPetAssets = {
       dozing: 'cloudling-dozing.svg',
       collapsing: 'cloudling-dozing-to-sleeping.svg',
       thinking: 'cloudling-thinking.svg',
+      planning: 'cloudling-thinking.svg',
       working: 'cloudling-typing.svg',
+      building: 'cloudling-building.svg',
+      debugging: 'cloudling-sweeping.svg',
+      reviewing: 'cloudling-conducting.svg',
+      waiting: 'cloudling-notification.svg',
       juggling: 'cloudling-juggling.svg',
       sweeping: 'cloudling-sweeping.svg',
       error: 'cloudling-error.svg',
@@ -258,6 +324,7 @@ const specialPetAssets = {
       happy: 'cloudling-attention.svg',
       notification: 'cloudling-notification.svg',
       carrying: 'cloudling-carrying.svg',
+      drag: 'cloudling-react-drag.svg',
       sleeping: 'cloudling-sleeping.svg',
       waking: 'cloudling-sleeping-to-idle.svg',
     },
@@ -272,7 +339,12 @@ const specialPetAssets = {
       dozing: 'calico-dozing.apng',
       collapsing: 'calico-collapsing.apng',
       thinking: 'calico-thinking.apng',
+      planning: 'calico-thinking.apng',
       working: 'calico-working-typing.apng',
+      building: 'calico-working-building.apng',
+      debugging: 'calico-working-sweeping.apng',
+      reviewing: 'calico-working-conducting.apng',
+      waiting: 'calico-notification.apng',
       juggling: 'calico-working-juggling.apng',
       sweeping: 'calico-working-sweeping.apng',
       error: 'calico-error.apng',
@@ -280,6 +352,7 @@ const specialPetAssets = {
       happy: 'calico-happy.apng',
       notification: 'calico-notification.apng',
       carrying: 'calico-working-carrying.apng',
+      drag: 'calico-react-drag.apng',
       sleeping: 'calico-sleeping.apng',
       waking: 'calico-waking.apng',
     },
@@ -296,7 +369,13 @@ const specialPetAssets = {
     files: {
       idle: 'miao-idle.png',
       thinking: 'miao-thinking.png',
+      planning: 'miao-thinking.png',
       working: 'miao-working.png',
+      building: 'miao-working.png',
+      debugging: 'miao-sweeping.png',
+      reviewing: 'miao-attention.png',
+      waiting: 'miao-notification.png',
+      drag: 'miao-react-drag.png',
       error: 'miao-error.png',
       attention: 'miao-attention.png',
       happy: 'miao-happy.png',
@@ -321,6 +400,7 @@ const specialPetAssets = {
 }
 
 const getPetAssetSpec = (type) => {
+  type = normalizePetType(type)
   if (specialPetAssets[type]) return specialPetAssets[type]
   
   const custom = customPetTypes.value.find(c => c.id === type)
@@ -358,7 +438,7 @@ const getPetAssetSpec = (type) => {
 const makeAssetPath = (spec, file) => spec.dir ? `${spec.dir}/${file}` : file
 
 const actionAssetRows = computed(() => {
-  const type = actionPetType.value || 'cat'
+  const type = normalizePetType(actionPetType.value)
   const spec = getPetAssetSpec(type)
   const custom = customPetTypes.value.find(c => c.id === type)
   const baseExt = (custom && custom.format) ? custom.format : 'svg'
@@ -450,16 +530,58 @@ const getAgentLabel = (agent) => {
   return agent.petLabel || agent.displayName || agent.label || agent.name
 }
 
+const agentStateLabels = {
+  idle: '待命',
+  thinking: '思考中',
+  planning: '规划中',
+  working: '执行中',
+  building: '开发中',
+  debugging: '排查中',
+  reviewing: '验收中',
+  waiting: '待确认',
+  attention: '更新',
+  notification: '待确认',
+  happy: '已回复',
+  error: '异常',
+  sleeping: '休息中',
+}
+
+const getAgentStateLabel = (agent) => {
+  const state = agent?.state || 'idle'
+  return agentStateLabels[state] || state
+}
+
+const getAgentStateDetail = (agent) => {
+  const detail = String(agent?.stateDetail || agent?.detail || '').trim()
+  if (detail) return detail.length > 64 ? `${detail.slice(0, 64)}...` : detail
+  return agent?.name === GLOBAL_PET_AGENT_NAME ? '等待全局指令' : '等待指令'
+}
+
 const getDefaultType = (agent) => {
-  return agent === MUSIC_PET_AGENT_NAME ? 'cloudling' : 'cat'
+  if (agent === GLOBAL_PET_AGENT_NAME) return 'robot'
+  return agent === MUSIC_PET_AGENT_NAME ? 'cloudling' : BUILTIN_FALLBACK_PET_TYPE
 }
 
 const getConfig = (agent) => {
-  return petConfigs.value[agent] || { type: getDefaultType(agent), enabled: true }
+  const config = petConfigs.value[agent] || { type: getDefaultType(agent), enabled: true }
+  return { ...config, type: normalizePetType(config.type || getDefaultType(agent)) }
 }
 
-const selectedAgentInfo = computed(() => props.agents.find(agent => agent.name === selectedAgent.value))
+const selectedAgentInfo = computed(() => allPetAgents.value.find(agent => agent.name === selectedAgent.value))
 const isMusicAgentSelected = computed(() => selectedAgent.value === MUSIC_PET_AGENT_NAME)
+const isSystemAgentSelected = computed(() => [GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME].includes(selectedAgent.value))
+
+const workspaceMood = computed(() => {
+  if (desktopPetRunning.value) return { key: 'working', label: '桌宠在线', detail: '桌面宠物引擎正在运行，音乐 Agent 和自定义宠物可显示到桌面。', progress: 72 }
+  return { key: 'idle', label: '安静待命', detail: '启动桌面宠物引擎后，独立宠物会出现在 Windows 桌面上。', progress: 24 }
+})
+
+const companionSignals = computed(() => [
+  { label: '引擎', value: desktopPetRunning.value ? '运行' : '停止' },
+  { label: '全局', value: props.agents.some(agent => agent.name === GLOBAL_PET_AGENT_NAME) ? '可选' : '未连接' },
+  { label: '音乐', value: props.agents.some(agent => agent.name === MUSIC_PET_AGENT_NAME) ? '可选' : '未连接' },
+  { label: '挂件', value: Math.max(0, allPetAgents.value.length - props.agents.length) },
+])
 
 const syncAgentLabelDraft = () => {
   agentLabelDraft.value = getAgentLabel(selectedAgentInfo.value) || ''
@@ -499,14 +621,14 @@ const selectAgent = (agent) => {
 }
 
 const allEnabled = computed(() => {
-  if (props.agents.length === 0) return false
-  return props.agents.every(a => getConfig(a.name).enabled !== false)
+  if (allPetAgents.value.length === 0) return false
+  return allPetAgents.value.every(a => getConfig(a.name).enabled !== false)
 })
 
 const toggleAll = () => {
   const nextVal = !allEnabled.value
   const newConfigs = { ...petConfigs.value }
-  for (const p of props.agents) {
+  for (const p of allPetAgents.value) {
     newConfigs[p.name] = { ...(newConfigs[p.name] || { type: getDefaultType(p.name) }), enabled: nextVal }
   }
   petConfigs.value = newConfigs
@@ -515,14 +637,15 @@ const toggleAll = () => {
 
 const showCreateModal = ref(false)
 const newPetLabel = ref('')
-const newPetType = ref('miao')
+const newPetType = ref(BUILTIN_FALLBACK_PET_TYPE)
 
 const allPetAgents = computed(() => {
   const list = [...props.agents]
-  const projectNames = new Set(props.agents.map(a => a.name))
+  const projectNames = new Set(props.projects.map(a => a.name || a.project).filter(Boolean))
+  const systemPetNames = new Set([GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME])
   
   for (const name of Object.keys(petConfigs.value)) {
-    if (name !== MUSIC_PET_AGENT_NAME && !projectNames.has(name)) {
+    if (!systemPetNames.has(name) && !projectNames.has(name)) {
       const cfg = petConfigs.value[name]
       list.push({
         name: name,
@@ -562,8 +685,8 @@ const createCustomPet = async () => {
 }
 
 const isCustomPet = (agentName) => {
-  if (!agentName || agentName === MUSIC_PET_AGENT_NAME) return false
-  const projectNames = new Set(props.agents.map(a => a.name))
+  if (!agentName || [GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME].includes(agentName)) return false
+  const projectNames = new Set(props.projects.map(a => a.name || a.project).filter(Boolean))
   return !projectNames.has(agentName)
 }
 
@@ -573,7 +696,7 @@ const deleteCustomPet = async (agentName) => {
   delete newConfigs[agentName]
   petConfigs.value = newConfigs
   await saveConfigs()
-  selectedAgent.value = props.agents.length > 0 ? props.agents[0].name : null
+  selectedAgent.value = allPetAgents.value.length > 0 ? allPetAgents.value[0].name : null
   syncAgentLabelDraft()
   toast.success('已成功删除自定义宠物')
   emit('agents-updated')
@@ -631,7 +754,7 @@ const deleteCustomSkin = async (type) => {
   customPetTypes.value = customPetTypes.value.filter(c => c.id !== type)
   for (const agent of Object.keys(petConfigs.value)) {
     if (petConfigs.value[agent].type === type) {
-      petConfigs.value[agent].type = 'cat'
+      petConfigs.value[agent].type = BUILTIN_FALLBACK_PET_TYPE
     }
   }
   await saveConfigs()
@@ -642,9 +765,9 @@ onMounted(async () => {
   await loadConfigs()
   checkDesktopPet()
   loadPetActionStrategy()
-  // 如果有项目，默认选择第一个
-  if (props.agents.length > 0) {
-    selectedAgent.value = props.agents[0].name
+  // 默认选择音乐宠物/自定义宠物，不再默认选择项目宠物
+  if (allPetAgents.value.length > 0) {
+    selectedAgent.value = allPetAgents.value[0].name
     syncAgentLabelDraft()
   }
 })
@@ -654,6 +777,36 @@ onMounted(async () => {
   <div class="pet-space-container">
     <!-- 左半边：桌面宠物控制 与 宠物列表 -->
     <div class="pet-space-left">
+      <div class="glass-panel pet-card-section workspace-companion-card">
+        <div class="companion-copy">
+          <div class="companion-kicker">WORKSPACE COMPANION</div>
+          <h2>一个安静的工作台宠物</h2>
+          <p>这里专注管理全局 Agent、音乐 Agent 和自定义挂件；项目状态回到项目管理和任务看板里展示。</p>
+        </div>
+        <div class="companion-stage" :class="workspaceMood.key">
+          <div class="orbit-ring ring-one"></div>
+          <div class="orbit-ring ring-two"></div>
+          <div class="codex-companion">
+            <div class="companion-core">
+              <span class="core-eye"></span>
+              <span class="core-eye"></span>
+            </div>
+            <div class="companion-shadow"></div>
+          </div>
+          <div class="mood-pill">{{ workspaceMood.label }}</div>
+        </div>
+        <div class="workspace-metrics">
+          <div v-for="item in companionSignals" :key="item.label" class="workspace-metric">
+            <strong>{{ item.value }}</strong>
+            <span>{{ item.label }}</span>
+          </div>
+        </div>
+        <div class="workspace-progress">
+          <span :style="{ width: `${workspaceMood.progress}%` }"></span>
+        </div>
+        <div class="workspace-detail">{{ workspaceMood.detail }}</div>
+      </div>
+
       <div class="glass-panel pet-card-section">
         <div class="section-title">🖥️ 桌面宠物引擎</div>
         <div class="desktop-engine-card">
@@ -671,9 +824,9 @@ onMounted(async () => {
 
       <div class="glass-panel pet-card-section flex-1">
         <div class="section-title-row">
-          <div class="section-title">📋 桌面宠物管理</div>
+          <div class="section-title">🤖 系统 Agent 宠物</div>
           <div class="section-actions" style="display: flex; gap: 8px;">
-            <button class="btn btn-outline btn-sm" @click="toggleAll" v-if="agents.length > 0">
+            <button class="btn btn-outline btn-sm" @click="toggleAll" v-if="allPetAgents.length > 0">
               {{ allEnabled ? '全部隐藏' : '全部显示' }}
             </button>
             <button class="btn btn-primary btn-sm" @click="showCreateModal = true">
@@ -692,7 +845,11 @@ onMounted(async () => {
             </div>
             <div class="pet-text-info">
               <div class="agent-label-name">{{ getAgentLabel(agent) }}</div>
-              <div class="pet-type-label">{{ petTypes.find(p => p.id === getConfig(agent.name).type)?.name || '小猫咪' }}</div>
+              <div class="pet-type-label">{{ petTypes.find(p => p.id === getConfig(agent.name).type)?.name || '月薪喵' }}</div>
+              <div v-if="[GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME].includes(agent.name)" class="pet-live-status" :class="agent.state || 'idle'">
+                <span>{{ getAgentStateLabel(agent) }}</span>
+                <em>{{ getAgentStateDetail(agent) }}</em>
+              </div>
             </div>
             <button
               class="state-toggle-btn"
@@ -702,10 +859,10 @@ onMounted(async () => {
               {{ getConfig(agent.name).enabled !== false ? '显示中' : '已隐藏' }}
             </button>
           </div>
-          <div v-if="agents.length === 0" class="empty-state-text">
-            <span>🐾</span>
-            <p>暂无代码项目目录</p>
-            <p class="sub">请先前往“项目管理”添加代码项目</p>
+          <div v-if="allPetAgents.length === 0" class="empty-state-text">
+            <span>🎵</span>
+            <p>暂无独立宠物</p>
+            <p class="sub">全局 Agent 和音乐 Agent 会保留为独立宠物，也可以创建自定义挂件</p>
           </div>
         </div>
       </div>
@@ -722,7 +879,7 @@ onMounted(async () => {
             🎨 宠物全能图鉴
           </button>
           <button :class="{ active: rightTab === 'strategy' }" @click="rightTab = 'strategy'">
-            🎬 项目动作策略
+            🎬 工作台状态策略
           </button>
           <button :class="{ active: rightTab === 'assets' }" @click="rightTab = 'assets'">
             🧩 动作资源
@@ -734,8 +891,8 @@ onMounted(async () => {
           <div v-if="rightTab === 'config'" class="config-tab-pane">
             <div v-if="!selectedAgent" class="empty-detail">
               <span class="icon">🐾</span>
-              <p>请在左侧列表中点击选择一个项目宠物</p>
-              <p class="sub">选择后即可为该 Agent 配置专属皮肤外观</p>
+              <p>请选择全局 Agent、音乐 Agent 或自定义宠物</p>
+              <p class="sub">项目已经移到工作台星球，不再作为独立宠物配置</p>
             </div>
             <div v-else class="config-wrapper">
               <div class="current-pet-hero">
@@ -745,20 +902,24 @@ onMounted(async () => {
                 <div class="hero-meta">
                   <div class="hero-agent">{{ getAgentLabel(selectedAgentInfo) || selectedAgent }}</div>
                   <div class="hero-pet-name">当前外观：{{ petTypes.find(p => p.id === getConfig(selectedAgent).type)?.name }}</div>
+                  <div v-if="selectedAgentInfo && isSystemAgentSelected" class="pet-live-status hero" :class="selectedAgentInfo.state || 'idle'">
+                    <span>{{ getAgentStateLabel(selectedAgentInfo) }}</span>
+                    <em>{{ getAgentStateDetail(selectedAgentInfo) }}</em>
+                  </div>
                 </div>
               </div>
 
-              <div v-if="isMusicAgentSelected" class="agent-name-editor">
+              <div v-if="isSystemAgentSelected" class="agent-name-editor">
                 <label>Agent 显示名称</label>
                 <div class="name-editor-row">
                   <input
                     v-model="agentLabelDraft"
                     maxlength="24"
-                    placeholder="给音乐 Agent 起个名字"
+                    placeholder="给这个 Agent 宠物起个名字"
                     @keydown.enter="saveAgentLabel" />
                   <button class="btn btn-primary btn-sm" @click="saveAgentLabel">保存名称</button>
                 </div>
-                <div class="name-editor-hint">会同步到宠物空间、音乐播放页和桌面宠物气泡。</div>
+                <div class="name-editor-hint">{{ isMusicAgentSelected ? '会同步到宠物空间、音乐播放页和桌面宠物气泡。' : '会同步到宠物空间和桌面宠物气泡。' }}</div>
               </div>
 
               <div class="skins-selection">
@@ -808,30 +969,25 @@ onMounted(async () => {
                 <div class="item-info">
                   <div class="item-title">{{ pt.emoji }} {{ pt.name }}</div>
                   <div class="item-desc">
-                    <span v-if="pt.id === 'cat'">活泼可爱的小猫咪，会在屏幕上走动、睡觉、摇尾巴，表达各种心情。</span>
-                    <span v-else-if="pt.id === 'crab'">勤劳勇敢的小红色螃蟹，会用大钳子努力帮你搬运任务。</span>
-                    <span v-else-if="pt.id === 'clawd'">Clawd 专属风格桌宠，会随编译、思考和提醒切换动态动作。</span>
-                    <span v-else-if="pt.id === 'robot'">充满未来感的极简小机器人，指示灯会跟随 Agent 的运转而发光。</span>
+                    <span v-if="pt.id === 'robot'">充满未来感的极简小机器人，指示灯会跟随 Agent 的运转而发光。</span>
                     <span v-else-if="pt.id === 'ghost'">神秘的幽灵飘飘，漂浮在屏幕角落默默守护主人的代码库。</span>
-                    <span v-else-if="pt.id === 'panda'">憨态可掬的黑白大熊猫，会在您编码时啃竹子或打瞌睡。</span>
-                    <span v-else-if="pt.id === 'fox'">聪明俏皮的橙色小狐狸，工作时戴上大耳机、思考时折耳，非常有灵气。</span>
-                    <span v-else-if="pt.id === 'rabbit'">乖巧温顺的小兔子，红宝石般的眼睛闪闪发亮，手里随时抱着心爱的胡萝卜。</span>
                     <span v-else-if="pt.id === 'yuexinmiao'">带着金币小挂饰的月薪喵，会用呼吸、眨眼、搬运和提醒动作陪你处理任务。</span>
                     <span v-else-if="pt.id === 'cloudling'">软绵绵的可爱小云朵，会随着任务的变化展现出下雨、打雷或杂耍的有趣姿态。</span>
                     <span v-else-if="pt.id === 'calico'">三花色的小花猫，精美的 APNG 帧动画，拥有打哈欠、抓小鱼、玩杂耍等超流畅的动作细节。</span>
+                    <span v-else>自定义宠物皮肤，可上传自己的动作资源。</span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- 项目动作策略 -->
+          <!-- 工作台状态策略 -->
           <div v-if="rightTab === 'strategy'" class="strategy-tab-pane">
             <div class="strategy-summary">
               <div>
-                <div class="strategy-summary-title">项目宠物空闲轮转</div>
+                <div class="strategy-summary-title">工作台伴侣状态轮转</div>
                 <div class="strategy-summary-meta">
-                  完整周期 {{ formatStrategyDuration(projectPetStrategy.idleCycleSeconds) }}，任务开始时自动切换到工作态
+                  完整周期 {{ formatStrategyDuration(projectPetStrategy.idleCycleSeconds) }}，任务开始时主伴侣切换到工作态
                 </div>
               </div>
               <span class="strategy-count">{{ projectPetStrategy.idle.length + projectPetStrategy.active.length }} 个策略</span>
@@ -889,7 +1045,8 @@ onMounted(async () => {
                 <div class="asset-preview">
                   <img 
                     :src="assetUrl(row.assetPath)" 
-                    :alt="row.label" 
+                    alt="" 
+                    aria-hidden="true"
                     :class="{ missing: imageErrors[row.assetPath] }"
                     @error="handleImageError(row)" 
                   />
@@ -998,26 +1155,216 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.pet-space-container {
+.workspace-companion-card {
+  gap: 14px;
+  background:
+    radial-gradient(circle at 72% 20%, rgba(59, 130, 246, 0.18), transparent 34%),
+    linear-gradient(145deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.86));
+  color: #e5edf8;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.22);
+}
+
+.companion-copy {
+  position: relative;
+  z-index: 2;
+}
+
+.companion-kicker {
+  color: #93c5fd;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1.8px;
+}
+
+.companion-copy h2 {
+  margin: 6px 0 8px;
+  font-size: 20px;
+  line-height: 1.15;
+  color: #f8fafc;
+}
+
+.companion-copy p {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.72);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.companion-stage {
+  position: relative;
+  height: 160px;
   display: flex;
-  gap: 20px;
-  padding: 24px;
-  height: 100%;
-  width: 100%;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at center, rgba(96, 165, 250, 0.14), transparent 46%),
+    rgba(15, 23, 42, 0.34);
+}
+
+.orbit-ring {
+  position: absolute;
+  border: 1px solid rgba(147, 197, 253, 0.22);
+  border-radius: 999px;
+  transform: rotate(-14deg);
+}
+
+.ring-one {
+  width: 138px;
+  height: 56px;
+  animation: orbit-drift 7s ease-in-out infinite;
+}
+
+.ring-two {
+  width: 188px;
+  height: 82px;
+  opacity: 0.7;
+  animation: orbit-drift 9s ease-in-out infinite reverse;
+}
+
+.codex-companion {
+  position: relative;
+  width: 86px;
+  height: 86px;
+  display: grid;
+  place-items: center;
+  animation: companion-breathe 3.8s ease-in-out infinite;
+}
+
+.companion-core {
+  width: 70px;
+  height: 70px;
+  border-radius: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  background:
+    linear-gradient(145deg, rgba(248, 250, 252, 0.95), rgba(191, 219, 254, 0.92));
+  box-shadow:
+    inset 0 -8px 18px rgba(59, 130, 246, 0.16),
+    0 18px 34px rgba(37, 99, 235, 0.32);
+}
+
+.core-eye {
+  width: 8px;
+  height: 14px;
+  border-radius: 999px;
+  background: #172033;
+  animation: companion-blink 5.8s ease-in-out infinite;
+}
+
+.companion-shadow {
+  position: absolute;
+  bottom: -4px;
+  width: 56px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.32);
+  filter: blur(4px);
+}
+
+.mood-pill {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.58);
+  border: 1px solid rgba(147, 197, 253, 0.22);
+  color: #bfdbfe;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.workspace-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.workspace-metric {
+  padding: 9px;
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.08);
+  border: 1px solid rgba(226, 232, 240, 0.08);
+}
+
+.workspace-metric strong {
+  display: block;
+  color: #f8fafc;
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.workspace-metric span,
+.workspace-detail,
+.workspace-note {
+  color: rgba(226, 232, 240, 0.66);
+  font-size: 11px;
+}
+
+.workspace-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.18);
   overflow: hidden;
 }
 
+.workspace-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #60a5fa, #a78bfa);
+  transition: width 0.35s ease;
+}
+
+.workspace-note {
+  color: var(--text-muted);
+}
+
+@keyframes companion-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-4px) scale(1.02); }
+}
+
+@keyframes companion-blink {
+  0%, 94%, 100% { transform: scaleY(1); }
+  96% { transform: scaleY(0.18); }
+}
+
+@keyframes orbit-drift {
+  0%, 100% { transform: rotate(-14deg) scale(1); }
+  50% { transform: rotate(-10deg) scale(1.03); }
+}
+
+.pet-space-container {
+  display: flex;
+  align-items: stretch;
+  gap: 20px;
+  padding: 24px;
+  min-height: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
 .pet-space-left {
-  width: 360px;
+  width: 380px;
+  min-width: 340px;
+  flex: 0 0 380px;
   display: flex;
   flex-direction: column;
   gap: 20px;
-  height: 100%;
+  min-height: 0;
 }
 
 .pet-space-right {
   flex: 1;
-  height: 100%;
+  min-width: 0;
+  min-height: 0;
 }
 
 .flex-1 {
@@ -1162,6 +1509,88 @@ onMounted(async () => {
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 2px;
+}
+
+.pet-live-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.pet-live-status span {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.1);
+  color: #64748b;
+  font-weight: 700;
+}
+
+.pet-live-status em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: normal;
+}
+
+.pet-live-status.thinking span {
+  background: rgba(99, 102, 241, 0.12);
+  color: #4f46e5;
+}
+
+.pet-live-status.planning span {
+  background: rgba(139, 92, 246, 0.13);
+  color: #7c3aed;
+}
+
+.pet-live-status.working span,
+.pet-live-status.building span {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0284c7;
+}
+
+.pet-live-status.debugging span {
+  background: rgba(244, 63, 94, 0.12);
+  color: #e11d48;
+}
+
+.pet-live-status.reviewing span {
+  background: rgba(20, 184, 166, 0.12);
+  color: #0f766e;
+}
+
+.pet-live-status.happy span {
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+}
+
+.pet-live-status.error span {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+.pet-live-status.waiting span,
+.pet-live-status.notification span,
+.pet-live-status.attention span {
+  background: rgba(245, 158, 11, 0.14);
+  color: #d97706;
+}
+
+.pet-live-status.hero {
+  margin-top: 10px;
+  font-size: 12.5px;
+}
+
+.pet-live-status.hero em {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .state-toggle-btn {
@@ -1771,14 +2200,37 @@ onMounted(async () => {
 @media (max-width: 900px) {
   .pet-space-container {
     flex-direction: column;
-    overflow-y: auto;
+    align-items: stretch;
+    min-height: auto;
+    overflow: visible;
+    padding-bottom: 96px;
   }
   .pet-space-left {
     width: 100%;
+    min-width: 0;
+    flex: 0 0 auto;
     height: auto;
+    min-height: auto;
+  }
+  .pet-card-section.flex-1 {
+    flex: 0 0 auto;
+  }
+  .pet-list-scroll {
+    flex: 0 0 auto;
+    overflow: visible;
+    max-height: none;
   }
   .pet-space-right {
+    flex: 0 0 auto;
     height: auto;
+    min-height: auto;
+  }
+  .pet-detail-panel {
+    height: auto;
+    min-height: 560px;
+  }
+  .right-tab-content {
+    overflow: visible;
   }
   .asset-toolbar {
     align-items: stretch;

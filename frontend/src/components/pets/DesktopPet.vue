@@ -4,6 +4,9 @@ import PetSprite from './PetSprite.vue'
 
 const props = defineProps({
   agent: { type: String, required: true },
+  label: { type: String, default: '' },
+  displayName: { type: String, default: '' },
+  petLabel: { type: String, default: '' },
   petType: { type: String, default: 'cat' },
   agentState: { type: String, default: 'idle' },
   initialX: { type: Number, default: null },
@@ -47,17 +50,58 @@ const happyMessages = [
   '任务完成！',
   '耶！'
 ]
+const planningMessages = [
+  '我先拆一下步骤...',
+  '正在规划路线...',
+  '判断下一步中...'
+]
+const buildingMessages = [
+  '开始动手执行...',
+  '正在推进任务...',
+  '协调开发中...'
+]
+const debuggingMessages = [
+  '我排查一下问题...',
+  '正在定位失败点...',
+  '返工修复中...'
+]
+const reviewingMessages = [
+  '正在验收结果...',
+  '复盘一下交付...',
+  '检查证据中...'
+]
+const waitingMessages = [
+  '需要你确认一下',
+  '等你一句话继续',
+  '这里需要选择'
+]
 
 const stateMessages = computed(() => {
   const map = {
     idle: idleMessages,
     working: workingMessages,
     thinking: workingMessages,
+    planning: planningMessages,
+    building: buildingMessages,
+    debugging: debuggingMessages,
+    reviewing: reviewingMessages,
+    waiting: waitingMessages,
+    notification: waitingMessages,
+    attention: reviewingMessages,
     error: errorMessages,
     happy: happyMessages,
+    drag: ['被你抓住啦', '换个舒服的位置～', '移动中...'],
     sleeping: ['💤 zzz...']
   }
-  return map[props.agentState] || idleMessages
+  return map[effectiveState.value] || idleMessages
+})
+
+const effectiveState = computed(() => isDragging.value ? 'drag' : props.agentState)
+const displayLabel = computed(() => {
+  const value = String(props.petLabel || props.displayName || props.label || props.agent || '').trim()
+  const lower = value.toLowerCase()
+  if (lower === 'music' || lower === 'music-agent' || lower === 'global' || lower === 'global-agent') return ''
+  return value
 })
 
 const showRandomBubble = () => {
@@ -161,11 +205,8 @@ onUnmounted(() => {
       </div>
     </transition>
 
-    <!-- 名字标签 -->
-    <div class="pet-name">{{ agent }}</div>
-
     <!-- 宠物精灵 -->
-    <PetSprite :type="petType" :state="agentState" :size="petSize" :name="agent" />
+    <PetSprite :type="petType" :state="effectiveState" :size="petSize" :name="displayLabel" />
   </div>
 </template>
 
@@ -184,16 +225,6 @@ onUnmounted(() => {
 }
 .desktop-pet:hover {
   filter: brightness(1.1);
-}
-
-.pet-name {
-  text-align: center;
-  font-size: 10px;
-  color: var(--text-muted, #94a3b8);
-  margin-bottom: 2px;
-  white-space: nowrap;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
-  pointer-events: none;
 }
 
 .pet-bubble {

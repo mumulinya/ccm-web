@@ -2,6 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { CCM_DIR, GROUP_MESSAGES_DIR } from "../utils";
+import { loadTasks } from "../db";
 
 export type MemoryScope = "group" | "project" | "global";
 type MemoryAction = "pin" | "unpin" | "lock" | "unlock" | "edit" | "deprecate" | "delete" | "restore";
@@ -10,9 +11,11 @@ const CONTROL_DIR = process.env.CCM_MEMORY_CONTROL_DIR || path.join(CCM_DIR, "me
 const CONTROL_FILE = path.join(CONTROL_DIR, "overrides.json");
 const AUDIT_FILE = path.join(CONTROL_DIR, "audit.jsonl");
 const METRICS_FILE = path.join(CONTROL_DIR, "metrics.json");
+const QUALITY_FILE = path.join(CONTROL_DIR, "quality.json");
 const GROUP_MEMORY_DIR = path.join(CCM_DIR, "group-memory");
 const PROJECT_MEMORY_DIR = path.join(CCM_DIR, "project-memory");
 const GLOBAL_MEMORY_FILE = path.join(CCM_DIR, "global-agent-memory", "memory.json");
+const KNOWLEDGE_DIR = path.join(process.env.USERPROFILE || "C:/Users/admin", ".cc-connect", "knowledge");
 
 function now() { return new Date().toISOString(); }
 
@@ -401,6 +404,321 @@ export function runMemoryAcceptanceSnapshot() {
   return snapshot;
 }
 
+function tokenizeQualityText(value: any) {
+  return Array.from(new Set(String(value || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}_:/.-]+/gu, " ")
+    .split(/\s+/)
+    .map(item => item.trim())
+    .filter(item => item.length >= 2 && !/^(the|and|for|with|this|that|一个|这个|那个|需要|必须|项目|任务)$/.test(item))
+  ));
+}
+
+function qualityRate(ok: number, total: number) {
+  return total > 0 ? Math.round((ok / total) * 1000) / 10 : null;
+}
+
+function makeQualityCheck(id: string, label: string, checked: number, passed: number, evidence: any[] = [], gaps: any[] = [], note = "") {
+  const score = qualityRate(passed, checked);
+  return {
+    id, label, checked, passed, failed: Math.max(0, checked - passed), score,
+    pass: checked === 0 ? null : Number(score) >= 90,
+    status: checked === 0 ? "empty" : Number(score) >= 90 ? "ok" : Number(score) >= 70 ? "warn" : "fail",
+    evidence: evidence.slice(0, 12),
+    gaps: gaps.slice(0, 12),
+    note,
+  };
+}
+
+function normalizeQualityStringList(value: any) {
+  if (Array.isArray(value)) return value.map(item => String(item || "").trim()).filter(Boolean);
+  const text = String(value || "").trim();
+  if (!text) return [];
+  return text.split(/[；;,\n]/).map(item => item.trim()).filter(Boolean);
+}
+
+function extractTaskMemoryUsageEvidence(task: any) {
+  const summary = task?.delivery_summary || {};
+  const usage = [
+    ...(Array.isArray(summary.memory_usage) ? summary.memory_usage : []),
+    ...(Array.isArray(summary.receipts) ? summary.receipts : []),
+    ...(Array.isArray(summary.receipt_statuses) ? summary.receipt_statuses : []),
+  ];
+  const used: any[] = [];
+  const ignored: any[] = [];
+  for (const item of usage) {
+    const agent = item?.agent || item?.project || "";
+    const itemUsed = normalizeQualityStringList(item?.memoryUsed || item?.memory_used || item?.used);
+    const itemIgnored = normalizeQualityStringList(item?.memoryIgnored || item?.memory_ignored || item?.ignored);
+    if (itemUsed.length) used.push({ agent, values: itemUsed });
+    if (itemIgnored.length) ignored.push({ agent, values: itemIgnored });
+  }
+  const groupId = String(task?.group_id || task?.groupId || "");
+  if (groupId) {
+    const memory = readMemoryFile(path.join(GROUP_MEMORY_DIR, `${groupId}.json`));
+    const ledger = Array.isArray(memory?.workerLedger) ? memory.workerLedger : [];
+    for (const item of ledger.filter((entry: any) => !task?.id || entry.taskId === task.id).slice(-20)) {
+      const itemUsed = normalizeQualityStringList(item?.memoryUsed || item?.memory_used);
+      const itemIgnored = normalizeQualityStringList(item?.memoryIgnored || item?.memory_ignored);
+      if (itemUsed.length) used.push({ agent: item.project || item.agent || "", values: itemUsed });
+      if (itemIgnored.length) ignored.push({ agent: item.project || item.agent || "", values: itemIgnored });
+    }
+  }
+  return { used, ignored };
+}
+
+function sourceMessageExists(groupId: string, messageId: string, expectedText = "") {
+  const messages = readJson(path.join(GROUP_MESSAGES_DIR, `${groupId}.json`), []);
+  const found = (Array.isArray(messages) ? messages : []).find((message: any) => String(message.id || message.uuid || "") === String(messageId));
+  if (!found) return { exists: false, matched: false };
+  return { exists: true, matched: !expectedText || evidenceTextMatches(found.content, expectedText) };
+}
+
+function evaluateConstraintRetention(options: any = {}) {
+  const traceSources = options.traceSources !== false;
+  const perScopeLimit = Math.max(20, Number(options.perScopeLimit || 200));
+  let checked = 0;
+  let passed = 0;
+  const evidence: any[] = [];
+  const gaps: any[] = [];
+  for (const file of listJsonFiles(GROUP_MEMORY_DIR)) {
+    const memory = readMemoryFile(file);
+    if (!memory) continue;
+    const groupId = String(memory.groupId || path.basename(file, ".json"));
+    const requirements = (applyMemoryControls("group", groupId, memory)?.persistentRequirements || []).slice(-perScopeLimit);
+    for (const requirement of requirements) {
+      if (!requirement?.text) continue;
+      checked++;
+      const source = traceSources && requirement.messageId ? sourceMessageExists(groupId, requirement.messageId, requirement.text) : { exists: !!requirement.messageId, matched: !!requirement.messageId };
+      const retained = String(requirement.text || "").trim().length >= 8 && (!requirement.messageId || source.matched);
+      if (retained) {
+        passed++;
+        evidence.push({ scope: "group", scopeId: groupId, item: String(requirement.text).slice(0, 160), source: requirement.messageId || "" });
+      } else {
+        gaps.push({ scope: "group", scopeId: groupId, item: String(requirement.text).slice(0, 160), reason: requirement.messageId ? "压缩约束无法回溯或原文不匹配" : "缺少来源消息 ID" });
+      }
+    }
+  }
+  try {
+    const globalMemory = require("../global-agent-memory").loadGlobalAgentMemory({ recover: false });
+    const constraints = [...(globalMemory.authorization || []), ...(globalMemory.feedback || [])];
+    for (const item of constraints) {
+      const text = itemText("feedback", item);
+      if (!text) continue;
+      checked++;
+      const sessionId = item.source?.sessionId;
+      const messageId = item.source?.messageIds?.[0];
+      const traceable = sessionId && messageId && (!traceSources || require("../global-agent-memory").getGlobalMemoryEvidence({ sessionId, messageId }).length > 0);
+      if (traceable) {
+        passed++;
+        evidence.push({ scope: "global", scopeId: "global-agent", item: text.slice(0, 160), source: `${sessionId}/${messageId}` });
+      } else {
+        gaps.push({ scope: "global", scopeId: "global-agent", item: text.slice(0, 160), reason: "全局约束缺少可读原始证据" });
+      }
+    }
+  } catch {}
+  return makeQualityCheck("constraint_retention", "关键约束保留", checked, passed, evidence, gaps, "检查 persistentRequirements、authorization、feedback 是否仍可回溯原文。");
+}
+
+function evaluateChildAgentMemoryUse(options: any = {}) {
+  const taskLimit = Math.max(5, Number(options.taskLimit || 20));
+  const textLimit = Math.max(600, Number(options.textLimit || 2400));
+  const tasks = loadTasks().slice(-taskLimit);
+  let checked = 0;
+  let passed = 0;
+  const evidence: any[] = [];
+  const gaps: any[] = [];
+  const pattern = /(?:子 Agent 记忆包|受控记忆包|历史结论|项目背景|架构决策|项目记忆|共享文档|知识库参考|recentConclusions|decisions)/i;
+  for (const task of tasks.filter((item: any) => item.assign_type === "group" || item.group_id || item.delivery_summary?.assignment_count)) {
+    const summary = task.delivery_summary || {};
+    const explicit = extractTaskMemoryUsageEvidence(task);
+    const assignmentTexts = [
+      ...(Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : []),
+      ...(Array.isArray(summary.worker_notifications) ? summary.worker_notifications : []),
+      task.status_detail,
+      task.final_report,
+    ].map((item: any) => {
+      const text = typeof item === "string" ? item : JSON.stringify(item || {});
+      return text.slice(0, textLimit);
+    });
+    const hasWorker = Number(summary.worker_notification_count || summary.receipt_count || 0) > 0 || assignmentTexts.length > 0 || explicit.used.length > 0 || explicit.ignored.length > 0;
+    if (!hasWorker) continue;
+    checked++;
+    const joined = assignmentTexts.join("\n");
+    if (explicit.used.length > 0) {
+      passed++;
+      evidence.push({ taskId: task.id, title: task.title, signal: "structured_receipt.memoryUsed", agents: explicit.used.map(item => item.agent).filter(Boolean), memoryUsed: explicit.used.flatMap(item => item.values).slice(0, 8) });
+    } else if (pattern.test(joined)) {
+      passed++;
+      evidence.push({ taskId: task.id, title: task.title, signal: (joined.match(pattern) || [])[0] || "legacy_text_signal" });
+    } else {
+      gaps.push({ taskId: task.id, title: task.title, reason: explicit.ignored.length ? `子 Agent 声明未使用记忆：${explicit.ignored.flatMap(item => item.values).slice(0, 3).join("；")}` : "回执未声明 memoryUsed，派发/Worker 证据中也未发现记忆引用" });
+    }
+  }
+  return makeQualityCheck("child_agent_memory_use", "子 Agent 使用记忆", checked, passed, evidence, gaps, "优先检查结构化回执 memoryUsed；旧任务回退检查派发与 Worker 文本中的项目/历史/文档记忆引用。");
+}
+
+function listKnowledgeSamples(limit = 12) {
+  try {
+    return fs.readdirSync(KNOWLEDGE_DIR)
+      .filter(name => /\.(md|txt|json)$/i.test(name))
+      .slice(-limit)
+      .map(name => {
+        const text = fs.readFileSync(path.join(KNOWLEDGE_DIR, name), "utf-8").slice(0, 4000);
+        const title = (text.match(/^#\s+(.+)$/m)?.[1] || name).trim();
+        const tokens = tokenizeQualityText(`${title}\n${text}`).filter(token => token.length >= 3).slice(0, 8);
+        return { name, title, text, query: tokens.slice(0, 5).join(" ") || title };
+      });
+  } catch { return []; }
+}
+
+function evaluateRagRecall(options: any = {}) {
+  if (options.skipRag === true) {
+    const samples = listKnowledgeSamples(5);
+    return makeQualityCheck("rag_recall_accuracy", "RAG 召回准确", 0, 0, samples.map(sample => ({ file: sample.name, query: sample.query })).slice(0, 5), [], "轻量模式不执行 RAG 检索；点击“评估压缩质量”运行完整 Top-3 召回检查。");
+  }
+  const samples = listKnowledgeSamples(Number(options.sampleLimit || 5));
+  let checked = 0;
+  let passed = 0;
+  const evidence: any[] = [];
+  const gaps: any[] = [];
+  for (const sample of samples) {
+    if (!sample.query) continue;
+    checked++;
+    const { queryKnowledgeBase } = require("./rag");
+    const result = queryKnowledgeBase(sample.query, 3);
+    const resultText = String(result || "").toLowerCase();
+    const filenameHit = resultText.includes(sample.name.toLowerCase());
+    const tokenHits = tokenizeQualityText(sample.title).filter(token => resultText.includes(token.toLowerCase())).length;
+    const ok = filenameHit || tokenHits >= Math.min(2, tokenizeQualityText(sample.title).length);
+    if (ok) {
+      passed++;
+      evidence.push({ file: sample.name, query: sample.query, hit: filenameHit ? "filename" : "title-token" });
+    } else {
+      gaps.push({ file: sample.name, query: sample.query, reason: "Top-3 检索结果未命中文档名或标题关键词" });
+    }
+  }
+  return makeQualityCheck("rag_recall_accuracy", "RAG 召回准确", checked, passed, evidence, gaps, "用知识库文档标题/关键词抽样检索，检测 Top-3 是否命中来源。");
+}
+
+function evaluateLongTaskGoalConsistency(options: any = {}) {
+  const tasks = loadTasks().slice(-Math.max(5, Number(options.taskLimit || 30)));
+  let checked = 0;
+  let passed = 0;
+  const evidence: any[] = [];
+  const gaps: any[] = [];
+  for (const task of tasks) {
+    const reasoning = task.reasoning_loop || {};
+    const planVersion = Number(reasoning.plan_version || 0);
+    const recoveries = Array.isArray(reasoning.recovery_checks) ? reasoning.recovery_checks : [];
+    const hasMultiRound = planVersion > 1 || recoveries.length > 0 || Number(task.watchdog_recoveries || 0) > 0 || Number(task.auto_gap_continue_count || 0) > 0;
+    if (!hasMultiRound) continue;
+    checked++;
+    const goal = String(reasoning.original_goal || task.business_goal || task.description || task.title || "");
+    const effective = String(reasoning.effective_goal || task.business_goal || task.description || task.title || "");
+    const goalTokens = tokenizeQualityText(goal).slice(0, 12);
+    const overlap = goalTokens.length ? goalTokens.filter(token => effective.toLowerCase().includes(token)).length / goalTokens.length : 1;
+    const recoveredOk = recoveries.every((item: any) => item.goal_revalidated !== false && item.acceptance_revalidated !== false);
+    if (overlap >= 0.45 && recoveredOk) {
+      passed++;
+      evidence.push({ taskId: task.id, title: task.title, planVersion, recoveries: recoveries.length });
+    } else {
+      gaps.push({ taskId: task.id, title: task.title, reason: overlap < 0.45 ? "多轮后有效目标与原始目标关键词重合过低" : "恢复记录未重新核对目标/验收" });
+    }
+  }
+  return makeQualityCheck("long_task_goal_consistency", "长任务目标一致", checked, passed, evidence, gaps, "检查多轮/恢复任务是否保留原始目标并重新核对验收条件。");
+}
+
+function evaluateSourceTraceability(options: any = {}) {
+  const perScopeLimit = Math.max(20, Number(options.perScopeLimit || 200));
+  const traceSources = options.traceSources !== false;
+  let checked = 0;
+  let passed = 0;
+  const evidence: any[] = [];
+  const gaps: any[] = [];
+  for (const file of listJsonFiles(GROUP_MEMORY_DIR)) {
+    const memory = readMemoryFile(file);
+    if (!memory) continue;
+    const groupId = String(memory.groupId || path.basename(file, ".json"));
+    const items = [...(memory.factAnchors || []), ...(memory.persistentRequirements || []), ...(memory.decisions || [])].slice(-perScopeLimit);
+    for (const item of items) {
+      const text = itemText("factAnchors", item);
+      if (!text) continue;
+      checked++;
+      const messageId = item.messageId || item.source?.messageId;
+      const source = traceSources && messageId ? sourceMessageExists(groupId, messageId) : { exists: !!messageId };
+      if (source.exists) {
+        passed++;
+        evidence.push({ scope: "group", scopeId: groupId, source: messageId, item: text.slice(0, 120) });
+      } else {
+        gaps.push({ scope: "group", scopeId: groupId, item: text.slice(0, 120), reason: "缺少可定位群聊消息来源" });
+      }
+    }
+  }
+  for (const file of listJsonFiles(PROJECT_MEMORY_DIR)) {
+    const memory = readMemoryFile(file);
+    if (!memory) continue;
+    const archives = [...(memory.conclusionArchives || []), ...(memory.decisionArchives || [])];
+    for (const archive of archives.slice(-perScopeLimit)) {
+      checked++;
+      const ok = !!archive.id && !!archive.checksum && Array.isArray(archive.records);
+      if (ok) {
+        passed++;
+        evidence.push({ scope: "project", scopeId: memory.project, source: archive.id, records: archive.records.length });
+      } else gaps.push({ scope: "project", scopeId: memory.project, reason: "项目归档缺少 archive id/checksum/records" });
+    }
+  }
+  try {
+    const globalMemory = require("../global-agent-memory").loadGlobalAgentMemory({ recover: false });
+    for (const archive of globalMemory.archives || []) {
+      checked++;
+      const ids = archive.summary?.sourceMessageIds || [];
+      if (ids.length > 0 && ids.length === Number(archive.count || ids.length)) {
+        passed++;
+        evidence.push({ scope: "global", scopeId: "global-agent", source: archive.archiveId || archive.id, messages: ids.length });
+      } else gaps.push({ scope: "global", scopeId: "global-agent", reason: "全局归档 sourceMessageIds 不完整" });
+    }
+  } catch {}
+  return makeQualityCheck("source_traceability", "摘要来源可追溯", checked, passed, evidence, gaps, "检查群聊消息 ID、项目归档 checksum、全局 sourceMessageIds。");
+}
+
+function readCachedQualityReport(maxAgeMs = 10 * 60 * 1000) {
+  const cached = readJson(QUALITY_FILE, null);
+  if (!cached?.generatedAt) return null;
+  const ageMs = Date.now() - Date.parse(cached.generatedAt);
+  return ageMs >= 0 && ageMs <= maxAgeMs ? { ...cached, cached: true, cacheAgeMs: ageMs } : null;
+}
+
+export function buildMemoryQualityReport(options: any = {}) {
+  if (options.refresh !== true) {
+    const cached = readCachedQualityReport(Number(options.cacheMaxAgeMs || 10 * 60 * 1000));
+    if (cached) return cached;
+  }
+  const lightweight = options.refresh !== true;
+  const checks = [
+    evaluateConstraintRetention({ perScopeLimit: lightweight ? 80 : 300, traceSources: !lightweight }),
+    evaluateChildAgentMemoryUse({ taskLimit: lightweight ? 12 : 80, textLimit: lightweight ? 1800 : 6000 }),
+    evaluateRagRecall({ skipRag: lightweight, sampleLimit: options.ragSampleLimit || 5 }),
+    evaluateLongTaskGoalConsistency({ taskLimit: lightweight ? 20 : 120 }),
+    evaluateSourceTraceability({ perScopeLimit: lightweight ? 80 : 300, traceSources: !lightweight }),
+  ];
+  const scored = checks.filter(item => item.score !== null);
+  const overallScore = scored.length ? Math.round(scored.reduce((sum, item) => sum + Number(item.score || 0), 0) / scored.length * 10) / 10 : null;
+  const report = {
+    id: `memory-quality-${Date.now().toString(36)}`,
+    generatedAt: now(),
+    overallScore,
+    status: overallScore === null ? "empty" : overallScore >= 90 ? "ok" : overallScore >= 70 ? "warn" : "fail",
+    checks,
+    nextActions: checks.flatMap(check => (check.gaps || []).slice(0, 2).map((gap: any) => `${check.label}：${gap.reason || "存在缺口"}`)).slice(0, 8),
+    lightweight,
+    cached: false,
+  };
+  writeJsonAtomic(QUALITY_FILE, report);
+  if (options.record === true) appendAudit({ type: "memory_quality", action: "quality_report", scope: "system", scopeId: "all", actor: "local-user", reason: "记忆压缩质量评估", overallScore, status: report.status });
+  return report;
+}
+
 export function buildMemoryCenterOverview() {
   const labels = groupLabelMap();
   const groups = listJsonFiles(GROUP_MEMORY_DIR).map(file => readMemoryFile(file)).filter(Boolean)
@@ -674,6 +992,15 @@ export function handleMemoryCenterApi(pathname: string, req: any, res: any, pars
     const acceptance = runMemoryAcceptanceSnapshot();
     const metrics = getMemoryMetrics();
     sendJson(res, { acceptance, metrics });
+    return true;
+  }
+
+  if (pathname === "/api/memory-center/quality" && (req.method === "GET" || req.method === "POST")) {
+    try {
+      sendJson(res, { success: true, quality: buildMemoryQualityReport({ refresh: req.method === "POST", record: req.method === "POST" }) });
+    } catch (e: any) {
+      sendJson(res, { success: false, error: e.message }, 500);
+    }
     return true;
   }
 

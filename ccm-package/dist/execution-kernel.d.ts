@@ -100,7 +100,55 @@ export declare function purgeTaskExecutionArtifacts(taskId: string): {
 export declare function transitionExecution(executionId: string, state: ExecutionState, message?: string, extra?: any): ExecutionRecord;
 export declare function attachExecutionWorkspace(executionId: string, workspace: any): ExecutionRecord;
 export declare function registerExternalRunnerRequest(executionId: string, requestId: string): void;
-export declare function trackManagedChildProcess(taskId: string, executionId: string, child: ChildProcess): () => void;
+export declare function listActiveAgentRuns(filters?: any): {
+    id: any;
+    taskId: any;
+    executionId: any;
+    project: any;
+    agentType: any;
+    source: any;
+    pid: any;
+    cwd: any;
+    status: any;
+    startedAt: any;
+    updatedAt: any;
+    timeoutMs: any;
+    ageMs: number;
+    commandLabel: any;
+    title: any;
+    cancellable: boolean;
+}[];
+export declare function cancelActiveAgentRun(input?: any): {
+    success: boolean;
+    matched: number;
+    killed: number;
+    cancellation: {
+        success: boolean;
+        taskId: string;
+        killedProcesses: number;
+        externalRunnerRequests: number;
+        executions: string[];
+    };
+    runs: {
+        id: any;
+        taskId: any;
+        executionId: any;
+        project: any;
+        agentType: any;
+        source: any;
+        pid: any;
+        cwd: any;
+        status: any;
+        startedAt: any;
+        updatedAt: any;
+        timeoutMs: any;
+        ageMs: number;
+        commandLabel: any;
+        title: any;
+        cancellable: boolean;
+    }[];
+};
+export declare function trackManagedChildProcess(taskId: string, executionId: string, child: ChildProcess, meta?: any): () => void;
 export declare function terminateManagedChildProcess(child: ChildProcess): boolean;
 export declare function clearTaskCancellation(taskId: string): void;
 export declare function isTaskCancellationRequested(taskId: string): boolean;
@@ -121,6 +169,11 @@ export declare function runManagedCommand(input: {
     maxOutputBytes?: number;
     onStdout?: (text: string) => void;
     onStderr?: (text: string) => void;
+    project?: string;
+    agentType?: string;
+    source?: string;
+    commandLabel?: string;
+    title?: string;
 }): Promise<any>;
 export declare function persistBoundedOutput(taskId: string, content: string, maxBytes?: number): {
     content: string;

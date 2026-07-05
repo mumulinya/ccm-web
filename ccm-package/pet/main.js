@@ -28,12 +28,23 @@ const PID_FILE = path.join(CCM_DIR, 'pids', 'pet.pid');
 const petWindows = new Map(); // agentName -> BrowserWindow
 const petWindowTypes = new Map(); // agentName -> pet type currently loaded in the window
 const petLabels = new Map(); // agentName -> display label
-let config = { configs: {}, positions: {} };
+let config = { configs: {}, positions: {}, customTypes: [] };
 let agentStates = {};
-const SPEECH_MIN_WIDTH = 280;
+const SPEECH_MIN_WIDTH = 330;
 const PET_SPRITE_SCALE = 0.5;
 const PET_EXTRA_HEIGHT = 165;
+const PET_TOP_OVERSHOOT_RATIO = 0.75;
+const PET_TOP_OVERSHOOT_MIN = 32;
 const MUSIC_PET_AGENT_NAME = 'music-agent';
+const BUILTIN_FALLBACK_PET_TYPE = 'yuexinmiao';
+const ALLOWED_BUILTIN_PET_TYPES = new Set(['clawd', 'yuexinmiao', 'cloudling', 'calico', 'ghost', 'robot']);
+
+function normalizePetType(type) {
+  const value = String(type || '').trim();
+  const customTypes = Array.isArray(config.customTypes) ? config.customTypes : [];
+  if (customTypes.some(item => item && item.id === value)) return value;
+  return ALLOWED_BUILTIN_PET_TYPES.has(value) ? value : BUILTIN_FALLBACK_PET_TYPE;
+}
 
 function getPetWindowSize(size) {
   return {
@@ -44,6 +55,7 @@ function getPetWindowSize(size) {
 
 function clampPetPositionForBounds(bounds, x, y, size) {
   const petVisualSize = Math.max(40, Math.round((size || 120) * PET_SPRITE_SCALE));
+  const topOvershoot = Math.max(PET_TOP_OVERSHOOT_MIN, Math.round(petVisualSize * PET_TOP_OVERSHOOT_RATIO));
   const petCenterX = bounds.width / 2;
   const petCenterY = bounds.height / 2;
   const display = screen.getDisplayMatching({
@@ -55,7 +67,11 @@ function clampPetPositionForBounds(bounds, x, y, size) {
   const area = display.workArea;
   const minX = area.x - petCenterX + petVisualSize / 2;
   const maxX = area.x + area.width - petCenterX - petVisualSize / 2;
-  const minY = area.y - petCenterY + petVisualSize / 2;
+  // The pet window includes speech/name padding and many SVG assets have transparent
+  // top padding, so the old center-based clamp made the visible pet feel blocked
+  // before it reached the screen top. Allow a controlled overshoot upward while
+  // still keeping enough of the window visible to drag it back.
+  const minY = area.y - petCenterY + petVisualSize / 2 - topOvershoot;
   const maxY = area.y + area.height - petCenterY - petVisualSize / 2;
   return {
     x: Math.round(Math.max(minX, Math.min(maxX, x))),
@@ -114,16 +130,17 @@ async function loadConfig() {
   if (data) {
     config = {
       configs: data.configs || {},
-      positions: data.positions || {}
+      positions: data.positions || {},
+      customTypes: data.customTypes || []
     };
   }
 }
 
 function getConfigForAgent(agent) {
   const cfg = config.configs && config.configs[agent];
-  const defaultType = agent === MUSIC_PET_AGENT_NAME ? 'cloudling' : 'cat';
+  const defaultType = agent === MUSIC_PET_AGENT_NAME ? 'cloudling' : BUILTIN_FALLBACK_PET_TYPE;
   if (!cfg) return { type: defaultType, enabled: true };
-  return { type: cfg.type || defaultType, enabled: cfg.enabled !== false };
+  return { type: normalizePetType(cfg.type || defaultType), enabled: cfg.enabled !== false };
 }
 
 function getPositionForAgent(agent) {
@@ -317,13 +334,13 @@ async function syncPets() {
     if (agentCfg.enabled !== false) {
       if (!petWindows.has(p.name)) {
         try {
-          createPetWindow(p.name, agentCfg.type || 'cat', label);
+          createPetWindow(p.name, agentCfg.type || BUILTIN_FALLBACK_PET_TYPE, label);
         } catch(e) {
           console.error(`[pet] 创建窗口失败: ${p.name}`, e.message);
         }
       } else {
         const win = petWindows.get(p.name);
-        const nextType = agentCfg.type || 'cat';
+        const nextType = agentCfg.type || BUILTIN_FALLBACK_PET_TYPE;
         if (petWindowTypes.get(p.name) !== nextType) {
           console.log(`[pet] 皮肤变更，重建窗口: ${label} (${p.name}) -> ${nextType}`);
           destroyPetWindow(p.name);
@@ -384,9 +401,9 @@ ipcMain.handle('get-agent-name', (event) => {
 });
 ipcMain.handle('get-pet-type', (event) => {
   for (const [name, win] of petWindows) {
-    if (win.webContents.id === event.sender.id) return getConfigForAgent(name).type || 'cat';
+    if (win.webContents.id === event.sender.id) return getConfigForAgent(name).type || BUILTIN_FALLBACK_PET_TYPE;
   }
-  return 'cat';
+  return BUILTIN_FALLBACK_PET_TYPE;
 });
 ipcMain.handle('get-mouse-position', () => {
   const p = screen.getCursorScreenPoint();
@@ -422,7 +439,7 @@ ipcMain.on('resize-window', (event, w, h, size) => {
   }
 });
 ipcMain.handle('save-size', async (_, agent, size) => {
-  if (!config.configs[agent]) config.configs[agent] = { type: 'cat' };
+  if (!config.configs[agent]) config.configs[agent] = { type: BUILTIN_FALLBACK_PET_TYPE };
   config.configs[agent].size = size;
   await httpPost('/api/pets/config', config);
 });

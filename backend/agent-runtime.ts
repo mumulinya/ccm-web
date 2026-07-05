@@ -185,6 +185,45 @@ export function getPublicAgentRuntimes() {
   }));
 }
 
+function commandExists(command: string) {
+  try {
+    const result = process.platform === "win32"
+      ? spawnSync("where.exe", [command], { windowsHide: true, stdio: "ignore" })
+      : spawnSync("sh", ["-lc", `command -v ${command}`], { stdio: "ignore" });
+    return result.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+export function isAgentRuntimeAvailable(agentType: string) {
+  const runtime = normalizeAgentRuntimeId(agentType);
+  if (runtime === "claudecode") return commandExists("claude");
+  if (runtime === "cursor") return commandExists("cursor-agent") || commandExists("agent");
+  if (runtime === "codex") return commandExists("codex");
+  if (runtime === "gemini") return commandExists("gemini");
+  if (runtime === "qoder") return commandExists("qodercli");
+  return false;
+}
+
+export function getAgentRuntimeFallbackChain(preferred = "claudecode") {
+  const preferredRuntime = normalizeAgentRuntimeId(preferred || "claudecode");
+  const priority: AgentRuntimeId[] = ["claudecode", "cursor", "codex"];
+  const ordered = [preferredRuntime, ...priority.filter(item => item !== preferredRuntime)];
+  return ordered.filter((item, index, arr) => arr.indexOf(item) === index);
+}
+
+export function resolveAvailableAgentRuntime(preferred = "claudecode") {
+  const chain = getAgentRuntimeFallbackChain(preferred);
+  const selected = chain.find(isAgentRuntimeAvailable) || chain[0] || "claudecode";
+  return {
+    selected,
+    preferred: normalizeAgentRuntimeId(preferred || "claudecode"),
+    chain,
+    switched: selected !== normalizeAgentRuntimeId(preferred || "claudecode"),
+  };
+}
+
 export function normalizeAgentCommandOutput(agentType: string, rawOutput: string) {
   const runtime = normalizeAgentRuntimeId(agentType);
   const raw = String(rawOutput || "").trim();
@@ -240,6 +279,40 @@ export function normalizeAgentCommandOutput(agentType: string, rawOutput: string
   };
 }
 
+export function detectAgentCommandFailure(agentType: string, rawOutput: string, exitCode?: number | null, rawError = "") {
+  const runtime = normalizeAgentRuntimeId(agentType);
+  const raw = String(rawOutput || "");
+  const stderr = String(rawError || "");
+  const codeFailed = typeof exitCode === "number" && exitCode !== 0;
+  let message = "";
+
+  if (["codex", "cursor"].includes(runtime)) {
+    for (const line of raw.split(/\r?\n/)) {
+      const text = line.trim();
+      if (!text.startsWith("{")) continue;
+      try {
+        const event = JSON.parse(text);
+        if (runtime === "codex") {
+          if (event.type === "turn.failed" || event.type === "error") {
+            message = String(event.error?.message || event.message || message || "Codex 执行失败");
+          }
+        } else if (runtime === "cursor") {
+          const subtype = String(event.subtype || event.status || "").toLowerCase();
+          if (event.type === "error" || event.type === "failed" || subtype === "error" || subtype === "failed") {
+            message = String(event.error?.message || event.message || event.result || message || "Cursor Agent 执行失败");
+          }
+        }
+      } catch {}
+    }
+  }
+
+  if (!message && codeFailed) {
+    message = (stderr.trim() || raw.trim() || `Agent 进程退出，exitCode=${exitCode}`).slice(0, 4000);
+  }
+
+  return { failed: !!message || codeFailed, message };
+}
+
 export function runAgentRuntimeSessionSelfTest() {
   const sessionId = "11111111-1111-4111-8111-111111111111";
   const claudeInitial = buildAgentCommand("claudecode", "prompt.txt", { persistSession: true, sessionId });
@@ -258,6 +331,16 @@ export function runAgentRuntimeSessionSelfTest() {
     result: "继续完成",
     session_id: sessionId,
   }));
+  const codexFailed = detectAgentCommandFailure("codex", [
+    JSON.stringify({ type: "thread.started", thread_id: sessionId }),
+    JSON.stringify({ type: "turn.failed", error: { message: "model unavailable" } }),
+  ].join("\n"), 0);
+  const cursorFailed = detectAgentCommandFailure("cursor", JSON.stringify({
+    type: "result",
+    subtype: "failed",
+    result: "permission denied",
+    session_id: sessionId,
+  }), 0);
   const checks = {
     claudeCreatesNamedSession: claudeInitial.includes("--session-id") && claudeInitial.includes(sessionId),
     claudeResumesSameSession: claudeResume.includes("--resume") && claudeResume.includes(sessionId),
@@ -267,6 +350,8 @@ export function runAgentRuntimeSessionSelfTest() {
     cursorInitialCapturesSession: cursorInitial.includes("--output-format json") && !cursorInitial.includes("--resume"),
     cursorResumesSameSession: cursorResume.includes("--resume") && cursorResume.includes(sessionId),
     cursorParsesNativeSession: cursorParsed.sessionId === sessionId && cursorParsed.output === "继续完成",
+    codexJsonFailureDetected: codexFailed.failed && codexFailed.message.includes("model unavailable"),
+    cursorJsonFailureDetected: cursorFailed.failed && cursorFailed.message.includes("permission denied"),
   };
   return { pass: Object.values(checks).every(Boolean), checks };
 }

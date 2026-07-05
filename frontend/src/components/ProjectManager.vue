@@ -5,9 +5,11 @@ import { toast, confirmDialog } from '../utils/toast.js'
 import SlashCommandMenu from './SlashCommandMenu.vue'
 import CommandResultCard from './CommandResultCard.vue'
 import TaskExperienceCard from './TaskExperienceCard.vue'
+import AgentCodeChangeDrawer from './AgentCodeChangeDrawer.vue'
 import { useSlashCommands } from '../composables/useSlashCommands.js'
 import { downloadCommandJson } from '../utils/commandExport.js'
 import { projectExecutionTaskCard } from '../utils/taskExperience.js'
+import { buildProjectSessionKnowledgePayload, buildProjectTaskKnowledgePayload, postKnowledgeCapture } from '../utils/knowledgeCapture.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
 const emit = defineEmits(['navigated'])
@@ -156,6 +158,7 @@ const navMessages = computed(() => {
 const chatFiles = ref([])
 const chatFileInput = ref(null)
 const diffViewer = ref({ visible: false, file: null })
+const codeChangeDrawer = ref({ visible: false, title: '', subtitle: '', project: '', fileChanges: null, files: [], selectedPath: '' })
 const pageInfo = ref('')
 
 const fallbackAgents = [
@@ -441,9 +444,33 @@ const deleteSession = async (sessionId) => {
   loadSessions(currentProject.value)
 }
 
+const saveCurrentProjectSessionKnowledge = async () => {
+  if (!currentProject.value || !currentSession.value || messages.value.length === 0) return toast.info('当前项目会话还没有可沉淀的内容')
+  try {
+    const data = await postKnowledgeCapture(buildProjectSessionKnowledgePayload({
+      project: currentProject.value,
+      sessionId: currentSession.value,
+      messages: messages.value,
+    }))
+    toast.success(`已保存到知识库：${data.entry?.title || '项目会话'}`)
+  } catch (error) {
+    toast.error(error?.message || '保存项目会话知识失败')
+  }
+}
+
 const getWorkEvents = (msg) => Array.isArray(msg?.workEvents) ? msg.workEvents.filter(Boolean) : []
-const compactWorkText = (value, max = 320) => {
+const sanitizeUserVisibleWorkText = (value) => {
   const text = String(value || '').trim()
+  if (!text) return ''
+  if (/CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|scratchpad|trace_id|session_ids|native_session|task_agent_session|shouldDelegate|门禁|回执要求|任务级原生会话/i.test(text)) {
+    if (/error|失败|权限|denied|invalid/i.test(text)) return 'Agent 遇到内部执行保护或权限问题，详情已折叠，可在技术详情中排查。'
+    if (/done|完成|CCM_AGENT_RECEIPT/i.test(text)) return 'Agent 已提交结构化完成信息，系统正在汇总验收。'
+    return 'Agent 正在处理内部执行细节，已为用户视图折叠。'
+  }
+  return text
+}
+const compactWorkText = (value, max = 320) => {
+  const text = sanitizeUserVisibleWorkText(value)
   return text.length > max ? `${text.slice(0, max)}...` : text
 }
 const workEventLabel = (kind) => ({ status: '状态', output: '输出', tool: '工具', done: '完成', error: '错误' }[kind || 'status'] || kind)
@@ -453,22 +480,115 @@ const workEventTone = (kind) => {
   if (kind === 'output') return 'output'
   return 'status'
 }
+const getProjectTaskCard = (msg) => projectExecutionTaskCard(msg, currentProject.value)
+const postTaskAction = async (path, body) => {
+  const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
+  const payload = await response.json()
+  if (!response.ok || payload.success === false || payload.error) throw new Error(payload.error || `操作失败 (${response.status})`)
+  return payload
+}
+const removeMessageFromCurrentSession = async (target) => {
+  const index = messages.value.indexOf(target)
+  if (index >= 0) messages.value.splice(index, 1)
+  if (!currentProject.value || !currentSession.value) return
+  await sessionsApi.deleteMessage({
+    project: currentProject.value,
+    sessionId: currentSession.value,
+    id: target?.id || target?.message_id || '',
+    task_id: target?.task_id || target?.taskExperience?.task_id || '',
+    timestamp: target?.timestamp || '',
+  })
+}
+const handleProjectTaskAction = async (msg, action) => {
+  const card = getProjectTaskCard(msg)
+  const id = card?.task_id || msg?.task_id
+  const isProjectRun = String(id || '').startsWith('pchat_')
+  try {
+    if (action.kind === 'view_changes') {
+      if (msg?.fileChanges?.files?.length) openCodeChangeDrawer(msg.fileChanges, { title: card?.title || '项目 Agent 代码改动', subtitle: card?.goal || '' })
+      else toast.info('暂无可查看的文件改动')
+      return
+    }
+    if (action.kind === 'save_knowledge') {
+      const data = await postKnowledgeCapture(buildProjectTaskKnowledgePayload({
+        msg,
+        card,
+        project: currentProject.value,
+        sessionId: currentSession.value,
+      }))
+      toast.success(`已保存到知识库：${data.entry?.title || card?.title || '项目任务'}`)
+      return
+    }
+    if (action.kind === 'continue') {
+      const requirement = window.prompt('继续修改什么？', '')
+      if (!requirement) return
+      pendingProjectParentRunId.value = isProjectRun ? id : ''
+      chatInput.value = requirement
+      await nextTick()
+      await sendMessage()
+    } else if (action.kind === 'cancel') {
+      if (!id) return toast.info('当前项目直连执行暂未绑定任务，无法远程停止')
+      if (!await confirmDialog(`确定停止任务“${card.title}”？`)) return
+      await postTaskAction(isProjectRun ? '/api/project-runs/cancel' : '/api/tasks/cancel', { id, reason: '用户从项目聊天任务卡停止' })
+    } else if (action.kind === 'retry') {
+      if (isProjectRun) {
+        pendingProjectParentRunId.value = id
+        chatInput.value = msg.requestText || card.goal || card.title
+        await nextTick()
+        await sendMessage()
+      } else {
+        if (!id) return toast.info('当前任务没有可重试身份')
+        await postTaskAction('/api/tasks/retry', { id, reason: '用户从项目聊天任务卡重新执行', auto_execute: true })
+      }
+    } else if (action.kind === 'rollback') {
+      if (!id) return toast.info('当前项目直连执行暂未绑定任务，无法安全撤销')
+      if (!await confirmDialog(`确定安全撤销任务“${card.title}”的最近一轮改动？`)) return
+      await postTaskAction(isProjectRun ? '/api/project-runs/rollback' : '/api/tasks/rollback', { id, reason: '用户从项目聊天任务卡安全撤销' })
+      if (msg.taskExperience) {
+        msg.taskExperience.status = 'reverted'
+        msg.taskExperience.phase = 'reverted'
+      }
+    } else if (action.kind === 'archive') {
+      if (!id) return toast.info('当前任务没有可删除的记录 ID')
+      if (!await confirmDialog(`确定删除任务记录“${card.title}”？记录会移入归档/从当前会话隐藏。`)) return
+      await postTaskAction(isProjectRun ? '/api/project-runs/delete' : '/api/tasks/delete', { id, reason: '用户从项目聊天任务卡删除记录' })
+      await removeMessageFromCurrentSession(msg)
+    } else if (action.kind === 'purge') {
+      if (!id) return toast.info('当前任务没有可清除的记录 ID')
+      if (!await confirmDialog(`确定永久清除“${card.title}”？这会删除关联执行记录/会话产物，无法撤销。`)) return
+      if (isProjectRun) {
+        await postTaskAction('/api/project-runs/purge', { id, reason: '用户从项目聊天任务卡永久清除' })
+      } else {
+        await postTaskAction('/api/tasks/delete', { id, reason: '用户从项目聊天任务卡永久清除前归档' })
+        await postTaskAction('/api/tasks/purge', { id, reason: '用户从项目聊天任务卡永久清除' })
+      }
+      await removeMessageFromCurrentSession(msg)
+    }
+    toast.success(`${action.label}已提交`)
+  } catch (error) {
+    toast.error(error?.message || `${action.label}失败`)
+  }
+}
 
 // 发送消息
 const isStreaming = ref(false)
 const thinkingMessages = ref([]) // 存储思考过程消息
+const pendingProjectParentRunId = ref('')
+const makeProjectMessageId = () => `pmsg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 
 const sendMessage = async () => {
   if ((!chatInput.value.trim() && chatFiles.value.length === 0) || !currentProject.value) return
   const msg = chatInput.value.trim()
   const filesToSend = [...chatFiles.value]
+  const parentRunId = pendingProjectParentRunId.value
+  pendingProjectParentRunId.value = ''
   chatInput.value = ''
   chatFiles.value = []
 
   const attachmentText = filesToSend.length
     ? `\n\n[附件]\n${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}`
     : ''
-  const userMsg = { role: 'user', content: `${msg || '请处理附件'}${attachmentText}`, timestamp: new Date().toISOString() }
+  const userMsg = { id: makeProjectMessageId(), role: 'user', content: `${msg || '请处理附件'}${attachmentText}`, timestamp: new Date().toISOString() }
   messages.value.push(userMsg)
 
   // 保存用户消息到会话
@@ -478,6 +598,7 @@ const sendMessage = async () => {
 
   // 创建思考过程消息
   const thinkingMsg = {
+    id: makeProjectMessageId(),
     role: 'thinking',
     content: '',
     timestamp: new Date().toISOString()
@@ -486,7 +607,7 @@ const sendMessage = async () => {
   scrollToBottom({ force: true })
 
   // 创建 Agent 回复消息
-  const agentMsg = { role: 'assistant', content: '', workEvents: [], requestText: msg, streaming: true, timestamp: new Date().toISOString() }
+  const agentMsg = { id: makeProjectMessageId(), role: 'assistant', content: '', workEvents: [], requestText: msg, streaming: true, timestamp: new Date().toISOString() }
 
   isStreaming.value = true
   thinkingMessages.value = []
@@ -496,13 +617,14 @@ const sendMessage = async () => {
     const formData = new FormData()
     formData.append('project', currentProject.value)
     formData.append('message', msg)
+    if (parentRunId) formData.append('parent_run_id', parentRunId)
     filesToSend.forEach(file => formData.append('files', file))
     res = await fetch('/api/send-stream', { method: 'POST', body: formData })
   } else {
     res = await fetch('/api/send-stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project: currentProject.value, message: msg })
+      body: JSON.stringify({ project: currentProject.value, message: msg, parent_run_id: parentRunId })
     })
   }
 
@@ -535,6 +657,15 @@ const sendMessage = async () => {
         thinkingMessages.value.push(data.text)
         thinkingMsg.content = thinkingMessages.value.join('\n')
         scrollToBottom()
+      } else if (data.type === 'task_runtime') {
+        agentMsg.projectRun = data.run || agentMsg.projectRun
+        agentMsg.task_id = data.taskExperience?.task_id || data.run?.id || agentMsg.task_id
+        agentMsg.taskExperience = data.taskExperience || agentMsg.taskExperience
+        if (!agentMsgAdded) {
+          messages.value.push(agentMsg)
+          agentMsgAdded = true
+        }
+        scrollToBottom()
       } else if (data.type === 'work_event') {
         if (!Array.isArray(agentMsg.workEvents)) agentMsg.workEvents = []
         const event = data.event
@@ -565,12 +696,18 @@ const sendMessage = async () => {
         if (data.fileChanges && data.fileChanges.count > 0) {
           agentMsg.fileChanges = data.fileChanges
         }
+        agentMsg.projectRun = data.run || agentMsg.projectRun
+        agentMsg.task_id = data.taskExperience?.task_id || data.run?.id || agentMsg.task_id
+        agentMsg.taskExperience = data.taskExperience || agentMsg.taskExperience
         agentMsg.workEvents = data.workEvents || agentMsg.workEvents
       } else if (data.type === 'error') {
         if (!agentMsgAdded) {
           messages.value.push(agentMsg)
           agentMsgAdded = true
         }
+        agentMsg.projectRun = data.run || agentMsg.projectRun
+        agentMsg.task_id = data.taskExperience?.task_id || data.run?.id || agentMsg.task_id
+        agentMsg.taskExperience = data.taskExperience || agentMsg.taskExperience
         agentMsg.content = '❌ 错误: ' + data.text
         agentMsg.streaming = false
         isStreaming.value = false
@@ -605,7 +742,7 @@ const sendMessage = async () => {
     sessionsApi.saveMessage({
       project: currentProject.value,
       sessionId: currentSession.value,
-      message: { role: 'assistant', content: agentMsg.content, requestText: agentMsg.requestText, task_id: agentMsg.task_id || '', taskExperience: agentMsg.taskExperience || null, timestamp: new Date().toISOString(), fileChanges: agentMsg.fileChanges || null, workEvents: agentMsg.workEvents || [] }
+      message: { id: agentMsg.id, role: 'assistant', content: agentMsg.content, requestText: agentMsg.requestText, task_id: agentMsg.task_id || '', taskExperience: agentMsg.taskExperience || null, timestamp: agentMsg.timestamp || new Date().toISOString(), fileChanges: agentMsg.fileChanges || null, workEvents: agentMsg.workEvents || [] }
     }).catch(() => {})
   }
 
@@ -648,7 +785,28 @@ const removeChatFile = (index) => {
 }
 
 const openFileDiff = (file) => {
-  diffViewer.value = { visible: true, file }
+  openCodeChangeDrawer({ files: [file], count: 1 }, { selectedPath: file?.path, title: '查看单文件改动' })
+}
+
+const openCodeChangeDrawer = (fileChanges, options = {}) => {
+  codeChangeDrawer.value = {
+    visible: true,
+    title: options.title || '项目 Agent 代码改动',
+    subtitle: options.subtitle || '',
+    project: options.project || currentProject.value || '',
+    fileChanges: fileChanges || null,
+    files: options.files || [],
+    selectedPath: options.selectedPath || fileChanges?.files?.[0]?.path || '',
+  }
+}
+
+const closeCodeChangeDrawer = () => {
+  codeChangeDrawer.value.visible = false
+}
+
+const openProjectChangesTab = () => {
+  // 项目管理页内已经在当前项目上下文中，抽屉按钮只负责保留用户在本页继续查看。
+  toast.info('当前已经在项目页，可继续在抽屉里查看本轮改动')
 }
 
 const diffSearchQuery = ref('')
@@ -1503,6 +1661,7 @@ const handleKeydown = async (e) => {
             <button class="btn btn-outline btn-sm" @click="openEditModal(projects.find(p => p.name === currentProject))">✏️ 编辑</button>
             <button class="btn btn-outline btn-sm" @click="loadProjectTools()">🔧 工具</button>
             <button class="btn btn-outline btn-sm" @click="loadProjectSharedFiles()">📁 文件</button>
+            <button class="btn btn-outline btn-sm" :disabled="!currentSession" @click="saveCurrentProjectSessionKnowledge">保存知识</button>
             <button class="btn btn-danger btn-sm" @click="deleteProject(currentProject)">🗑️ 删除</button>
           </div>
         </div>
@@ -1585,9 +1744,16 @@ const handleKeydown = async (e) => {
               <!-- Agent 回复 -->
               <div v-else class="bubble">
                 <span class="agent-label">🤖 Agent</span>
-                <div>{{ msg.content }}</div>
+                <TaskExperienceCard
+                  v-if="getProjectTaskCard(msg)"
+                  :card="getProjectTaskCard(msg)"
+                  context="project"
+                  :busy="!!msg.streaming"
+                  @action="handleProjectTaskAction(msg, $event)"
+                />
+                <div v-else>{{ msg.content }}</div>
                 <span v-if="isStreaming && i === messages.length - 1" class="stream-cursor">▌</span>
-                <div v-if="getWorkEvents(msg).length" class="agent-work-events">
+                <div v-if="getWorkEvents(msg).length && !getProjectTaskCard(msg)" class="agent-work-events">
                   <div class="work-events-head">
                     <span>Agent 工作输出</span>
                     <span>{{ getWorkEvents(msg).length }} 条</span>
@@ -1603,7 +1769,7 @@ const handleKeydown = async (e) => {
                     </div>
                   </div>
                 </div>
-                <div v-if="msg.fileChanges && msg.fileChanges.count > 0" class="file-changes">
+                <div v-if="msg.fileChanges && msg.fileChanges.count > 0 && !getProjectTaskCard(msg)" class="file-changes">
                   <div class="file-changes-header">📁 修改了 {{ msg.fileChanges.count }} 个文件</div>
                   <button v-for="f in msg.fileChanges.files" :key="f.path" class="file-change-item" @click="openFileDiff(f)">
                     <span class="fc-dot" :style="{ background: f.statusColor }"></span>
@@ -1716,6 +1882,18 @@ const handleKeydown = async (e) => {
     </div>
 
     <!-- 文件 Diff 弹窗 -->
+    <AgentCodeChangeDrawer
+      :visible="codeChangeDrawer.visible"
+      :title="codeChangeDrawer.title"
+      :subtitle="codeChangeDrawer.subtitle"
+      :project="codeChangeDrawer.project"
+      :fileChanges="codeChangeDrawer.fileChanges"
+      :files="codeChangeDrawer.files"
+      :selectedPath="codeChangeDrawer.selectedPath"
+      @close="closeCodeChangeDrawer"
+      @open-changes="openProjectChangesTab"
+    />
+
     <div v-if="diffViewer.visible" class="modal-overlay diff-overlay" @click.self="closeFileDiff">
       <div class="modal diff-modal">
         <button class="modal-close" @click="closeFileDiff">&times;</button>

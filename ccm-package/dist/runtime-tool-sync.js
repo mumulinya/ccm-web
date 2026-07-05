@@ -309,12 +309,12 @@ function syncRuntimeTools(workDir, agentType, allowedTools) {
             }
         }
         if (runtime === "claudecode") {
-            const claudeRoot = path.join(workDir, ".claude");
-            const runtimeRoot = path.join(claudeRoot, "ccm-runtime");
+            const runtimeRoot = path.join(utils_1.CCM_DIR, "agent-runtime", "claudecode", authorizationId);
             const mcpConfigPath = path.join(runtimeRoot, `mcp-${authorizationId}.json`);
-            const skillRoot = path.join(claudeRoot, "skills");
+            const skillRoot = path.join(runtimeRoot, "skills");
             writeJsonAtomic(mcpConfigPath, { mcpServers });
             audit.mcpConfigPath = mcpConfigPath;
+            audit.runtimeHomePath = runtimeRoot;
             audit.skillRoot = skillRoot;
             audit.configFormat = "claude-mcp-json";
             audit.isolation = "strict";
@@ -338,12 +338,25 @@ function syncRuntimeTools(workDir, agentType, allowedTools) {
             audit.isolation = "strict";
             syncManagedSkills(skillRoot, selectedSkills, audit);
         }
+        else if (runtime === "cursor") {
+            const runtimeRoot = path.join(utils_1.CCM_DIR, "agent-runtime", "cursor", authorizationId);
+            const configPath = path.join(runtimeRoot, "mcp.json");
+            const skillRoot = path.join(runtimeRoot, "skills");
+            fs.mkdirSync(runtimeRoot, { recursive: true });
+            writeJsonAtomic(configPath, { mcpServers });
+            audit.mcpConfigPath = configPath;
+            audit.runtimeHomePath = runtimeRoot;
+            audit.skillRoot = skillRoot;
+            audit.configFormat = "cursor-isolated-json";
+            audit.isolation = "proxy";
+            audit.mode = "ccm-proxy-only";
+            audit.warnings.push("Cursor Agent 当前无可靠严格 MCP 快照参数；CCM 已将配置写入隔离目录，不再写入项目 .cursor/，原生调用仅使用平台代理兜底");
+            syncManagedSkills(skillRoot, selectedSkills, audit);
+        }
         else {
-            const runtimeSpec = runtime === "cursor"
-                ? { root: ".cursor", config: "mcp.json", skillDir: "skills", format: "cursor-project-json" }
-                : runtime === "gemini"
-                    ? { root: ".gemini", config: "settings.json", skillDir: "skills", format: "gemini-project-settings" }
-                    : { root: ".qoder", config: "settings.local.json", skillDir: "skills", format: "qoder-local-settings" };
+            const runtimeSpec = runtime === "gemini"
+                ? { root: ".gemini", config: "settings.json", skillDir: "skills", format: "gemini-project-settings" }
+                : { root: ".qoder", config: "settings.local.json", skillDir: "skills", format: "qoder-local-settings" };
             const runtimeRoot = path.join(workDir, runtimeSpec.root);
             const configPath = path.join(runtimeRoot, runtimeSpec.config);
             const skillRoot = path.join(runtimeRoot, runtimeSpec.skillDir);

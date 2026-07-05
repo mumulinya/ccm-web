@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="280" height="280" viewBox="0 0 280 280" role="img" aria-label="yuexinmiao slow headphone dance">
-  <title>yuexinmiao slow headphone dance</title>
-  <desc>Slow headphone dance built only from original Yuexinmiao artwork frames, preserving the pet identity.</desc>
-  <g id="cc-pose-frame-animation" data-state="music" data-motion="slow-headphone-dance-original-art" data-frame-count="4">
+<svg xmlns="http://www.w3.org/2000/svg" width="280" height="280" viewBox="0 0 280 280" role="img" aria-label="yuexinmiao rhythm action">
+  <title>yuexinmiao rhythm action</title>
+  <desc>Rhythm action built only from original Yuexinmiao artwork frames, preserving the pet identity.</desc>
+  <g id="cc-pose-frame-animation" data-state="juggling" data-motion="slow-rhythm-action-original-art" data-frame-count="4">
     <animateTransform attributeName="transform" type="translate" values="0 0;0 -1;0 0;0 -0.8;0 0" keyTimes="0;0.25;0.5;0.75;1" dur="3.4s" repeatCount="indefinite" additive="sum" calcMode="spline" keySplines=".42 0 .58 1;.42 0 .58 1;.42 0 .58 1;.42 0 .58 1"/>
     
     <g class="cc-sanwei-source-frame" opacity="1" data-source="20_react_double.svg" data-hash="882f990daf490f2161effb1fbf942a91563ada1e" transform="translate(-4 -1) rotate(-2.5 140 176)">

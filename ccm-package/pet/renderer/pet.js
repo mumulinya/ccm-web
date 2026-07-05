@@ -1,6 +1,6 @@
 let agentName = 'loading';
 let agentLabel = 'loading';
-let petType = 'cat';
+let petType = 'yuexinmiao';
 let currentState = 'idle';
 let petSize = 120;
 
@@ -25,7 +25,12 @@ const clawdStateFiles = {
   dozing: 'clawd-idle-doze.svg',
   collapsing: 'clawd-collapse-sleep.svg',
   thinking: 'clawd-working-thinking.svg',
+  planning: 'clawd-working-ultrathink.svg',
   working: 'clawd-working-typing.svg',
+  building: 'clawd-working-building.svg',
+  debugging: 'clawd-working-debugger.svg',
+  reviewing: 'clawd-working-wizard.svg',
+  waiting: 'clawd-notification.svg',
   juggling: 'clawd-headphones-groove.svg',
   sweeping: 'clawd-working-sweeping.svg',
   error: 'clawd-error.svg',
@@ -33,6 +38,7 @@ const clawdStateFiles = {
   happy: 'clawd-happy.svg',
   notification: 'clawd-notification.svg',
   carrying: 'clawd-working-carrying.svg',
+  drag: 'clawd-react-drag.svg',
   sleeping: 'clawd-sleeping.svg',
   waking: 'clawd-wake.svg',
 };
@@ -58,7 +64,12 @@ const cloudlingStateFiles = {
   dozing: 'cloudling-dozing.svg',
   collapsing: 'cloudling-dozing-to-sleeping.svg',
   thinking: 'cloudling-thinking.svg',
+  planning: 'cloudling-thinking.svg',
   working: 'cloudling-typing.svg',
+  building: 'cloudling-building.svg',
+  debugging: 'cloudling-sweeping.svg',
+  reviewing: 'cloudling-conducting.svg',
+  waiting: 'cloudling-notification.svg',
   juggling: 'cloudling-juggling.svg',
   sweeping: 'cloudling-sweeping.svg',
   error: 'cloudling-error.svg',
@@ -66,6 +77,7 @@ const cloudlingStateFiles = {
   happy: 'cloudling-attention.svg',
   notification: 'cloudling-notification.svg',
   carrying: 'cloudling-carrying.svg',
+  drag: 'cloudling-react-drag.svg',
   sleeping: 'cloudling-sleeping.svg',
   waking: 'cloudling-sleeping-to-idle.svg',
 };
@@ -83,13 +95,59 @@ const cloudlingAutoReturnMs = {
   carrying: 4500,
 };
 
+const yuexinmiaoStateFiles = {
+  idle: 'yuexinmiao-idle.svg',
+  thinking: 'yuexinmiao-thinking.svg',
+  planning: 'yuexinmiao-thinking.svg',
+  working: 'yuexinmiao-working.svg',
+  building: 'yuexinmiao-working.svg',
+  debugging: 'yuexinmiao-working.svg',
+  reviewing: 'yuexinmiao-thinking.svg',
+  waiting: 'yuexinmiao-notification.svg',
+  drag: 'yuexinmiao-react-drag.svg',
+  error: 'yuexinmiao-error.svg',
+  attention: 'yuexinmiao-attention.svg',
+  happy: 'yuexinmiao-happy.svg',
+  notification: 'yuexinmiao-notification.svg',
+  carrying: 'yuexinmiao-carrying.svg',
+  sweeping: 'yuexinmiao-sweeping.svg',
+  juggling: 'yuexinmiao-juggling.svg',
+  yawning: 'yuexinmiao-yawning.svg',
+  dozing: 'yuexinmiao-dozing.svg',
+  collapsing: 'yuexinmiao-collapsing.svg',
+  sleeping: 'yuexinmiao-sleeping.svg',
+  waking: 'yuexinmiao-waking.svg',
+};
+
+const yuexinmiaoAmbientStatePools = {
+  idle: [
+    { state: 'idle', weight: 7, duration: 12000 },
+    { state: 'yawning', weight: 0.45, duration: 6500 },
+  ],
+};
+
+const yuexinmiaoAutoReturnMs = {
+  attention: 3200,
+  happy: 3200,
+  error: 4600,
+  reviewing: 4200,
+  sweeping: 5200,
+  notification: 3600,
+  carrying: 3200,
+};
+
 const calicoStateFiles = {
   idle: 'calico-idle-follow.svg',
   yawning: 'calico-yawning.apng',
   dozing: 'calico-dozing.apng',
   collapsing: 'calico-collapsing.apng',
   thinking: 'calico-thinking.apng',
+  planning: 'calico-thinking.apng',
   working: 'calico-working-typing.apng',
+  building: 'calico-working-building.apng',
+  debugging: 'calico-working-sweeping.apng',
+  reviewing: 'calico-working-conducting.apng',
+  waiting: 'calico-notification.apng',
   juggling: 'calico-working-juggling.apng',
   sweeping: 'calico-working-sweeping.apng',
   error: 'calico-error.apng',
@@ -97,6 +155,7 @@ const calicoStateFiles = {
   happy: 'calico-happy.apng',
   notification: 'calico-notification.apng',
   carrying: 'calico-working-carrying.apng',
+  drag: 'calico-react-drag.apng',
   sleeping: 'calico-sleeping.apng',
   waking: 'calico-waking.apng',
 };
@@ -125,26 +184,8 @@ const AMBIENT_MIN_DELAY_MS = 7000;
 const AMBIENT_MAX_DELAY_MS = 15000;
 const ambientStatePools = {
   idle: [
-    { state: 'idle', weight: 2.6, duration: 8500 },
-    { state: 'thinking', weight: 1.1, duration: 6500 },
-    { state: 'carrying', weight: 0.9, duration: 6200 },
-    { state: 'sweeping', weight: 0.9, duration: 6200 },
-    { state: 'juggling', weight: 0.7, duration: 6200 },
-    { state: 'happy', weight: 0.7, duration: 5200 },
-    { state: 'yawning', weight: 0.6, duration: 6800 },
-  ],
-  working: [
-    { state: 'working', weight: 2.2, duration: 9000 },
-    { state: 'thinking', weight: 1.2, duration: 7000 },
-    { state: 'carrying', weight: 1, duration: 6500 },
-    { state: 'sweeping', weight: 0.9, duration: 6500 },
-    { state: 'juggling', weight: 0.6, duration: 5600 },
-  ],
-  thinking: [
-    { state: 'thinking', weight: 2.2, duration: 8500 },
-    { state: 'working', weight: 1, duration: 7000 },
-    { state: 'carrying', weight: 0.8, duration: 6200 },
-    { state: 'sweeping', weight: 0.8, duration: 6200 },
+    { state: 'idle', weight: 3.5, duration: 9000 },
+    { state: 'yawning', weight: 0.45, duration: 6800 },
   ],
 };
 
@@ -152,7 +193,13 @@ function stateFileMap(type) {
   return {
     idle: `${type}-idle.svg`,
     thinking: `${type}-thinking.svg`,
+    planning: `${type}-thinking.svg`,
     working: `${type}-working.svg`,
+    building: `${type}-working.svg`,
+    debugging: `${type}-sweeping.svg`,
+    reviewing: `${type}-attention.svg`,
+    waiting: `${type}-notification.svg`,
+    drag: `${type}-react-drag.svg`,
     error: `${type}-error.svg`,
     attention: `${type}-attention.svg`,
     happy: `${type}-happy.svg`,
@@ -172,7 +219,13 @@ function stateFileMapPng(type) {
   return {
     idle: `${type}-idle.png`,
     thinking: `${type}-thinking.png`,
+    planning: `${type}-thinking.png`,
     working: `${type}-working.png`,
+    building: `${type}-working.png`,
+    debugging: `${type}-sweeping.png`,
+    reviewing: `${type}-attention.png`,
+    waiting: `${type}-notification.png`,
+    drag: `${type}-react-drag.png`,
     error: `${type}-error.png`,
     attention: `${type}-attention.png`,
     happy: `${type}-happy.png`,
@@ -295,14 +348,13 @@ const petThemes = {
     },
   },
   yuexinmiao: {
-    files: stateFileMap('yuexinmiao'),
+    files: yuexinmiaoStateFiles,
     bodyHitBox: { x: 0.13, y: 0.1, w: 0.74, h: 0.82 },
     idleAnimations: [
-      { file: 'yuexinmiao-idle-action1.svg', duration: 10000 },
-      { file: 'yuexinmiao-idle-action2.svg', duration: 10000 },
-      { file: 'yuexinmiao-idle-action3.svg', duration: 10000 }
+      { file: 'yuexinmiao-idle-action1.svg', weight: 0.8, duration: 7600 },
     ],
-    autoReturn: { attention: 4000, happy: 4000, error: 5000, notification: 5000, carrying: 3000 },
+    ambientStatePools: yuexinmiaoAmbientStatePools,
+    autoReturn: yuexinmiaoAutoReturnMs,
     reactions: {
       drag: { file: 'yuexinmiao-react-drag.svg' },
       clickLeft: { file: 'yuexinmiao-react-left.svg', duration: 2500 },
@@ -370,6 +422,22 @@ function normalizeState(state) {
   return state || 'idle';
 }
 
+function normalizeDisplayLabel(label, agent = agentName) {
+  const raw = String(label || '').trim();
+  const fallback = String(agent || '').trim();
+  const value = raw || fallback;
+  const lower = value.toLowerCase();
+  if (lower === 'music' || lower === 'music-agent' || lower === 'global' || lower === 'global-agent') return '';
+  return value;
+}
+
+function setPetName(label) {
+  const normalized = normalizeDisplayLabel(label, agentName);
+  agentLabel = normalized || agentLabel || '';
+  nameEl.textContent = normalized;
+  nameEl.classList.toggle('hidden', !normalized);
+}
+
 function shouldHideStateBadge() {
   return getTheme().hideBadge === true;
 }
@@ -381,19 +449,24 @@ function resolveThemeFile(type, state) {
   return theme.dir ? `${theme.dir}/${file}` : file;
 }
 
+function setPetSpriteSizeVar(spriteSize) {
+  document.documentElement.style.setProperty('--pet-sprite-size', `${Math.max(40, Math.round(spriteSize || 64))}px`);
+}
+
 // 通过 IPC 接收初始化参数
 window.petBridge.onInitPet((data) => {
   agentName = data.agent || 'unknown';
-  agentLabel = data.label || data.displayName || agentName;
-  petType = data.type || 'cat';
+  agentLabel = '';
+  petType = data.type || 'yuexinmiao';
   currentState = normalizeState(data.state || 'idle');
   petSize = data.size || 120;
   document.documentElement.dataset.petType = petType;
-  nameEl.textContent = agentLabel;
+  setPetName(data.label || data.displayName);
   loadSVG(petType, currentState);
   applyState(currentState);
   // 应用保存的大小
   const spriteSize = Math.round(petSize * PET_SPRITE_SCALE);
+  setPetSpriteSizeVar(spriteSize);
   const img = svgContainer.querySelector('img');
   if (img) {
     img.style.width = spriteSize + 'px';
@@ -407,6 +480,12 @@ const stateConfig = {
   idle:     { badge: '',       anim: 'anim-idle' },
   working:  { badge: '⚡',     anim: 'anim-working' },
   thinking: { badge: '💭',     anim: 'anim-thinking' },
+  planning: { badge: '🧠',     anim: 'anim-planning' },
+  building: { badge: '🛠️',     anim: 'anim-building' },
+  debugging:{ badge: '🧪',     anim: 'anim-debugging' },
+  reviewing:{ badge: '🔎',     anim: 'anim-reviewing' },
+  waiting:  { badge: '⌛',     anim: 'anim-waiting' },
+  drag:     { badge: '✋',     anim: 'anim-drag' },
   error:    { badge: '❌',     anim: 'anim-error' },
   happy:    { badge: '✨',     anim: 'anim-happy' },
   attention:{ badge: '✨',     anim: 'anim-happy' },
@@ -425,6 +504,12 @@ const stateMessages = {
   idle:     ['需要帮忙吗？', '我在呢～', '有什么任务？', '随时待命！'],
   working:  ['正在努力工作中...', '马上就好！', '处理中...', '专心工作中~'],
   thinking: ['让我想想...', '思考中...', '分析一下...'],
+  planning: ['正在规划路线...', '我先拆一下步骤...', '正在判断下一步...'],
+  building: ['开始动手执行...', '正在推进任务...', '开发/协调中...'],
+  debugging:['正在排查问题...', '我检查一下失败点...', '返工修复中...'],
+  reviewing:['正在验收结果...', '复盘一下交付...', '检查证据中...'],
+  waiting:  ['需要你确认一下', '等你一句话继续', '这里需要选择'],
+  drag:     ['被你抓住啦', '换个舒服的位置～', '移动中...'],
   error:    ['出了点问题...', '需要检查一下', '出错了！'],
   happy:    ['完成啦！✨', '搞定！', '任务完成！'],
   attention:['完成啦！✨', '搞定！', '任务完成！'],
@@ -440,7 +525,7 @@ const stateMessages = {
 };
 
 const petEmojis = { cat: '🐱', crab: '🦀', robot: '🤖', ghost: '👻', clawd: '🦀', panda: '🐼', fox: '🦊', rabbit: '🐰', yuexinmiao: '🐱', cloudling: '☁️', calico: '🐱', miao: '🐱' };
-const SPEECH_MIN_WIDTH = 280;
+const SPEECH_MIN_WIDTH = 330;
 const PET_SPRITE_SCALE = 0.5;
 const PET_EXTRA_HEIGHT = 165;
 const MIN_PET_SIZE = 80;
@@ -500,11 +585,12 @@ async function loadSVG(type, state) {
   const theme = getTheme(type);
   const svgFile = resolveThemeFile(type, state);
   const spriteSize = Math.round(petSize * PET_SPRITE_SCALE);
+  setPetSpriteSizeVar(spriteSize);
   try {
     const svgPath = await window.petBridge.getAssetPath(svgFile);
     if (svgPath) {
       const imageRendering = theme.pixelated ? 'pixelated' : 'auto';
-      svgContainer.innerHTML = `<img src="file:///${svgPath.replace(/\\/g, '/')}" draggable="false" style="width:${spriteSize}px;height:${spriteSize}px;image-rendering:${imageRendering};object-fit:contain;">`;
+      svgContainer.innerHTML = `<img src="file:///${svgPath.replace(/\\/g, '/')}" alt="" aria-hidden="true" draggable="false" style="width:${spriteSize}px;height:${spriteSize}px;image-rendering:${imageRendering};object-fit:contain;">`;
       requestAnimationFrame(positionResizeHandle);
       return;
     }
@@ -532,7 +618,8 @@ function themeHasState(theme, state) {
 }
 
 function getAmbientActions(theme, logicalState) {
-  const pool = ambientStatePools[logicalState];
+  if (logicalState !== 'idle') return [];
+  const pool = theme.ambientStatePools?.[logicalState] || ambientStatePools[logicalState];
   if (!pool) return [];
 
   const actions = pool
@@ -548,7 +635,7 @@ function getAmbientActions(theme, logicalState) {
       actions.push({
         key: `file:${idle.file}`,
         file: idle.file,
-        weight: 1.4,
+        weight: idle.weight ?? 1.4,
         duration: Math.min(idle.duration || 8000, 9000),
       });
     }
@@ -647,6 +734,7 @@ function scheduleThemeStateTimers(state, options = {}) {
 
 async function loadThemeFile(file) {
   const spriteSize = Math.round(petSize * PET_SPRITE_SCALE);
+  setPetSpriteSizeVar(spriteSize);
   const theme = getTheme();
   const assetFile = theme.dir ? `${theme.dir}/${file}` : file;
   try {
@@ -703,15 +791,31 @@ function cleanSpeechText(text) {
     .trim();
 }
 
+function isInternalSpeechText(text) {
+  const value = String(text || '').trim();
+  return /CCM_AGENT_PROBE_OK|执行通道健康探针|AGENT_RUNNER_PROBE_OK|HEALTH[_\s-]*PROBE/i.test(value);
+}
+
 function getSpeechLabel(role) {
+  const isMusicAgent = String(agentName || '').toLowerCase() === 'music-agent';
+  if (isMusicAgent) {
+    const musicLabels = {
+      user: '你的点歌',
+      status: '正在播放',
+      error: '播放遇到问题',
+      ask: '需要你确认',
+      assistant: '歌词',
+    };
+    return musicLabels[role] || '歌词';
+  }
   const labels = {
-    user: '你',
+    user: '你的消息',
     status: '正在处理',
-    error: '错误',
+    error: '遇到问题',
     ask: '需要你确认',
-    assistant: agentLabel,
+    assistant: 'Agent 回复',
   };
-  return labels[role] || agentLabel;
+  return labels[role] || 'Agent 回复';
 }
 
 function looksLikeQuestion(text) {
@@ -734,9 +838,15 @@ function getSpeechHold(role, isFinal) {
   return 8000;
 }
 
+function hideSpeech() {
+  speech.classList.add('hidden');
+  nameEl.classList.remove('suppressed-by-speech');
+}
+
 function showSpeech(data = {}) {
   const role = data.role || 'assistant';
   const mode = data.mode || 'replace';
+  if (isInternalSpeechText(data.text)) return;
   const text = cleanSpeechText(data.text);
 
   if (speechRole !== role || mode === 'replace') {
@@ -760,15 +870,23 @@ function showSpeech(data = {}) {
   speechLabel.textContent = getSpeechLabel(displayRole);
   speechText.textContent = speechBuffer;
   speech.classList.remove('hidden');
+  nameEl.classList.add('suppressed-by-speech');
   applySpeechState(displayRole, streaming, !!data.final);
 
   if (speechTimer) clearTimeout(speechTimer);
-  speechTimer = setTimeout(() => speech.classList.add('hidden'), getSpeechHold(displayRole, !!data.final));
+  speechTimer = setTimeout(hideSpeech, getSpeechHold(displayRole, !!data.final));
 }
 
 function applySpeechState(role, streaming, isFinal) {
-  if (role === 'error') return applyState('error');
-  if (role === 'ask') return applyState('notification');
+  const durableStates = new Set(['planning', 'building', 'debugging', 'reviewing', 'waiting']);
+  if (durableStates.has(currentState)) {
+    if (role === 'error' && currentState !== 'debugging') return applyState('debugging');
+    if (role === 'ask' && currentState !== 'waiting') return applyState('waiting');
+    if (role === 'assistant' && isFinal) return applyState('attention');
+    return;
+  }
+  if (role === 'error') return applyState('debugging');
+  if (role === 'ask') return applyState('waiting');
   if (role === 'user' || role === 'status') return applyState('thinking');
   if (role === 'assistant' && streaming) return applyState('working');
   if (role === 'assistant' && isFinal) return applyState('attention');
@@ -821,6 +939,7 @@ document.querySelectorAll('.menu-types button').forEach(btn => {
 function applySize(size) {
   petSize = Math.max(MIN_PET_SIZE, Math.min(MAX_PET_SIZE, size));
   const spriteSize = Math.round(petSize * PET_SPRITE_SCALE);
+  setPetSpriteSizeVar(spriteSize);
   const img = svgContainer.querySelector('img');
   if (img) {
     img.style.width = spriteSize + 'px';
@@ -1042,8 +1161,7 @@ setInterval(updateEyeTracking, 200);
 // 接收状态更新
 window.petBridge.onLabelUpdate((data) => {
   if (data.agent === agentName) {
-    agentLabel = data.label || data.displayName || agentName;
-    nameEl.textContent = agentLabel;
+    setPetName(data.label || data.displayName);
     if (!speech.classList.contains('hidden')) {
       speechLabel.textContent = getSpeechLabel('assistant');
     }

@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps({
-  type: { type: String, default: 'cat' },
+  type: { type: String, default: 'yuexinmiao' },
   state: { type: String, default: 'idle' },
   size: { type: Number, default: 64 },
   name: { type: String, default: 'Pet' }
@@ -12,14 +12,12 @@ const frame = ref(0)
 let animTimer = null
 
 const petTypes = {
-  cat: { emoji: '🐱', color: '#FF9800' },
-  crab: { emoji: '🦀', color: '#FF5722' },
-  clawd: { emoji: '🦀', color: '#E4572E' },
+  clawd: { emoji: '🦀', color: '#f97316' },
+  yuexinmiao: { emoji: '🐱', color: '#22c55e' },
+  cloudling: { emoji: '☁️', color: '#38bdf8' },
+  calico: { emoji: '🐱', color: '#d97706' },
   robot: { emoji: '🤖', color: '#607D8B' },
   ghost: { emoji: '👻', color: '#B39DDB' },
-  panda: { emoji: '🐼', color: '#3f3f46' },
-  fox: { emoji: '🦊', color: '#f97316' },
-  rabbit: { emoji: '🐰', color: '#cbd5e1' }
 }
 
 const clawdStateFiles = {
@@ -28,7 +26,12 @@ const clawdStateFiles = {
   dozing: 'clawd-idle-doze.svg',
   collapsing: 'clawd-collapse-sleep.svg',
   thinking: 'clawd-working-thinking.svg',
+  planning: 'clawd-working-ultrathink.svg',
   working: 'clawd-working-typing.svg',
+  building: 'clawd-working-building.svg',
+  debugging: 'clawd-working-debugger.svg',
+  reviewing: 'clawd-working-wizard.svg',
+  waiting: 'clawd-notification.svg',
   juggling: 'clawd-headphones-groove.svg',
   sweeping: 'clawd-working-sweeping.svg',
   error: 'clawd-error.svg',
@@ -36,25 +39,125 @@ const clawdStateFiles = {
   happy: 'clawd-happy.svg',
   notification: 'clawd-notification.svg',
   carrying: 'clawd-working-carrying.svg',
+  drag: 'clawd-react-drag.svg',
   sleeping: 'clawd-sleeping.svg',
   waking: 'clawd-wake.svg',
 }
 
-const pet = computed(() => petTypes[props.type] || petTypes.cat)
+const stateAliases = {
+  planning: 'thinking',
+  building: 'working',
+  debugging: 'sweeping',
+  reviewing: 'attention',
+  waiting: 'notification',
+}
+
+const BUILTIN_FALLBACK_PET_TYPE = 'yuexinmiao'
+const normalizePetType = (type) => petTypes[type] ? type : BUILTIN_FALLBACK_PET_TYPE
+const pet = computed(() => petTypes[normalizePetType(props.type)])
+
+const specialStateFiles = {
+  yuexinmiao: {
+    dir: '',
+    files: {
+      idle: 'yuexinmiao-idle.svg',
+      thinking: 'yuexinmiao-thinking.svg',
+      planning: 'yuexinmiao-thinking.svg',
+      working: 'yuexinmiao-working.svg',
+      building: 'yuexinmiao-working.svg',
+      debugging: 'yuexinmiao-working.svg',
+      reviewing: 'yuexinmiao-thinking.svg',
+      waiting: 'yuexinmiao-notification.svg',
+      drag: 'yuexinmiao-react-drag.svg',
+      error: 'yuexinmiao-error.svg',
+      happy: 'yuexinmiao-happy.svg',
+      sleeping: 'yuexinmiao-sleeping.svg',
+      attention: 'yuexinmiao-attention.svg',
+      notification: 'yuexinmiao-notification.svg',
+      carrying: 'yuexinmiao-carrying.svg',
+      sweeping: 'yuexinmiao-sweeping.svg',
+      juggling: 'yuexinmiao-juggling.svg',
+      yawning: 'yuexinmiao-yawning.svg',
+      dozing: 'yuexinmiao-dozing.svg',
+      collapsing: 'yuexinmiao-collapsing.svg',
+      waking: 'yuexinmiao-waking.svg',
+    },
+  },
+  cloudling: {
+    dir: 'cloudling',
+    files: {
+      idle: 'cloudling-idle.svg',
+      thinking: 'cloudling-thinking.svg',
+      planning: 'cloudling-thinking.svg',
+      working: 'cloudling-typing.svg',
+      building: 'cloudling-building.svg',
+      debugging: 'cloudling-sweeping.svg',
+      reviewing: 'cloudling-conducting.svg',
+      waiting: 'cloudling-notification.svg',
+      drag: 'cloudling-react-drag.svg',
+      error: 'cloudling-error.svg',
+      happy: 'cloudling-attention.svg',
+      sleeping: 'cloudling-sleeping.svg',
+      attention: 'cloudling-attention.svg',
+      notification: 'cloudling-notification.svg',
+      carrying: 'cloudling-carrying.svg',
+      sweeping: 'cloudling-sweeping.svg',
+      juggling: 'cloudling-juggling.svg',
+      yawning: 'cloudling-idle-to-dozing.svg',
+      dozing: 'cloudling-dozing.svg',
+      collapsing: 'cloudling-dozing-to-sleeping.svg',
+      waking: 'cloudling-sleeping-to-idle.svg',
+    },
+  },
+  calico: {
+    dir: 'calico',
+    files: {
+      idle: 'calico-idle-follow.svg',
+      thinking: 'calico-thinking.apng',
+      planning: 'calico-thinking.apng',
+      working: 'calico-working-typing.apng',
+      building: 'calico-working-building.apng',
+      debugging: 'calico-working-sweeping.apng',
+      reviewing: 'calico-working-conducting.apng',
+      waiting: 'calico-notification.apng',
+      drag: 'calico-react-drag.apng',
+      error: 'calico-error.apng',
+      happy: 'calico-happy.apng',
+      sleeping: 'calico-sleeping.apng',
+      attention: 'calico-happy.apng',
+      notification: 'calico-notification.apng',
+      carrying: 'calico-working-carrying.apng',
+      sweeping: 'calico-working-sweeping.apng',
+      juggling: 'calico-working-juggling.apng',
+      yawning: 'calico-yawning.apng',
+      dozing: 'calico-dozing.apng',
+      collapsing: 'calico-collapsing.apng',
+      waking: 'calico-waking.apng',
+    },
+  },
+}
 
 const getSvgUrl = computed(() => {
-  const t = props.type;
+  const t = normalizePetType(props.type);
   const s = props.state || 'idle';
   
-  if (t === 'clawd') {
-    const file = clawdStateFiles[s] || clawdStateFiles.idle || 'clawd-static-base.svg';
-    return `/pets/clawd/${file}`;
+  if (specialStateFiles[t]) {
+    const spec = specialStateFiles[t]
+    const file = spec.files[s] || spec.files[stateAliases[s]] || spec.files.idle
+    const prefix = spec.dir ? `${spec.dir}/` : ''
+    return `/pets/${prefix}${file}`
   } else {
     // 映射状态为相应的 SVG 文件
     const fileMap = {
       idle: `${t}-idle.svg`,
       working: `${t}-working.svg`,
       thinking: `${t}-thinking.svg`,
+      planning: `${t}-thinking.svg`,
+      building: `${t}-working.svg`,
+      debugging: `${t}-sweeping.svg`,
+      reviewing: `${t}-attention.svg`,
+      waiting: `${t}-notification.svg`,
+      drag: `${t}-react-drag.svg`,
       error: `${t}-error.svg`,
       happy: `${t}-happy.svg`,
       sleeping: `${t}-sleeping.svg`,
@@ -69,7 +172,7 @@ const getSvgUrl = computed(() => {
       collapsing: `${t}-collapsing.svg`,
       waking: `${t}-waking.svg`,
     };
-    const file = fileMap[s] || `${t}-idle.svg`;
+    const file = fileMap[s] || fileMap[stateAliases[s]] || `${t}-idle.svg`;
     return `/pets/${file}`;
   }
 });
@@ -78,7 +181,13 @@ const stateStyles = computed(() => {
   const states = {
     idle: { transform: 'translateY(0)', filter: 'none' },
     working: { transform: 'translateY(-2px)' },
+    building: { transform: 'translateY(-2px)' },
     thinking: { transform: 'translateY(0) scale(1.01)' },
+    planning: { transform: 'translateY(0) scale(1.02)' },
+    debugging: { transform: 'translateY(0)' },
+    reviewing: { transform: 'translateY(-1px) scale(1.01)' },
+    waiting: { transform: 'translateY(0)' },
+    drag: { transform: 'translateY(-2px) rotate(2deg)' },
     error: { transform: 'translateY(0)' },
     happy: { transform: 'translateY(-4px)' },
     sleeping: { transform: 'translateY(2px) scale(0.98)' }
@@ -87,6 +196,7 @@ const stateStyles = computed(() => {
 })
 
 const animClass = computed(() => `pet-anim-${props.state}`)
+const imageRendering = computed(() => normalizePetType(props.type) === 'clawd' ? 'pixelated' : 'auto')
 
 onMounted(() => {
   animTimer = setInterval(() => { frame.value++ }, 500)
@@ -96,11 +206,17 @@ onUnmounted(() => { if (animTimer) clearInterval(animTimer) })
 
 <template>
   <div class="pet-sprite" :class="animClass" :style="{ width: size + 'px', height: size + 'px', ...stateStyles }">
-    <img :src="getSvgUrl" :alt="name" :width="size" :height="size" draggable="false" @error="$event.target.src = '/pets/' + type + '.svg'" />
+    <img :src="getSvgUrl" alt="" aria-hidden="true" :width="size" :height="size" draggable="false" :style="{ imageRendering }" @error="$event.target.src = '/pets/yuexinmiao.svg'" />
     <!-- 状态指示器 -->
     <div class="state-badge" v-if="state !== 'idle'">
       <span v-if="state === 'working'">⚡</span>
+      <span v-else-if="state === 'building'">🛠️</span>
       <span v-else-if="state === 'thinking'">💭</span>
+      <span v-else-if="state === 'planning'">🧠</span>
+      <span v-else-if="state === 'debugging'">🧪</span>
+      <span v-else-if="state === 'reviewing'">🔎</span>
+      <span v-else-if="state === 'waiting'">⌛</span>
+      <span v-else-if="state === 'drag'">✋</span>
       <span v-else-if="state === 'error'">❌</span>
       <span v-else-if="state === 'happy'">✨</span>
       <span v-else-if="state === 'sleeping'">💤</span>
@@ -118,7 +234,6 @@ onUnmounted(() => { if (animTimer) clearInterval(animTimer) })
 }
 
 .pet-sprite img {
-  image-rendering: pixelated;
   display: block;
 }
 
@@ -142,8 +257,26 @@ onUnmounted(() => { if (animTimer) clearInterval(animTimer) })
 .pet-anim-working {
   animation: pet-working 0.6s ease-in-out infinite;
 }
+.pet-anim-building {
+  animation: pet-building 0.8s ease-in-out infinite;
+}
 .pet-anim-thinking {
   animation: pet-thinking 1.5s ease-in-out infinite;
+}
+.pet-anim-planning {
+  animation: pet-planning 1.8s ease-in-out infinite;
+}
+.pet-anim-debugging {
+  animation: pet-debugging 0.8s ease-in-out infinite;
+}
+.pet-anim-reviewing {
+  animation: pet-reviewing 1.2s ease-in-out infinite;
+}
+.pet-anim-waiting {
+  animation: pet-waiting 1.6s ease-in-out infinite;
+}
+.pet-anim-drag {
+  animation: pet-drag 0.7s ease-in-out infinite;
 }
 .pet-anim-error {
   animation: pet-error 0.3s ease-in-out 3;
@@ -163,9 +296,34 @@ onUnmounted(() => { if (animTimer) clearInterval(animTimer) })
   0%, 100% { transform: translateY(-2px) rotate(-2deg); }
   50% { transform: translateY(-2px) rotate(2deg); }
 }
+@keyframes pet-building {
+  0%, 100% { transform: translateY(-2px) rotate(-3deg) scale(1); }
+  50% { transform: translateY(-4px) rotate(3deg) scale(1.03); }
+}
 @keyframes pet-thinking {
   0%, 100% { transform: translateY(0) scale(1); }
   50% { transform: translateY(-2px) scale(1.05); }
+}
+@keyframes pet-planning {
+  0%, 100% { transform: translateY(0) scale(1); filter: saturate(1); }
+  50% { transform: translateY(-3px) scale(1.06); filter: saturate(1.2); }
+}
+@keyframes pet-debugging {
+  0%, 100% { transform: translateX(0) rotate(-1deg); }
+  25% { transform: translateX(-2px) rotate(1deg); }
+  75% { transform: translateX(2px) rotate(-1deg); }
+}
+@keyframes pet-reviewing {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-2px) rotate(-2deg) scale(1.02); }
+}
+@keyframes pet-waiting {
+  0%, 100% { transform: translateY(0); opacity: 1; }
+  50% { transform: translateY(-2px); opacity: 0.78; }
+}
+@keyframes pet-drag {
+  0%, 100% { transform: translateY(-2px) rotate(-4deg); }
+  50% { transform: translateY(-5px) rotate(4deg); }
 }
 @keyframes pet-error {
   0%, 100% { transform: translateX(0); }

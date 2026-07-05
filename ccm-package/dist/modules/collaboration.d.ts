@@ -49,7 +49,22 @@ export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
         readiness?: undefined;
     };
 };
-export declare function resumeTaskQueues(ctx: CollabCtx): {
+export declare function resumeTaskQueues(ctx: CollabCtx, options?: any): {
+    resumed: number;
+    total: number;
+    trace_backfilled: number;
+    manual_recovery: boolean;
+    results: any[];
+    queue_status: {
+        total_queued: number;
+        running_targets: number;
+        target_status: any;
+        pending_tasks: number;
+        in_progress_tasks: number;
+        failed_tasks: number;
+        running_task_ids: string[];
+    };
+} | {
     resumed: number;
     total: number;
     trace_backfilled: number;
@@ -63,6 +78,7 @@ export declare function resumeTaskQueues(ctx: CollabCtx): {
         failed_tasks: number;
         running_task_ids: string[];
     };
+    manual_recovery?: undefined;
 };
 export declare function runTaskWatchdog(ctx: CollabCtx, options?: any): {
     success: boolean;

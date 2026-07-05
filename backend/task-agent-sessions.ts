@@ -274,8 +274,9 @@ export function reconcileTaskAgentSessions(tasks: any[], nowMs = Date.now()) {
 
 export function shouldCloseTaskAgentSessions(input: { taskId?: string; reviewStatus?: string; taskStatus?: string }) {
   const hasPersistentTask = !!String(input.taskId || "").trim();
+  const terminalStatuses = new Set(["done", "cancelled", "archived", "deleted"]);
   return hasPersistentTask
-    ? String(input.taskStatus || "") === "done"
+    ? terminalStatuses.has(String(input.taskStatus || ""))
     : String(input.reviewStatus || "") === "complete";
 }
 
@@ -296,6 +297,10 @@ export function runTaskAgentSessionSelfTest() {
       cursorUsesNativeContinuation: getAgentRuntime("cursor").capabilities.sessionResume,
       persistentTaskWaitsForDoneState: !shouldCloseTaskAgentSessions({ taskId: "task-1", reviewStatus: "complete", taskStatus: "in_progress" }),
       persistentTaskClosesAfterDoneState: shouldCloseTaskAgentSessions({ taskId: "task-1", reviewStatus: "complete", taskStatus: "done" }),
+      persistentTaskKeepsSessionOnFailed: !shouldCloseTaskAgentSessions({ taskId: "task-1", reviewStatus: "complete", taskStatus: "failed" }),
+      persistentTaskKeepsSessionOnPaused: !shouldCloseTaskAgentSessions({ taskId: "task-1", reviewStatus: "complete", taskStatus: "paused" }),
+      persistentTaskClosesAfterCancelled: shouldCloseTaskAgentSessions({ taskId: "task-1", reviewStatus: "blocked", taskStatus: "cancelled" }),
+      persistentTaskClosesAfterArchived: shouldCloseTaskAgentSessions({ taskId: "task-1", reviewStatus: "blocked", taskStatus: "archived" }),
       conversationalTaskClosesAfterReview: shouldCloseTaskAgentSessions({ reviewStatus: "complete" }),
       missingNativeIdCanDegradeSafely: cursorWithoutCapturedId.resumeMode === "scratchpad" && cursorWithoutCapturedId.nativeCaptureFailures === 1,
       capturedNativeIdStaysResumable: codexWithCapturedId.resumeMode === "native" && getTaskAgentSessionOptions(codexWithCapturedId).resumeSession,

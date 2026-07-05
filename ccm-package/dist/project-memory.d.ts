@@ -18,6 +18,12 @@ export declare function buildProjectMemoryPacket(project: string, options?: {
     resources?: any;
     query?: string;
 }): string;
+export declare function buildProjectExecutionBrief(project: string, taskText: string, options?: {
+    workDir?: string;
+    resources?: any;
+    query?: string;
+    verificationHints?: any;
+}): string;
 export declare function runProjectMemorySelfTest(): {
     pass: boolean;
     checks: {
@@ -29,6 +35,7 @@ export declare function runProjectMemorySelfTest(): {
         decisionsRollIntoLosslessArchives: any;
         integrityValidationDetectsTampering: boolean;
         retrievesRelevantArchivedEvidence: boolean;
+        buildsExecutionBriefWithRecallAndRules: boolean;
         atomicBackupRecoveryWorks: boolean;
     };
 };

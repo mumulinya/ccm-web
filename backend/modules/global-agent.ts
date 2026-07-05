@@ -93,6 +93,142 @@ const GLOBAL_AGENT_HISTORY_FILE = path.join(CCM_DIR, "global-agent-history.json"
 const GLOBAL_AGENT_BRIDGE_FILE = path.join(CCM_DIR, "global-agent-bridge.json");
 const GLOBAL_AGENT_HISTORY_LIMIT = 80;
 const GLOBAL_AGENT_SESSION_LIMIT = 30;
+const GLOBAL_PET_AGENT_NAME = "global-agent";
+
+function compactPetText(value: any, max = 260) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function getGlobalPetToolState(toolName: string) {
+  const name = String(toolName || "").toLowerCase();
+  if (!name) return "working";
+  if (/(inspect|list|query|search|recall|memory|read|status|diagnostic|probe)/.test(name)) return "carrying";
+  if (/(review|verify|check|quality|git_review|diff|receipt|acceptance)/.test(name)) return "reviewing";
+  if (/(recover|retry|repair|rollback|fix|debug|failure|watchdog)/.test(name)) return "debugging";
+  if (/(orchestrate|create|send|dispatch|run|execute|task|mission|project|group|agent|cmd|write|manage|commit|merge|build)/.test(name)) return "building";
+  return "working";
+}
+
+function getGlobalToolDisplayName(toolName: string) {
+  const labels: Record<string, string> = {
+    inspect_system: "读取系统状态",
+    list_projects: "读取项目列表",
+    inspect_project: "读取项目上下文",
+    list_groups: "读取群聊列表",
+    list_tasks: "读取任务列表",
+    list_cron: "读取定时任务",
+    query_knowledge: "查询知识库",
+    query_global_memory: "查询全局记忆",
+    manage_global_memory: "管理全局记忆",
+    inspect_mission: "查询全局任务",
+    inspect_supervision: "查询监工状态",
+    orchestrate_development: "创建跨项目开发任务",
+    manage_supervision: "管理异步监工",
+    create_task: "创建开发任务",
+    send_project_cmd: "发送项目 Agent 指令",
+    send_group_cmd: "发送群聊主 Agent 指令",
+    manage_cron: "管理定时任务",
+    manage_group: "管理群聊",
+    manage_project: "管理项目",
+    manage_task: "管理任务",
+    manage_tool: "管理工具",
+    git_review: "审查代码变更",
+    git_commit: "提交代码",
+    create_template: "创建模板",
+    play_music: "播放音乐",
+    toggle_pet: "控制桌面宠物",
+    navigate: "切换页面",
+  };
+  const key = String(toolName || "").trim();
+  return labels[key] || key || "工具操作";
+}
+
+function buildGlobalAgentEventUi(event: any = {}) {
+  const type = String(event.type || "");
+  const toolName = event.tool?.name || event.pending_tool?.name || event.step?.tool?.name || event.step?.toolName || "";
+  const toolLabel = getGlobalToolDisplayName(toolName);
+  const text = (value: any, max = 220) => compactPetText(value, max);
+  if (type === "started") return { phase: "understanding", tone: "running", title: "理解需求", text: "正在理解你的消息，判断是普通对话还是需要执行操作。" };
+  if (type === "decision") {
+    const state = String(event.step?.state || "");
+    const message = text(event.step?.message || event.step?.decision?.intent?.reason || "");
+    if (toolName) return { phase: "planning", tone: "running", title: "形成行动计划", text: message || `准备执行：${toolLabel}` };
+    if (state === "answer" || state === "complete") return { phase: "answering", tone: "running", title: "组织回复", text: message || "已经形成回答，正在整理给你。" };
+    if (state === "needs_confirmation") return { phase: "waiting", tone: "waiting", title: "需要确认", text: message || "需要你确认目标或授权范围。" };
+    return { phase: "planning", tone: "running", title: "规划下一步", text: message || "正在规划下一步。" };
+  }
+  if (type === "tool_started") return { phase: "executing", tone: "running", title: "执行工具", text: `正在${toolLabel}。` };
+  if (type === "tool_completed") return { phase: "reviewing", tone: "ok", title: "工具完成", text: `${toolLabel}已完成，正在检查结果。` };
+  if (type === "tool_failed" || type === "tool_validation_failed") return { phase: "debugging", tone: "error", title: "执行遇到问题", text: text(event.error || event.step?.error || `${toolLabel}失败`) };
+  if (type === "clarification_required") return { phase: "waiting", tone: "waiting", title: "需要补充信息", text: text(event.reply || "需要你补充目标、范围或验收标准。") };
+  if (type === "confirmation_required") return { phase: "waiting", tone: "waiting", title: "等待授权确认", text: text(event.reply || "这个操作需要你确认后才会继续。") };
+  if (type === "paused") return { phase: "paused", tone: "waiting", title: "已暂停", text: text(event.reply || "全局 Agent 已暂停。") };
+  if (type === "supervising") return { phase: "supervising", tone: "running", title: "监工中", text: text(event.reply || "已经创建长期任务，正在监督群聊/项目 Agent 交付。") };
+  if (type === "completed") return { phase: "completed", tone: "ok", title: "完成", text: text(event.reply || "本轮处理完成。") };
+  if (type === "failed") return { phase: "failed", tone: "error", title: "失败", text: text(event.error || event.reply || "本轮处理失败。") };
+  if (type === "cancelled") return { phase: "cancelled", tone: "waiting", title: "已取消", text: text(event.reply || "本轮处理已取消。") };
+  return null;
+}
+
+function relayGlobalPetEvent(ctx: CollabCtx, event: any = {}, options: { message?: string; finalRun?: any; error?: string } = {}) {
+  const type = String(event.type || "");
+  const run = options.finalRun || event.run || {};
+  const toolName = event.tool?.name || event.pending_tool?.name || event.step?.tool?.name || event.step?.toolName || "";
+  const speech = (role: string, text: string, final = false) => ctx.broadcastPetSpeech(GLOBAL_PET_AGENT_NAME, { role, text: compactPetText(text), final, source: "global" });
+  if (type === "started") {
+    ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "thinking", "全局 Agent 正在理解你的需求...", { tab: "global-agent" }, 12 * 60 * 1000);
+    speech("status", "我正在理解你的需求...", false);
+    return;
+  }
+  if (type === "decision") {
+    const message = event.step?.message || event.step?.tool?.name || "正在规划下一步";
+    ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, toolName ? "planning" : "thinking", compactPetText(message), { tab: "global-agent" }, 12 * 60 * 1000);
+    speech("status", message, false);
+    return;
+  }
+  if (type === "tool_started") {
+    const message = toolName ? `正在执行：${toolName}` : "正在执行工具操作...";
+    ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, getGlobalPetToolState(toolName), message, { tab: "global-agent" }, 12 * 60 * 1000);
+    speech("status", message, false);
+    return;
+  }
+  if (type === "tool_completed") {
+    const message = toolName ? `完成工具：${toolName}` : "工具执行完成";
+    ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "reviewing", message, { tab: "global-agent" }, 45 * 1000);
+    speech("assistant", message, false);
+    return;
+  }
+  if (type === "tool_failed" || type === "tool_validation_failed") {
+    const message = event.error || event.step?.error || "全局 Agent 工具执行失败";
+    ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "debugging", compactPetText(message), { tab: "global-agent" }, 90 * 1000);
+    speech("error", message, true);
+    return;
+  }
+  if (type === "clarification_required" || type === "confirmation_required" || type === "paused") {
+    const message = event.reply || "全局 Agent 需要你确认后继续";
+    ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "waiting", compactPetText(message), { tab: "global-agent" }, 5 * 60 * 1000);
+    speech("status", message, true);
+    return;
+  }
+  if (type === "supervising") {
+    const message = event.reply || "全局 Agent 正在监督协作任务";
+    ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "building", compactPetText(message), { tab: "global-agent" }, 12 * 60 * 1000);
+    speech("status", message, false);
+    return;
+  }
+  if (type === "completed" || options.finalRun) {
+    const finalReply = options.finalRun?.final_reply || run.final_reply || event.reply || "全局 Agent 已完成本轮处理";
+    ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "happy", compactPetText(finalReply, 120), { tab: "global-agent" }, 90 * 1000);
+    speech("assistant", finalReply, true);
+    return;
+  }
+  if (type === "failed" || type === "cancelled" || options.error) {
+    const message = options.error || event.error || event.reply || "全局 Agent 本轮处理失败";
+    ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "error", compactPetText(message), { tab: "global-agent" }, 90 * 1000);
+    speech("error", message, true);
+  }
+}
 
 function writeGlobalJsonAtomic(file: string, value: any) {
   const temp = `${file}.${process.pid}.${Date.now()}.${crypto.randomBytes(2).toString("hex")}.tmp`;
@@ -2046,7 +2182,8 @@ export function handleGlobalAgentApi(
       }
       const emit = (event: any) => {
         if (!isStream || res.writableEnded) return;
-        res.write(`data: ${JSON.stringify(event)}\n\n`);
+        const ui = event?.ui === undefined ? buildGlobalAgentEventUi(event) : event.ui;
+        res.write(`data: ${JSON.stringify(ui ? { ...event, ui } : event)}\n\n`);
       };
       try {
         let message = String(payload.message || "").trim();
@@ -2058,6 +2195,8 @@ export function handleGlobalAgentApi(
         let history: any[] = [];
         try { history = Array.isArray(payload.history) ? payload.history : JSON.parse(String(payload.history || "[]")); } catch {}
         const sessionId = String(payload.session_id || payload.sessionId || "web:default");
+        ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "thinking", "全局 Agent 正在思考...", { tab: "global-agent" }, 12 * 60 * 1000);
+        ctx.broadcastPetSpeech(GLOBAL_PET_AGENT_NAME, { role: "user", text: message, final: true, source: "global" });
         const requestId = String(payload.request_id || payload.requestId || req.headers["x-client-message-id"] || "").trim();
         const operationKey = requestId ? `${sessionId}:${requestId}` : "";
         const operation = operationKey ? acquireIdempotency({ scope: "global-agent-request", key: operationKey, leaseMs: 13 * 60 * 1000, metadata: { session_id: sessionId, source: "web" } }) : null;
@@ -2073,22 +2212,33 @@ export function handleGlobalAgentApi(
           } else sendJson(res, { success: true, run: result, duplicate: true });
           return;
         }
+        let finalPetEventRelayed = false;
         const run = await runAgenticGlobalRequest(getRequestBaseUrl(req), ctx, {
           message,
           history,
           sessionId,
           source: "web",
           traceId: operation?.traceId,
-          onEvent: emit,
+          onEvent: (event: any) => {
+            emit(event);
+            relayGlobalPetEvent(ctx, event);
+            if (["completed", "failed", "cancelled"].includes(String(event?.type || ""))) {
+              finalPetEventRelayed = true;
+            }
+          },
         });
         if (operationKey) completeIdempotency("global-agent-request", operationKey, { run_id: run.id, status: run.status });
         const result = publicGlobalAgentRun(run);
+        if (!finalPetEventRelayed) {
+          relayGlobalPetEvent(ctx, { type: run.status === "failed" ? "failed" : "completed", run }, { finalRun: result });
+        }
         if (isStream) {
           emit({ type: "result", run: result, files: files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath })) });
           emit({ type: "done" });
           res.end();
         } else sendJson(res, { success: true, run: result, files: files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath })) });
       } catch (error: any) {
+        relayGlobalPetEvent(ctx, { type: "failed", error: error?.message || String(error) }, { error: error?.message || String(error) });
         if (isStream) {
           emit({ type: "error", text: error?.message || String(error) });
           emit({ type: "done" });

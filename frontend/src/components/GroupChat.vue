@@ -6,8 +6,12 @@ import { toast, confirmDialog } from '../utils/toast.js'
 import SlashCommandMenu from './SlashCommandMenu.vue'
 import CommandResultCard from './CommandResultCard.vue'
 import TaskCollaborationCard from './TaskCollaborationCard.vue'
+import AgentCodeChangeDrawer from './AgentCodeChangeDrawer.vue'
+import MainAgentDecisionCard from './MainAgentDecisionCard.vue'
 import { useSlashCommands } from '../composables/useSlashCommands.js'
+import { createGroupTaskCardActionHandler } from '../composables/useGroupTaskCardActions.js'
 import { downloadCommandJson } from '../utils/commandExport.js'
+import { buildGroupConversationKnowledgePayload, postKnowledgeCapture } from '../utils/knowledgeCapture.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
 const emit = defineEmits(['navigated'])
@@ -133,10 +137,11 @@ const slash = useSlashCommands({
 const messageFiles = ref([])
 const messageFileInput = ref(null)
 const targetAgent = ref('all')
-const messageMode = ref('project_task')
+const messageMode = ref('conversation')
 const collapsedWorkPanels = ref({})
 let activeAgentStreamMsgs = {}
 const diffViewer = ref({ visible: false, file: null })
+const codeChangeDrawer = ref({ visible: false, title: '', subtitle: '', project: '', fileChanges: null, files: [], selectedPath: '' })
 
 // 处理单栏 Unified Diff (Modal 专用)
 const processModalUnifiedLines = computed(() => {
@@ -206,6 +211,7 @@ const openMainAgentPipeline = () => {
 const hasMainAgentStatusDetail = computed(() => {
   const status = mainAgentStatus.value || {}
   return !!currentGroup.value && (
+    latestMainAgentDecision.value ||
     status.phase ||
     status.running_child_agents?.length ||
     status.open_qa_count ||
@@ -217,6 +223,64 @@ const hasMainAgentStatusDetail = computed(() => {
 const compactStatusText = (value, max = 80) => {
   const text = String(value || '').replace(/\s+/g, ' ').trim()
   return text.length > max ? text.slice(0, max) + '...' : text
+}
+
+const latestMainAgentDecisionEntry = computed(() => {
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const card = getTaskCard(messages.value[i])
+    const decision = card?.mainAgentDecision || card?.main_agent_decision || card?.technical?.mainAgentDecision || card?.technical?.main_agent_decision || getMainAgentDecision(messages.value[i])
+    if (decision) return { decision, index: i, msg: messages.value[i] }
+  }
+  return null
+})
+const latestMainAgentDecision = computed(() => latestMainAgentDecisionEntry.value?.decision || null)
+const mainDecisionModeLabel = (mode) => ({
+  conversation: '普通回复',
+  project_analysis: '项目分析',
+  project_task: '创建任务',
+  delegation: '派发子 Agent',
+  followup: '追加要求',
+  governance: '任务治理'
+}[mode] || '主 Agent 决策')
+const mainDecisionTone = (decision) => {
+  if (!decision?.verify?.passed) return 'warning'
+  if (['project_task', 'delegation', 'followup'].includes(decision.mode)) return 'active'
+  if (decision.mode === 'project_analysis') return 'analysis'
+  return 'idle'
+}
+const mainDecisionNextStep = (decision) => decision?.decision?.dispatch_policy?.nextStep || decision?.verify?.conclusion || '等待下一条消息'
+const mainDecisionActionSummary = (decision) => {
+  const actions = decision?.decision?.selected_actions || []
+  const labels = {
+    read_group_context: '读群聊',
+    read_project_code_snapshot: '读代码',
+    query_knowledge_base: '查知识库',
+    inspect_task_status: '看任务',
+    create_project_task: '建任务',
+    dispatch_child_agent: '派发',
+    ask_user_clarification: '追问',
+    govern_task_lifecycle: '治理',
+    read_child_agent_receipts: '读回执',
+    replan_from_observation: '重规划',
+    generate_final_reply: '回复'
+  }
+  return actions.map(a => labels[a] || a).slice(0, 5).join(' → ') || '等待动作'
+}
+const mainDecisionPlanSummary = (decision) => {
+  const steps = Array.isArray(decision?.user_plan_steps)
+    ? decision.user_plan_steps
+    : Array.isArray(decision?.todo_plan?.steps)
+      ? decision.todo_plan.steps
+      : []
+  const active = steps.find(step => ['in_progress', 'reviewing', 'reworking', 'needs_confirmation', 'failed'].includes(step.status))
+  const preview = (active || steps.find(step => step.status === 'pending') || steps[steps.length - 1])?.content || ''
+  const done = steps.filter(step => ['completed', 'skipped', 'cancelled', 'failed'].includes(step.status)).length
+  return preview ? `计划 ${done}/${steps.length}：${compactStatusText(preview, 56)}` : ''
+}
+const scrollToLatestMainDecision = () => {
+  const entry = latestMainAgentDecisionEntry.value
+  if (!entry) return
+  scrollToMessage(entry.index)
 }
 
 const isCoordinatorProject = (project) => String(project || '') === 'coordinator'
@@ -239,8 +303,14 @@ const getMemoryCompressionLabel = () => {
   const compressed = Number(stats.compressedMessages || 0)
   const recent = Number(stats.recentMessages || stats.recentLimit || 0)
   return compressed > 0
-    ? `记忆压缩：旧消息 ${compressed} / 近期 ${recent}`
-    : `记忆窗口：${total || messages.value.length} 条原文`
+    ? '上下文已压缩'
+    : `上下文 ${total || messages.value.length} 条`
+}
+const getMemoryCompressionMeta = () => {
+  const stats = getMemoryCompression()
+  const compressed = Number(stats.compressedMessages || 0)
+  const recent = Number(stats.recentMessages || stats.recentLimit || 0)
+  return compressed > 0 ? `${compressed} → ${recent}` : '原文'
 }
 const getMemoryCompressionTitle = () => {
   const stats = getMemoryCompression()
@@ -252,8 +322,18 @@ const getAgentDisplayName = (agent) => {
   return agent || 'Agent'
 }
 const getWorkEvents = (msg) => Array.isArray(msg?.workEvents) ? msg.workEvents.filter(Boolean) : []
-const compactWorkText = (value, max = 320) => {
+const sanitizeUserVisibleWorkText = (value) => {
   const text = String(value || '').trim()
+  if (!text) return ''
+  if (/CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|scratchpad|trace_id|session_ids|native_session|task_agent_session|shouldDelegate|门禁|回执要求|任务级原生会话/i.test(text)) {
+    if (/error|失败|权限|denied|invalid/i.test(text)) return 'Agent 遇到内部执行保护或权限问题，详情已折叠，可在技术详情中排查。'
+    if (/done|完成|CCM_AGENT_RECEIPT/i.test(text)) return 'Agent 已提交结构化完成信息，系统正在汇总验收。'
+    return 'Agent 正在处理内部执行细节，已为用户视图折叠。'
+  }
+  return text
+}
+const compactWorkText = (value, max = 320) => {
+  const text = sanitizeUserVisibleWorkText(value)
   return text.length > max ? `${text.slice(0, max)}...` : text
 }
 const workEventLabel = (kind) => ({
@@ -321,7 +401,27 @@ const getAgentMessageStatus = (msg) => {
   return { tone: 'idle', label: '回复' }
 }
 const getTaskRuntime = (msg) => msg?.taskRuntime || msg?.task_runtime || null
-const getTaskCard = (msg) => getTaskRuntime(msg)?.taskCard || getTaskRuntime(msg)?.task_card || null
+const isLegacyNonTaskCard = (card) => {
+  if (!card) return false
+  const text = String(`${card.title || ''} ${card.goal || ''}`).replace(/\s+/g, '')
+  const greetingOnly = /^(你好|您好|hi|hello|hey|在吗|在不在|早上好|下午好|晚上好|谢谢|感谢|ok|好的|嗯|哦|哈喽)+[。.!！?？]*$/i.test(text)
+  const hasEvidence = card.delivery?.files?.length || card.delivery?.verification?.length || card.completed?.length || card.agents?.some?.(agent => ['done', 'running', 'failed', 'partial', 'reviewing'].includes(String(agent.status || '')))
+  return greetingOnly && !hasEvidence
+}
+const getTaskCard = (msg) => {
+  const card = getTaskRuntime(msg)?.taskCard || getTaskRuntime(msg)?.task_card || null
+  if (card?.visible === false) return null
+  if (isLegacyNonTaskCard(card)) return null
+  return card
+}
+const shouldShowOrchestrationPlan = (msg) => {
+  if (!msg || getTaskCard(msg)) return false
+  const assignments = Array.isArray(msg.assignments) ? msg.assignments : []
+  if (assignments.length > 0) return true
+  if (msg.coordinationPlan?.phases?.length) return true
+  const action = String(msg.dispatchPolicy?.action || '')
+  return action === 'delegate'
+}
 const isInternalProtocolMessage = (msg) => {
   const content = String(msg?.content || '')
   if (msg?.task_id && ['agent_qa', 'agent_qa_resume', 'conflict_plan', 'task_rehearsal'].includes(String(msg?.type || ''))) return true
@@ -347,53 +447,13 @@ const shouldShowGroupMessage = (msg, index) => {
 const isPrimaryTaskCard = (msg, index) => {
   return !!getTaskCard(msg) && isPrimaryTaskMessage(msg, index)
 }
-const postTaskCardAction = async (path, body) => {
-  const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) })
-  const payload = await response.json()
-  if (!response.ok || payload.success === false) throw new Error(payload.error || `操作失败 (${response.status})`)
-  return payload
-}
-const handleTaskCardAction = async (msg, action) => {
-  const card = getTaskCard(msg)
-  const id = card?.task_id
-  if (!id) return
-  try {
-    if (action.kind === 'view_pipeline' || action.kind === 'view_report' || action.kind === 'view_changes') return openPipelineViewer(msg)
-    if (action.kind === 'cancel') {
-      if (!await confirmDialog(`确定取消任务“${card.title}”？运行中的 Agent 会被安全终止。`)) return
-      await postTaskCardAction('/api/tasks/cancel', { id, reason: '用户从群聊任务卡取消任务' })
-    } else if (action.kind === 'pause') {
-      await postTaskCardAction('/api/tasks/update', { id, status: 'paused', is_paused: true, status_detail: '用户从群聊任务卡暂停' })
-    } else if (action.kind === 'resume') {
-      await postTaskCardAction('/api/tasks/update', { id, status: 'pending', is_paused: false, paused: false, status_detail: '用户从群聊任务卡恢复' })
-      await postTaskCardAction('/api/tasks/queue', { task_id: id })
-    } else if (action.kind === 'retry') {
-      await postTaskCardAction('/api/tasks/retry', { id, reason: '用户从群聊任务卡重新派发', auto_execute: true })
-    } else if (action.kind === 'switch_executor') {
-      const runtime = window.prompt('切换执行器（claudecode / codex / cursor）：', 'codex')
-      if (!runtime) return
-      await postTaskCardAction('/api/tasks/switch-executor', { id, runtime: runtime.trim(), reason: '用户从群聊任务卡切换执行器', auto_execute: true })
-    } else if (action.kind === 'queue') {
-      await postTaskCardAction('/api/tasks/queue', { task_id: id })
-    } else if (action.kind === 'gap_continue') {
-      await postTaskCardAction('/api/tasks/continue-from-gaps', { id, source: 'user_gap_rework', auto_execute: true })
-    } else if (action.kind === 'continue') {
-      const prompt = action.id === 'replan' ? '请重新检查目标、当前事实和验收标准，只调整未完成部分。' : window.prompt(card.status === 'done' ? '继续修改什么？' : '追加要求：', '')
-      if (!prompt) return
-      await postTaskCardAction('/api/tasks/continue', { id, message: prompt, source: 'user', auto_execute: true })
-    } else if (action.kind === 'rollback') {
-      if (!await confirmDialog(`确定安全撤销任务“${card.title}”的最近一轮改动？`)) return
-      await postTaskCardAction('/api/tasks/rollback', { id, reason: '用户从群聊任务卡安全撤销' })
-    } else {
-      toast.info('该操作请在任务管理页的技术详情中执行')
-      return
-    }
-    toast.success(`${action.label}已提交`)
-    await loadMessages()
-  } catch (error) {
-    toast.error(error.message || `${action.label}失败`)
-  }
-}
+const handleTaskCardAction = createGroupTaskCardActionHandler({
+  getTaskCard,
+  getCurrentGroup: () => currentGroup.value,
+  openCodeChangeDrawer: (...args) => openCodeChangeDrawer(...args),
+  openPipelineViewer,
+  loadMessages: () => loadMessages(),
+})
 const taskRuntimeStatusLabel = (status) => ({ pending: '待执行', in_progress: '执行中', done: '已完成', failed: '失败', cancelled: '已取消' }[status] || status || '执行中')
 const taskRuntimeAgentState = (state) => ({ queued: '排队', spawning: '启动', ready: '就绪', prompt_accepted: '已接单', running: '执行中', reviewing: '验收', succeeded: '完成', failed: '失败', cancel_requested: '停止中', cancelled: '已取消' }[state] || state || '等待')
 const taskRuntimeGreenLabel = (green) => ({ none: '未验收', targeted: '局部绿', project: '项目绿', workspace: '工作区绿', merge_ready: '可合并' }[green] || green || '未验收')
@@ -685,6 +745,8 @@ const mergeIncomingMessage = (msg) => {
       dispatchPolicy: msg.dispatchPolicy || current.dispatchPolicy,
       coordinationPlan: msg.coordinationPlan || current.coordinationPlan,
       workflow: msg.workflow || current.workflow,
+      mainAgentDecision: msg.mainAgentDecision || msg.main_agent_decision || current.mainAgentDecision || current.main_agent_decision,
+      main_agent_decision: msg.main_agent_decision || msg.mainAgentDecision || current.main_agent_decision || current.mainAgentDecision,
       taskRuntime: msg.taskRuntime || msg.task_runtime || current.taskRuntime || current.task_runtime,
       task_runtime: msg.task_runtime || msg.taskRuntime || current.task_runtime || current.taskRuntime,
       delivery_summary: msg.delivery_summary || current.delivery_summary,
@@ -697,6 +759,26 @@ const mergeIncomingMessage = (msg) => {
     return false
   }
   messages.value.push(msg)
+  return true
+}
+
+const getMainAgentDecision = (msg) => msg?.mainAgentDecision || msg?.main_agent_decision || null
+const attachMainAgentDecision = (decision) => {
+  if (!decision) return false
+  const messageId = decision.reply?.message_id || decision.message_id || ''
+  const taskId = decision.task_id || ''
+  let index = -1
+  if (messageId) index = messages.value.findIndex(m => m.id === messageId)
+  if (index < 0 && taskId) index = messages.value.findIndex(m => getMessageTaskId(m) === taskId)
+  if (index < 0) index = [...messages.value].reverse().findIndex(m => m.role === 'assistant')
+  if (index < 0) return false
+  if (!messageId && !taskId) index = messages.value.length - 1 - index
+  const current = messages.value[index]
+  messages.value[index] = {
+    ...current,
+    mainAgentDecision: decision,
+    main_agent_decision: decision,
+  }
   return true
 }
 
@@ -722,7 +804,27 @@ const removeMessageFile = (index) => {
 }
 
 const openFileDiff = (file) => {
-  diffViewer.value = { visible: true, file }
+  openCodeChangeDrawer({ files: [file], count: 1 }, { selectedPath: file?.path, title: '查看单文件改动' })
+}
+
+const openCodeChangeDrawer = (fileChanges, options = {}) => {
+  codeChangeDrawer.value = {
+    visible: true,
+    title: options.title || '群聊 Agent 代码改动',
+    subtitle: options.subtitle || '',
+    project: options.project || '',
+    fileChanges: fileChanges || null,
+    files: options.files || [],
+    selectedPath: options.selectedPath || fileChanges?.files?.[0]?.path || '',
+  }
+}
+
+const closeCodeChangeDrawer = () => {
+  codeChangeDrawer.value.visible = false
+}
+
+const openDrawerChangesTab = (project) => {
+  if (project) toast.info(`已在抽屉展示 ${project} 的本轮改动`)
 }
 
 const diffSearchQuery = ref('')
@@ -1321,6 +1423,39 @@ const deleteGroup = async () => {
   toast.success('群聊已删除')
 }
 
+const clearGroupMessages = async () => {
+  if (!currentGroup.value) return
+  const clearMemory = await confirmDialog(`是否同时清空群聊“${currentGroup.value.name}”的压缩记忆？\n选择“确定”会清消息和记忆；选择“取消”只清消息。`)
+  const confirmed = clearMemory || await confirmDialog(`确定只清空群聊“${currentGroup.value.name}”的聊天消息？`)
+  if (!confirmed) return
+  const res = await fetch('/api/groups/messages/clear', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_id: currentGroup.value.id, clear_memory: clearMemory })
+  })
+  const data = await res.json()
+  if (!res.ok || !data.success) {
+    toast.error(data.error || '清空群聊失败')
+    return
+  }
+  messages.value = []
+  if (data.memory_cleared) groupMemory.value = null
+  toast.success(`已清空 ${data.cleared || 0} 条群聊消息`)
+}
+
+const saveCurrentGroupConversationKnowledge = async () => {
+  if (!currentGroup.value || messages.value.length === 0) return toast.info('当前群聊还没有可沉淀的内容')
+  try {
+    const data = await postKnowledgeCapture(buildGroupConversationKnowledgePayload({
+      group: currentGroup.value,
+      messages: messages.value,
+    }))
+    toast.success(`已保存到知识库：${data.entry?.title || '群聊对话'}`)
+  } catch (error) {
+    toast.error(error?.message || '保存群聊知识失败')
+  }
+}
+
 // 发送消息
 const isStreaming = ref(false)
 const thinkingMessages = ref([])
@@ -1421,12 +1556,18 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
           task_id: data.task?.id,
           task: data.task || null,
           queue: data.queue || null,
-          workflow: data.workflow || null
+          workflow: data.workflow || null,
+          mainAgentDecision: data.mainAgentDecision || data.main_agent_decision || null,
+          main_agent_decision: data.main_agent_decision || data.mainAgentDecision || null
         }
         mergeIncomingMessage(taskMessage)
         waitingCrossReply.value = true
         toast.success('项目任务已创建：' + (data.task?.id || ''))
         scrollToBottom()
+      } else if (data.type === 'main_agent_decision') {
+        if (attachMainAgentDecision(data.decision)) {
+          scrollToBottom()
+        }
       } else if (data.type === 'assignment_status') {
         if (applyAssignmentStatus(data)) {
           scrollToBottom()
@@ -1506,6 +1647,8 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
           streamMsg.dispatchPolicy = data.dispatchPolicy || streamMsg.dispatchPolicy || null
           streamMsg.coordinationPlan = data.coordinationPlan || streamMsg.coordinationPlan || null
           streamMsg.workflow = data.workflow || streamMsg.workflow
+          streamMsg.mainAgentDecision = data.mainAgentDecision || data.main_agent_decision || streamMsg.mainAgentDecision || streamMsg.main_agent_decision
+          streamMsg.main_agent_decision = data.main_agent_decision || data.mainAgentDecision || streamMsg.main_agent_decision || streamMsg.mainAgentDecision
           streamMsg.workEvents = data.workEvents || streamMsg.workEvents
           if (data.fileChanges && data.fileChanges.count > 0) {
             streamMsg.fileChanges = data.fileChanges
@@ -1524,6 +1667,8 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
               dispatchPolicy: data.dispatchPolicy || null,
               coordinationPlan: data.coordinationPlan || null,
               workflow: data.workflow || null,
+              mainAgentDecision: data.mainAgentDecision || data.main_agent_decision || null,
+              main_agent_decision: data.main_agent_decision || data.mainAgentDecision || null,
               fileChanges: data.fileChanges || null,
               workEvents: data.workEvents || []
             })
@@ -2110,8 +2255,16 @@ const applyRecommendation = () => {
         <div class="content-header">
           <div class="group-title-line">
             <span>{{ currentGroup ? '💬 ' + currentGroup.name : '选择或创建一个群聊' }}</span>
-            <span v-if="currentGroup" class="memory-chip" :class="{ active: hasCompressedMemory() }" :title="getMemoryCompressionTitle()">{{ getMemoryCompressionLabel() }}</span>
-            <span v-if="currentGroup && collaborationProtocol?.success" class="memory-chip active" :title="`开放 ${collaborationProtocol.summary?.open || 0}；采纳 ${collaborationProtocol.summary?.accepted || 0}；权限违规 ${collaborationProtocol.summary?.permission_violations || 0}`">Agent 协作 {{ collaborationProtocol.version }} · 开放 {{ collaborationProtocol.summary?.open || 0 }}</span>
+            <span v-if="currentGroup" class="memory-chip" :class="{ active: hasCompressedMemory() }" :title="getMemoryCompressionTitle()">
+              <span class="memory-chip-dot"></span>
+              <span class="memory-chip-label">{{ getMemoryCompressionLabel() }}</span>
+              <span class="memory-chip-meta">{{ getMemoryCompressionMeta() }}</span>
+            </span>
+            <span v-if="currentGroup && collaborationProtocol?.success" class="memory-chip protocol" :title="`开放 ${collaborationProtocol.summary?.open || 0}；采纳 ${collaborationProtocol.summary?.accepted || 0}；权限违规 ${collaborationProtocol.summary?.permission_violations || 0}`">
+              <span class="memory-chip-dot"></span>
+              <span class="memory-chip-label">Agent 协作 {{ collaborationProtocol.version }}</span>
+              <span class="memory-chip-meta">开放 {{ collaborationProtocol.summary?.open || 0 }}</span>
+            </span>
           </div>
           <div v-if="currentGroup" style="display:flex;gap:6px">
             <button class="btn btn-outline btn-sm" @click="loadGroupTools()">🔧 工具</button>
@@ -2119,7 +2272,9 @@ const applyRecommendation = () => {
             <button class="btn btn-outline btn-sm" @click="loadLogs()">📋 日志</button>
             <button class="btn btn-outline btn-sm" @click="showMembers = true">👥 成员</button>
             <button class="btn btn-outline btn-sm" @click="loadMessages()">↻ 刷新</button>
+            <button class="btn btn-outline btn-sm" @click="saveCurrentGroupConversationKnowledge">保存知识</button>
             <button class="btn btn-outline btn-sm" @click="renameName = currentGroup.name; showRename = true">✏️ 重命名</button>
+            <button class="btn btn-outline btn-sm" @click="clearGroupMessages">🧹 清空聊天</button>
             <button class="btn btn-danger btn-sm" @click="deleteGroup">🗑️ 删除</button>
           </div>
         </div>
@@ -2142,6 +2297,15 @@ const applyRecommendation = () => {
                   <button v-if="mainAgentStatus?.latest_delivery_summary" class="btn btn-outline btn-xs" @click="openMainAgentPipeline">协作看板</button>
                 </div>
                 <div class="main-agent-status-grid">
+                  <div v-if="latestMainAgentDecision" class="main-agent-status-item latest-decision" :class="mainDecisionTone(latestMainAgentDecision)">
+                    <span class="item-label">最近决策</span>
+                    <span class="item-value">
+                      {{ mainDecisionModeLabel(latestMainAgentDecision.mode) }} · {{ mainDecisionActionSummary(latestMainAgentDecision) }}
+                    </span>
+                    <small>{{ mainDecisionNextStep(latestMainAgentDecision) }}</small>
+                    <small v-if="mainDecisionPlanSummary(latestMainAgentDecision)" class="decision-plan-preview">{{ mainDecisionPlanSummary(latestMainAgentDecision) }}</small>
+                    <button class="btn btn-outline btn-xs" @click="scrollToLatestMainDecision">定位到消息</button>
+                  </div>
                   <div class="main-agent-status-item">
                     <span class="item-label">执行中</span>
                     <span class="item-value">{{ mainAgentStatus?.running_child_agents?.length ? mainAgentStatus.running_child_agents.join('、') : '无' }}</span>
@@ -2156,26 +2320,26 @@ const applyRecommendation = () => {
                   </div>
                   <details class="main-agent-technical-detail">
                     <summary>技术详情</summary>
-                  <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary?.lifecycle">
-                    <span class="item-label">任务阶段</span>
-                    <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.lifecycle.state }} · {{ mainAgentStatus.latest_delivery_summary.lifecycle.terminal ? '终态' : '会话保留' }}</span>
-                  </div>
-                  <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary?.session_continuity?.length">
-                    <span class="item-label">执行器 / 会话</span>
-                    <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.session_continuity.slice(0, 3).map(s => `${s.project}:${s.executor}/${s.resume_mode}#${s.turn_count}`).join('；') }}</span>
-                  </div>
-                  <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary">
-                    <span class="item-label">文件 / 验证</span>
-                    <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.actual_file_change_count || 0 }} 个文件 · {{ mainAgentStatus.latest_delivery_summary.external_runner_verification_count || 0 }} 条外部验证</span>
-                  </div>
-                  <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary?.reasoning_loop">
-                    <span class="item-label">推理闭环</span>
-                    <span class="item-value">计划 v{{ mainAgentStatus.latest_delivery_summary.reasoning_loop.plan_version || 0 }} · 待证明 {{ mainAgentStatus.latest_delivery_summary.reasoning_open_assertions || 0 }} · 偏差 {{ mainAgentStatus.latest_delivery_summary.reasoning_deviation_count || 0 }} · 复盘 {{ mainAgentStatus.latest_delivery_summary.reasoning_loop.postmortems?.length || 0 }}</span>
-                  </div>
-                  <div class="main-agent-status-item warning" v-if="mainAgentStatus?.failed_gates?.length">
-                    <span class="item-label">未过门禁</span>
-                    <span class="item-value">{{ mainAgentStatus.failed_gates.map(g => g.label || g.id).join('、') }}</span>
-                  </div>
+                    <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary?.lifecycle">
+                      <span class="item-label">任务阶段</span>
+                      <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.lifecycle.state }} · {{ mainAgentStatus.latest_delivery_summary.lifecycle.terminal ? '终态' : '会话保留' }}</span>
+                    </div>
+                    <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary?.session_continuity?.length">
+                      <span class="item-label">执行器 / 会话</span>
+                      <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.session_continuity.slice(0, 3).map(s => `${s.project}:${s.executor}/${s.resume_mode}#${s.turn_count}`).join('；') }}</span>
+                    </div>
+                    <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary">
+                      <span class="item-label">文件 / 验证</span>
+                      <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.actual_file_change_count || 0 }} 个文件 · {{ mainAgentStatus.latest_delivery_summary.external_runner_verification_count || 0 }} 条外部验证</span>
+                    </div>
+                    <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary?.reasoning_loop">
+                      <span class="item-label">推理闭环</span>
+                      <span class="item-value">计划 v{{ mainAgentStatus.latest_delivery_summary.reasoning_loop.plan_version || 0 }} · 待证明 {{ mainAgentStatus.latest_delivery_summary.reasoning_open_assertions || 0 }} · 偏差 {{ mainAgentStatus.latest_delivery_summary.reasoning_deviation_count || 0 }} · 复盘 {{ mainAgentStatus.latest_delivery_summary.reasoning_loop.postmortems?.length || 0 }}</span>
+                    </div>
+                    <div class="main-agent-status-item warning" v-if="mainAgentStatus?.failed_gates?.length">
+                      <span class="item-label">未过门禁</span>
+                      <span class="item-value">{{ mainAgentStatus.failed_gates.map(g => g.label || g.id).join('、') }}</span>
+                    </div>
                   </details>
                   <div class="main-agent-status-item warning" v-if="mainAgentStatus?.blockers?.length || mainAgentStatus?.needs?.length">
                     <span class="item-label">阻塞/待补</span>
@@ -2210,6 +2374,7 @@ const applyRecommendation = () => {
                     <span class="project-task-status">{{ msg.queue?.queued === false ? '已保存' : '执行中' }}</span>
                   </div>
                   <div class="project-task-content">{{ msg.content }}</div>
+                  <MainAgentDecisionCard v-if="getMainAgentDecision(msg)" :decision="getMainAgentDecision(msg)" compact @step-action="handleTaskCardAction(msg, $event)" />
                   <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
                 </div>
                 <div v-else-if="msg.type === 'conflict_plan'" class="bubble conflict-plan-bubble">
@@ -2285,12 +2450,13 @@ const applyRecommendation = () => {
                     </span>
                   </div>
                   <div v-if="msg.content" class="agent-message-content" v-html="highlightMentions(msg.content)"></div>
+                  <MainAgentDecisionCard v-if="getMainAgentDecision(msg)" :decision="getMainAgentDecision(msg)" compact @step-action="handleTaskCardAction(msg, $event)" />
                   <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
                   <div v-if="(msg.delivery_summary || msg.deliverySummary) && !getTaskCard(msg)" class="delivery-summary-actions">
                     <button class="btn btn-sm btn-outline" @click="openPipelineViewer(msg)">查看交付协作看板</button>
                     <span v-if="(msg.delivery_summary || msg.deliverySummary)?.acceptance_gate_passed === false" class="delivery-gate-warning">验收门禁未通过</span>
                   </div>
-                  <div v-if="(msg.dispatchPolicy || (msg.assignments && msg.assignments.length)) && !getTaskCard(msg)" class="orchestration-plan">
+                  <div v-if="shouldShowOrchestrationPlan(msg)" class="orchestration-plan">
                     <div class="plan-header">
                       <span>{{ getPlanTitle(msg) }}</span>
                       <span class="plan-order">{{ getExecutionOrderLabel(msg.executionOrder) }}</span>
@@ -2436,12 +2602,9 @@ const applyRecommendation = () => {
         <div v-if="currentGroup" class="chat-bar">
           <div class="message-mode" aria-label="消息模式">
             <button type="button" :class="{ active: messageMode === 'conversation' }" @click="messageMode = 'conversation'">对话</button>
+            <button type="button" :class="{ active: messageMode === 'project_analysis' }" @click="messageMode = 'project_analysis'; targetAgent = 'all'">项目分析</button>
             <button type="button" :class="{ active: messageMode === 'project_task' }" @click="messageMode = 'project_task'; targetAgent = 'all'">项目任务</button>
           </div>
-          <select v-model="targetAgent" class="select" :disabled="messageMode === 'project_task'">
-            <option value="all">🎯 协调者（主 Agent）</option>
-            <option v-for="m in getRoutableMembers()" :key="m.project" :value="m.project">{{ m.project }}</option>
-          </select>
           <input ref="messageFileInput" type="file" multiple class="hidden-file-input" @change="onMessageFilesSelected">
           <button class="btn btn-outline attach-btn" title="添加附件" @click="chooseMessageFiles">📎</button>
           <button class="btn btn-outline attach-btn" title="插入对话模板" style="margin-left: 4px;" @click="openTemplateSelector">📚</button>
@@ -2517,6 +2680,18 @@ const applyRecommendation = () => {
         </div>
       </div>
     </div>
+
+    <AgentCodeChangeDrawer
+      :visible="codeChangeDrawer.visible"
+      :title="codeChangeDrawer.title"
+      :subtitle="codeChangeDrawer.subtitle"
+      :project="codeChangeDrawer.project"
+      :fileChanges="codeChangeDrawer.fileChanges"
+      :files="codeChangeDrawer.files"
+      :selectedPath="codeChangeDrawer.selectedPath"
+      @close="closeCodeChangeDrawer"
+      @open-changes="openDrawerChangesTab"
+    />
 
     <!-- Agent 协作流 Pipeline 弹窗 -->
     <div v-if="pipelineViewer.visible" class="modal-overlay" style="z-index: 999; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); backdrop-filter: blur(12px);" @click.self="pipelineViewer.visible = false">
@@ -2792,8 +2967,57 @@ const applyRecommendation = () => {
 .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: transparent; position: relative; }
 .content-header { padding: 14px 20px; border-bottom: 1px solid rgba(0, 0, 0, 0.05); font-size: 13px; font-weight: 600; color: var(--text-secondary); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
 .group-title-line { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
-.memory-chip { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid rgba(100, 116, 139, 0.16); background: rgba(100, 116, 139, 0.07); color: var(--text-muted); font-size: 11px; font-weight: 800; white-space: nowrap; }
-.memory-chip.active { border-color: rgba(59, 130, 246, 0.24); background: rgba(59, 130, 246, 0.08); color: var(--accent-blue); }
+.memory-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 7px 4px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
+  transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+.memory-chip:hover {
+  border-color: rgba(15, 23, 42, 0.14);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.055);
+  transform: translateY(-1px);
+}
+.memory-chip.active { color: #334155; }
+.memory-chip.protocol { color: #475569; }
+.memory-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.44);
+  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.08);
+  flex: 0 0 auto;
+}
+.memory-chip.active .memory-chip-dot {
+  background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10);
+}
+.memory-chip.protocol .memory-chip-dot {
+  background: #0f172a;
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.08);
+}
+.memory-chip-label { letter-spacing: -0.01em; }
+.memory-chip-meta {
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.055);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
 .main-agent-status-card { margin: 0 0 16px; padding: 14px; border-radius: 14px; border: 1px solid rgba(59, 130, 246, 0.18); background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(14, 165, 233, 0.05)); box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); }
 .main-agent-status-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
 .main-agent-status-title { font-size: 12px; font-weight: 900; color: var(--text-primary); margin-right: 8px; }
@@ -2804,9 +3028,19 @@ const applyRecommendation = () => {
 .main-agent-technical-detail[open]{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
 .main-agent-technical-detail[open]>summary{grid-column:1/-1;margin-bottom:2px}
 .main-agent-status-item { min-width: 0; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.55); border: 1px solid rgba(148, 163, 184, 0.16); }
+.main-agent-status-item.latest-decision { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; border-color: rgba(59, 130, 246, 0.22); background: linear-gradient(135deg, rgba(255,255,255,.72), rgba(239,246,255,.58)); }
+.main-agent-status-item.latest-decision .item-label,
+.main-agent-status-item.latest-decision .item-value,
+.main-agent-status-item.latest-decision small { grid-column: 1; }
+.main-agent-status-item.latest-decision button { grid-column: 2; grid-row: 1 / span 4; align-self: center; }
+.decision-plan-preview { color: var(--accent-blue) !important; font-weight: 800; }
+.main-agent-status-item.latest-decision.active { border-color: rgba(124, 58, 237, 0.28); background: linear-gradient(135deg, rgba(250,245,255,.82), rgba(239,246,255,.64)); }
+.main-agent-status-item.latest-decision.analysis { border-color: rgba(14, 165, 233, 0.25); background: linear-gradient(135deg, rgba(240,249,255,.82), rgba(224,242,254,.58)); }
+.main-agent-status-item.latest-decision.idle { border-color: rgba(148, 163, 184, 0.18); background: rgba(255, 255, 255, 0.56); }
 .main-agent-status-item.warning { border-color: rgba(245, 158, 11, 0.25); background: rgba(245, 158, 11, 0.08); }
 .main-agent-status-item .item-label { display: block; font-size: 10px; color: var(--text-muted); font-weight: 800; margin-bottom: 4px; }
 .main-agent-status-item .item-value { display: block; font-size: 12px; color: var(--text-primary); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.main-agent-status-item small { display:block; color: var(--text-muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 .delivery-summary-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .delivery-gate-warning { font-size: 11px; font-weight: 800; color: #d97706; }
 .messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; }
@@ -2824,28 +3058,33 @@ const applyRecommendation = () => {
 .msg-meta { font-size: 10px; color: var(--text-muted); margin-top: 6px; font-family: 'Share Tech Mono', monospace; }
 .chat-bar { display: flex; padding: 16px 20px; border-top: 1px solid rgba(0, 0, 0, 0.05); background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(25px); gap: 10px; align-items: flex-end; }
 .message-mode {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(54px, 1fr));
-  flex: 0 0 126px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
   padding: 3px;
-  border: 1px solid rgba(0, 0, 0, 0.09);
-  border-radius: 7px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 999px;
   background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
 }
 .message-mode button {
-  min-height: 32px;
-  padding: 0 8px;
+  min-height: 30px;
+  padding: 0 11px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 999px;
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
   cursor: pointer;
+  transition: background .16s ease, color .16s ease, box-shadow .16s ease;
 }
 .message-mode button.active {
   background: var(--accent-blue);
   color: #fff;
-  font-weight: 600;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.18);
 }
 .hidden-file-input { display: none; }
 .attach-btn { width: 44px; min-width: 44px; height: 44px; padding: 0; font-size: 16px; border-radius: 10px; border-color: rgba(0, 0, 0, 0.06); background: rgba(255, 255, 255, 0.8); }
@@ -3542,6 +3781,23 @@ const applyRecommendation = () => {
   border-bottom-color: rgba(255, 255, 255, 0.05) !important;
 }
 
+[data-theme="dark"] .memory-chip {
+  border-color: rgba(148, 163, 184, 0.16);
+  background: rgba(15, 23, 42, 0.62);
+  color: #cbd5e1;
+  box-shadow: none;
+}
+
+[data-theme="dark"] .memory-chip:hover {
+  background: rgba(30, 41, 59, 0.78);
+  border-color: rgba(148, 163, 184, 0.24);
+}
+
+[data-theme="dark"] .memory-chip-meta {
+  background: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+}
+
 [data-theme="dark"] .message.assistant .bubble {
   background: var(--surface) !important;
   border-color: var(--border-color) !important;
@@ -3564,6 +3820,21 @@ const applyRecommendation = () => {
   background: rgba(56, 189, 248, 0.1) !important;
   border-color: var(--accent-blue) !important;
   color: var(--accent-blue) !important;
+}
+
+[data-theme="dark"] .message-mode {
+  background: var(--bg-primary) !important;
+  border-color: var(--border-color) !important;
+  box-shadow: none !important;
+}
+
+[data-theme="dark"] .message-mode button {
+  color: var(--text-muted) !important;
+}
+
+[data-theme="dark"] .message-mode button.active {
+  background: var(--accent-blue) !important;
+  color: #fff !important;
 }
 
 [data-theme="dark"] .attachment-chip {

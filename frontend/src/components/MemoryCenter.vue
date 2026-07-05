@@ -15,6 +15,8 @@ const evidence = ref([])
 const evidenceOpen = ref(false)
 const editState = ref(null)
 const operationState = ref(null)
+const qualityReport = ref(null)
+const qualityLoading = ref(false)
 
 const scopes = computed(() => [
   ...(overview.value.globals || []).map(item => ({ ...item, scope: 'global' })),
@@ -55,6 +57,15 @@ const metricCards = computed(() => {
   ]
 })
 
+const qualityChecks = computed(() => qualityReport.value?.checks || [])
+const qualityStatusText = computed(() => {
+  const status = qualityReport.value?.status
+  if (status === 'ok') return '质量稳定'
+  if (status === 'warn') return '需要关注'
+  if (status === 'fail') return '存在风险'
+  return '等待采样'
+})
+
 const typeLabels = {
   persistentRequirements: '用户约束', factAnchors: '事实锚点', decisions: '架构决策',
   conclusions: '任务结论', completed: '已完成', blocked: '阻塞事项', workerLedger: 'Agent 回执',
@@ -82,6 +93,7 @@ const loadOverview = async (preserveSelection = true) => {
   loading.value = true
   try {
     overview.value = await requestJson('/api/memory-center/overview')
+    await loadQuality(false)
     const stillExists = scopes.value.some(item => item.scope === selectedScope.value && item.id === selectedId.value)
     if (!preserveSelection || !stillExists) {
       const preferred = scopes.value.find(item => item.alerts > 0)
@@ -97,6 +109,32 @@ const loadOverview = async (preserveSelection = true) => {
     toast.error(error.message || '读取记忆控制中心失败')
   } finally {
     loading.value = false
+  }
+}
+
+const loadQuality = async (showToast = false) => {
+  qualityLoading.value = true
+  try {
+    const data = await requestJson('/api/memory-center/quality')
+    qualityReport.value = data.quality || null
+    if (showToast) toast.success('记忆压缩质量已刷新')
+  } catch (error) {
+    if (showToast) toast.error(error.message || '读取记忆质量失败')
+  } finally {
+    qualityLoading.value = false
+  }
+}
+
+const runQuality = async () => {
+  qualityLoading.value = true
+  try {
+    const data = await requestJson('/api/memory-center/quality', { method: 'POST' })
+    qualityReport.value = data.quality || null
+    toast.success(`压缩质量评估完成：${qualityReport.value?.overallScore ?? '待采样'}%`)
+  } catch (error) {
+    toast.error(error.message || '压缩质量评估失败')
+  } finally {
+    qualityLoading.value = false
   }
 }
 
@@ -248,6 +286,7 @@ onMounted(() => loadOverview(false))
       </div>
       <div class="header-actions">
         <span class="sync-time">快照 {{ formatTime(overview.generatedAt) }}</span>
+        <button class="btn btn-outline" :disabled="qualityLoading" @click="runQuality">{{ qualityLoading ? '评估中' : '评估压缩质量' }}</button>
         <button class="btn btn-outline" :disabled="loading" @click="loadOverview(true)">{{ loading ? '同步中' : '刷新状态' }}</button>
       </div>
     </header>
@@ -272,6 +311,47 @@ onMounted(() => loadOverview(false))
 
     <section v-if="overview.alerts?.length" class="global-alerts">
       <div v-for="alert in overview.alerts.slice(0, 5)" :key="alert.id" :class="['global-alert', alert.severity]"><span></span><strong>{{ alert.code }}</strong><p>{{ alert.message }}</p><small>{{ alert.scope === 'system' ? '全局基线' : `${alert.scope} / ${alert.scopeId}` }}</small></div>
+    </section>
+
+    <section class="quality-panel aura-card">
+      <div class="quality-panel-head">
+        <div>
+          <span class="panel-kicker">COMPACTION QUALITY</span>
+          <h3>记忆压缩质量评估</h3>
+          <p>检查约束保留、子 Agent 记忆使用、RAG 召回、长任务目标一致性和来源追溯。</p>
+        </div>
+        <div :class="['quality-score', qualityReport?.status || 'empty']">
+          <strong>{{ qualityReport?.overallScore ?? '—' }}{{ qualityReport?.overallScore !== null && qualityReport?.overallScore !== undefined ? '%' : '' }}</strong>
+          <span>{{ qualityStatusText }}</span>
+        </div>
+      </div>
+      <div class="quality-check-grid">
+        <article v-for="check in qualityChecks" :key="check.id" :class="['quality-check-card', check.status]">
+          <div class="quality-check-top">
+            <strong>{{ check.label }}</strong>
+            <span>{{ check.score === null || check.score === undefined ? '待采样' : `${check.score}%` }}</span>
+          </div>
+          <p>{{ check.note }}</p>
+          <div class="quality-check-stats">
+            <span>检查 {{ check.checked || 0 }}</span>
+            <span>通过 {{ check.passed || 0 }}</span>
+            <span>缺口 {{ check.failed || 0 }}</span>
+          </div>
+          <details v-if="check.gaps?.length || check.evidence?.length" class="quality-check-detail">
+            <summary>{{ check.gaps?.length ? `查看缺口 ${check.gaps.length}` : `查看证据 ${check.evidence.length}` }}</summary>
+            <ul v-if="check.gaps?.length">
+              <li v-for="(gap, index) in check.gaps.slice(0, 4)" :key="index">{{ gap.reason || gap.title || gap.item || JSON.stringify(gap) }}</li>
+            </ul>
+            <ul v-else>
+              <li v-for="(item, index) in check.evidence.slice(0, 4)" :key="index">{{ item.title || item.item || item.file || item.source || JSON.stringify(item) }}</li>
+            </ul>
+          </details>
+        </article>
+      </div>
+      <div v-if="qualityReport?.nextActions?.length" class="quality-next-actions">
+        <strong>建议处理</strong>
+        <span v-for="action in qualityReport.nextActions" :key="action">{{ action }}</span>
+      </div>
     </section>
 
     <div class="workspace-grid">
@@ -441,6 +521,7 @@ onMounted(() => loadOverview(false))
 .mc-header{border-radius:16px;padding:22px 26px;display:flex;align-items:center;justify-content:space-between;gap:24px}.eyebrow,.panel-kicker{font-family:var(--font-tech);font-size:10px;letter-spacing:1.8px;color:var(--accent-blue);font-weight:700}.mc-header h2{font-size:24px;margin:5px 0 4px}.mc-header p,.detail-header p,.modal-note{color:var(--text-muted);font-size:13px;line-height:1.55}.header-actions{display:flex;align-items:center;gap:12px}.sync-time{font-size:11px;color:var(--text-muted)}
 .summary-strip{display:grid;grid-template-columns:repeat(6,minmax(145px,1fr));gap:10px;margin:12px 0}.summary-card{min-height:105px;padding:16px;border-radius:13px;background:rgba(255,255,255,.55);border:1px solid var(--border-color);display:flex;flex-direction:column}.summary-label{font-size:11px;color:var(--text-muted);font-weight:700}.summary-card strong{font-family:var(--font-tech);font-size:24px;margin:9px 0 5px}.summary-card small{font-size:10px;color:var(--text-muted);line-height:1.4}.summary-card.warning strong,.summary-card.risk strong{color:var(--accent-yellow)}
 .global-alerts{display:flex;flex-direction:column;gap:6px;margin:-2px 0 12px}.global-alert{display:grid;grid-template-columns:7px auto minmax(0,1fr) auto;align-items:center;gap:9px;padding:9px 12px;border-radius:9px;border:1px solid rgba(245,158,11,.18);background:rgba(245,158,11,.06);font-size:10px}.global-alert>span{width:7px;height:7px;border-radius:50%;background:var(--accent-yellow)}.global-alert strong{font-family:monospace}.global-alert p{color:var(--text-secondary)}.global-alert small{color:var(--text-muted)}.global-alert.critical{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.06)}.global-alert.critical>span{background:var(--accent-red)}
+.quality-panel{border-radius:16px;padding:18px;margin:12px 0}.quality-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.quality-panel-head h3{font-size:17px;margin:4px 0}.quality-panel-head p{font-size:11px;color:var(--text-muted);line-height:1.5}.quality-score{min-width:112px;padding:12px 14px;border-radius:13px;background:rgba(100,116,139,.08);text-align:right}.quality-score strong{display:block;font-family:var(--font-tech);font-size:26px}.quality-score span{font-size:10px;color:var(--text-muted)}.quality-score.ok strong{color:var(--accent-green)}.quality-score.warn strong{color:var(--accent-yellow)}.quality-score.fail strong{color:var(--accent-red)}.quality-check-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:14px}.quality-check-card{min-width:0;padding:12px;border-radius:11px;border:1px solid var(--border-color);background:rgba(255,255,255,.42)}.quality-check-card.ok{border-color:rgba(16,185,129,.18);background:rgba(16,185,129,.045)}.quality-check-card.warn{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.06)}.quality-check-card.fail{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.055)}.quality-check-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.quality-check-top strong{font-size:12px;color:var(--text-primary)}.quality-check-top span{font-family:var(--font-tech);font-size:13px;color:var(--accent-blue)}.quality-check-card p{min-height:42px;margin:8px 0 10px;font-size:9.5px;line-height:1.45;color:var(--text-muted)}.quality-check-stats{display:flex;gap:5px;flex-wrap:wrap}.quality-check-stats span{padding:3px 6px;border-radius:999px;background:rgba(15,23,42,.055);font-size:9px;color:var(--text-secondary)}.quality-check-detail{margin-top:8px;font-size:9px;color:var(--text-muted)}.quality-check-detail summary{cursor:pointer;font-weight:800}.quality-check-detail ul{margin:6px 0 0;padding-left:16px;line-height:1.45}.quality-next-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.quality-next-actions strong{font-size:10px;color:var(--text-muted);padding:4px 0}.quality-next-actions span{padding:5px 8px;border-radius:999px;background:rgba(245,158,11,.08);color:#a16207;font-size:9px}
 .workspace-grid{display:grid;grid-template-columns:260px minmax(0,1fr);gap:12px;min-height:620px}.scope-panel,.detail-panel{border-radius:16px;min-height:0}.scope-panel{padding:18px 10px}.panel-title-row{display:flex;align-items:center;justify-content:space-between;padding:0 8px 14px}.panel-title-row h3{font-size:17px;margin-top:3px}.count-badge{font-family:var(--font-tech);font-size:11px;padding:4px 8px;border-radius:20px;background:rgba(var(--accent-blue-rgb),.1);color:var(--accent-blue)}.scope-list{display:flex;flex-direction:column;gap:5px;max-height:700px;overflow:auto}.scope-item{border:1px solid transparent;background:transparent;border-radius:10px;padding:10px;display:flex;align-items:center;gap:10px;text-align:left;color:var(--text-primary);cursor:pointer;transition:.2s}.scope-item:hover{background:rgba(var(--accent-blue-rgb),.05)}.scope-item.active{background:rgba(var(--accent-blue-rgb),.1);border-color:rgba(var(--accent-blue-rgb),.18)}.scope-mark{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-family:var(--font-tech);font-size:11px;color:white;background:var(--accent-purple)}.scope-mark.project{background:var(--accent-blue)}.scope-mark.warning,.scope-mark.critical{box-shadow:0 0 0 3px rgba(245,158,11,.12)}.scope-copy{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}.scope-copy strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.scope-copy small{font-size:10px;color:var(--text-muted)}.health-dot{width:7px;height:7px;border-radius:50%;background:var(--accent-green)}.alert-count{font-size:10px;color:#fff;background:var(--accent-yellow);padding:2px 6px;border-radius:10px}
 .detail-panel{padding:20px;overflow:hidden}.detail-header{display:flex;justify-content:space-between;gap:22px;align-items:flex-start}.detail-header h3{font-size:22px;margin:6px 0 5px}.detail-header>div:first-child{min-width:0}.detail-header>div:first-child>p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;max-width:760px}.scope-meta{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text-muted)}.status-pill{padding:3px 7px;border-radius:10px;background:rgba(16,185,129,.1);color:var(--accent-green);font-weight:800}.status-pill.warning{background:rgba(245,158,11,.12);color:var(--accent-yellow)}.status-pill.critical{background:rgba(239,68,68,.1);color:var(--accent-red)}.maintenance-actions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}
 .alerts-block{margin-top:14px;display:flex;flex-direction:column;gap:6px}.alert-row{display:flex;align-items:center;gap:8px;padding:9px 11px;border:1px solid rgba(245,158,11,.18);background:rgba(245,158,11,.06);border-radius:9px;font-size:11px}.alert-row.critical{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.06)}.alert-signal{width:7px;height:7px;border-radius:50%;background:var(--accent-yellow)}.critical .alert-signal{background:var(--accent-red)}
@@ -451,9 +532,9 @@ onMounted(() => loadOverview(false))
 .audit-view{padding-top:12px;max-height:560px;overflow:auto}.audit-item{display:grid;grid-template-columns:145px minmax(0,1fr) auto;gap:12px;padding:11px;border-bottom:1px solid var(--border-color);align-items:center}.audit-time{font-size:9px;color:var(--text-muted)}.audit-item strong{font-size:11px}.audit-item p{font-size:9px;color:var(--text-muted);margin-top:3px}.audit-item code{font-size:8px;color:var(--accent-blue)}.feedback-panel{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:12px;padding:14px;border-radius:10px;background:rgba(var(--accent-blue-rgb),.04);border:1px solid rgba(var(--accent-blue-rgb),.1)}.feedback-panel h4{font-size:12px;margin-bottom:4px}.feedback-panel p{font-size:9px;color:var(--text-muted)}.feedback-actions{display:flex;gap:5px;flex-wrap:wrap}.counter-table{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}.counter-table div{padding:11px;border-bottom:2px solid rgba(var(--accent-blue-rgb),.12);display:flex;justify-content:space-between;font-size:10px}.counter-table span{color:var(--text-muted)}
 .acceptance-note{margin-top:9px;padding:9px 11px;border-radius:8px;background:rgba(16,185,129,.06);color:var(--text-muted);font-size:9px;border:1px solid rgba(16,185,129,.12)}
 .empty-state{padding:35px;text-align:center;color:var(--text-muted);font-size:11px}.empty-state.large{padding-top:180px}.mc-modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.24);backdrop-filter:blur(10px);z-index:200;display:grid;place-items:center}.mc-modal{width:min(520px,calc(100vw - 36px));max-height:80vh;overflow:auto;border:1px solid var(--border-color);background:rgba(255,255,255,.92);box-shadow:0 26px 80px rgba(15,23,42,.18);border-radius:15px;padding:22px}.mc-modal h3{font-size:19px;margin:4px 0 14px}.mc-modal label{display:flex;flex-direction:column;gap:6px;font-size:10px;font-weight:700;color:var(--text-muted);margin-top:13px}.mc-modal textarea{resize:vertical;font-size:12px;line-height:1.5}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.evidence-modal{width:min(760px,calc(100vw - 36px))}.evidence-row{border:1px solid var(--border-color);border-radius:10px;margin-top:9px;overflow:hidden}.evidence-row>div{display:flex;justify-content:space-between;padding:9px 12px;background:rgba(var(--accent-blue-rgb),.04);font-size:9px;color:var(--text-muted)}
-@media(max-width:1100px){.summary-strip{grid-template-columns:repeat(3,1fr)}.memory-groups{grid-template-columns:1fr}.workspace-grid{grid-template-columns:220px minmax(0,1fr)}}
-@media(max-width:760px){.memory-center{padding:10px}.mc-header,.detail-header,.feedback-panel{flex-direction:column}.summary-strip{grid-template-columns:repeat(2,1fr)}.workspace-grid{grid-template-columns:1fr}.scope-panel{max-height:240px}.detail-panel{padding:13px}.maintenance-actions{justify-content:flex-start}.memory-toolbar{flex-direction:column}.memory-search{width:100%}.boundary-grid,.metrics-grid{grid-template-columns:repeat(2,1fr)}.audit-item{grid-template-columns:1fr}.counter-table{grid-template-columns:repeat(2,1fr)}}
-:global([data-theme='dark']) .memory-center .aura-card,:global([data-theme='dark']) .summary-card,:global([data-theme='dark']) .memory-group,:global([data-theme='dark']) .memory-item,:global([data-theme='dark']) .boundary-grid article,:global([data-theme='dark']) .metrics-grid article{background:rgba(15,23,42,.54)}:global([data-theme='dark']) .mc-modal{background:rgba(15,23,42,.94)}
+@media(max-width:1100px){.summary-strip{grid-template-columns:repeat(3,1fr)}.memory-groups{grid-template-columns:1fr}.workspace-grid{grid-template-columns:220px minmax(0,1fr)}.quality-check-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:760px){.memory-center{padding:10px}.mc-header,.detail-header,.feedback-panel,.quality-panel-head{flex-direction:column}.summary-strip{grid-template-columns:repeat(2,1fr)}.workspace-grid{grid-template-columns:1fr}.scope-panel{max-height:240px}.detail-panel{padding:13px}.maintenance-actions{justify-content:flex-start}.memory-toolbar{flex-direction:column}.memory-search{width:100%}.boundary-grid,.metrics-grid{grid-template-columns:repeat(2,1fr)}.quality-check-grid{grid-template-columns:1fr}.audit-item{grid-template-columns:1fr}.counter-table{grid-template-columns:repeat(2,1fr)}}
+:global([data-theme='dark']) .memory-center .aura-card,:global([data-theme='dark']) .summary-card,:global([data-theme='dark']) .memory-group,:global([data-theme='dark']) .memory-item,:global([data-theme='dark']) .boundary-grid article,:global([data-theme='dark']) .metrics-grid article,:global([data-theme='dark']) .quality-check-card{background:rgba(15,23,42,.54)}:global([data-theme='dark']) .mc-modal{background:rgba(15,23,42,.94)}
 .scope-mark.global{background:linear-gradient(135deg,var(--accent-purple),var(--accent-blue))}
 .memory-policy-strip{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 0 12px;font-size:10px;color:var(--text-muted)}.memory-policy-strip button{border:1px solid rgba(239,68,68,.18);background:rgba(239,68,68,.06);color:var(--accent-red);border-radius:14px;padding:4px 8px;cursor:pointer}
 </style>

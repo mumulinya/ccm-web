@@ -1,7 +1,7 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { CCM_DIR } from "./utils";
+import { CCM_DIR, parseGitStatus } from "./utils";
 import { applyMemoryControls, recordMemoryMetric } from "./modules/memory-control-center";
 
 const PROJECT_MEMORY_DIR = path.join(CCM_DIR, "project-memory");
@@ -337,6 +337,8 @@ export function updateProjectMemoryFromReceipt(input: {
     summary: compact(receipt.summary || "", 1000),
     filesModified,
     verification: uniqueStrings(receipt.verification || []).slice(0, 20),
+    memoryUsed: uniqueStrings(receipt.memoryUsed || receipt.memory_used || []).slice(0, 20),
+    memoryIgnored: uniqueStrings(receipt.memoryIgnored || receipt.memory_ignored || []).slice(0, 20),
   };
   memory.conclusions = [...(memory.conclusions || []), conclusion];
   const decisions = Array.isArray(receipt.newDecisions || receipt.new_decisions) ? (receipt.newDecisions || receipt.new_decisions) : [];
@@ -395,6 +397,43 @@ export function buildProjectMemoryPacket(project: string, options: { workDir?: s
   return lines.join("\n");
 }
 
+function buildProjectGitStatusSummary(workDir = "") {
+  if (!workDir) return "- 当前 Git 状态：工作目录未配置。";
+  try {
+    const entries = parseGitStatus(workDir).slice(0, 24);
+    if (!entries.length) return "- 当前 Git 状态：无未提交变更。";
+    return [
+      `- 当前 Git 状态：${entries.length} 个未提交文件（最多展示 24 个）。`,
+      ...entries.map((entry: any) => `  - ${entry.statusCode || ""} ${entry.path}`),
+    ].join("\n");
+  } catch (error: any) {
+    return `- 当前 Git 状态：读取失败，${compact(error?.message || error, 240)}。`;
+  }
+}
+
+export function buildProjectExecutionBrief(project: string, taskText: string, options: { workDir?: string; resources?: any; query?: string; verificationHints?: any } = {}) {
+  const query = String(options.query || taskText || "");
+  const verificationHints = Array.isArray(options.verificationHints)
+    ? options.verificationHints.filter(Boolean).join("；")
+    : String(options.verificationHints || "").trim();
+  return [
+    "【CCM 项目执行前简报】",
+    "用途：给底层 Claude/Codex/Cursor 项目 Agent 提供当前任务的可靠上下文。历史记忆只能辅助判断；执行前仍必须读取当前真实文件和命令结果。",
+    "",
+    `本轮用户需求：${compact(taskText, 1800) || "未提供"}`,
+    "",
+    buildProjectMemoryPacket(project, { workDir: options.workDir, resources: options.resources, query }),
+    "",
+    buildProjectGitStatusSummary(options.workDir || ""),
+    verificationHints ? `- 项目验证提示：${compact(verificationHints, 1200)}` : "- 项目验证提示：未配置；如需验证，请先识别项目脚本后选择安全命令。",
+    "",
+    "执行规则：",
+    "- 先核验当前代码状态，再根据本轮需求修改；不要只凭历史记忆判断。",
+    "- 如果项目记忆与当前文件冲突，以当前文件和真实命令输出为准，并在回执中说明差异。",
+    "- 完成后返回结构化结论：修改内容、文件、验证、风险、新决策。",
+  ].join("\n");
+}
+
 export function runProjectMemorySelfTest() {
   const sample: any = createEmptyProjectMemory("self-test", "");
   sample.conclusions = Array.from({ length: 21 }, (_, index) => ({ time: `t${index}`, summary: `结论 ${index}`, filesModified: [`f${index}.ts`] }));
@@ -410,6 +449,7 @@ export function runProjectMemorySelfTest() {
   if (tampered[0]?.records?.[0]) tampered[0].records[0].summary = "被篡改";
   const tamperedIntegrity = validateArchiveIntegrity(tampered);
   const recalled = buildRelevantArchiveEvidence(sample, "后续结论 0 g0.ts");
+  const brief = buildProjectExecutionBrief("self-test", "继续处理 g0.ts 相关问题", { query: "g0.ts", workDir: "", verificationHints: ["npm test"] });
   const recoveryFile = memoryFile(`storage-self-test-${process.pid}`);
   let backupRecoveryWorks = false;
   try {
@@ -431,6 +471,7 @@ export function runProjectMemorySelfTest() {
     decisionsRollIntoLosslessArchives: sample.decisions.length === DECISION_RECENT_KEEP && archivedDecisions.some((item: any) => item.decision === "决策 0"),
     integrityValidationDetectsTampering: validIntegrity.pass && !tamperedIntegrity.pass,
     retrievesRelevantArchivedEvidence: recalled.includes("后续结论 0") && recalled.includes("g0.ts"),
+    buildsExecutionBriefWithRecallAndRules: brief.includes("CCM 项目执行前简报") && brief.includes("继续处理 g0.ts") && brief.includes("历史记忆只能辅助判断") && brief.includes("npm test"),
     atomicBackupRecoveryWorks: backupRecoveryWorks,
   };
   return { pass: Object.values(checks).every(Boolean), checks };

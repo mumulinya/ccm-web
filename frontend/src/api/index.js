@@ -31,6 +31,8 @@ export const sessionsApi = {
   delete: (data) => api('/api/sessions/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   rename: (data) => api('/api/sessions/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   saveMessage: (data) => api('/api/sessions/message', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  deleteMessage: (data) => api('/api/sessions/message/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+  replaceMessages: (data) => api('/api/sessions/messages/replace', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
 };
 
 // 群聊相关 API

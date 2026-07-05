@@ -164,6 +164,48 @@ function getSessionDetail(projectName, sessionId) {
     }
     return null;
 }
+function normalizeWebSessionMessage(message) {
+    const input = message && typeof message === "object" ? message : {};
+    const safe = {
+        id: String(input.id || input.message_id || `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`),
+        role: input.role,
+        content: String(input.content || ""),
+        agent: input.agent || null,
+        timestamp: input.timestamp || new Date().toISOString(),
+    };
+    for (const key of [
+        "requestText",
+        "task_id",
+        "run_id",
+        "taskExperience",
+        "fileChanges",
+        "workEvents",
+        "projectRun",
+        "agenticRun",
+        "managementReceipt",
+        "type",
+    ]) {
+        if (Object.prototype.hasOwnProperty.call(input, key))
+            safe[key] = input[key];
+    }
+    return safe;
+}
+function messageMatchesDeleteSelector(message, selector, index) {
+    if (!message || !selector)
+        return false;
+    const id = String(selector.id || selector.message_id || "").trim();
+    const taskId = String(selector.task_id || selector.taskId || "").trim();
+    const timestamp = String(selector.timestamp || "").trim();
+    if (id && String(message.id || message.message_id || "") === id)
+        return true;
+    if (taskId && String(message.task_id || message.taskExperience?.task_id || message.run_id || "") === taskId)
+        return true;
+    if (timestamp && String(message.timestamp || "") === timestamp)
+        return true;
+    if (Number.isInteger(selector.index) && selector.index === index)
+        return true;
+    return false;
+}
 function getNextSessionId(projectName) {
     const dir = path.join(exports.WEB_SESSIONS_DIR, projectName);
     const nums = [];
@@ -258,16 +300,64 @@ function handleSessionsApi(pathname, req, res, parsed) {
                 const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
                 if (!data.history)
                     data.history = [];
-                data.history.push({
-                    role: message.role,
-                    content: message.content,
-                    agent: message.agent || null,
-                    timestamp: message.timestamp || new Date().toISOString(),
-                });
+                data.history.push(normalizeWebSessionMessage(message));
                 data.updated_at = new Date().toISOString();
                 fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
                 syncToFilesystemToCc(project);
                 (0, utils_1.sendJson)(res, { success: true, count: data.history.length });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/sessions/message/delete" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = JSON.parse(body || "{}");
+                const { project, sessionId } = payload;
+                if (!project || !sessionId)
+                    return (0, utils_1.sendJson)(res, { error: "缺少参数" }, 400);
+                const filePath = path.join(exports.WEB_SESSIONS_DIR, project, `${sessionId}.json`);
+                if (!fs.existsSync(filePath))
+                    return (0, utils_1.sendJson)(res, { error: "会话不存在" }, 404);
+                const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+                const before = Array.isArray(data.history) ? data.history.length : 0;
+                data.history = (Array.isArray(data.history) ? data.history : []).filter((message, index) => !messageMatchesDeleteSelector(message, payload, index));
+                const deleted = before - data.history.length;
+                data.updated_at = new Date().toISOString();
+                fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+                syncToFilesystemToCc(project);
+                (0, utils_1.sendJson)(res, { success: true, deleted, count: data.history.length });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { error: e.message }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/sessions/messages/replace" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = JSON.parse(body || "{}");
+                const { project, sessionId } = payload;
+                if (!project || !sessionId || !Array.isArray(payload.messages))
+                    return (0, utils_1.sendJson)(res, { error: "缺少参数" }, 400);
+                const filePath = path.join(exports.WEB_SESSIONS_DIR, project, `${sessionId}.json`);
+                if (!fs.existsSync(filePath))
+                    return (0, utils_1.sendJson)(res, { error: "会话不存在" }, 404);
+                const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+                const before = Array.isArray(data.history) ? data.history.length : 0;
+                data.history = payload.messages.map(normalizeWebSessionMessage);
+                data.updated_at = new Date().toISOString();
+                fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+                syncToFilesystemToCc(project);
+                (0, utils_1.sendJson)(res, { success: true, replaced: before, count: data.history.length });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);
