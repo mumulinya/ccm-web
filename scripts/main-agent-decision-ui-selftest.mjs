@@ -6,6 +6,7 @@ const files = {
   component: path.join(root, 'frontend/src/components/MainAgentDecisionCard.vue'),
   groupChat: path.join(root, 'frontend/src/components/GroupChat.vue'),
   groupMainAgentDisplay: path.join(root, 'frontend/src/composables/useMainAgentDisplay.js'),
+  agentExecution: path.join(root, 'frontend/src/components/AgentExecutionMessage.vue'),
   agentWorkEvents: path.join(root, 'frontend/src/components/AgentWorkEventDetails.vue'),
   groupMainAgentStatus: path.join(root, 'frontend/src/components/GroupMainAgentStatusCard.vue'),
   groupTaskActions: path.join(root, 'frontend/src/composables/useGroupTaskCardActions.js'),
@@ -22,6 +23,7 @@ const read = (file) => fs.readFileSync(file, 'utf-8')
 const component = read(files.component)
 const groupChat = read(files.groupChat)
 const groupMainAgentDisplay = read(files.groupMainAgentDisplay)
+const agentExecution = read(files.agentExecution)
 const agentWorkEvents = read(files.agentWorkEvents)
 const groupMainAgentStatus = read(files.groupMainAgentStatus)
 const groupTaskActions = read(files.groupTaskActions)
@@ -55,9 +57,9 @@ const checks = {
   groupRendersTopPlanPreview: groupChat.includes('GroupMainAgentStatusCard') && groupMainAgentStatus.includes('mainDecisionPlanSummary') && groupMainAgentStatus.includes('decision-plan-preview') && groupChat.includes('card?.mainAgentDecision || card?.main_agent_decision'),
   groupHandlesTodoStepActions: groupChat.includes('@step-action="handleTaskCardAction(msg, $event)"') && groupTaskActions.includes("action.kind === 'confirm_done'") && groupTaskActions.includes('action?.task_id'),
   groupDoesNotUseDeadPetEvent: !groupChat.includes('ccm-pet-speech'),
-  groupUsesUserFacingCollaborationLabels: groupChat.includes('协作计划') && groupChat.includes('查看协作看板') && groupChat.includes('正在处理...') && !groupChat.includes('Coordinator 计划') && !groupChat.includes('查看协同 Pipeline'),
+  groupUsesUserFacingCollaborationLabels: agentExecution.includes('协作计划') && agentExecution.includes('查看协作看板') && groupChat.includes('正在处理...') && !groupChat.includes('Coordinator 计划') && !agentExecution.includes('查看协同 Pipeline'),
   frontendHasSharedDisplaySanitizer: agentDisplay.includes('sanitizeUserFacingAgentText') && agentDisplay.includes('getDisplayStream') && agentDisplay.includes('tool_use_summary') && agentDisplay.includes('getTechnicalDetailSections'),
-  groupSummarizesChildAgentEvents: groupChat.includes('AgentWorkEventDetails') && agentWorkEvents.includes('summarizeWorkEvents') && agentWorkEvents.includes('子 Agent 执行摘要') && agentWorkEvents.includes('eventSummary.summary') && agentWorkEvents.includes('<details') && agentWorkEvents.includes('hiddenCount'),
+  groupSummarizesChildAgentEvents: groupChat.includes('AgentExecutionMessage') && agentExecution.includes('AgentWorkEventDetails') && agentWorkEvents.includes('summarizeWorkEvents') && agentWorkEvents.includes('子 Agent 执行摘要') && agentWorkEvents.includes('eventSummary.summary') && agentWorkEvents.includes('<details') && agentWorkEvents.includes('hiddenCount'),
   userFacingTerminologySanitized: templates.includes('群聊协作（主 Agent）') && searchHistory.includes("item.agent || '主 Agent'") && !templates.includes('群聊协作 (Coordinator)') && !searchHistory.includes("item.agent || 'Coordinator'"),
   taskCardRendersDecision: taskCard.includes('MainAgentDecisionCard') && taskCard.includes('mainAgentDecision'),
   taskCardBubblesTodoStepActions: taskCard.includes('@step-action="emit(\'action\', $event)"'),
