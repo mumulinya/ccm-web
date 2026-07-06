@@ -5,6 +5,8 @@ const root = process.cwd()
 const files = {
   component: path.join(root, 'frontend/src/components/MainAgentDecisionCard.vue'),
   groupChat: path.join(root, 'frontend/src/components/GroupChat.vue'),
+  groupMainAgentDisplay: path.join(root, 'frontend/src/composables/useMainAgentDisplay.js'),
+  agentWorkEvents: path.join(root, 'frontend/src/components/AgentWorkEventDetails.vue'),
   groupTaskActions: path.join(root, 'frontend/src/composables/useGroupTaskCardActions.js'),
   taskCard: path.join(root, 'frontend/src/components/TaskExperienceCard.vue'),
   globalAgent: path.join(root, 'frontend/src/components/GlobalAgent.vue'),
@@ -18,6 +20,8 @@ const files = {
 const read = (file) => fs.readFileSync(file, 'utf-8')
 const component = read(files.component)
 const groupChat = read(files.groupChat)
+const groupMainAgentDisplay = read(files.groupMainAgentDisplay)
+const agentWorkEvents = read(files.agentWorkEvents)
 const groupTaskActions = read(files.groupTaskActions)
 const taskCard = read(files.taskCard)
 const globalAgent = read(files.globalAgent)
@@ -36,7 +40,7 @@ const checks = {
   userTodoPlanVisible: component.includes('planSteps') && component.includes('我准备这样处理') && component.includes('status-needs_confirmation') && component.includes('status-in_progress'),
   internalLoopVisible: component.includes('internalLoop') && component.includes('内部工作循环') && component.includes('loop-stage') && component.includes('loopStatusText'),
   compactTodoDoesNotHideFinalStep: component.includes('prioritizePlanSteps') && component.includes('const finalIndex = raw.length - 1') && !component.includes('raw.slice(0, props.compact ? 6 : 9)'),
-  simpleConversationTodoHidden: component.includes('shouldHideSimpleConversationPlan') && component.includes("props.decision?.mode !== 'conversation'") && component.includes('hide_for_simple_conversation') && groupChat.includes("decision?.mode === 'conversation'") && groupChat.includes('display.user_visible === false'),
+  simpleConversationTodoHidden: component.includes('shouldHideSimpleConversationPlan') && component.includes("props.decision?.mode === 'conversation'") && component.includes('hide_for_simple_conversation') && groupMainAgentDisplay.includes("decision?.mode === 'conversation'") && groupMainAgentDisplay.includes('display.user_visible === false') && groupMainAgentDisplay.includes('hide_for_simple_conversation'),
   userTodoFocusVisible: component.includes('plan-focus') && component.includes('currentPlanStep') && component.includes('currentPlanActions') && component.includes('stepActiveText'),
   liveTodoStatusesVisible: ['reviewing', 'reworking', 'failed', 'cancelled'].every(text => component.includes(text)) && component.includes('验收中') && component.includes('返工中'),
   liveVerifyBadgeNotAlwaysNeedsConfirm: component.includes('verifyBadge') && component.includes('进行中') && component.includes('需处理') && component.includes('decision-verify.work'),
@@ -51,7 +55,7 @@ const checks = {
   groupDoesNotUseDeadPetEvent: !groupChat.includes('ccm-pet-speech'),
   groupUsesUserFacingCollaborationLabels: groupChat.includes('协作计划') && groupChat.includes('查看协作看板') && groupChat.includes('正在处理...') && !groupChat.includes('Coordinator 计划') && !groupChat.includes('查看协同 Pipeline'),
   frontendHasSharedDisplaySanitizer: agentDisplay.includes('sanitizeUserFacingAgentText') && agentDisplay.includes('getDisplayStream') && agentDisplay.includes('tool_use_summary') && agentDisplay.includes('getTechnicalDetailSections'),
-  groupSummarizesChildAgentEvents: groupChat.includes('summarizeWorkEvents') && groupChat.includes('子 Agent 执行摘要') && groupChat.includes('getWorkEventSummary(msg).summary') && groupChat.includes('<details') && groupChat.includes('+{{ getWorkEventSummary(msg).hiddenCount }} 条详情'),
+  groupSummarizesChildAgentEvents: groupChat.includes('AgentWorkEventDetails') && agentWorkEvents.includes('summarizeWorkEvents') && agentWorkEvents.includes('子 Agent 执行摘要') && agentWorkEvents.includes('eventSummary.summary') && agentWorkEvents.includes('<details') && agentWorkEvents.includes('hiddenCount'),
   userFacingTerminologySanitized: templates.includes('群聊协作（主 Agent）') && searchHistory.includes("item.agent || '主 Agent'") && !templates.includes('群聊协作 (Coordinator)') && !searchHistory.includes("item.agent || 'Coordinator'"),
   taskCardRendersDecision: taskCard.includes('MainAgentDecisionCard') && taskCard.includes('mainAgentDecision'),
   taskCardBubblesTodoStepActions: taskCard.includes('@step-action="emit(\'action\', $event)"'),

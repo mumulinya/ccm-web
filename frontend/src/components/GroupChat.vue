@@ -7,13 +7,13 @@ import SlashCommandMenu from './SlashCommandMenu.vue'
 import CommandResultCard from './CommandResultCard.vue'
 import TaskCollaborationCard from './TaskCollaborationCard.vue'
 import AgentCodeChangeDrawer from './AgentCodeChangeDrawer.vue'
+import AgentWorkEventDetails from './AgentWorkEventDetails.vue'
 import MainAgentDecisionCard from './MainAgentDecisionCard.vue'
 import { useSlashCommands } from '../composables/useSlashCommands.js'
 import { createGroupTaskCardActionHandler } from '../composables/useGroupTaskCardActions.js'
 import { compactStatusText, mainDecisionActionSummary, mainDecisionModeLabel, mainDecisionNextStep, mainDecisionPlanSummary, mainDecisionTone } from '../composables/useMainAgentDisplay.js'
 import { downloadCommandJson } from '../utils/commandExport.js'
 import { buildGroupConversationKnowledgePayload, postKnowledgeCapture } from '../utils/knowledgeCapture.js'
-import { sanitizeUserFacingAgentText, summarizeWorkEvents } from '../utils/agentDisplay.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
 const emit = defineEmits(['navigated'])
@@ -140,7 +140,6 @@ const messageFiles = ref([])
 const messageFileInput = ref(null)
 const targetAgent = ref('all')
 const messageMode = ref('conversation')
-const collapsedWorkPanels = ref({})
 let activeAgentStreamMsgs = {}
 const diffViewer = ref({ visible: false, file: null })
 const codeChangeDrawer = ref({ visible: false, title: '', subtitle: '', project: '', fileChanges: null, files: [], selectedPath: '' })
@@ -276,26 +275,6 @@ const getAgentDisplayName = (agent) => {
   return agent || 'Agent'
 }
 const getWorkEvents = (msg) => Array.isArray(msg?.workEvents) ? msg.workEvents.filter(Boolean) : []
-const sanitizeUserVisibleWorkText = (value) => {
-  return sanitizeUserFacingAgentText(value, '')
-}
-const compactWorkText = (value, max = 320) => {
-  const text = sanitizeUserVisibleWorkText(value)
-  return text.length > max ? `${text.slice(0, max)}...` : text
-}
-const workEventLabel = (kind) => ({
-  status: '状态',
-  output: '输出',
-  tool: '工具',
-  done: '完成',
-  error: '错误'
-}[kind || 'status'] || kind)
-const workEventTone = (kind) => {
-  if (kind === 'done') return 'ok'
-  if (kind === 'error') return 'fail'
-  if (kind === 'output') return 'output'
-  return 'status'
-}
 const agentAccentPalette = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#dc2626', '#0891b2', '#be185d', '#4f46e5']
 const hashAgent = (agent) => String(agent || 'agent').split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0)
 const getAgentAccent = (agent) => agentAccentPalette[hashAgent(agent) % agentAccentPalette.length]
@@ -306,40 +285,12 @@ const getAgentInitials = (agent) => {
   if (!parts.length) return 'A'
   return parts.slice(0, 2).map(part => part[0]).join('').toUpperCase()
 }
-const getWorkPanelKey = (msg) => msg?.id || `${msg?.agent || 'agent'}-${msg?.timestamp || ''}`
 const getWorkPanelState = (msg) => {
   const events = getWorkEvents(msg)
   if (events.some(event => event.kind === 'error')) return { tone: 'fail', label: '失败' }
   if (msg?.streaming) return { tone: 'running', label: '执行中' }
   if (events.some(event => event.kind === 'done')) return { tone: 'ok', label: '完成' }
   return { tone: 'idle', label: events.length ? '等待回执' : '待执行' }
-}
-const formatWorkTime = (value) => {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
-const formatWorkDuration = (msg) => {
-  const events = getWorkEvents(msg)
-  if (!events.length) return '0s'
-  const first = new Date(events[0].time || msg?.timestamp || Date.now()).getTime()
-  const last = msg?.streaming ? Date.now() : new Date(events[events.length - 1].time || Date.now()).getTime()
-  if (Number.isNaN(first) || Number.isNaN(last)) return '0s'
-  const seconds = Math.max(0, Math.round((last - first) / 1000))
-  if (seconds < 60) return `${seconds}s`
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
-}
-const getWorkEventPreview = (msg) => compactWorkText(getWorkEvents(msg).slice(-1)[0]?.text || '等待子 Agent 输出...', 180)
-const getWorkEventSummary = (msg) => summarizeWorkEvents(getWorkEvents(msg))
-const isWorkPanelCollapsed = (msg) => {
-  const key = getWorkPanelKey(msg)
-  if (collapsedWorkPanels.value[key] !== undefined) return collapsedWorkPanels.value[key]
-  return !msg?.streaming && getWorkEvents(msg).length > 6
-}
-const toggleWorkPanel = (msg) => {
-  const key = getWorkPanelKey(msg)
-  collapsedWorkPanels.value = { ...collapsedWorkPanels.value, [key]: !isWorkPanelCollapsed(msg) }
 }
 const getAgentMessageStatus = (msg) => {
   if (msg?.agent === 'system') return { tone: 'fail', label: '系统' }
@@ -2461,66 +2412,12 @@ const applyRecommendation = () => {
                     </div>
                   </div>
                   <span v-if="msg.streaming" class="stream-cursor">▌</span>
-                  <details
-                    v-if="getWorkEvents(msg).length && !getTaskCard(msg) && isGroupMainAgentMessage(msg)"
-                    class="agent-work-events main-agent-technical-events"
-                    :class="getWorkPanelState(msg).tone"
-                    :style="getAgentAccentStyle(msg.agent)"
-                  >
-                    <summary>
-                      <span>技术详情</span>
-                      <small>可展开排查</small>
-                    </summary>
-                    <div class="work-events-list">
-                      <div
-                        v-for="event in getWorkEvents(msg).slice(-12)"
-                        :key="event.id || event.time || event.text"
-                        :class="['work-event', workEventTone(event.kind)]"
-                      >
-                        <div class="work-event-side">
-                          <span class="work-event-kind">{{ workEventLabel(event.kind) }}</span>
-                          <span class="work-event-time">{{ formatWorkTime(event.time) }}</span>
-                        </div>
-                        <pre>{{ compactWorkText(event.text) }}</pre>
-                      </div>
-                    </div>
-                  </details>
-                  <details
-                    v-else-if="getWorkEvents(msg).length && !getTaskCard(msg)"
-                    class="agent-work-events"
-                    :class="getWorkPanelState(msg).tone"
-                    :style="getAgentAccentStyle(msg.agent)"
-                  >
-                    <summary class="work-events-head">
-                      <div class="work-head-main">
-                        <span class="work-agent-dot"></span>
-                        <span class="work-title">子 Agent 执行摘要</span>
-                        <span :class="['work-state-pill', getWorkPanelState(msg).tone]">{{ getWorkPanelState(msg).label }}</span>
-                      </div>
-                      <div class="work-head-meta">
-                        <span>{{ getWorkEventSummary(msg).summary }}</span>
-                        <span>{{ formatWorkDuration(msg) }}</span>
-                        <small v-if="getWorkEventSummary(msg).hiddenCount">+{{ getWorkEventSummary(msg).hiddenCount }} 条详情</small>
-                      </div>
-                    </summary>
-                    <div class="work-events-preview">
-                      <span>{{ formatWorkTime(getWorkEvents(msg).slice(-1)[0]?.time) }}</span>
-                      <pre>{{ getWorkEventSummary(msg).latestText || getWorkEventPreview(msg) }}</pre>
-                    </div>
-                    <div class="work-events-list">
-                      <div
-                        v-for="event in getWorkEvents(msg).slice(-12)"
-                        :key="event.id || event.time || event.text"
-                        :class="['work-event', workEventTone(event.kind)]"
-                      >
-                        <div class="work-event-side">
-                          <span class="work-event-kind">{{ workEventLabel(event.kind) }}</span>
-                          <span class="work-event-time">{{ formatWorkTime(event.time) }}</span>
-                        </div>
-                        <pre>{{ compactWorkText(event.text) }}</pre>
-                      </div>
-                    </div>
-                  </details>
+                  <AgentWorkEventDetails
+                    v-if="getWorkEvents(msg).length && !getTaskCard(msg)"
+                    :msg="msg"
+                    :main-agent="isGroupMainAgentMessage(msg)"
+                    :accent-style="getAgentAccentStyle(msg.agent)"
+                  />
                   <!-- 文件变更 -->
                   <div v-if="msg.fileChanges && msg.fileChanges.count > 0" class="file-changes">
                     <div class="file-changes-header">{{ getFileChangesTitle(msg.fileChanges) }}</div>
@@ -4147,8 +4044,7 @@ const applyRecommendation = () => {
   font-size: 12px;
   font-weight: 800;
 }
-.agent-status-pill,
-.work-state-pill {
+.agent-status-pill {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -4163,18 +4059,15 @@ const applyRecommendation = () => {
   background: rgba(100, 116, 139, 0.1);
   color: var(--text-muted);
 }
-.agent-status-pill.running,
-.work-state-pill.running {
+.agent-status-pill.running {
   background: color-mix(in srgb, var(--agent-accent) 13%, transparent);
   color: var(--agent-accent);
 }
-.agent-status-pill.ok,
-.work-state-pill.ok {
+.agent-status-pill.ok {
   background: rgba(34, 197, 94, 0.12);
   color: var(--accent-green);
 }
-.agent-status-pill.fail,
-.work-state-pill.fail {
+.agent-status-pill.fail {
   background: rgba(239, 68, 68, 0.12);
   color: var(--accent-red);
 }
@@ -4182,194 +4075,11 @@ const applyRecommendation = () => {
   position: relative;
   z-index: 1;
 }
-.agent-work-events {
-  position: relative;
-  z-index: 1;
-  margin-top: 10px;
-  border: 1px solid color-mix(in srgb, var(--agent-accent) 22%, rgba(15, 23, 42, 0.08));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--agent-accent) 5%, rgba(255, 255, 255, 0.7));
-  overflow: hidden;
-}
-.agent-work-events > summary {
-  list-style: none;
-  cursor: pointer;
-  user-select: none;
-}
-.agent-work-events > summary::-webkit-details-marker {
-  display: none;
-}
-.agent-work-events:not([open]) .work-events-preview,
-.agent-work-events:not([open]) .work-events-list {
-  display: none;
-}
-.agent-work-events[open] .work-events-preview {
-  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
-}
-.agent-work-events.fail {
-  border-color: rgba(239, 68, 68, 0.24);
-  background: rgba(239, 68, 68, 0.035);
-}
-.main-agent-technical-events {
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.5);
-}
-.main-agent-technical-events summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 800;
-  user-select: none;
-}
-.main-agent-technical-events summary span {
-  color: var(--text-secondary);
-}
-.main-agent-technical-events summary small {
-  font-size: 10px;
-  font-weight: 700;
-}
-.main-agent-technical-events .work-events-list {
-  margin-top: 8px;
-  padding: 8px 0 0;
-  border-top: 1px solid rgba(15, 23, 42, 0.06);
-}
-.work-events-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 800;
-}
-.work-head-main,
-.work-head-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.work-head-meta {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-  font-weight: 700;
-}
-.work-agent-dot {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 8px;
-  border-radius: 999px;
-  background: var(--agent-accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--agent-accent) 12%, transparent);
-}
-.work-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-primary);
-}
-.work-toggle {
-  border: 1px solid color-mix(in srgb, var(--agent-accent) 22%, rgba(15, 23, 42, 0.1));
-  background: rgba(255, 255, 255, 0.72);
-  color: var(--agent-accent);
-  border-radius: 6px;
-  height: 24px;
-  padding: 0 8px;
-  font-size: 11px;
-  font-weight: 800;
-  cursor: pointer;
-}
-.work-toggle:hover {
-  background: color-mix(in srgb, var(--agent-accent) 10%, white);
-}
-.work-events-preview {
-  display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
-  gap: 8px;
-  padding: 8px 10px;
-  align-items: start;
-  color: var(--text-muted);
-  font-size: 11px;
-}
-.work-events-preview pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--text-secondary);
-  font-family: Consolas, 'JetBrains Mono', monospace;
-  line-height: 1.5;
-}
-.work-events-list {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 9px;
-  max-height: 300px;
-  overflow-y: auto;
-}
-.work-event {
-  display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
-  gap: 9px;
-  align-items: start;
-}
-.work-event-side {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  align-items: flex-start;
-}
-.work-event-kind {
-  min-width: 42px;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: rgba(100, 116, 139, 0.1);
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 800;
-  text-align: center;
-}
-.work-event-time {
-  color: var(--text-muted);
-  font-size: 10px;
-  line-height: 1.2;
-}
-.work-event pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--text-secondary);
-  font-family: Consolas, 'JetBrains Mono', monospace;
-  font-size: 11px;
-  line-height: 1.55;
-}
-.work-event.output pre {
-  color: var(--text-primary);
-}
-.work-event.ok .work-event-kind { background: rgba(34, 197, 94, 0.12); color: var(--accent-green); }
-.work-event.fail .work-event-kind { background: rgba(239, 68, 68, 0.12); color: var(--accent-red); }
-.work-event.output .work-event-kind { background: color-mix(in srgb, var(--agent-accent) 12%, transparent); color: var(--agent-accent); }
 [data-theme="dark"] .agent-avatar {
   background: color-mix(in srgb, var(--agent-accent) 20%, rgba(15, 23, 42, 0.9));
   border-color: color-mix(in srgb, var(--agent-accent) 32%, rgba(255, 255, 255, 0.08));
 }
-[data-theme="dark"] .agent-work-events {
-  background: color-mix(in srgb, var(--agent-accent) 8%, rgba(15, 23, 42, 0.78));
-  border-color: color-mix(in srgb, var(--agent-accent) 30%, rgba(255, 255, 255, 0.08));
-}
-[data-theme="dark"] .work-events-head {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
-[data-theme="dark"] .work-toggle {
-  background: rgba(15, 23, 42, 0.72);
-  border-color: color-mix(in srgb, var(--agent-accent) 30%, rgba(255, 255, 255, 0.08));
-}.agent-qa-bubble {
+.agent-qa-bubble {
   border-left: 3px solid var(--agent-accent, #3b82f6) !important;
   background: color-mix(in srgb, var(--agent-accent, #3b82f6) 7%, rgba(255, 255, 255, 0.78)) !important;
 }
