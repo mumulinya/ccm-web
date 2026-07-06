@@ -12,6 +12,7 @@ const files = {
   templates: path.join(root, 'frontend/src/components/Templates.vue'),
   searchHistory: path.join(root, 'frontend/src/components/SearchHistory.vue'),
   backend: path.join(root, 'backend/modules/collaboration.ts'),
+  backendDisplay: path.join(root, 'backend/modules/collaboration-display.ts'),
 }
 
 const read = (file) => fs.readFileSync(file, 'utf-8')
@@ -24,6 +25,7 @@ const agentDisplay = read(files.agentDisplay)
 const templates = read(files.templates)
 const searchHistory = read(files.searchHistory)
 const backend = read(files.backend)
+const backendDisplay = read(files.backendDisplay)
 
 const checks = {
   componentExists: fs.existsSync(files.component),
@@ -62,8 +64,8 @@ const checks = {
   backendTaskCreatedCarriesDecision: backend.includes('mainAgentDecision,') && backend.includes('main_agent_decision: mainAgentDecision'),
   backendPetLinkage: backend.includes('mainAgentPetStateFromDecision') && backend.includes('applyMainAgentDecisionPetState') && backend.includes('"global-agent"') && backend.includes('workspace-group'),
   backendBuildsUserTodoPlan: backend.includes('buildMainAgentUserPlanSteps') && backend.includes('buildUserVisiblePlanStep') && backend.includes('user_visible') && backend.includes('schema: "cc-style-todo-v2"') && backend.includes('show_current_focus: true') && backend.includes('hide_for_simple_conversation'),
-  backendBuildsStreamlinedDisplay: backend.includes('buildMainAgentDisplayStream') && backend.includes('ccm-streamlined-display-v1') && backend.includes('streamlined_text') && backend.includes('streamlined_tool_use_summary') && backend.includes('tool_message_visible: false') && backend.includes('technical_details'),
-  backendBuildsToolUseSummary: backend.includes('buildStreamlinedToolUseSummary') && backend.includes('hidden_tool_uses') && backend.includes('读取/检查') && backend.includes('协作通道'),
+  backendBuildsStreamlinedDisplay: backend.includes('buildMainAgentDisplayStream') && backendDisplay.includes('ccm-streamlined-display-v1') && backendDisplay.includes('streamlined_text') && backendDisplay.includes('streamlined_tool_use_summary') && backendDisplay.includes('tool_message_visible: false') && backendDisplay.includes('technical_details'),
+  backendBuildsToolUseSummary: backendDisplay.includes('buildStreamlinedToolUseSummary') && backendDisplay.includes('hidden_tool_uses') && backendDisplay.includes('读取/检查') && backendDisplay.includes('协作通道'),
   backendBuildsInternalLoop: backend.includes('buildGroupMainAgentInternalLoop') && backend.includes('observe-think-plan-act-monitor-reflect-respond') && backend.includes('internal_loop') && backend.includes('GROUP_MAIN_AGENT_LOOP_STAGES'),
   backendSelftestCoversTodoPlan: backend.includes('allHaveUserTodoPlan') && backend.includes('conversationTodoSkipsDispatch') && backend.includes('projectTaskTodoTracksExecution') && backend.includes('governanceTodoNeedsConfirmation'),
   backendSelftestCoversInternalLoop: backend.includes('allHaveInternalLoop') && backend.includes('conversationLoopSkipsAct') && backend.includes('projectTaskLoopActsAndMonitors') && backend.includes('governanceLoopBlocksUnauthorizedAct'),
