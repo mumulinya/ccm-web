@@ -5,6 +5,8 @@ import AgentPipeline from './AgentPipeline.vue'
 import { toast, confirmDialog } from '../utils/toast.js'
 import SlashCommandMenu from './SlashCommandMenu.vue'
 import CommandResultCard from './CommandResultCard.vue'
+import ConflictPlanMessage from './ConflictPlanMessage.vue'
+import ProjectTaskIntakeMessage from './ProjectTaskIntakeMessage.vue'
 import TaskCollaborationCard from './TaskCollaborationCard.vue'
 import AgentCodeChangeDrawer from './AgentCodeChangeDrawer.vue'
 import AgentQaMessage from './AgentQaMessage.vue'
@@ -2218,32 +2220,11 @@ const applyRecommendation = () => {
                   <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
                 </div>
                 <!-- 项目主 Agent 任务接管 -->
-                <div v-else-if="msg.type === 'project_task_intake'" class="bubble project-task-intake" :style="getAgentAccentStyle(msg.agent)">
-                  <div class="project-task-head">
-                    <div>
-                      <span class="project-task-kicker">项目任务</span>
-                      <strong>{{ msg.task?.title || '项目开发任务' }}</strong>
-                    </div>
-                    <span class="project-task-status">{{ msg.queue?.queued === false ? '已保存' : '执行中' }}</span>
-                  </div>
-                  <div class="project-task-content">{{ msg.content }}</div>
+                <ProjectTaskIntakeMessage v-else-if="msg.type === 'project_task_intake'" :msg="msg" :accent-style="getAgentAccentStyle(msg.agent)">
                   <MainAgentDecisionCard v-if="getMainAgentDecision(msg)" :decision="getMainAgentDecision(msg)" compact @step-action="handleTaskCardAction(msg, $event)" />
                   <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
-                </div>
-                <div v-else-if="msg.type === 'conflict_plan'" class="bubble conflict-plan-bubble">
-                  <div class="conflict-plan-head">
-                    <strong>跨 Agent 冲突保护</strong>
-                    <span>已自动串行</span>
-                  </div>
-                  <div class="project-task-content">{{ msg.content }}</div>
-                  <div v-if="msg.conflictPlan?.conflicts?.length" class="conflict-plan-list">
-                    <div v-for="(conflict, conflictIndex) in msg.conflictPlan.conflicts" :key="`${conflict.projects?.join(':')}:${conflictIndex}`">
-                      <strong>{{ conflict.projects?.join(' 与 ') }}</strong>
-                      <span>{{ conflict.reason }}</span>
-                      <code v-if="conflict.scopes?.length">{{ conflict.scopes.join('、') }}</code>
-                    </div>
-                  </div>
-                </div>
+                </ProjectTaskIntakeMessage>
+                <ConflictPlanMessage v-else-if="msg.type === 'conflict_plan'" :msg="msg" />
                 <!-- Agent 问答 -->
                 <AgentQaMessage
                   v-else-if="isAgentQaMessage(msg)"
@@ -3825,81 +3806,6 @@ const applyRecommendation = () => {
 [data-theme="dark"] .hl-number { color: #f97316; }
 
 .hl-match { background-color: rgba(234, 179, 8, 0.4); border-bottom: 2px solid #eab308; color: inherit; font-weight: bold; }
-.project-task-intake {
-  border-left: 3px solid var(--accent-blue);
-  background: rgba(37, 99, 235, 0.045);
-}
-.project-task-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 10px;
-}
-.project-task-head > div {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-.project-task-head strong {
-  font-size: 14px;
-  overflow-wrap: anywhere;
-}
-.project-task-kicker {
-  color: var(--accent-blue);
-  font-size: 10px;
-  font-weight: 700;
-}
-.project-task-status {
-  flex: none;
-  padding: 3px 7px;
-  border-radius: 4px;
-  background: rgba(37, 99, 235, 0.1);
-  color: var(--accent-blue);
-  font-size: 10px;
-  font-weight: 700;
-}
-.project-task-content {
-  white-space: pre-wrap;
-  line-height: 1.65;
-  color: var(--text-secondary);
-}
-.project-task-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  margin-top: 10px;
-  color: var(--text-muted);
-  font-size: 10px;
-}
-.project-task-meta code {
-  color: var(--accent-blue);
-}
-.inline-task-runtime {
-  margin-top: 10px;
-  padding: 10px;
-  border: 1px solid rgba(37, 99, 235, 0.14);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.46);
-}
-.inline-task-runtime.compact { margin-bottom: 10px; }
-.inline-runtime-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; }
-.inline-runtime-head strong { color: var(--accent-blue); }
-.inline-runtime-head span { color: var(--text-muted); text-align: right; overflow-wrap: anywhere; }
-.inline-runtime-counts { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; color: var(--text-secondary); font-size: 10.5px; }
-.inline-runtime-agents, .inline-runtime-sessions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.inline-runtime-agents > span, .inline-runtime-sessions > span { padding: 4px 7px; border-radius: 5px; background: rgba(100, 116, 139, 0.09); color: var(--text-secondary); font-size: 10px; }
-.inline-agent-state.running, .inline-agent-state.spawning, .inline-agent-state.ready, .inline-agent-state.prompt_accepted, .inline-agent-state.reviewing { background: rgba(37, 99, 235, 0.1); color: var(--accent-blue); }
-.inline-agent-state.succeeded { background: rgba(34, 197, 94, 0.11); color: var(--accent-green); }
-.inline-agent-state.failed, .inline-agent-state.cancelled { background: rgba(239, 68, 68, 0.1); color: #b91c1c; }
-.conflict-plan-bubble { border-left: 3px solid #d97706; background: rgba(245, 158, 11, 0.06); }
-.conflict-plan-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
-.conflict-plan-head span { padding: 3px 7px; border-radius: 5px; background: rgba(245, 158, 11, 0.12); color: #b45309; font-size: 10px; font-weight: 700; }
-.conflict-plan-list { display: grid; gap: 7px; margin-top: 9px; }
-.conflict-plan-list > div { display: grid; gap: 3px; padding: 7px 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.52); font-size: 10.5px; }
-.conflict-plan-list span { color: var(--text-secondary); }
-.conflict-plan-list code { color: #92400e; overflow-wrap: anywhere; }
-
 .agent-exec-bubble {
   position: relative;
   border-left: 3px solid var(--agent-accent) !important;
