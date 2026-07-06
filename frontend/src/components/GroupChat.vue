@@ -12,6 +12,7 @@ import { useSlashCommands } from '../composables/useSlashCommands.js'
 import { createGroupTaskCardActionHandler } from '../composables/useGroupTaskCardActions.js'
 import { downloadCommandJson } from '../utils/commandExport.js'
 import { buildGroupConversationKnowledgePayload, postKnowledgeCapture } from '../utils/knowledgeCapture.js'
+import { sanitizeUserFacingAgentText, summarizeWorkEvents } from '../utils/agentDisplay.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
 const emit = defineEmits(['navigated'])
@@ -267,13 +268,18 @@ const mainDecisionActionSummary = (decision) => {
   return actions.map(a => labels[a] || a).slice(0, 5).join(' → ') || '等待动作'
 }
 const mainDecisionPlanSummary = (decision) => {
+  const display = decision?.todo_plan?.display || {}
+  if (decision?.mode === 'conversation' && (display.user_visible === false || display.hide_for_simple_conversation === true)) return ''
   const steps = Array.isArray(decision?.user_plan_steps)
     ? decision.user_plan_steps
     : Array.isArray(decision?.todo_plan?.steps)
       ? decision.todo_plan.steps
       : []
   const active = steps.find(step => ['in_progress', 'reviewing', 'reworking', 'needs_confirmation', 'failed'].includes(step.status))
-  const preview = (active || steps.find(step => step.status === 'pending') || steps[steps.length - 1])?.content || ''
+  const current = active || steps.find(step => step.status === 'pending') || steps[steps.length - 1]
+  const preview = (['in_progress', 'reviewing', 'reworking'].includes(current?.status) && (current?.activeForm || current?.active_form))
+    ? (current.activeForm || current.active_form)
+    : current?.summary || current?.content || ''
   const done = steps.filter(step => ['completed', 'skipped', 'cancelled', 'failed'].includes(step.status)).length
   return preview ? `计划 ${done}/${steps.length}：${compactStatusText(preview, 56)}` : ''
 }
@@ -323,14 +329,7 @@ const getAgentDisplayName = (agent) => {
 }
 const getWorkEvents = (msg) => Array.isArray(msg?.workEvents) ? msg.workEvents.filter(Boolean) : []
 const sanitizeUserVisibleWorkText = (value) => {
-  const text = String(value || '').trim()
-  if (!text) return ''
-  if (/CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|scratchpad|trace_id|session_ids|native_session|task_agent_session|shouldDelegate|门禁|回执要求|任务级原生会话/i.test(text)) {
-    if (/error|失败|权限|denied|invalid/i.test(text)) return 'Agent 遇到内部执行保护或权限问题，详情已折叠，可在技术详情中排查。'
-    if (/done|完成|CCM_AGENT_RECEIPT/i.test(text)) return 'Agent 已提交结构化完成信息，系统正在汇总验收。'
-    return 'Agent 正在处理内部执行细节，已为用户视图折叠。'
-  }
-  return text
+  return sanitizeUserFacingAgentText(value, '')
 }
 const compactWorkText = (value, max = 320) => {
   const text = sanitizeUserVisibleWorkText(value)
@@ -384,6 +383,7 @@ const formatWorkDuration = (msg) => {
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
 }
 const getWorkEventPreview = (msg) => compactWorkText(getWorkEvents(msg).slice(-1)[0]?.text || '等待子 Agent 输出...', 180)
+const getWorkEventSummary = (msg) => summarizeWorkEvents(getWorkEvents(msg))
 const isWorkPanelCollapsed = (msg) => {
   const key = getWorkPanelKey(msg)
   if (collapsedWorkPanels.value[key] !== undefined) return collapsedWorkPanels.value[key]
@@ -400,6 +400,7 @@ const getAgentMessageStatus = (msg) => {
   if (msg?.streaming) return { tone: 'running', label: '思考中' }
   return { tone: 'idle', label: '回复' }
 }
+const isGroupMainAgentMessage = (msg) => isCoordinatorProject(msg?.agent) || msg?.type === 'project_task_intake'
 const getTaskRuntime = (msg) => msg?.taskRuntime || msg?.task_runtime || null
 const isLegacyNonTaskCard = (card) => {
   if (!card) return false
@@ -452,6 +453,11 @@ const handleTaskCardAction = createGroupTaskCardActionHandler({
   getCurrentGroup: () => currentGroup.value,
   openCodeChangeDrawer: (...args) => openCodeChangeDrawer(...args),
   openPipelineViewer,
+  openTraceReplay: (target = {}) => {
+    localStorage.setItem('trace-replay-target', JSON.stringify({ scope: target.scope || 'orchestrator', trace_id: target.trace_id || '', at: Date.now() }))
+    slashNavigate?.('trace-replay')
+    window.dispatchEvent(new CustomEvent('trace-replay-target', { detail: { scope: target.scope || 'orchestrator', trace_id: target.trace_id || '' } }))
+  },
   loadMessages: () => loadMessages(),
 })
 const taskRuntimeStatusLabel = (status) => ({ pending: '待执行', in_progress: '执行中', done: '已完成', failed: '失败', cancelled: '已取消' }[status] || status || '执行中')
@@ -2353,7 +2359,7 @@ const applyRecommendation = () => {
                 <div v-else-if="msg.role === 'thinking'" class="thinking-bubble">
                   <div class="thinking-header">
                     <span class="thinking-icon">🧠</span>
-                    <span>Agent 思考中...</span>
+                    <span>正在处理...</span>
                   </div>
                   <div class="thinking-content">{{ msg.content }}</div>
                   <span class="stream-cursor">▌</span>
@@ -2368,7 +2374,7 @@ const applyRecommendation = () => {
                 <div v-else-if="msg.type === 'project_task_intake'" class="bubble project-task-intake" :style="getAgentAccentStyle(msg.agent)">
                   <div class="project-task-head">
                     <div>
-                      <span class="project-task-kicker">项目主 Agent</span>
+                      <span class="project-task-kicker">项目任务</span>
                       <strong>{{ msg.task?.title || '项目开发任务' }}</strong>
                     </div>
                     <span class="project-task-status">{{ msg.queue?.queued === false ? '已保存' : '执行中' }}</span>
@@ -2469,7 +2475,7 @@ const applyRecommendation = () => {
                       <div v-if="msg.dispatchPolicy.requiresConfirmation" class="dispatch-confirm">需要确认后执行</div>
                     </div>
                     <div v-if="msg.coordinationPlan?.phases?.length" class="coordination-plan">
-                      <div class="coordination-title">Coordinator 计划</div>
+                      <div class="coordination-title">协作计划</div>
                       <div v-for="phase in msg.coordinationPlan.phases" :key="phase" class="coordination-phase">
                         {{ compactPlanText(phase, 120) }}
                       </div>
@@ -2499,7 +2505,7 @@ const applyRecommendation = () => {
                       </div>
                     <div style="margin-top: 10px; display: flex; justify-content: flex-end;">
                       <button class="btn btn-sm" style="display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 11px; background: rgba(0, 188, 212, 0.12); border: 1px solid rgba(0, 188, 212, 0.25); color: #00bcd4; border-radius: 4px; cursor: pointer;" @click="openPipelineViewer(msg)">
-                        🔍 查看协同 Pipeline
+                        查看协作看板
                       </button>
                     </div>
                       <div class="plan-task">{{ compactPlanText(item.task) }}</div>
@@ -2507,31 +2513,17 @@ const applyRecommendation = () => {
                     </div>
                   </div>
                   <span v-if="msg.streaming" class="stream-cursor">▌</span>
-                  <div
-                    v-if="getWorkEvents(msg).length && !getTaskCard(msg)"
-                    class="agent-work-events"
+                  <details
+                    v-if="getWorkEvents(msg).length && !getTaskCard(msg) && isGroupMainAgentMessage(msg)"
+                    class="agent-work-events main-agent-technical-events"
                     :class="getWorkPanelState(msg).tone"
                     :style="getAgentAccentStyle(msg.agent)"
                   >
-                    <div class="work-events-head">
-                      <div class="work-head-main">
-                        <span class="work-agent-dot"></span>
-                        <span class="work-title">子 Agent 执行面板</span>
-                        <span :class="['work-state-pill', getWorkPanelState(msg).tone]">{{ getWorkPanelState(msg).label }}</span>
-                      </div>
-                      <div class="work-head-meta">
-                        <span>{{ getWorkEvents(msg).length }} 条</span>
-                        <span>{{ formatWorkDuration(msg) }}</span>
-                        <button class="work-toggle" type="button" @click="toggleWorkPanel(msg)">
-                          {{ isWorkPanelCollapsed(msg) ? '展开' : '收起' }}
-                        </button>
-                      </div>
-                    </div>
-                    <div v-if="isWorkPanelCollapsed(msg)" class="work-events-preview">
-                      <span>{{ formatWorkTime(getWorkEvents(msg).slice(-1)[0]?.time) }}</span>
-                      <pre>{{ getWorkEventPreview(msg) }}</pre>
-                    </div>
-                    <div v-else class="work-events-list">
+                    <summary>
+                      <span>技术详情</span>
+                      <small>可展开排查</small>
+                    </summary>
+                    <div class="work-events-list">
                       <div
                         v-for="event in getWorkEvents(msg).slice(-12)"
                         :key="event.id || event.time || event.text"
@@ -2544,7 +2536,43 @@ const applyRecommendation = () => {
                         <pre>{{ compactWorkText(event.text) }}</pre>
                       </div>
                     </div>
-                  </div>
+                  </details>
+                  <details
+                    v-else-if="getWorkEvents(msg).length && !getTaskCard(msg)"
+                    class="agent-work-events"
+                    :class="getWorkPanelState(msg).tone"
+                    :style="getAgentAccentStyle(msg.agent)"
+                  >
+                    <summary class="work-events-head">
+                      <div class="work-head-main">
+                        <span class="work-agent-dot"></span>
+                        <span class="work-title">子 Agent 执行摘要</span>
+                        <span :class="['work-state-pill', getWorkPanelState(msg).tone]">{{ getWorkPanelState(msg).label }}</span>
+                      </div>
+                      <div class="work-head-meta">
+                        <span>{{ getWorkEventSummary(msg).summary }}</span>
+                        <span>{{ formatWorkDuration(msg) }}</span>
+                        <small v-if="getWorkEventSummary(msg).hiddenCount">+{{ getWorkEventSummary(msg).hiddenCount }} 条详情</small>
+                      </div>
+                    </summary>
+                    <div class="work-events-preview">
+                      <span>{{ formatWorkTime(getWorkEvents(msg).slice(-1)[0]?.time) }}</span>
+                      <pre>{{ getWorkEventSummary(msg).latestText || getWorkEventPreview(msg) }}</pre>
+                    </div>
+                    <div class="work-events-list">
+                      <div
+                        v-for="event in getWorkEvents(msg).slice(-12)"
+                        :key="event.id || event.time || event.text"
+                        :class="['work-event', workEventTone(event.kind)]"
+                      >
+                        <div class="work-event-side">
+                          <span class="work-event-kind">{{ workEventLabel(event.kind) }}</span>
+                          <span class="work-event-time">{{ formatWorkTime(event.time) }}</span>
+                        </div>
+                        <pre>{{ compactWorkText(event.text) }}</pre>
+                      </div>
+                    </div>
+                  </details>
                   <!-- 文件变更 -->
                   <div v-if="msg.fileChanges && msg.fileChanges.count > 0" class="file-changes">
                     <div class="file-changes-header">{{ getFileChangesTitle(msg.fileChanges) }}</div>
@@ -2693,12 +2721,12 @@ const applyRecommendation = () => {
       @open-changes="openDrawerChangesTab"
     />
 
-    <!-- Agent 协作流 Pipeline 弹窗 -->
+    <!-- Agent 协作流看板弹窗 -->
     <div v-if="pipelineViewer.visible" class="modal-overlay" style="z-index: 999; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); backdrop-filter: blur(12px);" @click.self="pipelineViewer.visible = false">
       <div class="modal" style="width: 860px; max-width: 90vw; background: rgba(18, 22, 33, 0.95); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); display: flex; flex-direction: column; max-height: 90vh;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
           <h3 style="margin: 0; font-size: 15px; color: #fff; display: flex; align-items: center; gap: 8px;">
-            📈 Agent 协作流 Pipeline 看板
+            Agent 协作流看板
           </h3>
           <button class="modal-close" style="background: none; border: none; color: #888; font-size: 24px; cursor: pointer; line-height: 1;" @click="pipelineViewer.visible = false">&times;</button>
         </div>
@@ -4215,9 +4243,51 @@ const applyRecommendation = () => {
   background: color-mix(in srgb, var(--agent-accent) 5%, rgba(255, 255, 255, 0.7));
   overflow: hidden;
 }
+.agent-work-events > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+.agent-work-events > summary::-webkit-details-marker {
+  display: none;
+}
+.agent-work-events:not([open]) .work-events-preview,
+.agent-work-events:not([open]) .work-events-list {
+  display: none;
+}
+.agent-work-events[open] .work-events-preview {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
 .agent-work-events.fail {
   border-color: rgba(239, 68, 68, 0.24);
   background: rgba(239, 68, 68, 0.035);
+}
+.main-agent-technical-events {
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.5);
+}
+.main-agent-technical-events summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 800;
+  user-select: none;
+}
+.main-agent-technical-events summary span {
+  color: var(--text-secondary);
+}
+.main-agent-technical-events summary small {
+  font-size: 10px;
+  font-weight: 700;
+}
+.main-agent-technical-events .work-events-list {
+  margin-top: 8px;
+  padding: 8px 0 0;
+  border-top: 1px solid rgba(15, 23, 42, 0.06);
 }
 .work-events-head {
   display: flex;

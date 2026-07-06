@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import { buildContextBudget, estimateTextTokens, microCompactText } from "./context-budget";
 import { CCM_DIR } from "./utils";
 import { applyMemoryControls, recordMemoryMetric, recordMemoryOperation } from "./modules/memory-control-center";
 
@@ -36,6 +37,8 @@ const MEMORY_ITEM_KEYS: GlobalMemoryItemType[] = ["user", "feedback", "authoriza
 const COMPACT_MESSAGE_THRESHOLD = 60;
 const COMPACT_TOKEN_THRESHOLD = 50_000;
 const RECENT_MESSAGES_TO_KEEP = 24;
+const RECENT_MIN_TOKENS_TO_KEEP = 10_000;
+const RECENT_MAX_TOKENS_TO_KEEP = 40_000;
 const MAX_COMPACTION_FAILURES = 3;
 const MAX_ITEMS_PER_TYPE = 300;
 
@@ -44,7 +47,7 @@ function ensureDirs() { fs.mkdirSync(TRANSCRIPT_DIR, { recursive: true }); }
 function sha(value: any, length = 32) { return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex").slice(0, length); }
 function cleanId(value: any) { return String(value || "default").replace(/[^a-zA-Z0-9._@-]+/g, "_").slice(0, 110); }
 function compact(value: any, max = 2000) { const text = String(value || "").trim(); return text.length > max ? `${text.slice(0, Math.ceil(max * .64))}\n…[中间内容已压缩，原文可从加密转录恢复]…\n${text.slice(-Math.floor(max * .3))}` : text; }
-function estimateTokens(value: any) { return Math.ceil(String(value || "").length / 3.5); }
+function estimateTokens(value: any) { return estimateTextTokens(value); }
 
 function writeAtomic(file: string, value: any) {
   ensureDirs();
@@ -296,6 +299,42 @@ function buildSegmentSummary(messages: any[], candidates: GlobalMemoryItem[]) {
   };
 }
 
+function calculateGlobalMessagesToKeepIndex(messages: any[], options: { floorIndex?: number; force?: boolean } = {}) {
+  const floorIndex = Math.max(0, Math.min(messages.length, Number(options.floorIndex || 0)));
+  let startIndex = messages.length;
+  let totalTokens = 0;
+  let textMessages = 0;
+  for (let index = messages.length - 1; index >= floorIndex; index -= 1) {
+    const messageTokens = estimateTokens(messages[index]?.content || "");
+    const meetsMinimum = textMessages >= RECENT_MESSAGES_TO_KEEP && totalTokens >= RECENT_MIN_TOKENS_TO_KEEP;
+    if (meetsMinimum) break;
+    if (textMessages >= 3 && totalTokens + messageTokens > RECENT_MAX_TOKENS_TO_KEEP) break;
+    startIndex = index;
+    totalTokens += messageTokens;
+    if (String(messages[index]?.content || "").trim()) textMessages += 1;
+  }
+  if (options.force && startIndex === floorIndex && messages.length - floorIndex > RECENT_MESSAGES_TO_KEEP && totalTokens < RECENT_MIN_TOKENS_TO_KEEP) {
+    return Math.max(floorIndex, messages.length - RECENT_MESSAGES_TO_KEEP);
+  }
+  return startIndex;
+}
+
+function buildMicroCompactRecords(messages: any[]) {
+  return messages.map((message: any) => {
+    const content = String(message?.content || "");
+    const compacted = microCompactText(content, 8000);
+    if (!compacted.compacted) return null;
+    return {
+      messageId: message.id,
+      originalChars: compacted.original_chars,
+      compactedChars: compacted.compacted_chars,
+      tokensBefore: compacted.tokens_before,
+      tokensAfter: compacted.tokens_after,
+      contentHash: sha(content, 40),
+    };
+  }).filter(Boolean);
+}
+
 export function compactGlobalAgentSession(sessionId: string, options: { force?: boolean; reason?: string } = {}) {
   const transcript = loadGlobalAgentTranscript(sessionId);
   const memory = loadGlobalAgentMemory();
@@ -309,11 +348,32 @@ export function compactGlobalAgentSession(sessionId: string, options: { force?: 
     return { compacted: false, reason: "circuit_breaker", tokenCount, messageCount: unsummarized.length, memory };
   }
   try {
-    const keepStart = Math.max(Number(session.lastCompactedIndex || -1) + 1, transcript.messages.length - RECENT_MESSAGES_TO_KEEP);
+    const floorIndex = Number(session.lastCompactedIndex || -1) + 1;
+    const keepStart = calculateGlobalMessagesToKeepIndex(transcript.messages, { floorIndex, force: !!options.force });
     const segment = transcript.messages.slice(Number(session.lastCompactedIndex || -1) + 1, keepStart);
     if (segment.length === 0) return { compacted: false, reason: "nothing_to_compact", tokenCount, messageCount: unsummarized.length, memory };
     const extracted = extractGlobalMemoryCandidates(segment, sessionId);
     const summary = buildSegmentSummary(segment, extracted.candidates);
+    const microCompactRecords = buildMicroCompactRecords(segment);
+    const keptMessages = transcript.messages.slice(keepStart);
+    const recentTokenCount = keptMessages.reduce((sum: number, item: any) => sum + estimateTokens(item.content), 0);
+    const postCompactTokenCount = recentTokenCount + estimateTokens(JSON.stringify(summary));
+    const contextBudget = buildContextBudget({
+      context: {
+        summary,
+        recent: keptMessages.map((item: any) => ({ id: item.id, role: item.role, content: microCompactText(item.content, 1800).text })),
+      },
+      maxChars: 48_000,
+      maxTokens: RECENT_MAX_TOKENS_TO_KEEP + COMPACT_TOKEN_THRESHOLD,
+    });
+    const postCompactRestore = {
+      strategy: "summary_recent_anchor_reinject",
+      filesAndResources: (summary.filesAndResources || []).slice(-8),
+      references: (summary.references || []).slice(-8),
+      missionIds: (summary.missionIds || []).slice(-8),
+      sourceMessageIds: (summary.sourceMessageIds || []).slice(-12),
+      recentMessageIds: keptMessages.slice(-12).map((item: any) => item.id),
+    };
     const archive: any = {
       id: `gma_${Date.now().toString(36)}_${crypto.randomBytes(3).toString("hex")}`,
       sessionId,
@@ -324,6 +384,11 @@ export function compactGlobalAgentSession(sessionId: string, options: { force?: 
       count: segment.length,
       records: segment.map((item: any) => ({ id: item.id, role: item.role, timestamp: item.timestamp, contentHash: sha(item.content, 40) })),
       summary,
+      microCompact: {
+        version: 1,
+        compactedMessages: microCompactRecords,
+        compactedMessageCount: microCompactRecords.length,
+      },
       transcriptFile: path.basename(transcriptFile(sessionId)),
       createdAt: now(),
       reason: options.reason || "auto",
@@ -343,9 +408,19 @@ export function compactGlobalAgentSession(sessionId: string, options: { force?: 
       lastCompactedMessageId: segment.at(-1)?.id || "",
       recentMessageIds: transcript.messages.slice(keepStart).map((item: any) => item.id),
       preCompactTokenCount: tokenCount,
-      postCompactTokenCount: transcript.messages.slice(keepStart).reduce((sum: number, item: any) => sum + estimateTokens(item.content), 0) + estimateTokens(JSON.stringify(summary)),
+      postCompactTokenCount,
       lastCompactedAt: now(),
-      boundary: { type: "compact_boundary", archiveId: archive.id, preCompactTokenCount: tokenCount, preservedFromIndex: keepStart },
+      boundary: {
+        type: "compact_boundary",
+        archiveId: archive.id,
+        preCompactTokenCount: tokenCount,
+        postCompactTokenCount,
+        preservedFromIndex: keepStart,
+        preservedMessageCount: keptMessages.length,
+        preservedTokenCount: recentTokenCount,
+        post_compact_restore: postCompactRestore,
+        context_budget: contextBudget,
+      },
     };
     if (sessionIndex >= 0) memory.sessions[sessionIndex] = nextSession; else memory.sessions.push(nextSession);
     memory.compaction = {
@@ -356,6 +431,7 @@ export function compactGlobalAgentSession(sessionId: string, options: { force?: 
       lastCompactedAt: nextSession.lastCompactedAt,
       preCompactTokenCount: nextSession.preCompactTokenCount,
       postCompactTokenCount: nextSession.postCompactTokenCount,
+      context_budget: contextBudget,
       boundaries: [...(memory.compaction?.boundaries || []), nextSession.boundary].slice(-100),
     };
     memory.privacy = { ...(memory.privacy || {}), rejectedCandidates: Number(memory.privacy?.rejectedCandidates || 0) + extracted.rejected, encryptedTranscripts: true, lastScanAt: now() };
@@ -455,6 +531,16 @@ export function buildGlobalAgentMemoryPacket(query: string, options: { sessionId
     "使用规则：记忆中提到的文件、函数、任务状态或配置可能已过期；采取行动前必须读取当前真实状态验证。",
   ];
   if (recalled.sessionSummary) lines.push(`当前会话压缩摘要：${compact(JSON.stringify(recalled.sessionSummary), 3000)}`);
+  if (recalled.boundary) {
+    const budget = recalled.boundary.context_budget || {};
+    lines.push(`当前会话压缩边界：archive=${recalled.boundary.archiveId || ""}；保留 recent=${recalled.boundary.preservedMessageCount || 0} 条/${recalled.boundary.preservedTokenCount || 0} tokens；压力=${budget.pressure ?? ""}%`);
+  }
+  if (Array.isArray(recalled.sessionSummary?.filesAndResources) && recalled.sessionSummary.filesAndResources.length) {
+    lines.push(`压缩后恢复锚点：${recalled.sessionSummary.filesAndResources.slice(-8).join("、")}`);
+  }
+  if (Array.isArray(recalled.boundary?.post_compact_restore?.recentMessageIds) && recalled.boundary.post_compact_restore.recentMessageIds.length) {
+    lines.push(`压缩后 recent 回灌：${recalled.boundary.post_compact_restore.recentMessageIds.slice(-8).join("、")}`);
+  }
   for (const item of recalled.items) {
     const source = item.source || {};
     lines.push(`- [${item.type}｜${item.id}｜${source.timestamp || item.updatedAt || ""}] ${item.text}${item.why ? `\n  Why: ${item.why}` : ""}${item.howToApply ? `\n  How to apply: ${item.howToApply}` : ""}\n  来源: session=${source.sessionId || ""}${source.missionId ? ` mission=${source.missionId}` : ""} messages=${(source.messageIds || []).join(",")}`);
@@ -532,7 +618,7 @@ export function runGlobalAgentMemorySelfTest() {
   const messages: any[] = [];
   for (let index = 0; index < 90; index += 1) {
     messages.push({ role: "user", timestamp: new Date(Date.now() + index * 1000).toISOString(), content: index === 2 ? "以后全局 Agent 没有明确授权时不要直接操作项目，必须先确认" : index === 4 ? "我的 Claude Code 源码在 D:\\claude-code，以后分析压缩机制先看这里" : index === 6 ? "api_key=super-secret-value-123456" : `第 ${index} 轮普通对话，讨论全局任务连续性和记忆压缩边界` });
-    messages.push({ role: "assistant", timestamp: new Date(Date.now() + index * 1000 + 10).toISOString(), content: index === 8 ? "下一步仍需完成全局记忆控制中心的跨会话验收" : `已记录第 ${index} 轮上下文` });
+    messages.push({ role: "assistant", timestamp: new Date(Date.now() + index * 1000 + 10).toISOString(), content: index === 8 ? "下一步仍需完成全局记忆控制中心的跨会话验收" : index === 12 ? `大型工具输出 ${"x".repeat(12_000)} 结束` : `已记录第 ${index} 轮上下文` });
   }
   const result = ingestGlobalAgentConversation({ sessionId: id, source: "self-test", messages, compact: false });
   const compacted = compactGlobalAgentSession(id, { force: true, reason: "self-test" });
@@ -566,6 +652,9 @@ export function runGlobalAgentMemorySelfTest() {
     explicitIgnoreMemoryWorks: ignoredPacket.includes("已按用户要求忽略"),
     evidenceTraceable: archive?.summary?.sourceMessageIds?.length === archive?.count,
     recentWindowPreserved: compacted.session?.recentMessageIds?.length === RECENT_MESSAGES_TO_KEEP,
+    tokenAwareBoundaryRecorded: !!compacted.session?.boundary?.context_budget && Number(compacted.session?.boundary?.preservedTokenCount || 0) > 0,
+    microCompactRecordsLargeOutput: Number(archive?.microCompact?.compactedMessageCount || 0) >= 1,
+    postCompactRestoreAnchorsRecorded: String(JSON.stringify(compacted.session?.boundary?.post_compact_restore || {})).includes("claude-code") && compacted.session?.boundary?.post_compact_restore?.recentMessageIds?.length > 0,
     corruptedTranscriptRecoversFromBackup: recoveredTranscript.storageRecovery?.recoveredFromBackup === true && recoveredTranscript.messages.length === messages.length,
   };
   try {

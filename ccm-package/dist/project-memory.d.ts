@@ -35,6 +35,10 @@ export declare function runProjectMemorySelfTest(): {
         decisionsRollIntoLosslessArchives: any;
         integrityValidationDetectsTampering: boolean;
         retrievesRelevantArchivedEvidence: boolean;
+        projectBoundaryTracksTokenPressure: boolean;
+        decisionBoundaryTracksTokenPressure: boolean;
+        postCompactRestoreAnchorsRecorded: boolean;
+        invokedSkillPreservedInMemory: boolean;
         buildsExecutionBriefWithRecallAndRules: boolean;
         atomicBackupRecoveryWorks: boolean;
     };

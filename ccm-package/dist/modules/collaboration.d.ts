@@ -4,6 +4,722 @@ export declare function deriveTaskLifecycle(task: any, executions?: any[]): {
     terminal: boolean;
     keepsSession: boolean;
 };
+export declare function runCollaborationUxSelfTest(): {
+    pass: boolean;
+    checks: {
+        simplePhaseLanguage: boolean;
+        conciseAgentLanguage: boolean;
+        simpleActions: boolean;
+        revertedPhase: boolean;
+        technicalIdsStayCollapsed: boolean;
+        userWorkflowTimelineVisible: any;
+        liveTodoPlanVisible: boolean;
+        liveTodoReviewing: any;
+        liveTodoReworking: any;
+        liveTodoFailedNeedsConfirmation: any;
+        liveTodoCancelled: any;
+        liveTodoEvidenceTraceable: any;
+        liveTodoFailureHasActions: any;
+        agentQaVisible: boolean;
+        conflictWarningsVisible: any;
+        greetingDoesNotCreateTaskCard: boolean;
+        ordinaryQuestionDoesNotCreateTaskCard: boolean;
+        explicitDevelopmentCreatesTaskCard: boolean;
+        groupIntentGatewayBlocksRuleFallbackWrite: boolean;
+        groupIntentGatewayAllowsLlmDelegate: boolean;
+        groupIntentGatewayKeepsLlmDirectAnswerReadOnly: boolean;
+        projectTaskModeQuestionDoesNotCreatePersistentTask: boolean;
+        projectTaskQuestionUsesReadOnlyAnalysis: boolean;
+        explicitAnalysisGreetingDoesNotReadProjects: boolean;
+        explicitAnalysisModeReadsProjectContext: boolean;
+        projectAnalysisReadsSafeCodeSnapshot: boolean;
+        forceTaskCanBypassIntentGate: boolean;
+        nonTaskCardIsHidden: boolean;
+        planModeHighRiskRequiresConfirmation: boolean;
+        planModeLowRiskAutoContinues: boolean;
+        awaitingPlanCardNeedsUser: boolean;
+        awaitingPlanCardShowsPlan: boolean;
+        workOrderPreviewVisible: any;
+        executionStoryShowsCodingFlow: boolean;
+        acceptanceReviewHardGateVisible: boolean;
+        missingEvidenceAcceptanceReviewBlocksCompletion: boolean;
+        agentCoordinationProtocolVisible: any;
+        agentCoordinationHeartbeatVisible: boolean;
+        agentCoordinationContractSyncVisible: boolean;
+        agentCoordinationReceiptQualityScores: boolean;
+        agentCoordinationTargetedReworkForMissingEvidence: boolean;
+        agentCoordinationAckReviewApproved: boolean;
+        agentCoordinationContractTransferReady: any;
+        ackGapBlocksCompletion: boolean;
+        ackGapCreatesRewriteDraft: boolean;
+        contractGapCreatesInjectionDraft: boolean;
+        contractInjectionGateRequiresConsumerReceipt: boolean;
+        contractInjectionGateRecognizesConsumerRerun: boolean;
+        contractInjectionGateRequiresConsumptionQuality: boolean;
+        contractInjectionGateRejectsGenericApiAssignment: boolean;
+        taskCardShowsRuntimeKernel: any;
+        agentCoordinationEventStreamVisible: boolean;
+        acceptanceReviewIncludesAckGate: boolean;
+        agentCoordinationContractInjectAction: boolean;
+        reportHasFourUserSections: boolean;
+        reportHidesProtocol: boolean;
+        groupReportFormatsObjects: boolean;
+        acknowledgementHasCleanPunctuation: boolean;
+        followupClassification: boolean;
+        followupDetection: boolean;
+    };
+    card: {
+        version: number;
+        visible: boolean;
+        task_id: any;
+        title: any;
+        goal: any;
+        phase: string;
+        phase_label: any;
+        status: any;
+        progress: any;
+        active_agents: string[];
+        agents: {
+            name: string;
+            status: any;
+            summary: string;
+            blockers: any;
+        }[];
+        live_todo_plan: {
+            title: string;
+            source: string;
+            phase: string;
+            task_id: any;
+            updated_at: any;
+            steps: any[];
+        };
+        mainAgentDecision: {
+            version: number;
+            trace_id: any;
+            group_id: any;
+            task_id: any;
+            message_id: string;
+            coordinator: any;
+            mode: string;
+            decision: {
+                selected_actions: string[];
+                dispatch_policy: {
+                    action: string;
+                    reason: string;
+                    nextStep: any;
+                };
+                reason: string;
+            };
+            internal_loop: {
+                version: number;
+                source: string;
+                pattern: string;
+                current_stage: string;
+                current_label: string;
+                progress: {
+                    completed: number;
+                    total: number;
+                };
+                stages: {
+                    id: string;
+                    label: string;
+                    title: string;
+                    status: string;
+                    purpose: string;
+                    actions: string[];
+                    tool_choice: any;
+                    evidence: string[];
+                }[];
+                next_action: string;
+            };
+            loop: {
+                version: number;
+                source: string;
+                pattern: string;
+                current_stage: string;
+                current_label: string;
+                progress: {
+                    completed: number;
+                    total: number;
+                };
+                stages: {
+                    id: string;
+                    label: string;
+                    title: string;
+                    status: string;
+                    purpose: string;
+                    actions: string[];
+                    tool_choice: any;
+                    evidence: string[];
+                }[];
+                next_action: string;
+            };
+            user_plan_steps: any;
+            todo_plan: any;
+            permissions: {
+                action_id: string;
+                risk: string;
+                allowed: boolean;
+                reason: string;
+            }[];
+            observation: {
+                live_task_phase: string;
+                receipt_count: number;
+                acceptance_gate_passed: boolean;
+                needs_replan: boolean;
+            };
+            verify: {
+                passed: boolean;
+                blocked_actions: string[];
+                conclusion: string;
+            };
+            reply: {
+                kind: string;
+                message_id: string;
+                preview: any;
+            };
+            created_at: string;
+        };
+        main_agent_decision: {
+            version: number;
+            trace_id: any;
+            group_id: any;
+            task_id: any;
+            message_id: string;
+            coordinator: any;
+            mode: string;
+            decision: {
+                selected_actions: string[];
+                dispatch_policy: {
+                    action: string;
+                    reason: string;
+                    nextStep: any;
+                };
+                reason: string;
+            };
+            internal_loop: {
+                version: number;
+                source: string;
+                pattern: string;
+                current_stage: string;
+                current_label: string;
+                progress: {
+                    completed: number;
+                    total: number;
+                };
+                stages: {
+                    id: string;
+                    label: string;
+                    title: string;
+                    status: string;
+                    purpose: string;
+                    actions: string[];
+                    tool_choice: any;
+                    evidence: string[];
+                }[];
+                next_action: string;
+            };
+            loop: {
+                version: number;
+                source: string;
+                pattern: string;
+                current_stage: string;
+                current_label: string;
+                progress: {
+                    completed: number;
+                    total: number;
+                };
+                stages: {
+                    id: string;
+                    label: string;
+                    title: string;
+                    status: string;
+                    purpose: string;
+                    actions: string[];
+                    tool_choice: any;
+                    evidence: string[];
+                }[];
+                next_action: string;
+            };
+            user_plan_steps: any;
+            todo_plan: any;
+            permissions: {
+                action_id: string;
+                risk: string;
+                allowed: boolean;
+                reason: string;
+            }[];
+            observation: {
+                live_task_phase: string;
+                receipt_count: number;
+                acceptance_gate_passed: boolean;
+                needs_replan: boolean;
+            };
+            verify: {
+                passed: boolean;
+                blocked_actions: string[];
+                conclusion: string;
+            };
+            reply: {
+                kind: string;
+                message_id: string;
+                preview: any;
+            };
+            created_at: string;
+        };
+        workflow_timeline: any;
+        agent_questions: any;
+        conflict_warnings: any;
+        work_order_preview: {
+            title: string;
+            source: string;
+            ready: boolean;
+            requires_confirmation: boolean;
+            summary: string;
+            orders: any;
+        };
+        execution_story: {
+            title: string;
+            style: string;
+            current_step: string;
+            steps: {
+                id: string;
+                label: string;
+                detail: string;
+                status: string;
+                evidence: any;
+            }[];
+        };
+        acceptance_review: {
+            title: string;
+            pass: boolean;
+            status: string;
+            headline: string;
+            checks: {
+                ok: boolean;
+                detail: any;
+                id: string;
+                label: string;
+            }[];
+            missing: string[];
+            next_action: string;
+        };
+        agent_coordination: {
+            version: number;
+            source: string;
+            title: string;
+            health: number;
+            status: string;
+            ack_review: {
+                status: string;
+                rows: {
+                    agent: any;
+                    status: string;
+                    reason: string;
+                    understood_goal: string;
+                    planned_scope: any[];
+                    forbidden_scope: any[];
+                    verification_plan: any[];
+                    unclear: any[];
+                }[];
+                rejected: {
+                    agent: any;
+                    status: string;
+                    reason: string;
+                    understood_goal: string;
+                    planned_scope: any[];
+                    forbidden_scope: any[];
+                    verification_plan: any[];
+                    unclear: any[];
+                }[];
+                next_action: string;
+            };
+            handoff: any;
+            heartbeat: {
+                id: string;
+                text: string;
+            }[];
+            contract_sync: {
+                required: boolean;
+                status: string;
+                summary: string;
+                endpoints: string[];
+                files: string[];
+                changes: any;
+            };
+            contract_transfer: {
+                required: boolean;
+                status: string;
+                rows: any;
+                next_action: string;
+            };
+            contract_injection_gate: {
+                required: boolean;
+                pass: boolean;
+                rows: any[];
+                missing: any[];
+                unconsumed: any[];
+                status: string;
+                summary: string;
+            };
+            runtime_kernel: any;
+            coordination_events: any[];
+            receipt_quality: {
+                agent: any;
+                status: any;
+                summary: string;
+                quality: {
+                    score: number;
+                    grade: string;
+                    pass: boolean;
+                    checks: {
+                        id: string;
+                        label: string;
+                        ok: boolean;
+                    }[];
+                    missing: string[];
+                };
+            }[];
+            weak_receipts: {
+                agent: any;
+                status: any;
+                summary: string;
+                quality: {
+                    score: number;
+                    grade: string;
+                    pass: boolean;
+                    checks: {
+                        id: string;
+                        label: string;
+                        ok: boolean;
+                    }[];
+                    missing: string[];
+                };
+            }[];
+            targeted_rework: any[];
+            next_action: string;
+        };
+        agentCoordination: {
+            version: number;
+            source: string;
+            title: string;
+            health: number;
+            status: string;
+            ack_review: {
+                status: string;
+                rows: {
+                    agent: any;
+                    status: string;
+                    reason: string;
+                    understood_goal: string;
+                    planned_scope: any[];
+                    forbidden_scope: any[];
+                    verification_plan: any[];
+                    unclear: any[];
+                }[];
+                rejected: {
+                    agent: any;
+                    status: string;
+                    reason: string;
+                    understood_goal: string;
+                    planned_scope: any[];
+                    forbidden_scope: any[];
+                    verification_plan: any[];
+                    unclear: any[];
+                }[];
+                next_action: string;
+            };
+            handoff: any;
+            heartbeat: {
+                id: string;
+                text: string;
+            }[];
+            contract_sync: {
+                required: boolean;
+                status: string;
+                summary: string;
+                endpoints: string[];
+                files: string[];
+                changes: any;
+            };
+            contract_transfer: {
+                required: boolean;
+                status: string;
+                rows: any;
+                next_action: string;
+            };
+            contract_injection_gate: {
+                required: boolean;
+                pass: boolean;
+                rows: any[];
+                missing: any[];
+                unconsumed: any[];
+                status: string;
+                summary: string;
+            };
+            runtime_kernel: any;
+            coordination_events: any[];
+            receipt_quality: {
+                agent: any;
+                status: any;
+                summary: string;
+                quality: {
+                    score: number;
+                    grade: string;
+                    pass: boolean;
+                    checks: {
+                        id: string;
+                        label: string;
+                        ok: boolean;
+                    }[];
+                    missing: string[];
+                };
+            }[];
+            weak_receipts: {
+                agent: any;
+                status: any;
+                summary: string;
+                quality: {
+                    score: number;
+                    grade: string;
+                    pass: boolean;
+                    checks: {
+                        id: string;
+                        label: string;
+                        ok: boolean;
+                    }[];
+                    missing: string[];
+                };
+            }[];
+            targeted_rework: any[];
+            next_action: string;
+        };
+        runtime_kernel: any;
+        runtimeKernel: any;
+        plan_mode: {
+            title: any;
+            mode: any;
+            requires_confirmation: boolean;
+            auto_continue: boolean;
+            next_step: any;
+            risk: {
+                level: any;
+                summary: any;
+                reasons: any;
+            };
+            impact_scope: {
+                areas: any;
+                projects: any;
+                multi_agent: boolean;
+            };
+            read_only_exploration: {
+                summary: string;
+                projects: any;
+                knowledge_used: boolean;
+                code_snapshot_used: boolean;
+            };
+            acceptance: any;
+            permission_boundaries: any;
+            session_strategy: any;
+        };
+        completed: string[];
+        blockers: string[];
+        next_action: string;
+        delivery: {
+            headline: any;
+            files: string[];
+            changes: any;
+            verification: string[];
+            risks: string[];
+            acceptance_passed: boolean;
+        };
+        actions: any[];
+        technical: {
+            trace_id: any;
+            execution_ids: any[];
+            session_ids: any[];
+            gap_fingerprint: string;
+            entity_chain_endpoint: string;
+            mainAgentDecision: {
+                version: number;
+                trace_id: any;
+                group_id: any;
+                task_id: any;
+                message_id: string;
+                coordinator: any;
+                mode: string;
+                decision: {
+                    selected_actions: string[];
+                    dispatch_policy: {
+                        action: string;
+                        reason: string;
+                        nextStep: any;
+                    };
+                    reason: string;
+                };
+                internal_loop: {
+                    version: number;
+                    source: string;
+                    pattern: string;
+                    current_stage: string;
+                    current_label: string;
+                    progress: {
+                        completed: number;
+                        total: number;
+                    };
+                    stages: {
+                        id: string;
+                        label: string;
+                        title: string;
+                        status: string;
+                        purpose: string;
+                        actions: string[];
+                        tool_choice: any;
+                        evidence: string[];
+                    }[];
+                    next_action: string;
+                };
+                loop: {
+                    version: number;
+                    source: string;
+                    pattern: string;
+                    current_stage: string;
+                    current_label: string;
+                    progress: {
+                        completed: number;
+                        total: number;
+                    };
+                    stages: {
+                        id: string;
+                        label: string;
+                        title: string;
+                        status: string;
+                        purpose: string;
+                        actions: string[];
+                        tool_choice: any;
+                        evidence: string[];
+                    }[];
+                    next_action: string;
+                };
+                user_plan_steps: any;
+                todo_plan: any;
+                permissions: {
+                    action_id: string;
+                    risk: string;
+                    allowed: boolean;
+                    reason: string;
+                }[];
+                observation: {
+                    live_task_phase: string;
+                    receipt_count: number;
+                    acceptance_gate_passed: boolean;
+                    needs_replan: boolean;
+                };
+                verify: {
+                    passed: boolean;
+                    blocked_actions: string[];
+                    conclusion: string;
+                };
+                reply: {
+                    kind: string;
+                    message_id: string;
+                    preview: any;
+                };
+                created_at: string;
+            };
+            main_agent_decision: {
+                version: number;
+                trace_id: any;
+                group_id: any;
+                task_id: any;
+                message_id: string;
+                coordinator: any;
+                mode: string;
+                decision: {
+                    selected_actions: string[];
+                    dispatch_policy: {
+                        action: string;
+                        reason: string;
+                        nextStep: any;
+                    };
+                    reason: string;
+                };
+                internal_loop: {
+                    version: number;
+                    source: string;
+                    pattern: string;
+                    current_stage: string;
+                    current_label: string;
+                    progress: {
+                        completed: number;
+                        total: number;
+                    };
+                    stages: {
+                        id: string;
+                        label: string;
+                        title: string;
+                        status: string;
+                        purpose: string;
+                        actions: string[];
+                        tool_choice: any;
+                        evidence: string[];
+                    }[];
+                    next_action: string;
+                };
+                loop: {
+                    version: number;
+                    source: string;
+                    pattern: string;
+                    current_stage: string;
+                    current_label: string;
+                    progress: {
+                        completed: number;
+                        total: number;
+                    };
+                    stages: {
+                        id: string;
+                        label: string;
+                        title: string;
+                        status: string;
+                        purpose: string;
+                        actions: string[];
+                        tool_choice: any;
+                        evidence: string[];
+                    }[];
+                    next_action: string;
+                };
+                user_plan_steps: any;
+                todo_plan: any;
+                permissions: {
+                    action_id: string;
+                    risk: string;
+                    allowed: boolean;
+                    reason: string;
+                }[];
+                observation: {
+                    live_task_phase: string;
+                    receipt_count: number;
+                    acceptance_gate_passed: boolean;
+                    needs_replan: boolean;
+                };
+                verify: {
+                    passed: boolean;
+                    blocked_actions: string[];
+                    conclusion: string;
+                };
+                reply: {
+                    kind: string;
+                    message_id: string;
+                    preview: any;
+                };
+                created_at: string;
+            };
+            runtime_kernel: any;
+        };
+        updated_at: any;
+    };
+    report: string;
+};
 export declare function runGroupMemoryStorageRecoverySelfTest(): {
     pass: boolean;
     checks: {

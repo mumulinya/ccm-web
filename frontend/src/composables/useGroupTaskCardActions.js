@@ -14,6 +14,7 @@ export function createGroupTaskCardActionHandler(options = {}) {
     getCurrentGroup,
     openCodeChangeDrawer,
     openPipelineViewer,
+    openTraceReplay,
     loadMessages,
   } = options
 
@@ -36,6 +37,10 @@ export function createGroupTaskCardActionHandler(options = {}) {
         return
       }
       if (action.kind === 'view_pipeline' || action.kind === 'view_report') return openPipelineViewer?.(msg)
+      if (action.kind === 'view_trace') {
+        openTraceReplay?.({ trace_id: action.trace_id || card?.technical?.trace_id || '', scope: action.scope || 'orchestrator' })
+        return
+      }
       if (action.kind === 'cancel') {
         if (!await confirmDialog(`确定取消任务“${card?.title || id}”？运行中的 Agent 会被安全终止。`)) return
         await postTaskCardAction('/api/tasks/cancel', { id, reason: '用户从群聊任务卡取消任务' })

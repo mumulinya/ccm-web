@@ -130,6 +130,57 @@ export declare function runCodedGroupOrchestrator(input: {
         task: string;
         reason: string;
         dependsOn: string;
+        worker_context_packet: {
+            context_budget: {
+                chars: number;
+                estimated_tokens: number;
+                max_chars: number;
+                max_tokens: number;
+                reserved_output_tokens: number;
+                auto_compact_threshold: number;
+                warning_threshold: number;
+                blocking_threshold: number;
+                pressure: number;
+                compact_recommended: boolean;
+                boundary: {
+                    type: string;
+                    preserved_head_chars: number;
+                    preserved_tail_chars: number;
+                };
+            };
+            packet_id: string;
+            version: number;
+            project: string;
+            task_id: string;
+            trace_id: string;
+            group: {
+                id: any;
+                name: any;
+                members: any;
+            };
+            goal: any;
+            task: string;
+            constraints: any;
+            document_findings: any;
+            dependencies: any[];
+            contract_injections: {
+                injection_id: any;
+                source_agent: any;
+                target_agent: any;
+                endpoint: any;
+                summary: any;
+                required_receipt_reference: boolean;
+            }[];
+            memory: any;
+            verification: any;
+            acceptance: {
+                ack_required_before_implementation: boolean;
+                receipt_required: boolean;
+                actual_diff_required: boolean;
+                verification_required: boolean;
+                contract_injection_receipt_required: boolean;
+            };
+        };
     }[];
     executionOrder: string;
     coordinationStrategy: string;
@@ -181,6 +232,8 @@ export declare function runCoordinatorProtocolSelfTest(): {
         project: any;
         dependsOn: any;
         hasWorkerPacket: boolean;
+        hasRuntimeWorkerContextPacket: boolean;
+        hasStructuredWorkerPacket: boolean;
         hasUnderstanding: boolean;
         hasVerification: boolean;
         hasReceipt: boolean;
@@ -286,6 +339,57 @@ export declare function runGroupOrchestrator(input: {
         task: string;
         reason: string;
         dependsOn: string;
+        worker_context_packet: {
+            context_budget: {
+                chars: number;
+                estimated_tokens: number;
+                max_chars: number;
+                max_tokens: number;
+                reserved_output_tokens: number;
+                auto_compact_threshold: number;
+                warning_threshold: number;
+                blocking_threshold: number;
+                pressure: number;
+                compact_recommended: boolean;
+                boundary: {
+                    type: string;
+                    preserved_head_chars: number;
+                    preserved_tail_chars: number;
+                };
+            };
+            packet_id: string;
+            version: number;
+            project: string;
+            task_id: string;
+            trace_id: string;
+            group: {
+                id: any;
+                name: any;
+                members: any;
+            };
+            goal: any;
+            task: string;
+            constraints: any;
+            document_findings: any;
+            dependencies: any[];
+            contract_injections: {
+                injection_id: any;
+                source_agent: any;
+                target_agent: any;
+                endpoint: any;
+                summary: any;
+                required_receipt_reference: boolean;
+            }[];
+            memory: any;
+            verification: any;
+            acceptance: {
+                ack_required_before_implementation: boolean;
+                receipt_required: boolean;
+                actual_diff_required: boolean;
+                verification_required: boolean;
+                contract_injection_receipt_required: boolean;
+            };
+        };
     }[];
     analysis: any;
     coordinationPlan: {
@@ -368,6 +472,57 @@ export declare function runGroupOrchestrator(input: {
         task: string;
         reason: string;
         dependsOn: string;
+        worker_context_packet: {
+            context_budget: {
+                chars: number;
+                estimated_tokens: number;
+                max_chars: number;
+                max_tokens: number;
+                reserved_output_tokens: number;
+                auto_compact_threshold: number;
+                warning_threshold: number;
+                blocking_threshold: number;
+                pressure: number;
+                compact_recommended: boolean;
+                boundary: {
+                    type: string;
+                    preserved_head_chars: number;
+                    preserved_tail_chars: number;
+                };
+            };
+            packet_id: string;
+            version: number;
+            project: string;
+            task_id: string;
+            trace_id: string;
+            group: {
+                id: any;
+                name: any;
+                members: any;
+            };
+            goal: any;
+            task: string;
+            constraints: any;
+            document_findings: any;
+            dependencies: any[];
+            contract_injections: {
+                injection_id: any;
+                source_agent: any;
+                target_agent: any;
+                endpoint: any;
+                summary: any;
+                required_receipt_reference: boolean;
+            }[];
+            memory: any;
+            verification: any;
+            acceptance: {
+                ack_required_before_implementation: boolean;
+                receipt_required: boolean;
+                actual_diff_required: boolean;
+                verification_required: boolean;
+                contract_injection_receipt_required: boolean;
+            };
+        };
     }[];
     analysis: any;
     coordinationPlan: {

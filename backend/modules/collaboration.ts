@@ -29,7 +29,6 @@ import {
   buildCodedCoordinatorSummary,
   buildCoordinatorCollaborationInstructions,
   buildMemberCollaborationInstructions,
-  buildRecentGroupContext,
   decomposeRequirementWithCodedCoordinator,
   getCoordinatorMember,
   getRoutableMembers,
@@ -45,8 +44,9 @@ import {
   saveOrchestratorConfig,
   selectGroupTargets,
 } from "./group-orchestrator";
+import { buildBoundedRecentGroupContext } from "./group-memory-compaction";
 import { getAgentCommandLabel, getPublicAgentRuntimes, normalizeAgentRuntimeId } from "../agent-runtime";
-import { buildRuntimeToolSyncPrompt, recordRuntimeToolSyncAudit, syncRuntimeTools } from "../runtime-tool-sync";
+import { buildRuntimeToolSyncPrompt, detectInvokedSkillsFromText, recordRuntimeToolSyncAudit, syncRuntimeTools } from "../runtime-tool-sync";
 import {
   buildChildAgentWorktreeNotice,
   normalizeChildAgentIsolationMode,
@@ -136,6 +136,13 @@ import {
   getTaskAckRewriteRows,
   getTaskContractInjectionRows,
 } from "./collaboration-protocol-gates";
+import {
+  buildContractInjectionEvent,
+  buildTraceReplaySuite,
+  recordAgentRuntimeLifecycle,
+  replayAgentTrace,
+  runAgentRuntimeKernelSelfTest,
+} from "../agent-runtime-kernel";
 
 // === 任务队列系统（支持并行执行）===
 const taskQueues = new Map<string, string[]>(); // 每个目标（群聊/Agent）独立队列
@@ -421,6 +428,7 @@ function taskCardGapLabel(item: any) {
   if (value.startsWith("receipt:")) return `${value.split(":")[1] || "项目 Agent"} 尚未提交可验收结果`;
   if (value.startsWith("ack_rewrite:")) return `${value.split(":")[1] || "项目 Agent"} 需要先重写接单 ACK`;
   if (value.startsWith("contract_inject:")) return `${value.split(":")[1] || "依赖 Agent"} 尚未收到 contractChanges 注入续跑`;
+  if (value.startsWith("contract_consume:")) return `${value.split(":")[1] || "依赖 Agent"} 需要补充 contractChanges 消费回执`;
   if (value.startsWith("notification:")) return `${value.split(":")[1] || "项目 Agent"} 的本轮工作尚未完成`;
   return value;
 }
@@ -641,6 +649,7 @@ function buildTaskCardView(task: any, executions: any[], sessions: any[]) {
   const executionStory = buildUserExecutionStory(task, summary, executions, phase, workOrderPreview);
   const acceptanceReview = buildUserAcceptanceReview(task, summary, executions, phase);
   const agentCoordination = buildUserAgentCoordinationProtocol(task, summary, executions, workOrderPreview, acceptanceReview);
+  const runtimeKernel = summary.runtime_kernel || agentCoordination.runtime_kernel || buildRuntimeKernelSnapshot(task, summary);
   const liveTodoPlan = buildLiveMainAgentTodoPlan(task, phase, workers, executions, summary);
   const liveMainAgentDecision = buildLiveMainAgentDecisionForTask(task, phase, liveTodoPlan, summary);
   const completed: string[] = [];
@@ -662,6 +671,20 @@ function buildTaskCardView(task: any, executions: any[], sessions: any[]) {
   else if (phase === "completed") nextAction = "可以查看改动、继续修改或安全撤销";
   else if (phase === "cancelled") nextAction = "任务已停止，不会继续执行";
   else if (phase === "reverted") nextAction = "最近一轮改动已恢复到任务开始前";
+  const displayStream = buildMainAgentDisplayStream({
+    mode: phase === "reworking" ? "followup" : "delegation",
+    userText: summary.headline || task?.status_detail || nextAction,
+    actionIds: liveMainAgentDecision?.decision?.selected_actions || [],
+    steps: liveTodoPlan?.steps || [],
+    permissions: liveMainAgentDecision?.permissions || [],
+    observations: liveMainAgentDecision?.observation || {},
+    traceId: task?.trace_id || "",
+    technical: { execution_ids: executions.map(item => item.id), session_ids: sessions.map(item => item.id), failed_gates: summary.failed_gates || [], blockers },
+    workers,
+    executions,
+    summary,
+    rawEvents: Array.isArray(summary.timeline) ? summary.timeline : [],
+  });
   return {
     version: 1,
     visible,
@@ -675,6 +698,8 @@ function buildTaskCardView(task: any, executions: any[], sessions: any[]) {
     active_agents: activeAgents.map((name: string) => `${userAgentRole(name)} · ${name} 正在处理`),
     agents: workers.map((item: any) => ({ name: `${userAgentRole(item.agent)} · ${item.agent}`, status: item.status, summary: userAgentProgress(item), blockers: item.blockers.slice(0, 3) })),
     live_todo_plan: liveTodoPlan,
+    display_stream: displayStream,
+    displayStream,
     mainAgentDecision: liveMainAgentDecision,
     main_agent_decision: liveMainAgentDecision,
     workflow_timeline: workflowTimeline,
@@ -685,6 +710,8 @@ function buildTaskCardView(task: any, executions: any[], sessions: any[]) {
     acceptance_review: acceptanceReview,
     agent_coordination: agentCoordination,
     agentCoordination,
+    runtime_kernel: runtimeKernel,
+    runtimeKernel,
     plan_mode: planMode ? {
       title: planMode.title || "执行前计划",
       mode: planMode.mode || "",
@@ -703,7 +730,7 @@ function buildTaskCardView(task: any, executions: any[], sessions: any[]) {
     next_action: nextAction,
     delivery: { headline: summary.headline || task?.status_detail || "", files: files.slice(0, 30), changes: Array.isArray(summary.actual_file_changes) ? summary.actual_file_changes.slice(0, 30) : [], verification: verification.slice(0, 20), risks: uniqueStrings([...(summary.risks || []), ...(summary.remaining_items || []), ...(summary.advisory_needs || [])]).slice(0, 10), acceptance_passed: summary.acceptance_gate_passed === true },
     actions: buildUserTaskActions(task, phase, executions),
-    technical: { trace_id: task?.trace_id || "", execution_ids: executions.map(item => item.id), session_ids: sessions.map(item => item.id), gap_fingerprint: terminalPhase ? "" : getTaskGapFingerprint(task), entity_chain_endpoint: `/api/tasks/entity-chain?id=${encodeURIComponent(task?.id || "")}`, mainAgentDecision: liveMainAgentDecision, main_agent_decision: liveMainAgentDecision },
+    technical: { trace_id: task?.trace_id || "", execution_ids: executions.map(item => item.id), session_ids: sessions.map(item => item.id), gap_fingerprint: terminalPhase ? "" : getTaskGapFingerprint(task), entity_chain_endpoint: `/api/tasks/entity-chain?id=${encodeURIComponent(task?.id || "")}`, mainAgentDecision: liveMainAgentDecision, main_agent_decision: liveMainAgentDecision, runtime_kernel: runtimeKernel, display_stream: displayStream },
     updated_at: task?.updated_at || new Date().toISOString(),
   };
 }
@@ -999,14 +1026,14 @@ function buildUserAcceptanceReview(task: any, summary: any = {}, executions: any
     {
       id: "ack_gate",
       label: "ACK 前置审核",
-      ok: !(taskRequiresCodeChanges(task) || taskRequiresVerification(task)) || summary.ack_gate_passed === true || !summary.ack_review,
-      detail: summary.ack_review?.rejected?.length ? `需重写 ACK ${summary.ack_review.rejected.length} 条` : "等待 ACK 审核",
+      ok: !(taskRequiresCodeChanges(task) || taskRequiresVerification(task)) || summary.ack_gate_passed === true,
+      detail: summary.ack_review?.rejected?.length ? `需重写 ACK ${summary.ack_review.rejected.length} 条` : summary.ack_gate_passed === true ? "通过" : "等待 ACK 审核通过",
     },
     {
       id: "receipt_quality",
       label: "回执质量",
-      ok: !(taskRequiresCodeChanges(task) || taskRequiresVerification(task)) || summary.receipt_quality_gate_passed === true || !summary.receipt_quality,
-      detail: summary.weak_receipt_quality?.length ? `弱回执 ${summary.weak_receipt_quality.length} 条` : "等待高质量 ACK/回执",
+      ok: !(taskRequiresCodeChanges(task) || taskRequiresVerification(task)) || summary.receipt_quality_gate_passed === true,
+      detail: summary.weak_receipt_quality?.length ? `弱回执 ${summary.weak_receipt_quality.length} 条` : summary.receipt_quality_gate_passed === true ? "通过" : "等待高质量 ACK/回执",
     },
     {
       id: "actual_diff",
@@ -1102,6 +1129,155 @@ function buildCoordinationEventStream(task: any, summary: any = {}, executions: 
   return events.slice(-18);
 }
 
+function compactRuntimeToolAudit(audit: any = {}) {
+  return {
+    runtime: audit.runtime || "",
+    mode: audit.mode || "",
+    isolation: audit.isolation || "",
+    snapshotId: audit.snapshotId || "",
+    snapshotPath: audit.snapshotPath || "",
+    mcpConfigPath: audit.mcpConfigPath || "",
+    skillRoot: audit.skillRoot || "",
+    requested: audit.requested || { mcp: [], skill: [] },
+    synced: audit.synced || { mcp: [], skill: [] },
+    missing: audit.missing || { mcp: [], skill: [] },
+    mcp_statuses: Array.isArray(audit.mcp_statuses) ? audit.mcp_statuses.slice(0, 30) : [],
+    skill_statuses: Array.isArray(audit.skill_statuses) ? audit.skill_statuses.slice(0, 30) : [],
+    permission_rules: Array.isArray(audit.permission_rules) ? audit.permission_rules.slice(0, 50) : [],
+    invoked_skills: Array.isArray(audit.invoked_skills) ? audit.invoked_skills.slice(0, 30) : [],
+    warnings: Array.isArray(audit.warnings) ? audit.warnings.slice(0, 12) : [],
+    errors: Array.isArray(audit.errors) ? audit.errors.slice(0, 12) : [],
+    reusedSnapshot: !!audit.reusedSnapshot,
+    timestamp: audit.timestamp || "",
+  };
+}
+
+function runtimeToolSnapshotFromAudit(audit: any = {}, allowedTools: any = {}) {
+  return {
+    snapshotId: audit.snapshotId || "",
+    snapshotPath: audit.snapshotPath || "",
+    mcpConfigPath: audit.mcpConfigPath || "",
+    allowedTools: allowedTools || audit.requested || { mcp: [], skill: [] },
+    permissionRules: Array.isArray(audit.permission_rules) ? audit.permission_rules : [],
+  };
+}
+
+function attachInvokedSkillsToReceipt(receipt: any, text: string, allowedTools: any = {}, audit: any = null) {
+  const sourceText = [
+    text,
+    ...(Array.isArray(receipt?.memoryUsed) ? receipt.memoryUsed : []),
+    ...(Array.isArray(receipt?.memory_used) ? receipt.memory_used : []),
+  ].join("\n");
+  const invoked = detectInvokedSkillsFromText(sourceText, allowedTools);
+  if (audit && invoked.length) audit.invoked_skills = uniqueByKey([...(audit.invoked_skills || []), ...invoked], (item: any) => item.name, 30);
+  if (!receipt || !invoked.length) return { receipt, invoked };
+  return {
+    receipt: {
+      ...receipt,
+      invokedSkills: uniqueByKey([...(Array.isArray(receipt.invokedSkills) ? receipt.invokedSkills : []), ...invoked], (item: any) => item.name, 30),
+      runtimeToolSnapshot: runtimeToolSnapshotFromAudit(audit || {}, allowedTools),
+    },
+    invoked,
+  };
+}
+
+function collectRuntimeToolingFromSources(task: any = {}, execution: any = {}, lifecycle: any[] = [], receipts: any[] = []) {
+  const audits: any[] = [];
+  const addAudit = (audit: any) => {
+    if (!audit || typeof audit !== "object") return;
+    audits.push(compactRuntimeToolAudit(audit));
+  };
+  for (const event of lifecycle || []) addAudit(event?.data?.runtime_tool_sync || event?.data?.runtimeToolSync || (event.action === "runtime_tool_sync" ? event.data : null));
+  for (const record of task?.id ? listExecutions({ taskId: task.id }) : []) {
+    for (const item of Array.isArray(record.events) ? record.events : []) addAudit(item?.data?.runtime_tool_sync || item?.data?.runtimeToolSync);
+  }
+  addAudit(execution?.runtimeToolSync || execution?.runtime_tool_sync);
+  for (const message of task?.group_id && task?.id ? getGroupMessages(task.group_id).filter((item: any) => item?.task_id === task.id) : []) {
+    for (const event of Array.isArray(message.workEvents) ? message.workEvents : []) addAudit(event.runtimeToolSync || event.runtime_tool_sync);
+  }
+
+  const latestBySnapshot = new Map<string, any>();
+  for (const audit of audits) {
+    const fallbackKey = crypto.createHash("sha256").update(JSON.stringify(audit || {})).digest("hex").slice(0, 12);
+    const key = `${audit.runtime}|${audit.snapshotId || audit.mcpConfigPath || audit.timestamp || fallbackKey}`;
+    latestBySnapshot.set(key, audit);
+  }
+  const uniqueAudits = Array.from(latestBySnapshot.values()).sort((a: any, b: any) => String(a.timestamp || "").localeCompare(String(b.timestamp || "")));
+  const invokedSkills = uniqueByKey([
+    ...uniqueAudits.flatMap((audit: any) => audit.invoked_skills || []),
+    ...receipts.flatMap((receipt: any) => Array.isArray(receipt.invokedSkills) ? receipt.invokedSkills : []),
+  ], (item: any) => item.name || JSON.stringify(item), 50);
+  const missingMcp = uniqueStrings(...uniqueAudits.map((audit: any) => audit.missing?.mcp || []));
+  const missingSkill = uniqueStrings(...uniqueAudits.map((audit: any) => audit.missing?.skill || []));
+  const errors = uniqueStrings(...uniqueAudits.map((audit: any) => audit.errors || []));
+  const warnings = uniqueStrings(...uniqueAudits.map((audit: any) => audit.warnings || []));
+  const blocked = errors.length > 0 || missingMcp.length > 0 || missingSkill.length > 0 || uniqueAudits.some((audit: any) => audit.mode === "failed");
+  return {
+    status: blocked ? "needs_attention" : uniqueAudits.length ? "ready" : "not_recorded",
+    audits: uniqueAudits.slice(-12),
+    audit_count: uniqueAudits.length,
+    latest: uniqueAudits.at(-1) || null,
+    snapshots: uniqueStrings(uniqueAudits.map((audit: any) => audit.snapshotId).filter(Boolean)).slice(0, 20),
+    reused_snapshot_count: uniqueAudits.filter((audit: any) => audit.reusedSnapshot).length,
+    mcp_statuses: uniqueAudits.flatMap((audit: any) => audit.mcp_statuses || []).slice(-40),
+    skill_statuses: uniqueAudits.flatMap((audit: any) => audit.skill_statuses || []).slice(-40),
+    permission_rules: uniqueAudits.flatMap((audit: any) => audit.permission_rules || []).slice(-80),
+    invoked_skills: invokedSkills,
+    missing: { mcp: missingMcp, skill: missingSkill },
+    errors,
+    warnings,
+  };
+}
+
+function buildRuntimeKernelSnapshot(task: any = {}, summary: any = {}) {
+  const trace = task?.trace_id ? getTrace(task.trace_id) : null;
+  const events = Array.isArray(trace?.events) ? trace.events : [];
+  const lifecycle = events
+    .filter((event: any) => event.type === "agent_runtime.lifecycle")
+    .map((event: any) => ({ ...(event.data || {}), at: event.at, task_id: event.task_id || "", group_id: event.group_id || "", trace_event_id: event.id }))
+    .filter((event: any) => !task?.id || !event.task_id || event.task_id === task.id);
+  const contractInjections = events
+    .filter((event: any) => event.type === "agent_runtime.contract_injection")
+    .map((event: any) => ({ ...(event.data || {}), at: event.at, task_id: event.task_id || "", group_id: event.group_id || "", trace_event_id: event.id }))
+    .filter((event: any) => !task?.id || !event.task_id || event.task_id === task.id);
+  const latestLifecycle = lifecycle.slice(-8);
+  const ackOnlyEvents = lifecycle.filter((event: any) => event.action === "ack_preflight_dispatch" || event.data?.ack_only === true);
+  const dispatches = lifecycle.filter((event: any) => event.action === "dispatch_worker");
+  const contextPressures = lifecycle
+    .map((event: any) => Number(event.context_budget?.pressure || 0))
+    .filter((value: number) => Number.isFinite(value) && value > 0);
+  const packetIds = uniqueStrings(
+    dispatches.map((event: any) => event.data?.worker_context_packet?.packet_id),
+    (Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : []).map((item: any) => item.worker_context_packet?.packet_id),
+  );
+  const runtimeTooling = summary.runtime_tooling?.audit_count
+    ? summary.runtime_tooling
+    : collectRuntimeToolingFromSources(task, {}, lifecycle, Array.isArray(summary.receipts) ? summary.receipts : []);
+  return {
+    trace_id: task?.trace_id || "",
+    lifecycle_count: lifecycle.length,
+    latest_lifecycle: latestLifecycle,
+    blocked_count: lifecycle.filter((event: any) => ["blocked", "error"].includes(String(event.status || ""))).length,
+    ack_only: {
+      active: ackOnlyEvents.length > 0 && summary.ack_gate_passed !== true,
+      count: ackOnlyEvents.length,
+      latest: ackOnlyEvents.at(-1) || null,
+    },
+    dispatch_worker_count: dispatches.length,
+    worker_context_packet_ids: packetIds.slice(0, 12),
+    contract_injections: contractInjections.slice(-12),
+    injection_ids: uniqueStrings(
+      contractInjections.map((item: any) => item.injection_id),
+      Array.isArray(summary.contract_injection_gate?.rows) ? summary.contract_injection_gate.rows.map((row: any) => row.injection_id) : [],
+    ).slice(0, 20),
+    context_budget: {
+      max_pressure: contextPressures.length ? Math.max(...contextPressures) : 0,
+      compact_recommended: lifecycle.some((event: any) => event.context_budget?.compact_recommended),
+    },
+    runtime_tooling: runtimeTooling,
+  };
+}
+
 function buildTargetedReworkSuggestions(task: any, summary: any = {}, acceptanceReview: any = null, receiptQualityRows: any[] = []) {
   const missing = new Set<string>(Array.isArray(acceptanceReview?.missing) ? acceptanceReview.missing : []);
   const suggestions: any[] = [];
@@ -1157,7 +1333,7 @@ function buildUserAgentCoordinationProtocol(task: any, summary: any = {}, execut
   const contractSync = extractContractSyncHints(task, summary);
   const ackReview = buildAckPreflightReview(task, receipts, orders);
   const contractTransfer = buildContractTransferPlan(contractSync, orders);
-  const contractInjectionGate = evaluateContractInjectionGate(contractTransfer.rows || [], Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : []);
+  const contractInjectionGate = evaluateContractInjectionGate(contractTransfer.rows || [], Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : [], receipts);
   const targetedRework = buildTargetedReworkSuggestions(task, summary, acceptanceReview, receiptRows);
   if (ackReview.rejected?.length) {
     for (const row of ackReview.rejected.slice(0, 4)) {
@@ -1180,6 +1356,18 @@ function buildUserAgentCoordinationProtocol(task: any, summary: any = {}, execut
         label: "注入契约",
       });
     }
+    for (const row of contractInjectionGate.unconsumed.slice(0, 4)) {
+      targetedRework.push({
+        id: "contract_consume",
+        title: "补充契约消费回执",
+        target: row.target,
+        reason: `${row.endpoint || row.type || "contract"}：回执必须引用 injection_id=${row.injection_id}`,
+        action: "gap_continue",
+        kind: "targeted_rework",
+        tone: "warning",
+        label: "补消费回执",
+      });
+    }
   }
   const coordinationEvents = buildCoordinationEventStream(task, summary, executions, ackReview, contractTransfer, receiptRows, targetedRework);
   const weakReceipts = receiptRows.filter((row: any) => row.quality.grade !== "good");
@@ -1190,6 +1378,7 @@ function buildUserAgentCoordinationProtocol(task: any, summary: any = {}, execut
     targetedRework.length ? 60 : 100,
   ];
   const health = Math.round(healthScoreParts.reduce((sum, value) => sum + value, 0) / healthScoreParts.length);
+  const runtimeKernel = summary.runtime_kernel || buildRuntimeKernelSnapshot(task, summary);
   return {
     version: 1,
     source: "main-child-agent-coordination-6.0",
@@ -1202,6 +1391,7 @@ function buildUserAgentCoordinationProtocol(task: any, summary: any = {}, execut
     contract_sync: contractSync,
     contract_transfer: contractTransfer,
     contract_injection_gate: contractInjectionGate,
+    runtime_kernel: runtimeKernel,
     coordination_events: coordinationEvents,
     receipt_quality: receiptRows,
     weak_receipts: weakReceipts,
@@ -1253,6 +1443,69 @@ function classifyGroupProjectTaskIntent(message: string, uploadedFiles: any[] = 
           ? "普通询问，不创建任务卡"
           : "未发现明确项目执行动作",
   };
+}
+
+function normalizeGroupAgentGatewayTaskIntent(fallback: any, coordinatorResult: any, messageMode = "conversation") {
+  const runtime = String(coordinatorResult?.runtime || "");
+  const dispatchPolicy = coordinatorResult?.dispatchPolicy || {};
+  const action = String(dispatchPolicy.action || "").trim();
+  const assignments = Array.isArray(coordinatorResult?.assignments) ? coordinatorResult.assignments : [];
+  const llmBacked = runtime === "llm-api";
+  if (!llmBacked) {
+    return {
+      ...fallback,
+      executable: false,
+      analysisEligible: fallback.analysisEligible === true,
+      kind: fallback.analysisEligible ? "project_analysis" : fallback.kind === "greeting" ? "greeting" : fallback.kind === "question" ? "question" : "conversation",
+      reason: `Agent intent gateway 未获得大模型决策（${runtime || "unknown"}），规则兜底不创建任务卡`,
+      agent_gateway: { runtime, dispatchPolicy, llm_backed: false, fallback_kind: fallback.kind },
+    };
+  }
+  const delegates = action === "delegate" && dispatchPolicy.requiresConfirmation !== true && assignments.length > 0;
+  const analysisEligible = !delegates && (fallback.analysisEligible === true || action === "direct_answer" || action === "ask_user");
+  return {
+    executable: delegates,
+    analysisEligible,
+    kind: delegates ? "task" : analysisEligible ? "project_analysis" : fallback.kind,
+    reason: delegates
+      ? `Agent intent gateway 允许创建任务卡：${dispatchPolicy.reason || "主 Agent 判定需要派发"}`
+      : `Agent intent gateway 不创建任务卡：${dispatchPolicy.reason || "主 Agent 判定无需派发"}`,
+    agent_gateway: { runtime, dispatchPolicy, llm_backed: true, assignments: assignments.map((item: any) => item.project).filter(Boolean) },
+  };
+}
+
+async function classifyGroupProjectTaskIntentWithAgent(input: {
+  group: any;
+  message: string;
+  uploadedFiles?: any[];
+  isOrchestrated?: boolean;
+  messageMode?: string;
+  forceProjectTask?: boolean;
+  sharedFilesContext?: string;
+}) {
+  const fallback = classifyGroupProjectTaskIntent(input.message, input.uploadedFiles || []);
+  const mode = String(input.messageMode || "conversation").trim().toLowerCase();
+  if (!input.isOrchestrated || input.forceProjectTask || !["project_task", "daily_dev", "mission", "project_analysis"].includes(mode)) {
+    return { ...fallback, agent_gateway: { runtime: "not-required", llm_backed: false, fallback_kind: fallback.kind } };
+  }
+  try {
+    const coordinatorResult = await runGroupOrchestrator({
+      group: input.group,
+      message: input.message,
+      source: "intent-gateway",
+      sharedFilesContext: input.sharedFilesContext || "",
+    });
+    return normalizeGroupAgentGatewayTaskIntent(fallback, coordinatorResult, mode);
+  } catch (error: any) {
+    return {
+      ...fallback,
+      executable: false,
+      analysisEligible: fallback.analysisEligible === true,
+      kind: fallback.analysisEligible ? "project_analysis" : fallback.kind === "greeting" ? "greeting" : fallback.kind === "question" ? "question" : "conversation",
+      reason: `Agent intent gateway 调用失败，规则兜底不创建任务卡：${error?.message || error}`,
+      agent_gateway: { runtime: "error", llm_backed: false, error: error?.message || String(error), fallback_kind: fallback.kind },
+    };
+  }
 }
 
 function shouldUseProjectAnalysisMode(input: { isOrchestrated?: boolean; messageMode?: string; taskIntent?: any }) {
@@ -1596,7 +1849,7 @@ function buildGroupProjectAnalysisContext(group: any, message: string, ctx: Coll
   return lines.filter(Boolean).join("\n");
 }
 
-function runCollaborationUxSelfTest() {
+export function runCollaborationUxSelfTest() {
   const task = {
     id: "ux-task",
     title: "增加负责人筛选",
@@ -1729,14 +1982,44 @@ function runCollaborationUxSelfTest() {
     },
   };
   const contractGapDraft = buildTaskGapContinuationDraft(contractGapTask);
-  const contractInjectedGate = evaluateContractInjectionGate(
-    getTaskContractInjectionRows(contractGapTask).rows,
+  const contractRows = getTaskContractInjectionRows(contractGapTask).rows;
+  const contractInjectionId = contractRows[0]?.injection_id || "";
+  const contractDispatchedUnconsumedGate = evaluateContractInjectionGate(
+    contractRows,
     [{ project: "collab-web", task: "注入 contractChanges：GET /api/users?role=owner，请续跑适配消费者", continuationStrategy: "contract_inject", message_id: "m-contract" }]
   );
+  const contractConsumedGate = evaluateContractInjectionGate(
+    contractRows,
+    [{ project: "collab-web", task: "注入 contractChanges：GET /api/users?role=owner，请续跑适配消费者", continuationStrategy: "contract_inject", message_id: "m-contract" }],
+    [{ agent: "collab-web", status: "done", consumedInjectionIds: [contractInjectionId], contractConsumption: [{ injection_id: contractInjectionId, status: "adapted", evidence: ["frontend/app.js", "npm test"] }], filesChanged: ["frontend/app.js"], verification: ["npm test passed by external runner (exit 0)"] }]
+  );
+  const contractWeakConsumptionGate = evaluateContractInjectionGate(
+    contractRows,
+    [{ project: "collab-web", task: "注入 contractChanges：GET /api/users?role=owner，请续跑适配消费者", continuationStrategy: "contract_inject", message_id: "m-contract" }],
+    [{ agent: "collab-web", status: "done", consumedInjectionIds: [contractInjectionId] }]
+  );
   const contractGenericApiGate = evaluateContractInjectionGate(
-    getTaskContractInjectionRows(contractGapTask).rows,
+    contractRows,
     [{ project: "collab-web", task: "改前端 API 调用", message_id: "m-original" }]
   );
+  const runtimeKernelCard = buildTaskCardView({
+    ...task,
+    delivery_summary: {
+      ...task.delivery_summary,
+      runtime_kernel: {
+        trace_id: "trace-ux",
+        lifecycle_count: 2,
+        latest_lifecycle: [],
+        blocked_count: 0,
+        ack_only: { active: true, count: 1, latest: { action: "ack_preflight_dispatch", status: "blocked" } },
+        dispatch_worker_count: 1,
+        worker_context_packet_ids: ["wcp_selftest"],
+        contract_injections: [],
+        injection_ids: ["ci_selftest"],
+        context_budget: { max_pressure: 18.5, compact_recommended: false },
+      },
+    },
+  }, [], []);
   const codeSnapshotSelfTest = (() => {
     const tempRoot = fs.mkdtempSync(path.join(process.env.TEMP || CCM_DIR, "ccm-project-analysis-"));
     try {
@@ -1759,6 +2042,21 @@ function runCollaborationUxSelfTest() {
       try { fs.rmSync(tempRoot, { recursive: true, force: true }); } catch {}
     }
   })();
+  const gatewayFallbackBlocked = normalizeGroupAgentGatewayTaskIntent(
+    classifyGroupProjectTaskIntent("帮我给项目A新增支付接口并改前端页面"),
+    { runtime: "coded-fallback", dispatchPolicy: { action: "delegate", reason: "规则猜测需要派发" }, assignments: [{ project: "collab-web" }] },
+    "project_task"
+  );
+  const gatewayLlmDelegates = normalizeGroupAgentGatewayTaskIntent(
+    classifyGroupProjectTaskIntent("帮我给项目A新增支付接口并改前端页面"),
+    { runtime: "llm-api", dispatchPolicy: { action: "delegate", reason: "用户要求开发任务" }, assignments: [{ project: "collab-web" }] },
+    "project_task"
+  );
+  const gatewayLlmDirectAnswer = normalizeGroupAgentGatewayTaskIntent(
+    classifyGroupProjectTaskIntent("这个项目架构是什么"),
+    { runtime: "llm-api", dispatchPolicy: { action: "direct_answer", reason: "只读项目分析即可" }, assignments: [] },
+    "project_task"
+  );
   const checks = {
     simplePhaseLanguage: card.phase_label === "已完成",
     conciseAgentLanguage: card.agents.every((item: any) => !/receipt|回执|门禁|session|trace/i.test(item.summary)),
@@ -1782,6 +2080,9 @@ function runCollaborationUxSelfTest() {
     greetingDoesNotCreateTaskCard: classifyGroupProjectTaskIntent("你好").executable === false,
     ordinaryQuestionDoesNotCreateTaskCard: classifyGroupProjectTaskIntent("这个知识库怎么用？").executable === false,
     explicitDevelopmentCreatesTaskCard: classifyGroupProjectTaskIntent("帮我给项目A新增支付接口并改前端页面").executable === true,
+    groupIntentGatewayBlocksRuleFallbackWrite: gatewayFallbackBlocked.executable === false && gatewayFallbackBlocked.agent_gateway?.llm_backed === false,
+    groupIntentGatewayAllowsLlmDelegate: gatewayLlmDelegates.executable === true && gatewayLlmDelegates.agent_gateway?.llm_backed === true,
+    groupIntentGatewayKeepsLlmDirectAnswerReadOnly: gatewayLlmDirectAnswer.executable === false && gatewayLlmDirectAnswer.analysisEligible === true,
     projectTaskModeQuestionDoesNotCreatePersistentTask: shouldCreatePersistentGroupTask({ isOrchestrated: true, messageMode: "project_task", taskIntent: classifyGroupProjectTaskIntent("你好，这是一个什么项目") }) === false,
     projectTaskQuestionUsesReadOnlyAnalysis: shouldUseProjectAnalysisMode({ isOrchestrated: true, messageMode: "project_task", taskIntent: classifyGroupProjectTaskIntent("你好，这是一个什么项目") }) === true,
     explicitAnalysisGreetingDoesNotReadProjects: shouldUseProjectAnalysisMode({ isOrchestrated: true, messageMode: "project_analysis", taskIntent: classifyGroupProjectTaskIntent("你好") }) === false,
@@ -1807,8 +2108,11 @@ function runCollaborationUxSelfTest() {
     ackGapBlocksCompletion: canCompleteDailyDevFromDeliverySummary(ackGapTask, { status: "done" }, ackGapTask.delivery_summary) === false,
     ackGapCreatesRewriteDraft: getTaskGapItems(ackGapTask).some((item: string) => item.startsWith("ack_rewrite:collab-web")) && ackGapDraft.includes("需要先返工的 ACK 前置审核"),
     contractGapCreatesInjectionDraft: getTaskGapItems(contractGapTask).some((item: string) => item.startsWith("contract_inject:collab-web")) && contractGapDraft.includes("需要注入依赖 Agent 的 contractChanges") && contractGapDraft.includes("collab-web"),
-    contractInjectionGateRecognizesConsumerRerun: contractInjectedGate.pass === true && contractInjectedGate.rows[0]?.assignment_message_id === "m-contract",
+    contractInjectionGateRequiresConsumerReceipt: contractDispatchedUnconsumedGate.pass === false && contractDispatchedUnconsumedGate.status === "needs_consumption" && contractDispatchedUnconsumedGate.unconsumed[0]?.injection_id === contractInjectionId,
+    contractInjectionGateRecognizesConsumerRerun: contractConsumedGate.pass === true && contractConsumedGate.rows[0]?.assignment_message_id === "m-contract" && contractConsumedGate.rows[0]?.consumed === true,
+    contractInjectionGateRequiresConsumptionQuality: contractWeakConsumptionGate.pass === false && contractWeakConsumptionGate.rows[0]?.missing_reason === "needs_consumption_evidence",
     contractInjectionGateRejectsGenericApiAssignment: contractGenericApiGate.pass === false && contractGenericApiGate.rows[0]?.assignment_message_id === "",
+    taskCardShowsRuntimeKernel: runtimeKernelCard.runtime_kernel?.ack_only?.active === true && runtimeKernelCard.runtime_kernel?.injection_ids?.includes("ci_selftest") && runtimeKernelCard.technical?.runtime_kernel?.worker_context_packet_ids?.includes("wcp_selftest"),
     agentCoordinationEventStreamVisible: ["work_order_sent", "ack_received", "contract_changed", "receipt_scored"].every(type => card.agent_coordination?.coordination_events?.some((item: any) => item.type === type)),
     acceptanceReviewIncludesAckGate: card.acceptance_review?.checks?.some((item: any) => item.id === "ack_gate" && item.ok),
     agentCoordinationContractInjectAction: card.agent_coordination?.targeted_rework?.some((item: any) => item.id === "contract_inject" && item.target === "collab-web"),
@@ -2217,6 +2521,11 @@ function buildGroupMemoryContext(memory: any) {
   ];
   if (memory.summary) lines.push(`- 压缩摘要：${compactMemoryText(memory.summary, 900)}`);
   if (memory.messageDigest) lines.push(`- 群聊旧消息压缩：${compactMemoryText(memory.messageDigest, 900)}`);
+  if (memory.compactBoundary) {
+    const boundary = memory.compactBoundary;
+    const budget = boundary.context_budget || {};
+    lines.push(`- 群聊压缩边界：${boundary.summarizedFromMessageId || ""} -> ${boundary.summarizedThroughMessageId || ""}；保留 ${boundary.preservedMessageIds?.length || 0} 条锚点；压缩前 ${boundary.preCompactTokenCount || 0} tokens，压缩后 ${boundary.postCompactTokenCount || 0} tokens，压力 ${budget.pressure ?? 0}%。`);
+  }
   if (memory.messageCompression?.compressedMessages) lines.push(`- 压缩状态：共 ${memory.messageCompression.totalMessages || 0} 条消息，旧消息压缩 ${memory.messageCompression.compressedMessages || 0} 条，近期原文 ${memory.messageCompression.recentLimit || 0} 条。`);
   const addList = (title: string, items: any[], mapper: (item: any) => string) => {
     if (!items?.length) return;
@@ -2417,7 +2726,7 @@ function buildGroupContextPacket(groupId: string, options: any = {}) {
   if (recentMessages.length) {
     sections.push([
       `群聊近期原文窗口（最近 ${recentMessages.length}/${allMessages.length} 条，最后 ${Math.min(fullCount, recentMessages.length)} 条保留全文）：`,
-      buildRecentGroupContext(recentMessages, fullCount),
+      buildBoundedRecentGroupContext(recentMessages, fullCount),
     ].join("\n"));
   }
   return sections.filter(Boolean).join("\n\n");
@@ -2453,7 +2762,8 @@ function buildChildAgentDevelopmentContract(targetProject: string, taskText = ""
     "- 回执质量要求：status=done 只有在目标覆盖、文件/产出和验证证据都齐全时才能写；缺文件、缺验证、仍有依赖或不确定时写 blocked/needs_info/partial。",
     "- ACK 结构要求：CCM_AGENT_RECEIPT 中必须包含 ack 对象，字段包括 understoodGoal、plannedScope、forbiddenScope、verificationPlan、unclear；如果不清楚，unclear 必须列出问题且 status 不得写 done。",
     "- contractChanges 结构要求：如果涉及接口、字段、schema、路由、类型、配置或前后端契约变化，CCM_AGENT_RECEIPT 中必须包含 contractChanges 数组，写明 type、endpoint/path、request、response、fields、consumers、note。",
-    "- 回执要求：回复末尾必须包含 JSON 格式 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、ack、contractChanges、memoryUsed、memoryIgnored。",
+    "- contract injection 消费要求：如果工作单包含 injection_id，回执必须写 consumedInjectionIds，并说明是否已适配、无需适配或仍阻塞。",
+    "- 回执要求：回复末尾必须包含 JSON 格式 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、ack、contractChanges、consumedInjectionIds、memoryUsed、memoryIgnored。",
   ].filter(Boolean).join("\n");
 }
 
@@ -3450,6 +3760,7 @@ function extractStructuredAssignments(result: any, group: any, sourceProject = "
       attempt: Number(item?.attempt || 1),
       continuationOf: String(item?.continuationOf || item?.continuation_of || "").trim(),
       continuationStrategy: String(item?.continuationStrategy || item?.continuation_strategy || "").trim(),
+      worker_context_packet: item?.worker_context_packet || item?.workerContextPacket || null,
       structured: true,
     });
   }
@@ -3625,6 +3936,9 @@ function buildTaskExecutionResult(status: TaskExecutionStatus, result: string, d
     executionOrder: details.executionOrder || "",
     coordinatorRuntime: details.coordinatorRuntime || details.runtime || "",
     coordinatorAgent: details.coordinatorAgent || "",
+    runtimeToolSync: details.runtimeToolSync || details.runtime_tool_sync || null,
+    runtimeTooling: details.runtimeTooling || details.runtime_tooling || null,
+    invokedSkills: Array.isArray(details.invokedSkills || details.invoked_skills) ? (details.invokedSkills || details.invoked_skills) : [],
   };
 }
 
@@ -4093,7 +4407,7 @@ function buildAcceptanceGate(task: any, execution: any, summary: any, finalStatu
     { id: "worker_receipt", label: "子 Agent 回执", ok: (summary.receipt_statuses || []).some((item: any) => item.status === "done") || task?.assign_type !== "group", detail: `回执 ${(summary.receipt_statuses || []).length} 条` },
     { id: "ack_gate", label: "ACK 前置审核", ok: !(taskRequiresCodeChanges(task) || taskRequiresVerification(task)) || summary.ack_gate_passed === true, detail: summary.ack_review?.rejected?.length ? `需重写 ACK ${summary.ack_review.rejected.length} 条` : "通过" },
     { id: "receipt_quality", label: "回执质量", ok: !taskRequiresCodeChanges(task) && !taskRequiresVerification(task) || summary.receipt_quality_gate_passed === true, detail: summary.weak_receipt_quality?.length ? `弱回执 ${summary.weak_receipt_quality.length} 条` : "通过" },
-    { id: "contract_injection", label: "契约注入依赖 Agent", ok: summary.contract_injection_gate_passed !== false, detail: summary.contract_injection_gate?.missing?.length ? `待注入 ${summary.contract_injection_gate.missing.length} 个 Agent` : "通过" },
+    { id: "contract_injection", label: "契约注入依赖 Agent", ok: summary.contract_injection_gate_passed !== false, detail: summary.contract_injection_gate?.missing?.length ? `待注入 ${summary.contract_injection_gate.missing.length} 个 Agent` : summary.contract_injection_gate?.unconsumed?.length ? `待消费回执 ${summary.contract_injection_gate.unconsumed.length} 个 Agent` : "通过" },
     { id: "final_review", label: "主 Agent 验收", ok: !!summary.has_final_review || finalStatus === "failed" || task?.assign_type !== "group", detail: summary.review_status || "" },
     { id: "actual_changes", label: "真实文件变更", ok: !taskRequiresCodeChanges(task) || Number(summary.actual_file_change_count || 0) > 0, detail: `变更 ${summary.actual_file_change_count || 0} 个文件` },
     { id: "verification", label: "已执行验证", ok: !taskRequiresVerification(task) || Number(summary.verification_executed?.length || 0) > 0, detail: `已执行 ${summary.verification_executed?.length || 0} 条` },
@@ -4195,6 +4509,10 @@ function buildDeliverySummary(task: any, execution: any, finalStatus: string) {
     verification: Array.isArray(receipt.verification) ? receipt.verification.slice(0, 30) : [],
     ack: receipt.ack || null,
     contractChanges: Array.isArray(receipt.contractChanges || receipt.contract_changes) ? (receipt.contractChanges || receipt.contract_changes).slice(0, 12) : [],
+    consumedInjectionIds: normalizeStringArray(receipt.consumedInjectionIds || receipt.consumed_injection_ids || receipt.contractInjectionConsumed || receipt.contract_injection_consumed).slice(0, 20),
+    contractConsumption: Array.isArray(receipt.contractConsumption || receipt.contract_consumption) ? (receipt.contractConsumption || receipt.contract_consumption).slice(0, 20) : [],
+    invokedSkills: Array.isArray(receipt.invokedSkills || receipt.invoked_skills) ? (receipt.invokedSkills || receipt.invoked_skills).slice(0, 20) : [],
+    runtimeToolSnapshot: receipt.runtimeToolSnapshot || receipt.runtime_tool_snapshot || null,
     memoryUsed: Array.isArray(receipt.memoryUsed) ? receipt.memoryUsed.slice(0, 20) : [],
     memoryIgnored: Array.isArray(receipt.memoryIgnored) ? receipt.memoryIgnored.slice(0, 20) : [],
     blockers: Array.isArray(receipt.blockers) ? receipt.blockers.slice(0, 20) : [],
@@ -4229,7 +4547,7 @@ function buildDeliverySummary(task: any, execution: any, finalStatus: string) {
     contractSyncForGate,
     assignmentEvidence.map((item: any) => ({ project: item.project, objective: item.task }))
   );
-  const contractInjectionGate = evaluateContractInjectionGate(contractTransferForGate.rows || [], assignmentEvidence);
+  const contractInjectionGate = evaluateContractInjectionGate(contractTransferForGate.rows || [], assignmentEvidence, receiptEvidence);
   const review = execution?.review || null;
   const reviewStatus = review?.status || "";
   const taskAgentQa = getAgentQaItemsForGroup(String(task?.group_id || task?.groupId || ""), 120)
@@ -4389,8 +4707,10 @@ function buildDeliverySummary(task: any, execution: any, finalStatus: string) {
     session_count: sessionContinuity.length,
     native_session_count: sessionContinuity.filter((item: any) => item.resume_mode === "native" && item.native_session_id).length,
     degraded_session_count: sessionContinuity.filter((item: any) => item.degraded).length,
+    runtime_tooling: collectRuntimeToolingFromSources(task, execution, [], receiptEvidence),
     generated_at: new Date().toISOString(),
   };
+  summary.runtime_kernel = buildRuntimeKernelSnapshot(task, summary);
   summary.acceptance_gate = buildAcceptanceGate(task, execution, summary, finalStatus);
   summary.acceptance_gate_passed = summary.acceptance_gate.pass;
   summary.reasoning_loop = buildTaskReasoningState(task, summary);
@@ -5579,6 +5899,8 @@ function normalizeAgentReceipt(raw: any, agent: string) {
     needs: normalizeStringArray(raw.needs || raw.followUps || raw.follow_ups),
     ack,
     contractChanges,
+    consumedInjectionIds: normalizeStringArray(raw.consumedInjectionIds || raw.consumed_injection_ids || raw.contractInjectionConsumed || raw.contract_injection_consumed),
+    contractConsumption: Array.isArray(raw.contractConsumption || raw.contract_consumption) ? (raw.contractConsumption || raw.contract_consumption).filter((item: any) => item && typeof item === "object").slice(0, 20) : [],
     memoryUsed,
     memoryIgnored,
   };
@@ -6006,6 +6328,55 @@ async function processCrossAgents(
       }
       atMessage = relevantLines.join("\n").trim() || output.substring(0, 500);
     }
+    const requiresAckPreflight = !!sourceTask
+      && sourceTask.workflow_type === "daily_dev"
+      && (taskRequiresCodeChanges(sourceTask) || taskRequiresVerification(sourceTask))
+      && sourceTask.delivery_summary?.ack_gate_passed !== true
+      && !/^【ACK-only 前置接单确认】/.test(atMessage.trim());
+    if (requiresAckPreflight) {
+      atMessage = [
+        "【ACK-only 前置接单确认】",
+        "主 Agent 当前只要求你先返回接单 ACK，不允许开始实现、编辑文件、运行破坏性命令或宣称完成。",
+        "",
+        "原始工作单如下，先理解但不要执行：",
+        atMessage,
+        "",
+        "请只回复 CCM_AGENT_RECEIPT，并在 receipt.ack 中包含：",
+        "- understoodGoal：你理解的业务目标",
+        "- plannedScope：你计划负责的项目范围",
+        "- forbiddenScope：你不会越权触碰的范围",
+        "- verificationPlan：ACK 通过后你会执行的验证计划",
+        "- unclear：仍需澄清的问题；没有则空数组",
+        "",
+        "ACK gate 通过后，主 Agent 会复用原任务、原 Trace、原 native session / scratchpad 续跑实现阶段。",
+      ].join("\n");
+      if (taskId) {
+        addTaskLog(taskId, "info", `${targetName} 进入 ACK-only 前置接单确认；ACK 未通过前不派发实现阶段`);
+        appendTaskTimelineEvent(taskId, {
+          type: "ack_preflight_dispatch",
+          title: `${targetName} ACK 前置接单`,
+          detail: "ACK gate 未通过，本轮只允许返回接单确认",
+          status: "active",
+          phase: "intake",
+          agent: targetName,
+          data: { ack_gate_passed: false, original_message_preview: compactMemoryText(typeof mention === "string" ? output : mention.message, 600) },
+        });
+      }
+      recordAgentRuntimeLifecycle({
+        scope: "group",
+        traceId: sourceTask?.trace_id || "",
+        taskId,
+        groupId,
+        agent: sourceProject,
+        action: "ack_preflight_dispatch",
+        phase: "pre_dispatch",
+        risk: "agent",
+        target: targetName,
+        status: "blocked",
+        message: "ACK gate 未通过，本轮只派发 ACK-only 接单确认",
+        data: { targetName, ack_only: true },
+      });
+    }
     const taskKey = `${sourceProject}->${targetName}:${normalizeMentionTask(atMessage)}`;
     if (seenMentions.has(taskKey)) {
       addGroupLog(groupId, "info", "collaboration", `跳过重复协作: ${sourceProject} -> ${targetName}`, { task: atMessage.substring(0, 160) });
@@ -6213,9 +6584,9 @@ async function processCrossAgents(
     const advisoryOnly = !!mention.advisoryOnly;
     const projectResourcesConfig = getProjectExtraConfig(targetName);
     const toolContext = advisoryOnly
-      ? { prompt: "\n[Agent 问答权限隔离]\n- 当前请求仅允许提供只读建议，不注入任何额外 MCP 或 Skill。\n", allowedTools: { mcp: [], skill: [] } }
+      ? { prompt: "\n[Agent 问答权限隔离]\n- 当前请求仅允许提供只读建议，不注入任何额外 MCP 或 Skill。\n", allowedTools: { mcp: [], skill: [] }, toolAudit: null }
       : buildAgentToolContext(ctx, group, targetName);
-    let runtimeToolContext = prepareAgentRuntimeTools(groupId, targetName, tWorkDir, tAgentType, toolContext.allowedTools, streamRes);
+    let runtimeToolContext = prepareAgentRuntimeTools(groupId, targetName, tWorkDir, tAgentType, toolContext.allowedTools, streamRes, { taskId, task: sourceTask, toolAudit: toolContext.toolAudit });
     const developmentContract = buildChildAgentDevelopmentContract(targetName, childTaskText, {
       source: `${sourceProject} @ 协作`,
       acceptance: sourceTask?.acceptance_criteria || "",
@@ -6300,7 +6671,7 @@ ${childTaskText}
           const previousRuntime = runtimeCandidates[attemptIndex - 1];
           const sameRuntimeResume = activeRuntime === previousRuntime;
           if (!sameRuntimeResume) {
-            runtimeToolContext = prepareAgentRuntimeTools(groupId, targetName, tWorkDir, activeRuntime, toolContext.allowedTools, streamRes);
+            runtimeToolContext = prepareAgentRuntimeTools(groupId, targetName, tWorkDir, activeRuntime, toolContext.allowedTools, streamRes, { taskId, task: sourceTask, toolAudit: toolContext.toolAudit });
             activeTaskSession = taskId ? openTaskAgentSession({ scopeId: taskId, taskId, groupId, project: targetName, agentType: activeRuntime }) : null;
           }
           const recoveryText = sameRuntimeResume
@@ -6362,7 +6733,13 @@ ${childTaskText}
         const attemptRecoveryDecision = shouldSwitchRuntime(attemptFailureText);
         const permissionDrift = !!sourceTask && taskRequiresCodeChanges(sourceTask) && attemptRecoveryDecision.permissionDrift === true;
         if (activeTaskSession) {
-          activeTaskSession = recordTaskAgentSessionTurn(activeTaskSession.id, { nativeSessionId: targetNativeSessionId, success: targetSessionSucceeded && !permissionDrift, error: targetSessionError || (permissionDrift || !targetSessionSucceeded ? attemptOutput : ""), permissionDrift }) || activeTaskSession;
+          activeTaskSession = recordTaskAgentSessionTurn(activeTaskSession.id, {
+            nativeSessionId: targetNativeSessionId,
+            success: targetSessionSucceeded && !permissionDrift,
+            error: targetSessionError || (permissionDrift || !targetSessionSucceeded ? attemptOutput : ""),
+            permissionDrift,
+            runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
+          }) || activeTaskSession;
           if (taskId) addTaskLog(taskId, targetSessionSucceeded ? "info" : "warning", `${targetName} 会话轮次已记录：${activeTaskSession.agentType} turn=${activeTaskSession.turnCount}${activeTaskSession.nativeSessionId ? "，已捕获原生 session ID" : "，使用 scratchpad 续跑保护"}`);
         }
         if (permissionDrift && taskId) {
@@ -6381,6 +6758,10 @@ ${childTaskText}
       }
       if (laneChangeSnapshot) targetFileChanges = ctx.getFileChanges(targetName, laneChangeSnapshot);
       let targetReceipt = extractAgentReceipt(tOutput, targetName);
+      let targetInvokedSkills: any[] = [];
+      const detectedSkillUse = attachInvokedSkillsToReceipt(targetReceipt, tOutput, toolContext.allowedTools, runtimeToolContext.audit);
+      targetReceipt = detectedSkillUse.receipt;
+      targetInvokedSkills = detectedSkillUse.invoked;
       if (advisoryOnly) {
         const advisoryChanges = Array.isArray(targetFileChanges?.files) ? targetFileChanges.files : Array.isArray(targetFileChanges) ? targetFileChanges : [];
         const boundary = evaluateAdvisoryPermissionBoundary(advisoryChanges, { mcp: [], skill: [] }, toolContext.allowedTools);
@@ -6417,6 +6798,7 @@ ${childTaskText}
             fileChanges: targetFileChanges,
             runnerVerification: extractRunnerVerificationEvidence(tOutput),
             outputPreview: tOutput,
+            data: { runtime_tool_sync: compactRuntimeToolAudit(runtimeToolContext.audit), invoked_skills: targetInvokedSkills },
           });
         }
         if (targetReceipt.status === "done" || targetReceipt.status === "partial") {
@@ -6500,6 +6882,8 @@ ${childTaskText}
         receipt: targetReceipt || undefined,
         fileChanges: targetFileChanges,
         workEvents: targetWorkEvents,
+        runtimeToolSync: compactRuntimeToolAudit(runtimeToolContext.audit),
+        invokedSkills: targetInvokedSkills,
       });
       const qaResult = await handleAgentQaRequests({
         groupId,
@@ -6511,6 +6895,7 @@ ${childTaskText}
         sourceAgentType: tAgentType,
         allowedTools: toolContext.allowedTools,
         mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+        runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
         configs,
         ctx,
         streamRes,
@@ -6669,7 +7054,7 @@ async function resumeAgentQaFromStoredContinuation(qa: any, group: any, ctx: Col
   const agentType = String(continuation.source_agent_type || runtime?.agentType || "claudecode").trim();
   if (!workDir) return { resumed: false, reason: "缺少原 Agent 工作目录，无法安全续跑" };
   const toolContext = buildAgentToolContext(ctx, group, qa.from_agent);
-  const runtimeTools = prepareAgentRuntimeTools(qa.group_id, qa.from_agent, workDir, agentType, continuation.allowed_tools || toolContext.allowedTools, streamRes);
+  const runtimeTools = prepareAgentRuntimeTools(qa.group_id, qa.from_agent, workDir, agentType, continuation.allowed_tools || toolContext.allowedTools, streamRes, { taskId: qa.task_id });
   let session = openTaskAgentSession({ scopeId: qa.task_id, taskId: qa.task_id, groupId: qa.group_id, project: qa.from_agent, agentType });
   let nativeSessionId = "";
   let succeeded = true;
@@ -6700,7 +7085,12 @@ async function resumeAgentQaFromStoredContinuation(qa: any, group: any, ctx: Col
       error = String(opts?.error || opts?.message || "");
     },
   });
-  if (session) session = recordTaskAgentSessionTurn(session.id, { nativeSessionId, success: succeeded, error: error || (!succeeded ? output : "") }) || session;
+  if (session) session = recordTaskAgentSessionTurn(session.id, {
+    nativeSessionId,
+    success: succeeded,
+    error: error || (!succeeded ? output : ""),
+    runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeTools.audit, continuation.allowed_tools || toolContext.allowedTools),
+  }) || session;
   const at = new Date().toISOString();
   const resumed = upsertAgentQaItem({
     ...qa,
@@ -6791,6 +7181,7 @@ async function handleAgentQaRequests(input: {
   sourceAgentType: string;
   allowedTools: any;
   mcpConfigPath?: string;
+  runtimeToolSnapshot?: any;
   configs: any[];
   ctx: CollabCtx;
   streamRes?: any;
@@ -6843,6 +7234,7 @@ async function handleAgentQaRequests(input: {
         original_prompt: compactMemoryText(input.originalPrompt, 4000),
         allowed_tools: input.allowedTools || { mcp: [], skill: [] },
         mcp_config_path: input.mcpConfigPath || "",
+        runtime_tool_snapshot: input.runtimeToolSnapshot || null,
       },
       retry_count: 0,
       manual_takeover: false,
@@ -7488,6 +7880,26 @@ async function executeTask(task: any, ctx: CollabCtx) {
     if (validMentions.length > 0) {
       addTaskLog(task.id, "info", `检测到群聊派发目标: ${validMentions.map(m => m.mention).join(", ")}`);
       appendTaskTimelineEvent(task.id, { type: "dispatch", title: "主 Agent 派发子 Agent", detail: validMentions.map(m => m.mention).join(", "), status: "active", phase: "dispatching", agent: coordinatorProject, data: { mentions: validMentions } });
+      for (const mention of validMentions) {
+        recordAgentRuntimeLifecycle({
+          scope: "group",
+          traceId: task.trace_id,
+          taskId: task.id,
+          groupId: task.group_id,
+          agent: coordinatorProject,
+          action: "dispatch_worker",
+          phase: "act",
+          risk: "agent",
+          target: mention.targetName || mention.mention || "",
+          status: "running",
+          message: `主 Agent 派发子 Agent：${mention.targetName || mention.mention || ""}`,
+          data: {
+            mention,
+            worker_context_packet: mention.worker_context_packet || null,
+            execution_order: (coordinatorResult as any).executionOrder || "parallel",
+          },
+        });
+      }
       crossOutputs = await processCrossAgents(
         task.group_id,
         group,
@@ -7523,6 +7935,20 @@ async function executeTask(task: any, ctx: CollabCtx) {
     const config = configs.find(c => c.name === task.target_project);
     if (!config) throw new Error("项目配置不存在");
     appendTaskTimelineEvent(task.id, { type: "direct_task", title: "直接任务进入项目 Agent", detail: task.title || "", status: "active", phase: "dispatching", agent: task.target_project });
+    recordAgentRuntimeLifecycle({
+      scope: "worker",
+      traceId: task.trace_id,
+      taskId: task.id,
+      groupId: task.group_id || "",
+      agent: task.target_project,
+      action: "dispatch_worker",
+      phase: "act",
+      risk: "agent",
+      target: task.target_project,
+      status: "running",
+      message: "直接任务进入项目 Agent",
+      data: { target_project: task.target_project, workflow_type: task.workflow_type || "" },
+    });
 
     const info = getConfigInfo(config.path);
     let workDir = info[0]?.workDir;
@@ -7544,7 +7970,7 @@ async function executeTask(task: any, ctx: CollabCtx) {
       catch (error: any) { addTaskLog(task.id, "warning", `无法创建任务前文件检查点：${error.message}`); }
     }
     const worktreeNotice = buildChildAgentWorktreeNotice(preparedWorkDir);
-    const runtimeToolContext = prepareAgentRuntimeTools(task.group_id || "", task.target_project, workDir, agentType, toolContext.allowedTools);
+    const runtimeToolContext = prepareAgentRuntimeTools(task.group_id || "", task.target_project, workDir, agentType, toolContext.allowedTools, null, { taskId: task.id, task, toolAudit: toolContext.toolAudit });
     if (preparedWorkDir.mode === "worktree") {
       addTaskLog(task.id, "info", `直接任务已启用 worktree 隔离：${preparedWorkDir.worktreePath}（${preparedWorkDir.worktreeBranch || "branch unknown"}）`);
     } else if (preparedWorkDir.requestedMode === "worktree" && preparedWorkDir.warning) {
@@ -7586,6 +8012,8 @@ async function executeTask(task: any, ctx: CollabCtx) {
   "actions": ["实际执行的动作"],
   "filesChanged": ["修改过的文件路径；没有修改填空数组"],
   "verification": ["已经运行或建议运行的验证；不能编造未运行的测试"],
+  "contractChanges": ["如涉及接口/字段/schema 变化，改为对象数组；没有填空数组"],
+  "consumedInjectionIds": ["如果工作单包含 injection_id，填已消费的 injection_id；没有填空数组"],
   "memoryUsed": ["本轮实际使用的记忆/知识库/历史结论；未使用填空数组"],
   "memoryIgnored": ["没有使用或无法使用记忆的原因；没有填空数组"],
   "blockers": ["阻塞点；没有填空数组"],
@@ -7594,8 +8022,9 @@ async function executeTask(task: any, ctx: CollabCtx) {
 \`\`\``;
     const output = await ctx.callAgent(task.target_project, message, workDir, agentType, 300000, { allowedTools: toolContext.allowedTools, mcpConfigPath: runtimeToolContext.audit.mcpConfigPath, taskId: task.id, executionId: task.id });
     const fileChanges = workDir ? ctx.getFileChanges(task.target_project, changeSnapshot) : null;
-    const receipt = extractAgentReceipt(output, task.target_project);
-    const result = getTaskExecutionFromReceipt(output, receipt, { fileChanges });
+    const detectedSkillUse = attachInvokedSkillsToReceipt(extractAgentReceipt(output, task.target_project), output, toolContext.allowedTools, runtimeToolContext.audit);
+    const receipt = detectedSkillUse.receipt;
+    const result = getTaskExecutionFromReceipt(output, receipt, { fileChanges, runtimeToolSync: compactRuntimeToolAudit(runtimeToolContext.audit), invokedSkills: detectedSkillUse.invoked });
     const green = evaluateGreenContract({ receipt, fileChanges, requiresChanges: taskRequiresCodeChanges(task), requiresVerification: task.requires_verification !== false, requiredLevel: "project" });
     transitionExecution(task.id, result.status === "failed" ? "failed" : "reviewing", result.status === "done" ? "项目 Agent 已交付，进入验收" : result.detail, {
       green,
@@ -7603,8 +8032,9 @@ async function executeTask(task: any, ctx: CollabCtx) {
       fileChanges,
       runnerVerification: extractRunnerVerificationEvidence(output),
       outputPreview: output,
+      data: { runtime_tool_sync: compactRuntimeToolAudit(runtimeToolContext.audit), invoked_skills: detectedSkillUse.invoked },
     });
-    return { ...result, executionKernel: { executionId: task.id, green } };
+    return { ...result, runtimeToolSync: compactRuntimeToolAudit(runtimeToolContext.audit), invokedSkills: detectedSkillUse.invoked, executionKernel: { executionId: task.id, green } };
   }
 }
 
@@ -8967,6 +9397,169 @@ function mainAgentPlanStepStatus(actionIds: string[], blockedActions: string[], 
   return actionIds.includes(actionId) ? "completed" : fallback;
 }
 
+function buildUserVisiblePlanStep(input: {
+  id: string;
+  content: string;
+  status: string;
+  activeForm?: string;
+  detail?: string;
+  evidence?: any[];
+  actions?: any[];
+}) {
+  const status = normalizeLiveTodoStatus(input.status || "pending");
+  const activeForm = input.activeForm || input.content;
+  return {
+    id: input.id,
+    content: input.content,
+    subject: input.content,
+    activeForm,
+    active_form: activeForm,
+    summary: ["in_progress", "reviewing", "reworking"].includes(status) ? activeForm : input.content,
+    status,
+    detail: compactMemoryText(input.detail || "", 220),
+    user_visible: true,
+    technical: false,
+    evidence: Array.isArray(input.evidence) ? input.evidence : [],
+    actions: Array.isArray(input.actions) ? input.actions : [],
+  };
+}
+
+const USER_DISPLAY_INTERNAL_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|scratchpad|trace_id|session_ids|native_session|task_agent_session|shouldDelegate|Runtime Kernel|Coordinator|Pipeline|Trace Replay|回执要求|任务级原生会话/i;
+
+function sanitizeMainAgentUserText(value: any, fallback = "Agent 正在处理当前请求。", max = 260) {
+  let text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) text = fallback;
+  if (USER_DISPLAY_INTERNAL_PATTERN.test(text)) {
+    if (/error|失败|denied|invalid|权限|门禁/i.test(text)) text = "Agent 遇到需要处理的执行保护或权限问题，排障信息已放入技术详情。";
+    else if (/done|完成|receipt|回执/i.test(text)) text = "Agent 已提交结构化完成信息，主 Agent 正在汇总验收。";
+    else text = fallback;
+  }
+  text = text
+    .replace(/\bCoordinator\b/g, "主 Agent")
+    .replace(/\bPipeline\b/g, "协作看板")
+    .replace(/\bRuntime Kernel\b/g, "技术运行信息")
+    .replace(/\bTrace Replay\b/g, "技术回放");
+  return compactMemoryText(text, max);
+}
+
+function buildStreamlinedToolUseSummary(input: {
+  actionIds?: string[];
+  steps?: any[];
+  workers?: any[];
+  executions?: any[];
+  summary?: any;
+}) {
+  const actionIds = Array.isArray(input.actionIds) ? input.actionIds : [];
+  const steps = Array.isArray(input.steps) ? input.steps : [];
+  const workers = Array.isArray(input.workers) ? input.workers : [];
+  const executions = Array.isArray(input.executions) ? input.executions : [];
+  const summary = input.summary || {};
+  const counts = {
+    reads: actionIds.filter(id => /read|inspect|query/.test(id)).length + steps.filter(step => /read|读取|查看|查询/i.test(String(step.id || step.content || ""))).length,
+    writes: actionIds.filter(id => /create|govern|replan/.test(id)).length,
+    dispatches: actionIds.includes("dispatch_child_agent") ? Math.max(1, workers.length, Number(summary.assignment_count || 0)) : workers.length,
+    receipts: Number(summary.receipt_count || 0) || steps.filter(step => /receipt|回执/i.test(String(step.id || step.content || ""))).length,
+    verifications: Number((Array.isArray(summary.verification_executed) ? summary.verification_executed.length : 0) || 0),
+    executions: executions.length,
+  };
+  const parts: string[] = [];
+  if (counts.reads) parts.push(`读取/检查 ${counts.reads} 项`);
+  if (counts.writes) parts.push(`准备写入/治理 ${counts.writes} 项`);
+  if (counts.dispatches) parts.push(`协作通道 ${counts.dispatches} 个`);
+  if (counts.receipts) parts.push(`回执 ${counts.receipts} 条`);
+  if (counts.verifications) parts.push(`验证 ${counts.verifications} 项`);
+  if (counts.executions) parts.push(`执行记录 ${counts.executions} 条`);
+  const toolSummary = parts.length ? parts.join("，") : "本轮没有需要展示的工具调用";
+  return {
+    type: "streamlined_tool_use_summary",
+    tool_summary: toolSummary,
+    counts,
+    hidden_tool_uses: Math.max(0, actionIds.length + steps.length + executions.length - 3),
+  };
+}
+
+function buildTechnicalDetailSections(input: {
+  traceId?: string;
+  actionIds?: string[];
+  permissions?: any[];
+  observations?: any;
+  technical?: any;
+  rawEvents?: any[];
+}) {
+  const actionIds = Array.isArray(input.actionIds) ? input.actionIds : [];
+  const permissions = Array.isArray(input.permissions) ? input.permissions : [];
+  const technical = input.technical || {};
+  const rawEvents = Array.isArray(input.rawEvents) ? input.rawEvents : [];
+  const blocked = permissions.filter((item: any) => item?.allowed === false);
+  const troubleshooting: any[] = [];
+  const records: any[] = [];
+  if (blocked.length) troubleshooting.push({ label: "待确认动作", value: blocked.map((item: any) => item.action_id).join("、") });
+  if (technical.failed_gates?.length) troubleshooting.push({ label: "未过门禁", value: technical.failed_gates.map((item: any) => item.label || item.id || item).join("、") });
+  if (technical.blockers?.length) troubleshooting.push({ label: "阻塞", value: technical.blockers.slice(0, 5).join("；") });
+  if (input.traceId) records.push({ label: "Trace", value: input.traceId });
+  if (technical.execution_ids?.length) records.push({ label: "执行", value: technical.execution_ids.join("、") });
+  if (technical.session_ids?.length) records.push({ label: "会话", value: technical.session_ids.join("、") });
+  if (actionIds.length) records.push({ label: "动作", value: actionIds.join(", ") });
+  if (input.observations) records.push({ label: "观察", value: compactMemoryText(JSON.stringify(input.observations), 360) });
+  if (rawEvents.length) records.push({ label: "原始事件", value: `${rawEvents.length} 条，默认隐藏` });
+  return [
+    { id: "troubleshooting", title: "排障摘要", items: troubleshooting },
+    { id: "records", title: "完整记录", items: records },
+  ].filter(section => section.items.length > 0);
+}
+
+function buildMainAgentDisplayStream(input: {
+  mode: string;
+  userText?: string;
+  actionIds?: string[];
+  steps?: any[];
+  permissions?: any[];
+  observations?: any;
+  traceId?: string;
+  technical?: any;
+  workers?: any[];
+  executions?: any[];
+  summary?: any;
+  rawEvents?: any[];
+}) {
+  const toolUseSummary = buildStreamlinedToolUseSummary(input);
+  const modeLabels: Record<string, string> = {
+    conversation: "普通回复",
+    project_analysis: "项目分析",
+    project_task: "项目任务",
+    delegation: "协作执行",
+    followup: "追加处理",
+    governance: "任务治理",
+  };
+  const currentStep = (input.steps || []).find((step: any) => ["failed", "needs_confirmation", "reworking", "reviewing", "in_progress"].includes(step.status))
+    || (input.steps || []).find((step: any) => step.status === "pending")
+    || (input.steps || [])[0];
+  const fallback = currentStep
+    ? `${modeLabels[input.mode] || "主 Agent"}：${currentStep.activeForm || currentStep.active_form || currentStep.summary || currentStep.content}`
+    : `${modeLabels[input.mode] || "主 Agent"}正在处理当前请求。`;
+  const text = sanitizeMainAgentUserText(input.userText, fallback);
+  return {
+    schema: "ccm-streamlined-display-v1",
+    type: "streamlined_agent_display",
+    user_visible: true,
+    user_visible_text: text,
+    text_message: { type: "streamlined_text", text },
+    tool_use_summary: toolUseSummary,
+    technical_details: buildTechnicalDetailSections(input),
+    raw_events: Array.isArray(input.rawEvents) ? input.rawEvents.slice(-20) : [],
+    todo: {
+      visible: true,
+      surface: "plan_panel",
+      tool_message_visible: false,
+      quiet_completed: true,
+    },
+    terminology: {
+      sanitized: true,
+      blocked_terms: ["Coordinator", "Pipeline", "Runtime Kernel", "trace_id", "session_ids"],
+    },
+  };
+}
+
 function buildMainAgentUserPlanSteps(input: {
   mode: string;
   actionIds: string[];
@@ -8983,7 +9576,7 @@ function buildMainAgentUserPlanSteps(input: {
   const assignmentCount = Array.isArray(input.assignments) ? input.assignments.length : 0;
   const steps: any[] = [];
   const add = (id: string, content: string, status: string, activeForm = content, detail = "") => {
-    steps.push({ id, content, activeForm, status, detail });
+    steps.push(buildUserVisiblePlanStep({ id, content, activeForm, status, detail }));
   };
 
   add(
@@ -9237,7 +9830,7 @@ function buildLiveMainAgentTodoPlan(task: any, phase: string, workers: any[], ex
   const steps: any[] = [];
   const add = (id: string, content: string, status: string, activeForm: string, detail = "") => {
     const normalizedStatus = normalizeLiveTodoStatus(status);
-    steps.push({
+    steps.push(buildUserVisiblePlanStep({
       id,
       content,
       status: normalizedStatus,
@@ -9245,7 +9838,7 @@ function buildLiveMainAgentTodoPlan(task: any, phase: string, workers: any[], ex
       detail,
       evidence: buildTodoStepEvidence({ task, summary, workers, executions, stepId: id, phase }),
       actions: buildTodoStepActions({ task, stepId: id, status: normalizedStatus, phase, summary }),
-    });
+    }));
   };
 
   add("understand_intent", "确认需求目标和涉及范围", "completed", "正在确认需求目标", task?.business_goal || task?.title || "");
@@ -9318,6 +9911,8 @@ function buildLiveMainAgentTodoPlan(task: any, phase: string, workers: any[], ex
   return {
     title: "我正在这样处理",
     source: "ccm-live-task-todo",
+    schema: "cc-style-todo-v2",
+    display: { max_visible_steps: 7, quiet_completed: true, show_current_focus: true },
     phase,
     task_id: task?.id || "",
     updated_at: task?.updated_at || new Date().toISOString(),
@@ -9354,6 +9949,20 @@ function buildLiveMainAgentDecisionForTask(task: any, phase: string, liveTodoPla
     observations: observation,
     verified: passed,
   });
+  const displayStream = buildMainAgentDisplayStream({
+    mode: phase === "reworking" ? "followup" : "delegation",
+    userText: task?.status_detail || summary.headline || "",
+    actionIds: selectedActions,
+    steps,
+    permissions,
+    observations: observation,
+    traceId: task?.trace_id || "",
+    technical: { blockers: summary.blockers || summary.needs || [] },
+    workers: Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : [],
+    executions: [],
+    summary,
+    rawEvents: Array.isArray(summary.timeline) ? summary.timeline : [],
+  });
   return {
     version: 2,
     trace_id: task?.trace_id || "",
@@ -9370,6 +9979,8 @@ function buildLiveMainAgentDecisionForTask(task: any, phase: string, liveTodoPla
     internal_loop: internalLoop,
     loop: internalLoop,
     user_plan_steps: steps,
+    display_stream: displayStream,
+    displayStream,
     todo_plan: liveTodoPlan,
     permissions,
     observation,
@@ -9453,6 +10064,20 @@ function buildMainAgentDecisionChain(input: {
     observations,
     verified,
   });
+  const displayStream = buildMainAgentDisplayStream({
+    mode,
+    userText: input.reply?.text || input.dispatchPolicy?.nextStep || input.dispatchPolicy?.reason || input.taskIntent?.reason || "",
+    actionIds,
+    steps: userPlanSteps,
+    permissions,
+    observations,
+    traceId: input.traceId,
+    technical: { blockers: blocked.map((item: any) => item.reason || item.action_id) },
+    workers: input.assignments || [],
+    executions: [],
+    summary: { assignment_count: (input.assignments || []).length },
+    rawEvents: [],
+  });
   const chain = {
     version: 2,
     trace_id: input.traceId,
@@ -9469,9 +10094,13 @@ function buildMainAgentDecisionChain(input: {
     internal_loop: internalLoop,
     loop: internalLoop,
     user_plan_steps: userPlanSteps,
+    display_stream: displayStream,
+    displayStream,
     todo_plan: {
       title: "我准备这样处理",
       source: "cc-style-todo",
+      schema: "cc-style-todo-v2",
+      display: { max_visible_steps: 7, quiet_completed: true, show_current_focus: true, user_visible: mode !== "conversation" || blocked.length > 0 || policyAction === "ask_user", hide_for_simple_conversation: mode === "conversation" && blocked.length === 0 && policyAction !== "ask_user" },
       strategy: "完整列表替换；普通用户看计划步骤，内部 Action/Trace 折叠",
       verification_nudge: userPlanSteps.length >= 3 && !userPlanSteps.some(step => /验证|验收|verify/i.test(step.content)),
       steps: userPlanSteps,
@@ -10474,6 +11103,17 @@ function buildDailyDevAgentDiagnostics() {
       ? `规则主 Agent 可生成 ${coordinatorProtocol.coordinationPlan?.phases?.length || 0} 阶段计划，按 ${coordinatorProtocol.executionOrder || "parallel"} 派发 ${coordinatorProtocol.assignmentCount} 个自包含子 Agent 工作单；策略：${coordinatorProtocol.coordinationStrategy || coordinatorProtocol.coordinationPlan?.strategy || "未声明"}`
       : "规则主 Agent 未能稳定生成计划、派发和自包含子 Agent 工作单",
     coordinatorProtocol
+  ));
+
+  const runtimeKernel = runAgentRuntimeKernelSelfTest();
+  checks.push(createDiagnosticCheck(
+    "agent-runtime-kernel",
+    "Agent 运行时内核",
+    runtimeKernel.pass ? "ok" : "fail",
+    runtimeKernel.pass
+      ? "统一 lifecycle、权限规则、上下文预算、WorkerContextPacket、contract injection 和 Trace Replay 自测通过"
+      : "Agent 运行时内核自测未通过，需检查 lifecycle/packet/replay 输出",
+    runtimeKernel
   ));
 
   const reworkProtocol = getCoordinatorReworkProtocolSelfTest();
@@ -11615,7 +12255,46 @@ function collectProjectPolicyViolations(actualFileChanges: any[] = [], evidenceE
 function buildAgentToolContext(ctx: CollabCtx, group: any, projectName: string) {
   const allowedTools = mergeToolSelections(group?.tools || {}, getProjectToolSelection(projectName));
   const prompt = ctx.toolManager.buildToolPrompt(allowedTools);
-  return { prompt, allowedTools };
+  const toolAudit = typeof ctx.toolManager.buildScopeAudit === "function" ? ctx.toolManager.buildScopeAudit(allowedTools) : null;
+  return { prompt, allowedTools, toolAudit };
+}
+
+function mergeRuntimeToolManagerAudit(audit: any, toolAudit: any) {
+  if (!audit || !toolAudit) return audit;
+  const rows = Array.isArray(toolAudit.mcp) ? toolAudit.mcp : [];
+  for (const row of rows) {
+    if (row.state !== "missing_tool") continue;
+    const serverName = `ccm__${String(row.server || "").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "tool"}`;
+    const existing = (audit.mcp_statuses || []).find((item: any) => item.name === row.server);
+    if (existing) {
+      existing.state = "missing_tool";
+      existing.availableTools = row.availableTools || existing.availableTools || [];
+      existing.missingTools = row.missingTools || [];
+      existing.error = `授权的 MCP tool 不存在或未注册：${(row.missingTools || []).join(", ")}`;
+    } else {
+      audit.mcp_statuses = audit.mcp_statuses || [];
+      audit.mcp_statuses.push({
+        name: row.server,
+        serverName,
+        state: "missing_tool",
+        grants: [row.raw],
+        tools: row.tool ? [row.tool] : [],
+        availableTools: row.availableTools || [],
+        missingTools: row.missingTools || [],
+        error: `授权的 MCP tool 不存在或未注册：${(row.missingTools || []).join(", ")}`,
+      });
+    }
+    audit.warnings = audit.warnings || [];
+    audit.warnings.push(`MCP ${row.server} 缺少授权工具：${(row.missingTools || []).join(", ")}`);
+  }
+  for (const row of rows.filter((item: any) => ["failed", "disconnected", "missing_server"].includes(String(item.state || "")))) {
+    const existing = (audit.mcp_statuses || []).find((item: any) => item.name === row.server);
+    if (existing && existing.state === "synced") {
+      existing.state = "config_error";
+      existing.error = row.serverStatus?.error || `MCP server 当前状态：${row.state}`;
+    }
+  }
+  return audit;
 }
 
 function prepareAgentRuntimeTools(
@@ -11624,9 +12303,11 @@ function prepareAgentRuntimeTools(
   workDir: string,
   agentType: string,
   allowedTools: any,
-  streamRes: any = null
+  streamRes: any = null,
+  options: any = {}
 ) {
   const audit = syncRuntimeTools(workDir, agentType, allowedTools);
+  mergeRuntimeToolManagerAudit(audit, options.toolAudit);
   const level = audit.mode === "failed" || audit.missing.mcp.length || audit.missing.skill.length ? "warning" : "info";
   const missingNames = [...audit.missing.mcp.map(name => `MCP:${name}`), ...audit.missing.skill.map(name => `Skill:${name}`)];
   const missingSuffix = missingNames.length ? `；未找到或未启用：${missingNames.join("、")}` : "";
@@ -11636,6 +12317,24 @@ function prepareAgentRuntimeTools(
     : audit.mode === "ccm-proxy-only"
       ? `${projectName} (${audit.runtime}) 使用 CCM 工具代理模式`
       : `${projectName} Runtime 工具同步失败：${audit.errors.join("；") || "未知错误"}`;
+  const sourceTask = options.task || getTaskById(options.taskId || "");
+  const traceId = options.traceId || sourceTask?.trace_id || "";
+  if (traceId) {
+    recordAgentRuntimeLifecycle({
+      scope: "worker",
+      traceId,
+      taskId: sourceTask?.id || options.taskId || "",
+      groupId,
+      agent: projectName,
+      action: "runtime_tool_sync",
+      phase: "prepare",
+      risk: "read",
+      target: projectName,
+      status: audit.mode === "failed" ? "error" : (audit.missing.mcp.length || audit.missing.skill.length ? "blocked" : "ok"),
+      message: summary,
+      data: { runtime_tool_sync: compactRuntimeToolAudit(audit), snapshot: runtimeToolSnapshotFromAudit(audit, allowedTools) },
+    });
+  }
   recordRuntimeToolSyncAudit(audit, projectName, groupId);
   if (groupId) safeAddGroupLog(groupId, level, "runtime-tool-sync", summary, audit);
   const workEvent = {
@@ -13544,15 +14243,26 @@ function buildTaskGapContinuationDraft(task: any) {
     lines.push("");
   }
   const contractInjection = getTaskContractInjectionRows(task);
-  const contractGate = evaluateContractInjectionGate(contractInjection.rows, Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : []);
+  const contractGate = evaluateContractInjectionGate(contractInjection.rows, Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : [], Array.isArray(summary.receipts) ? summary.receipts : []);
   if (contractGate.required && !contractGate.pass) {
     lines.push("需要注入依赖 Agent 的 contractChanges：");
     contractGate.missing.slice(0, 12).forEach((row: any) => {
       const endpoint = row.endpoint || row.type || "contract";
-      lines.push(`- ${row.target}：续跑同一任务和同 Agent 会话，注入 ${endpoint}。${row.summary || "结构化契约变化需要同步给消费者 Agent"}`);
+      const injection = buildContractInjectionEvent({
+        traceId: task?.trace_id || task?.traceId || "",
+        taskId: task?.id || "",
+        sourceAgent: row.source || row.source_agent || row.producer || "",
+        targetAgent: row.target || row.consumer || "",
+        contract: row,
+      });
+      lines.push(`- ${row.target}：续跑同一任务和同 Agent 会话，注入 ${endpoint}；injection_id=${injection.injection_id}。${row.summary || "结构化契约变化需要同步给消费者 Agent"}`);
+    });
+    contractGate.unconsumed.slice(0, 12).forEach((row: any) => {
+      const endpoint = row.endpoint || row.type || "contract";
+      lines.push(`- ${row.target}：已收到 ${endpoint} 注入但回执未完成消费；请复用原任务和同 Agent 会话续跑，回执 consumedInjectionIds 必须包含 ${row.injection_id}，contractConsumption 必须写 status=adapted/no_change/not_required 之一，并附适配/无需适配/验证证据。${row.consumption_reason ? `当前问题：${row.consumption_reason}` : ""}`);
     });
     lines.push("- 主 Agent 必须优先复用原任务、原 Trace、原 native session/scratchpad，通过同一任务卡继续派发，不要新建无关任务。");
-    lines.push("- 依赖 Agent 收到注入后必须说明是否需要适配代码、是否已完成适配和验证；回执里保留 contractChanges 消费结论。");
+    lines.push("- 依赖 Agent 收到注入后必须说明是否需要适配代码、是否已完成适配和验证；回执里保留 contractChanges 消费结论，并引用对应 injection_id。");
     lines.push("");
   }
   if (Array.isArray(summary.verification_required_missing) && summary.verification_required_missing.length) {
@@ -13661,9 +14371,12 @@ function getTaskGapItems(task: any) {
     items.push(`ack_rewrite:${compactMemoryText(row.agent, 80)}:${row.status}:${compactMemoryText(row.reason, 180)}`);
   }
   const contractInjection = getTaskContractInjectionRows(task);
-  const contractGate = evaluateContractInjectionGate(contractInjection.rows, Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : []);
+  const contractGate = evaluateContractInjectionGate(contractInjection.rows, Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : [], Array.isArray(summary.receipts) ? summary.receipts : []);
   for (const row of contractGate.missing || []) {
     items.push(`contract_inject:${compactMemoryText(row.target, 80)}:${compactMemoryText(row.endpoint || row.type || "contract", 180)}`);
+  }
+  for (const row of contractGate.unconsumed || []) {
+    items.push(`contract_consume:${compactMemoryText(row.target, 80)}:${compactMemoryText(row.injection_id || row.endpoint || row.type || "contract", 180)}`);
   }
   for (const notification of Array.isArray(summary.worker_notifications) ? summary.worker_notifications : []) {
     const status = String(notification?.status || "").trim();
@@ -13741,7 +14454,7 @@ function hasDailyDevContinuationGaps(task: any) {
   const hasAckGateGap = (taskRequiresCodeChanges(task) || taskRequiresVerification(task))
     && (summary.ack_gate_passed === false || getTaskAckRewriteRows(task).length > 0);
   const contractInjection = getTaskContractInjectionRows(task);
-  const contractGate = evaluateContractInjectionGate(contractInjection.rows, Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : []);
+  const contractGate = evaluateContractInjectionGate(contractInjection.rows, Array.isArray(summary.assignment_evidence) ? summary.assignment_evidence : [], Array.isArray(summary.receipts) ? summary.receipts : []);
   const hasContractInjectionGap = contractGate.required && !contractGate.pass;
   return hasSummaryGaps || hasReceiptGaps || hasWorkerNotificationGaps || hasCoordinationEvidenceGaps || hasAgentQaGap || hasAckGateGap || hasContractInjectionGap;
 }
@@ -15307,6 +16020,25 @@ export function handleCollaborationApi(
     return true;
   }
 
+  if (pathname === "/api/orchestrator/trace-replay" && req.method === "GET") {
+    try {
+      const traceId = String(parsed.query.trace_id || parsed.query.traceId || "").trim();
+      sendJson(res, {
+        success: true,
+        replay: traceId ? replayAgentTrace(traceId) : buildTraceReplaySuite(Number(parsed.query.limit || 20)),
+      });
+    } catch (e: any) {
+      sendJson(res, { success: false, error: e.message }, 500);
+    }
+    return true;
+  }
+
+  if (pathname === "/api/orchestrator/runtime-kernel/self-test" && req.method === "GET") {
+    const result = runAgentRuntimeKernelSelfTest();
+    sendJson(res, { success: result.pass, result }, result.pass ? 200 : 500);
+    return true;
+  }
+
   if (pathname === "/api/orchestrator/main-agent-actions" && req.method === "GET") {
     try {
       const selfTest = runGroupMainAgentActionRegistrySelfTest();
@@ -15995,8 +16727,16 @@ export function handleCollaborationApi(
 
         const messageMode = String(payload.message_mode || payload.messageMode || "conversation").trim().toLowerCase();
         const messageTraceId = ensureTraceId(payload.trace_id || payload.traceId, "group");
-        const taskIntent = classifyGroupProjectTaskIntent(userMessage, uploadedFiles);
         const forceProjectTask = payload.force_task === true || payload.forceTask === true;
+        const taskIntent = await classifyGroupProjectTaskIntentWithAgent({
+          group,
+          message: userMessage,
+          uploadedFiles,
+          isOrchestrated,
+          messageMode,
+          forceProjectTask,
+          sharedFilesContext: uploadedFilesContext,
+        });
         const persistentTaskRequest = shouldCreatePersistentGroupTask({ isOrchestrated, messageMode, taskIntent, forceProjectTask });
         const projectAnalysisRequest = shouldUseProjectAnalysisMode({ isOrchestrated, messageMode, taskIntent }) && !persistentTaskRequest;
         const continuationKind = classifyTaskContinuation(userMessage);
@@ -16734,8 +17474,9 @@ export function handleCollaborationApi(
               sourceWorkDir: workDir,
               sourceAgentType: agentType,
               allowedTools: toolContext.allowedTools,
-              mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
-              configs,
+        mcpConfigPath: runtimeToolContext.audit.mcpConfigPath,
+        runtimeToolSnapshot: runtimeToolSnapshotFromAudit(runtimeToolContext.audit, toolContext.allowedTools),
+        configs,
               ctx,
               streamRes: res,
               taskId: "",
@@ -16953,6 +17694,8 @@ export function handleCollaborationApi(
   "actions": ["实际执行的动作"],
   "filesChanged": ["修改过的文件路径；没有修改填空数组"],
   "verification": ["已经运行或建议运行的验证；不能编造未运行的测试"],
+  "contractChanges": ["如涉及接口/字段/schema 变化，改为对象数组；没有填空数组"],
+  "consumedInjectionIds": ["如果工作单包含 injection_id，填已消费的 injection_id；没有填空数组"],
   "memoryUsed": ["本轮实际使用的记忆/知识库/历史结论；未使用填空数组"],
   "memoryIgnored": ["没有使用或无法使用记忆的原因；没有填空数组"],
   "blockers": ["阻塞点；没有填空数组"],

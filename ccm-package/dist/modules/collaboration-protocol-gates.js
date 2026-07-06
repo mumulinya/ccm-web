@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.extractContractSyncHints = extractContractSyncHints;
 exports.buildAckPreflightReview = buildAckPreflightReview;
@@ -6,6 +39,7 @@ exports.buildContractTransferPlan = buildContractTransferPlan;
 exports.getTaskAckRewriteRows = getTaskAckRewriteRows;
 exports.getTaskContractInjectionRows = getTaskContractInjectionRows;
 exports.evaluateContractInjectionGate = evaluateContractInjectionGate;
+const crypto = __importStar(require("crypto"));
 function normalizeStringArray(value) {
     if (Array.isArray(value))
         return value.map((item) => String(item || "").trim()).filter(Boolean);
@@ -33,6 +67,60 @@ function uniqueStrings(...values) {
 function compactMemoryText(value, max = 400) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
     return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+function stableInjectionId(row) {
+    const source = [
+        row?.target || row?.consumer || "",
+        row?.endpoint || row?.path || "",
+        row?.type || "contract",
+        row?.summary || row?.note || row?.response || row?.request || "",
+    ].join("|");
+    return `ci_${crypto.createHash("sha256").update(source).digest("hex").slice(0, 16)}`;
+}
+function normalizeConsumedInjectionIds(receipt) {
+    return uniqueStrings(receipt?.consumedInjectionIds, receipt?.consumed_injection_ids, receipt?.contractInjectionConsumed, receipt?.contract_injection_consumed, receipt?.contractInjection?.consumedInjectionIds, receipt?.contract_injection?.consumed_injection_ids, ...(Array.isArray(receipt?.contractConsumption || receipt?.contract_consumption)
+        ? (receipt.contractConsumption || receipt.contract_consumption).map((item) => item?.injection_id || item?.injectionId)
+        : []));
+}
+function normalizeContractConsumptionEntries(receipt) {
+    const entries = [
+        ...(Array.isArray(receipt?.contractConsumption) ? receipt.contractConsumption : []),
+        ...(Array.isArray(receipt?.contract_consumption) ? receipt.contract_consumption : []),
+        ...(Array.isArray(receipt?.contractInjection?.consumption) ? receipt.contractInjection.consumption : []),
+        ...(Array.isArray(receipt?.contract_injection?.consumption) ? receipt.contract_injection.consumption : []),
+    ];
+    return entries
+        .filter((item) => item && typeof item === "object")
+        .map((item) => ({
+        injection_id: String(item.injection_id || item.injectionId || item.id || "").trim(),
+        status: String(item.status || item.result || item.decision || "").trim().toLowerCase(),
+        summary: compactMemoryText(item.summary || item.note || item.reason || item.evidence || "", 240),
+        evidence: normalizeStringArray(item.evidence || item.files || item.verification || item.tests).slice(0, 12),
+    }))
+        .filter((item) => item.injection_id);
+}
+function evaluateContractConsumptionQuality(receipt, injectionId) {
+    const consumedIds = normalizeConsumedInjectionIds(receipt);
+    if (!consumedIds.includes(injectionId)) {
+        return { consumed: false, pass: false, status: "missing_reference", reason: "回执未引用 injection_id", entry: null };
+    }
+    const entries = normalizeContractConsumptionEntries(receipt);
+    const entry = entries.find((item) => item.injection_id === injectionId) || null;
+    if (!entry) {
+        return { consumed: true, pass: false, status: "missing_consumption_detail", reason: "缺少 contractConsumption 消费结论", entry: null };
+    }
+    const status = entry.status;
+    const okStatuses = ["adapted", "verified", "no_change", "no_change_needed", "not_required", "not_applicable", "ok", "passed"];
+    if (["blocked", "needs_info", "failed", "partial", "unknown"].includes(status) || !okStatuses.includes(status)) {
+        return { consumed: true, pass: false, status: status || "missing_status", reason: "contractConsumption 状态未通过", entry };
+    }
+    const files = normalizeStringArray(receipt?.filesChanged || receipt?.files_changed || receipt?.files);
+    const verification = normalizeStringArray(receipt?.verification || receipt?.tests);
+    const evidence = normalizeStringArray(entry.evidence);
+    if (["adapted", "verified", "ok", "passed"].includes(status) && (!files.length || !verification.length) && !evidence.length) {
+        return { consumed: true, pass: false, status: "missing_evidence", reason: "已适配契约但缺少文件或验证证据", entry };
+    }
+    return { consumed: true, pass: true, status, reason: entry.summary || "contractConsumption 消费结论已记录", entry };
 }
 function extractContractSyncHints(task, summary = {}) {
     const structured = (Array.isArray(summary.receipts) ? summary.receipts : [])
@@ -103,6 +191,7 @@ function buildContractTransferPlan(contractSync, orders = []) {
         const targets = consumers.length ? consumers : [...orderProjects].filter(project => !normalizeStringArray(change.producers || change.provider || change.owner).includes(project));
         return targets.map((target) => ({
             id: `contract_transfer_${index + 1}_${target}`,
+            injection_id: stableInjectionId({ ...change, target }),
             target,
             endpoint: change.endpoint || change.path || "",
             type: change.type || "contract",
@@ -147,15 +236,17 @@ function getTaskContractInjectionRows(task) {
             .filter((row) => row?.target)
             .map((row) => ({
             ...row,
+            injection_id: row.injection_id || stableInjectionId(row),
             target: String(row.target || "").trim(),
             status: row.status || "ready_to_inject",
         }))
             .slice(0, 20),
     };
 }
-function evaluateContractInjectionGate(rows = [], assignments = []) {
+function evaluateContractInjectionGate(rows = [], assignments = [], receipts = []) {
     const normalizedRows = (rows || []).filter((row) => row?.target);
     const injected = normalizedRows.map((row) => {
+        const injectionId = row.injection_id || stableInjectionId(row);
         const target = String(row.target || "").toLowerCase();
         const endpoint = String(row.endpoint || "").toLowerCase();
         const type = String(row.type || "").toLowerCase();
@@ -175,25 +266,43 @@ function evaluateContractInjectionGate(rows = [], assignments = []) {
                 return true;
             return !!type && !["contract", "api", "接口"].includes(type) && taskText.includes(type);
         });
+        const consumerReceipt = (receipts || []).find((receipt) => {
+            const agent = String(receipt?.agent || receipt?.project || "").toLowerCase();
+            if (agent !== target)
+                return false;
+            return normalizeConsumedInjectionIds(receipt).includes(injectionId);
+        });
+        const consumptionQuality = consumerReceipt ? evaluateContractConsumptionQuality(consumerReceipt, injectionId) : null;
         return {
             ...row,
+            injection_id: injectionId,
             injected: !!found,
+            consumed: !!consumerReceipt && consumptionQuality?.pass === true,
+            consumption_status: consumptionQuality?.status || "",
+            consumption_reason: consumptionQuality?.reason || "",
+            consumption_entry: consumptionQuality?.entry || null,
+            consumer_receipt_status: consumerReceipt?.status || "",
             assignment_message_id: found?.message_id || "",
             assignment_source: found?.source || "",
+            missing_reason: !found ? "needs_injection" : !consumerReceipt ? "needs_consumption_receipt" : consumptionQuality?.pass !== true ? "needs_consumption_evidence" : "",
         };
     });
     const missing = injected.filter((row) => !row.injected);
+    const unconsumed = injected.filter((row) => row.injected && !row.consumed);
     return {
         required: normalizedRows.length > 0,
-        pass: missing.length === 0,
+        pass: missing.length === 0 && unconsumed.length === 0,
         rows: injected,
         missing,
-        status: !normalizedRows.length ? "not_required" : missing.length ? "needs_injection" : "injected",
+        unconsumed,
+        status: !normalizedRows.length ? "not_required" : missing.length ? "needs_injection" : unconsumed.length ? "needs_consumption" : "injected",
         summary: !normalizedRows.length
             ? "无依赖 Agent 契约注入需求"
             : missing.length
                 ? `仍需注入 ${missing.length} 个依赖 Agent`
-                : "结构化 contractChanges 已注入依赖 Agent",
+                : unconsumed.length
+                    ? `仍有 ${unconsumed.length} 个依赖 Agent 未引用 injection_id 回执消费结果`
+                    : "结构化 contractChanges 已注入并被依赖 Agent 回执消费",
     };
 }
 //# sourceMappingURL=collaboration-protocol-gates.js.map

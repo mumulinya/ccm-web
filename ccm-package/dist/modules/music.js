@@ -33,6 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.runMusicAgentIntentSelfTest = runMusicAgentIntentSelfTest;
 exports.handleMusicApi = handleMusicApi;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -504,20 +505,178 @@ function searchLocalMusic(keyword) {
         return { id: i, filename: f, title, artist, bvid, pic: `/api/music/cover?file=${encodeURIComponent(f)}`, size: stat.size };
     });
 }
+const RANDOM_MUSIC_KEYWORD = "__random__";
 function extractMusicIntent(msg) {
     const lower = msg.toLowerCase();
-    const playMatch = msg.match(/(?:播放|放一首?|听一首?|来一首?|来点|来些)(.+)/);
+    const playMatch = msg.match(/(?:播放|放一首?|听一首?|来一首?|来点|来些|我想听|我要听|想听)(.*)/);
     if (playMatch)
-        return { type: "play", keyword: playMatch[1].trim() };
+        return { type: "play", keyword: normalizeMusicActionKeyword(playMatch[1].trim(), true) };
     const searchMatch = msg.match(/(?:搜索|找|查找|有没有)(.+)/);
     if (searchMatch)
         return { type: "search", keyword: searchMatch[1].trim() };
     if (/(?:转换|转码|下载|转成|转为)/.test(lower))
         return { type: "convert", keyword: "" };
+    if (/[?？]|(?:怎么|如何|为什么|是什么|是啥|说明|介绍)/.test(msg))
+        return { type: "help", keyword: "" };
     const cleaned = msg.replace(/[，。！？、]/g, " ").replace(/我想听|帮我找|推荐|一些|一点|的歌|的音乐|吧|呗|听听/g, "").trim();
     if (cleaned.length >= 2)
         return { type: "search", keyword: cleaned };
     return { type: "help", keyword: "" };
+}
+function normalizeMusicActionKeyword(keyword, randomIfGeneric = false) {
+    const cleaned = String(keyword || "")
+        .replace(/[，。！？、]/g, " ")
+        .replace(/^(一下|下|首|点|些|一个|一首)\s*/g, "")
+        .trim();
+    if (randomIfGeneric && (!cleaned || /^(随机|随便|任意|音乐|歌曲|歌|听歌)$/i.test(cleaned)))
+        return RANDOM_MUSIC_KEYWORD;
+    return cleaned;
+}
+function extractJsonObject(text) {
+    const raw = String(text || "").trim();
+    try {
+        return JSON.parse(raw);
+    }
+    catch { }
+    const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced)
+        try {
+            return JSON.parse(fenced[1].trim());
+        }
+        catch { }
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start >= 0 && end > start)
+        try {
+            return JSON.parse(raw.slice(start, end + 1));
+        }
+        catch { }
+    return null;
+}
+function normalizeMusicAgentAction(value, message, mode, source = "agent") {
+    const rawType = String(value?.action || value?.type || value?.intent || "").trim().toLowerCase();
+    const fallback = extractMusicIntent(message);
+    const type = ["play_music", "play"].includes(rawType)
+        ? "play_music"
+        : ["search_music", "search"].includes(rawType)
+            ? "search_music"
+            : ["convert_music", "convert", "download"].includes(rawType)
+                ? "convert_music"
+                : rawType === "none" || rawType === "help" || rawType === "chat"
+                    ? "none"
+                    : fallback.type === "play"
+                        ? "play_music"
+                        : fallback.type === "search"
+                            ? "search_music"
+                            : fallback.type === "convert"
+                                ? "convert_music"
+                                : "none";
+    const rawKeyword = String(value?.keyword || value?.query || value?.song || (type === "play_music" || type === "search_music" ? fallback.keyword : "") || "").trim();
+    return {
+        type,
+        keyword: type === "play_music"
+            ? normalizeMusicActionKeyword(rawKeyword, true)
+            : normalizeMusicActionKeyword(rawKeyword, false),
+        mode: mode || "cloud",
+        source,
+        confidence: Math.max(0, Math.min(1, Number(value?.confidence ?? (source === "agent" ? 0.75 : 0.45)) || 0)),
+        reason: String(value?.reason || (source === "agent" ? "音乐 Agent 结构化决策" : "模型动作识别失败，使用后端兜底")).slice(0, 500),
+    };
+}
+function normalizeOpenAiChatUrl(apiUrl) {
+    const base = String(apiUrl || "").replace(/\/$/, "");
+    if (base.includes("/chat/completions"))
+        return base;
+    if (base.endsWith("/v1"))
+        return `${base}/chat/completions`;
+    if (base.includes("/v1/"))
+        return base;
+    return `${base}/v1/chat/completions`;
+}
+function normalizeAnthropicMessagesUrl(apiUrl) {
+    const base = String(apiUrl || "https://api.anthropic.com").replace(/\/$/, "");
+    if (base.endsWith("/v1/messages"))
+        return base;
+    if (base.endsWith("/v1"))
+        return `${base}/messages`;
+    return `${base}/v1/messages`;
+}
+async function classifyMusicAgentAction(cfg, message, mode, history = []) {
+    const system = `你是 CCM 音乐 Agent 的动作识别内核。你只判断用户最新消息是否需要触发播放器副作用。
+只输出 JSON，不要 Markdown。
+动作类型：
+- play_music：用户明确要求播放/想听/来一首/点歌。keyword 是歌曲、歌手、风格或 "__random__"。
+- search_music：用户只是搜索、查找、推荐或询问有没有，不自动播放。
+- convert_music：用户要求转码、下载或转换。
+- none：闲聊、说明、歌词展示、问题咨询或不需要播放器动作。
+如果用户只说“播放音乐”“随便来一首”“听歌”，keyword 必须是 "__random__"。
+返回格式：{"action":"play_music|search_music|convert_music|none","keyword":"","confidence":0.0,"reason":"一句话依据"}`;
+    const recent = (history || []).slice(-6).map((msg) => `${msg.role === "agent" ? "assistant" : "user"}: ${String(msg.content || "").slice(0, 400)}`).join("\n");
+    const user = `当前音乐模式：${mode || "cloud"}\n最近对话：\n${recent || "无"}\n\n用户最新消息：${message}`;
+    const apiUrl = String(cfg.apiUrl || "https://api.anthropic.com").replace(/\/$/, "");
+    const format = String(cfg.format || "auto");
+    const isAnthropicCompat = format === "anthropic"
+        || format === "anthropic-compatible"
+        || (format === "auto" && (apiUrl.includes("anthropic") || apiUrl.endsWith("/anthropic")));
+    try {
+        if (isAnthropicCompat) {
+            const response = await fetch(normalizeAnthropicMessagesUrl(apiUrl), {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-api-key": cfg.apiKey,
+                    "anthropic-version": "2023-06-01",
+                },
+                body: JSON.stringify({
+                    model: cfg.model,
+                    max_tokens: 220,
+                    temperature: 0,
+                    system,
+                    messages: [{ role: "user", content: user }],
+                }),
+                signal: AbortSignal.timeout(8000),
+            });
+            const text = await response.text();
+            if (!response.ok)
+                throw new Error(`HTTP ${response.status}: ${text.slice(0, 160)}`);
+            const data = JSON.parse(text);
+            const content = (data?.content || []).map((part) => part?.type === "text" ? part.text : "").join("").trim();
+            const parsed = extractJsonObject(content);
+            if (!parsed)
+                throw new Error("模型未返回 JSON 动作");
+            return normalizeMusicAgentAction(parsed, message, mode, "agent");
+        }
+        const response = await fetch(normalizeOpenAiChatUrl(apiUrl), {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${cfg.apiKey}`,
+            },
+            body: JSON.stringify({
+                model: cfg.model,
+                temperature: 0,
+                max_tokens: 220,
+                messages: [
+                    { role: "system", content: system },
+                    { role: "user", content: user },
+                ],
+            }),
+            signal: AbortSignal.timeout(8000),
+        });
+        const text = await response.text();
+        if (!response.ok)
+            throw new Error(`HTTP ${response.status}: ${text.slice(0, 160)}`);
+        const data = JSON.parse(text);
+        const content = data?.choices?.[0]?.message?.content || "";
+        const parsed = extractJsonObject(content);
+        if (!parsed)
+            throw new Error("模型未返回 JSON 动作");
+        return normalizeMusicAgentAction(parsed, message, mode, "agent");
+    }
+    catch (error) {
+        const fallback = normalizeMusicAgentAction({}, message, mode, "fallback");
+        return { ...fallback, error: error?.message || String(error) };
+    }
 }
 function getMusicHelpText(chatMode) {
     if (chatMode === "local") {
@@ -766,6 +925,20 @@ async function callAnthropicNative(cfg, system, messages, tools, res) {
         res.end();
     }
 }
+function runMusicAgentIntentSelfTest() {
+    const playSpecific = normalizeMusicAgentAction({ action: "play_music", keyword: "周杰伦 晴天", confidence: 0.93 }, "我想听周杰伦的晴天", "cloud", "agent");
+    const playRandom = normalizeMusicAgentAction({}, "播放音乐", "cloud", "fallback");
+    const searchOnly = normalizeMusicAgentAction({ action: "search_music", keyword: "轻音乐", confidence: 0.9 }, "搜索轻音乐", "cloud", "agent");
+    const questionOnly = normalizeMusicAgentAction({}, "歌词怎么显示？", "cloud", "fallback");
+    const checks = {
+        agentPlayAction: playSpecific.type === "play_music" && playSpecific.keyword === "周杰伦 晴天" && playSpecific.source === "agent",
+        genericPlayBecomesRandom: playRandom.type === "play_music" && playRandom.keyword === RANDOM_MUSIC_KEYWORD,
+        fallbackPlayRequiresNoAutoplay: playRandom.source === "fallback",
+        searchDoesNotAutoplay: searchOnly.type === "search_music" && searchOnly.keyword === "轻音乐",
+        questionDoesNotAutoplay: questionOnly.type !== "play_music",
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, samples: { playSpecific, playRandom, searchOnly, questionOnly } };
+}
 function handleMusicApi(pathname, req, res, parsed, ctx) {
     if (!pathname.startsWith("/api/music"))
         return false;
@@ -995,7 +1168,7 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/music/agent" && req.method === "POST") {
         let body = "";
         req.on("data", (chunk) => body += chunk);
-        req.on("end", () => {
+        req.on("end", async () => {
             try {
                 const { message, mode: chatMode, history } = JSON.parse(body);
                 const cfg = loadMusicAgentConfig();
@@ -1060,14 +1233,24 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                     "Connection": "keep-alive",
                     "Access-Control-Allow-Origin": "*",
                 });
-                const intent = extractMusicIntent(message);
+                const agentAction = await classifyMusicAgentAction(cfg, message, chatMode, history || []);
+                writeSse(res, {
+                    type: "music_action",
+                    action: agentAction,
+                    intent: agentAction.type,
+                    keyword: agentAction.keyword,
+                });
+                const intent = {
+                    type: agentAction.type === "play_music" ? "play" : agentAction.type === "search_music" ? "search" : agentAction.type === "convert_music" ? "convert" : "help",
+                    keyword: agentAction.keyword,
+                };
                 let toolContext = "";
                 if (intent.type === "search" || intent.type === "play") {
                     if (chatMode === "local") {
                         const localResults = searchLocalMusic(intent.keyword);
                         toolContext = `\n\n[工具结果] 本地搜索 "${intent.keyword}" 找到 ${localResults.length} 首：\n${localResults.slice(0, 5).map((t, i) => `${i + 1}. ${t.title} - ${t.artist} (文件: ${t.filename})`).join("\n")}`;
                         messages[messages.length - 1].content += toolContext;
-                        callClaudeAgent(cfg, systemPrompt, messages, res, chatMode);
+                        await callClaudeAgent(cfg, systemPrompt, messages, res, chatMode);
                     }
                     else if (chatMode === "netease") {
                         neteaseSearch(intent.keyword).then((neteaseResults) => {
@@ -1093,7 +1276,7 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
                     }
                 }
                 else {
-                    callClaudeAgent(cfg, systemPrompt, messages, res, chatMode);
+                    await callClaudeAgent(cfg, systemPrompt, messages, res, chatMode);
                 }
             }
             catch (e) {
@@ -1635,7 +1818,8 @@ function handleMusicApi(pathname, req, res, parsed, ctx) {
             try {
                 const { message, mode: chatMode } = JSON.parse(body);
                 const intent = extractMusicIntent(message);
-                const result = { intent: intent.type, keyword: intent.keyword };
+                const action = normalizeMusicAgentAction({ action: intent.type === "play" ? "play_music" : intent.type === "search" ? "search_music" : intent.type === "convert" ? "convert_music" : "none", keyword: intent.keyword }, message, chatMode, "simple-fallback");
+                const result = { intent: intent.type, keyword: intent.keyword, action };
                 if (intent.type === "search") {
                     if (chatMode === "local") {
                         const localResults = searchLocalMusic(intent.keyword);

@@ -56,6 +56,9 @@ const global_agent_memory_1 = require("../global-agent-memory");
 const agent_quality_center_1 = require("../agent-quality-center");
 const task_agent_sessions_1 = require("../task-agent-sessions");
 const agent_reasoning_loop_1 = require("../agent-reasoning-loop");
+const agent_runtime_kernel_1 = require("../agent-runtime-kernel");
+const global_agent_runtime_1 = require("../global-agent-runtime");
+const global_agent_control_center_1 = require("../global-agent-control-center");
 const GLOBAL_AGENT_HISTORY_FILE = path.join(utils_1.CCM_DIR, "global-agent-history.json");
 const GLOBAL_AGENT_BRIDGE_FILE = path.join(utils_1.CCM_DIR, "global-agent-bridge.json");
 const GLOBAL_AGENT_HISTORY_LIMIT = 80;
@@ -515,6 +518,18 @@ function stripActionWords(value) {
         .replace(/(一下|下|吧|呢|谢谢)$/g, "")
         .trim();
 }
+const RANDOM_MUSIC_KEYWORD = "__random__";
+function parseMusicKeyword(message) {
+    const text = stripActionWords(message);
+    const keyword = text
+        .replace(/^(?:随机|随便|任意)?\s*(播放|放一首|放|来一首|来点|听|我想听|我要听|搜首歌|搜索(?:一下)?(?:歌曲|歌)?)/, "")
+        .replace(/^(?:一首|首|点|点儿|点歌)\s*/, "")
+        .replace(/(?:的)?(音乐|歌曲|歌)$/g, "")
+        .trim();
+    if (!keyword || /^(随机|随便|任意|音乐|歌曲|歌|播放|播放音乐|听歌)$/.test(keyword))
+        return "";
+    return keyword;
+}
 function findProjectName(message, projects) {
     const text = message.toLowerCase();
     return projects.find(project => text.includes(String(project).toLowerCase())) || "";
@@ -531,6 +546,16 @@ function findAllProjectNames(message, projects) {
     const text = message.toLowerCase();
     return projects.filter(project => text.includes(String(project).toLowerCase()));
 }
+function resolveImplicitCurrentProject(message, projects) {
+    const text = normalizeText(message).toLowerCase();
+    const hasImplicitProject = /(?:这个|当前|本|该)\s*(?:项目|代码库|仓库|系统)|(?:项目|代码库|仓库|系统)\s*(?:这个|当前|本|该)/.test(text);
+    if (!hasImplicitProject)
+        return "";
+    const ccmProject = projects.find(project => /cc[-_]?connect|ccm/i.test(String(project)));
+    if (ccmProject)
+        return ccmProject;
+    return projects.length === 1 ? projects[0] : "";
+}
 function findAllGroups(message, groups) {
     const text = message.toLowerCase();
     return groups.filter(group => {
@@ -542,6 +567,7 @@ function findAllGroups(message, groups) {
 function buildLocalDevelopmentTargets(message, projects, groups) {
     const matchedGroups = findAllGroups(message, groups);
     const matchedProjects = findAllProjectNames(message, projects);
+    const implicitProject = matchedProjects.length ? "" : resolveImplicitCurrentProject(message, projects);
     const requestsWholeWorkspace = /(?:所有|全部|全量|整个|全局|全项目|跨项目).*(?:项目|代码库|仓库|系统)|(?:项目|代码库|仓库|系统).*(?:全部|全量|整体|全局)/.test(message);
     const targets = [
         ...matchedGroups.map((group) => ({
@@ -556,6 +582,12 @@ function buildLocalDevelopmentTargets(message, projects, groups) {
             reason: "用户明确提到项目「" + project + "」",
             task: message,
         })),
+        ...(implicitProject ? [{
+                type: "project",
+                project: implicitProject,
+                reason: "用户使用“当前/这个项目”指代，已解析到项目「" + implicitProject + "」",
+                task: message,
+            }] : []),
     ];
     if (targets.length > 0)
         return targets;
@@ -814,17 +846,18 @@ function inferLocalGlobalAction(message, projects, groups, resources = {}) {
             action: { type: "manage_project", params: { operation: "stop", project: matchedProject } }
         };
     }
-    if (/(播放|放一首|来一首|听|我想听|我要听|搜首歌|搜索.*歌)/.test(text) && !/页面|列表|打开音乐/.test(text)) {
-        const keyword = stripActionWords(text)
-            .replace(/^(播放|放一首|来一首|听|我想听|我要听|搜首歌|搜索)/, "")
-            .replace(/(音乐|歌曲|歌)$/g, "")
-            .trim();
+    if (/(播放|放一首|放|来一首|来点|听|我想听|我要听|搜首歌|搜索.*歌)/.test(text) && !/页面|列表|打开音乐/.test(text)) {
+        const keyword = parseMusicKeyword(text);
         if (keyword) {
             return {
                 reply: `我会交给音乐 Agent 搜索并播放「${keyword}」。`,
                 action: { type: "play_music", params: { keyword } }
             };
         }
+        return {
+            reply: "我会交给音乐 Agent 随机播放一首本地音乐。",
+            action: { type: "play_music", params: { keyword: RANDOM_MUSIC_KEYWORD, random: true } }
+        };
     }
     if (/定时任务|计划任务|定时执行|每(天|周|星期|小时|隔)/.test(text) && /(创建|新建|添加|定时|每)/.test(text)) {
         if (!matchedGroup && !matchedProject)
@@ -879,7 +912,7 @@ function inferLocalGlobalAction(message, projects, groups, resources = {}) {
                 reply: `我会把这条指令下发到群聊「${group.name || group.id}」的主 Agent。`,
                 action: {
                     type: "send_group_cmd",
-                    params: { groupId: group.id, message: text, target_project: "coordinator" }
+                    params: { group_id: group.id, message: text, target_project: "coordinator" }
                 }
             };
         }
@@ -962,7 +995,7 @@ function createActionBlockSafeStreamer(emit) {
     };
 }
 function runGlobalAgentIntentSelfTest() {
-    const projects = ["frontend-app", "backend-api"];
+    const projects = ["frontend-app", "backend-api", "cc-connect-test"];
     const groups = [{ id: "dev-group", name: "开发群", members: projects.map(project => ({ project })) }];
     const cases = [
         { message: "知识库是怎么实现的？", expected: null, authorized: false },
@@ -979,6 +1012,7 @@ function runGlobalAgentIntentSelfTest() {
         { message: "给项目加一个支付功能", expected: null, authorized: true },
         { message: "创建每天检查一次的定时任务", expected: null, authorized: true },
         { message: "请优化整个项目的知识库检索，并完成测试", expected: "orchestrate_development", expectedTargetCount: projects.length, authorized: true },
+        { message: "请修改当前项目的 README 并运行测试", expected: "orchestrate_development", expectedTargetCount: 1, authorized: true },
         { message: "修复 backend-api 的知识库检索错误", expected: "orchestrate_development", authorized: true },
         { message: "请给 frontend-app 新增登录页面并运行测试", expected: "orchestrate_development", authorized: true },
         { message: "直接运行 backend-api 的测试", expected: "orchestrate_development", authorized: true },
@@ -988,6 +1022,8 @@ function runGlobalAgentIntentSelfTest() {
         { message: "启动 backend-api 项目", expected: "manage_project", authorized: true },
         { message: "打开系统设置页面", expected: "navigate" },
         { message: "播放周杰伦的晴天", expected: "play_music", authorized: true },
+        { message: "播放音乐", expected: "play_music", authorized: true },
+        { message: "随便放一首歌", expected: "play_music", authorized: false },
     ];
     const results = cases.map(item => {
         const result = inferLocalGlobalAction(item.message, projects, groups, {});
@@ -1005,9 +1041,15 @@ function runGlobalAgentIntentSelfTest() {
     safeStreamer.finish();
     const visibleReply = visibleChunks.join("");
     const actionBlockHidden = visibleReply === "这是自然回答。\n";
-    const modelUnavailableWrite = localActionToAgenticDecision({ reply: "准备派发", action: { type: "send_group_cmd", params: { group_id: "dev-group", message: "修复登录" } } }, { steps: [], user_message: "给开发群派发修复登录", explicit_write_authorization: true });
-    const keywordFallbackCannotWrite = modelUnavailableWrite?.state === "answer" && !modelUnavailableWrite.tool && String(modelUnavailableWrite.message || "").includes("没有执行任何写操作");
-    return { passed: results.every(item => item.passed) && actionBlockHidden && keywordFallbackCannotWrite, results, actionBlockHidden, keywordFallbackCannotWrite, visibleReply };
+    const modelUnavailableDelegation = localActionToAgenticDecision({ reply: "准备派发", action: { type: "send_group_cmd", params: { group_id: "dev-group", message: "修复登录" } } }, { steps: [], user_message: "给开发群派发修复登录", explicit_write_authorization: true });
+    const fallbackDelegationCannotWrite = modelUnavailableDelegation?.state === "answer" && !modelUnavailableDelegation.tool;
+    const localGroupDispatch = inferLocalGlobalAction("给开发群派发任务，修复登录问题", projects, groups, {});
+    const localGroupDispatchUsesSchema = localGroupDispatch?.action?.params?.group_id === "dev-group" && !("groupId" in (localGroupDispatch?.action?.params || {}));
+    const modelUnavailableCronCreate = localActionToAgenticDecision({ reply: "准备创建定时任务", action: { type: "manage_cron", params: { operation: "create", name: "检查 backend-api", schedule: "0 8 * * *", prompt: "检查 backend-api" } } }, { steps: [], user_message: "创建一个每天早上八点检查 backend-api 的定时任务", explicit_write_authorization: true });
+    const fallbackCronCannotWrite = modelUnavailableCronCreate?.state === "answer" && !modelUnavailableCronCreate.tool;
+    const modelUnavailableAmbiguousWrite = localActionToAgenticDecision({ reply: "准备派发", action: { type: "create_task", params: { title: "优化", business_goal: "帮我优化一下" } } }, { steps: [], user_message: "帮我优化一下", explicit_write_authorization: true });
+    const ambiguousFallbackCannotWrite = modelUnavailableAmbiguousWrite?.state === "answer" && !modelUnavailableAmbiguousWrite.tool;
+    return { passed: results.every(item => item.passed) && actionBlockHidden && fallbackDelegationCannotWrite && localGroupDispatchUsesSchema && fallbackCronCannotWrite && ambiguousFallbackCannotWrite, results, actionBlockHidden, fallbackDelegationCannotWrite, localGroupDispatchUsesSchema, fallbackCronCannotWrite, ambiguousFallbackCannotWrite, visibleReply };
 }
 function decryptFeishuEvent(encrypted, encryptKey) {
     const key = crypto.createHash("sha256").update(encryptKey).digest();
@@ -1132,10 +1174,12 @@ function formatSystemStatus() {
     ].join("\n");
 }
 async function queueMusicPlayback(baseUrl, keyword) {
-    if (!keyword)
+    const normalizedKeyword = parseMusicKeyword(keyword) || (/(播放|放一首|放|来一首|来点|听|听歌|音乐|歌曲|歌)/.test(keyword) ? RANDOM_MUSIC_KEYWORD : normalizeText(keyword));
+    if (!normalizedKeyword)
         return "缺少要播放的歌曲或歌手关键词。";
-    const result = await postLocalApi(baseUrl, "/api/music/remote-command", { keyword, source: "feishu-global-agent" });
-    return `已把「${keyword}」发送给音乐播放器。请保持 CCM 音乐播放器页面打开，它会在后台自动检索并播放。${result.command?.id ? `\n- 指令 ID：${result.command.id}` : ""}`;
+    const result = await postLocalApi(baseUrl, "/api/music/remote-command", { keyword: normalizedKeyword, source: "feishu-global-agent" });
+    const label = normalizedKeyword === RANDOM_MUSIC_KEYWORD ? "随机播放音乐" : `「${normalizedKeyword}」`;
+    return `已把${label}发送给音乐播放器。请保持 CCM 音乐播放器页面打开，它会在后台自动检索并播放。${result.command?.id ? `\n- 指令 ID：${result.command.id}` : ""}`;
 }
 function fillCronParams(params, originalText, groups = [], projects = []) {
     const schedule = params.schedule || params.cron || guessCronSchedule(originalText);
@@ -1410,10 +1454,11 @@ function localActionToAgenticDecision(localIntent, run) {
     }
     const spec = global_agent_loop_1.GLOBAL_AGENT_TOOL_SPECS.find(item => item.name === toolName);
     const fallbackRisk = typeof spec.risk === "function" ? spec.risk(action.params || {}) : spec.risk;
-    if (fallbackRisk !== "read") {
+    const deterministicUiTools = new Set(["play_music", "toggle_pet", "navigate"]);
+    if (fallbackRisk !== "read" && !deterministicUiTools.has(toolName)) {
         return {
             state: "answer",
-            message: "当前统一大模型不可用。规则兜底只能做确定性只读检查，不能代替大模型理解你的自然语言并修改、创建或派发任务；本次没有执行任何写操作。请恢复模型配置后重试。",
+            message: "当前统一大模型不可用。规则兜底只允许只读查询和界面动作，不会依据关键词执行任何数据写入、任务派发或项目修改。请恢复统一大模型配置后再执行该操作。",
             tool: null,
             intent: { category: "ambiguous", goal: run.user_message, action_required: false, confidence: 0.2, authorization_basis: "none", reason: "模型不可用，禁止关键词规则代替语义决策执行写操作" },
         };
@@ -1738,6 +1783,7 @@ function publicGlobalAgentRun(run, includeObservations = false) {
         shadow_mode: run.shadow_mode,
         original_user_message: run.original_user_message,
         reasoning_loop: run.reasoning_loop,
+        runtime_debug: (0, global_agent_runtime_1.buildGlobalAgentSessionDebug)(run),
     };
 }
 async function processFeishuGlobalAgentMessage(baseUrl, ctx, text, payload, options = {}) {
@@ -2104,8 +2150,123 @@ function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
         });
         return true;
     }
+    if (pathname === "/api/global-agent/runtime/tools" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, tools: (0, global_agent_runtime_1.buildGlobalAgentToolDefinitions)(global_agent_loop_1.GLOBAL_AGENT_TOOL_SPECS) });
+        return true;
+    }
+    if (pathname === "/api/global-agent/control-center" && req.method === "GET") {
+        const message = String(parsed.query.message || "").trim();
+        (0, utils_1.sendJson)(res, { success: true, control: (0, global_agent_control_center_1.buildGlobalControlCenterSnapshot)(message) });
+        return true;
+    }
+    if (pathname === "/api/global-agent/control-center/intent-preview" && req.method === "GET") {
+        const message = String(parsed.query.message || "").trim();
+        (0, utils_1.sendJson)(res, { success: true, intent: (0, global_agent_control_center_1.classifyGlobalControlIntent)(message), dispatch: (0, global_agent_control_center_1.buildGlobalDispatchStrategy)(message) });
+        return true;
+    }
+    if (pathname === "/api/global-agent/control-center/health" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, health: (0, global_agent_control_center_1.buildGlobalSystemHealth)() });
+        return true;
+    }
+    if (pathname === "/api/global-agent/control-center/self-test" && req.method === "GET") {
+        const result = (0, global_agent_control_center_1.runGlobalControlCenterSelfTest)();
+        (0, utils_1.sendJson)(res, { success: result.pass, result }, result.pass ? 200 : 500);
+        return true;
+    }
+    if (pathname === "/api/global-agent/runtime/permissions" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, rules: (0, global_agent_runtime_1.loadGlobalAgentPermissionRules)() });
+        return true;
+    }
+    if (pathname === "/api/global-agent/runtime/permissions" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const result = payload.operation === "delete" || payload.delete === true
+                    ? (0, global_agent_runtime_1.deleteGlobalAgentPermissionRule)(String(payload.id || ""))
+                    : (0, global_agent_runtime_1.saveGlobalAgentPermissionRule)(payload);
+                (0, utils_1.sendJson)(res, { success: true, result, rules: (0, global_agent_runtime_1.loadGlobalAgentPermissionRules)() });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/global-agent/runtime/hooks" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, hooks: (0, global_agent_runtime_1.loadGlobalAgentHooks)() });
+        return true;
+    }
+    if (pathname === "/api/global-agent/runtime/hooks" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const result = payload.operation === "delete" || payload.delete === true
+                    ? (0, global_agent_runtime_1.deleteGlobalAgentHook)(String(payload.id || ""))
+                    : (0, global_agent_runtime_1.saveGlobalAgentHook)(payload);
+                (0, utils_1.sendJson)(res, { success: true, result, hooks: (0, global_agent_runtime_1.loadGlobalAgentHooks)() });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/global-agent/runtime/background" && req.method === "GET") {
+        const id = String(parsed.query.id || parsed.query.run_id || "").trim();
+        if (!id)
+            return (0, utils_1.sendJson)(res, { success: false, error: "缺少运行 ID" }, 400), true;
+        const run = (0, global_agent_loop_1.getGlobalAgentRun)(id);
+        (0, utils_1.sendJson)(res, { success: true, run: publicGlobalAgentRun(run), runtime: (0, global_agent_runtime_1.getGlobalAgentBackgroundOutput)(id) });
+        return true;
+    }
+    if (pathname === "/api/global-agent/runtime/background/control" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", async () => {
+            try {
+                const payload = body ? JSON.parse(body) : {};
+                const id = String(payload.id || payload.run_id || "").trim();
+                const operation = String(payload.operation || "").toLowerCase();
+                if (!id)
+                    return (0, utils_1.sendJson)(res, { success: false, error: "缺少运行 ID" }, 400);
+                let run;
+                if (operation === "stop" || operation === "cancel")
+                    run = (0, global_agent_loop_1.cancelGlobalAgentRun)(id);
+                else if (operation === "pause")
+                    run = (0, global_agent_loop_1.pauseGlobalAgentRun)(id);
+                else if (operation === "resume" || operation === "takeover")
+                    run = await (0, global_agent_loop_1.resumeGlobalAgentRun)(id, createAgenticRuntime(getRequestBaseUrl(req), ctx), { approved: payload.approved === true ? true : undefined });
+                else
+                    throw new Error("operation 必须是 stop、pause、resume 或 takeover");
+                (0, utils_1.sendJson)(res, { success: true, run: publicGlobalAgentRun(run), runtime: (0, global_agent_runtime_1.getGlobalAgentBackgroundOutput)(id) });
+            }
+            catch (error) {
+                (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400);
+            }
+        });
+        return true;
+    }
+    if (pathname === "/api/global-agent/runtime/session-debug" && req.method === "GET") {
+        const id = String(parsed.query.id || parsed.query.run_id || "").trim();
+        if (!id)
+            return (0, utils_1.sendJson)(res, { success: false, error: "缺少运行 ID" }, 400), true;
+        const run = (0, global_agent_loop_1.getGlobalAgentRun)(id);
+        if (!run)
+            return (0, utils_1.sendJson)(res, { success: false, error: "全局 Agent 运行不存在" }, 404), true;
+        (0, utils_1.sendJson)(res, { success: true, debug: (0, global_agent_runtime_1.buildGlobalAgentSessionDebug)(run) });
+        return true;
+    }
+    if (pathname === "/api/global-agent/runtime/self-test" && req.method === "GET") {
+        const result = (0, global_agent_runtime_1.runGlobalAgentRuntimeSelfTest)(global_agent_loop_1.GLOBAL_AGENT_TOOL_SPECS);
+        (0, utils_1.sendJson)(res, { success: result.pass, result }, result.pass ? 200 : 500);
+        return true;
+    }
     if (pathname === "/api/global-agent/agentic/tools" && req.method === "GET") {
-        (0, utils_1.sendJson)(res, { success: true, tools: global_agent_loop_1.GLOBAL_AGENT_TOOL_SPECS.map(spec => ({ name: spec.name, description: spec.description, required: spec.required || [], risk: typeof spec.risk === "string" ? spec.risk : "dynamic" })) });
+        (0, utils_1.sendJson)(res, { success: true, tools: (0, global_agent_runtime_1.buildGlobalAgentToolDefinitions)(global_agent_loop_1.GLOBAL_AGENT_TOOL_SPECS) });
         return true;
     }
     if (pathname === "/api/global-agent/agentic/self-test" && req.method === "GET") {
@@ -2147,6 +2308,19 @@ function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
     if (pathname === "/api/global-agent/reasoning/self-test" && req.method === "GET") {
         const result = (0, agent_reasoning_loop_1.runAgentReasoningLoopSelfTest)();
         (0, utils_1.sendJson)(res, { success: result.pass, result }, result.pass ? 200 : 500);
+        return true;
+    }
+    if (pathname === "/api/global-agent/runtime-kernel/self-test" && req.method === "GET") {
+        const result = (0, agent_runtime_kernel_1.runAgentRuntimeKernelSelfTest)();
+        (0, utils_1.sendJson)(res, { success: result.pass, result }, result.pass ? 200 : 500);
+        return true;
+    }
+    if (pathname === "/api/global-agent/trace-replay" && req.method === "GET") {
+        const traceId = String(parsed.query.trace_id || parsed.query.traceId || "").trim();
+        (0, utils_1.sendJson)(res, {
+            success: true,
+            replay: traceId ? (0, agent_runtime_kernel_1.replayAgentTrace)(traceId) : (0, agent_runtime_kernel_1.buildTraceReplaySuite)(Number(parsed.query.limit || 20)),
+        });
         return true;
     }
     if (pathname === "/api/global-agent/runs" && req.method === "GET") {
@@ -2321,6 +2495,89 @@ function handleGlobalAgentApi(pathname, req, res, parsed, ctx) {
     }
     if (pathname === "/api/global-agent/chat" && req.method === "POST") {
         const contentType = req.headers["content-type"] || "";
+        const handleAgenticChatProxy = async (payload, files = []) => {
+            const isStream = parsed.query.stream === "true" || payload.stream === true || String(req.headers.accept || "").includes("text/event-stream");
+            if (isStream) {
+                res.writeHead(200, {
+                    "Content-Type": "text/event-stream",
+                    "Cache-Control": "no-cache, no-transform",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                });
+                if (typeof res.flushHeaders === "function")
+                    res.flushHeaders();
+            }
+            const emit = (event) => {
+                if (!isStream || res.writableEnded)
+                    return;
+                const ui = event?.ui === undefined ? buildGlobalAgentEventUi(event) : event.ui;
+                res.write(`data: ${JSON.stringify(ui ? { ...event, ui } : event)}\n\n`);
+            };
+            try {
+                let message = String(payload.message || "").trim();
+                if (files.length) {
+                    const fileContext = (0, utils_1.buildUploadedFilesContext)(files, "本次消息附件");
+                    message = message ? `${message}\n\n${fileContext}` : `请处理以下附件：\n${fileContext}`;
+                }
+                if (!message)
+                    throw new Error("消息不能为空");
+                let history = [];
+                try {
+                    history = Array.isArray(payload.history) ? payload.history : JSON.parse(String(payload.history || "[]"));
+                }
+                catch { }
+                const sessionId = String(payload.session_id || payload.sessionId || "legacy:web");
+                const run = await runAgenticGlobalRequest(getRequestBaseUrl(req), ctx, {
+                    message,
+                    history,
+                    sessionId,
+                    source: "legacy-chat-proxy",
+                    onEvent: emit,
+                });
+                const result = publicGlobalAgentRun(run);
+                const responseFiles = files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath }));
+                if (isStream) {
+                    emit({ type: "result", run: result, files: responseFiles });
+                    emit({ type: "done" });
+                    res.end();
+                }
+                else {
+                    (0, utils_1.sendJson)(res, { success: true, reply: run.final_reply || "", run: result, files: responseFiles, agentic: true });
+                }
+            }
+            catch (error) {
+                if (isStream) {
+                    emit({ type: "error", text: error?.message || String(error) });
+                    emit({ type: "done" });
+                    res.end();
+                }
+                else {
+                    (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400);
+                }
+            }
+        };
+        if (contentType.includes("multipart/form-data")) {
+            (0, utils_1.collectRequestBuffer)(req).then(buffer => {
+                const boundary = (0, utils_1.getMultipartBoundary)(contentType);
+                if (!boundary)
+                    throw new Error("无效的附件请求");
+                const { fields, files } = (0, utils_1.parseMultipart)(buffer, boundary);
+                return handleAgenticChatProxy(fields || {}, files || []);
+            }).catch(error => (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400));
+        }
+        else {
+            let body = "";
+            req.on("data", (chunk) => body += chunk);
+            req.on("end", () => {
+                try {
+                    void handleAgenticChatProxy(body ? JSON.parse(body) : {}, []);
+                }
+                catch (error) {
+                    (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400);
+                }
+            });
+        }
+        return true;
         const handleChat = async (message, history, files, isStream) => {
             try {
                 let finalMessage = message || "";

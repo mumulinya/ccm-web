@@ -1,0 +1,183 @@
+{
+  "schema": "ccm-main-agent-replay-fixture-v1",
+  "source_shape": {
+    "tasks": "os.homedir()/.cc-connect/tasks.json",
+    "groups": "os.homedir()/.cc-connect/groups.json",
+    "messages": "os.homedir()/.cc-connect/group-messages/*.json"
+  },
+  "group": {
+    "id": "group-replay-demo",
+    "name": "匿名开发群",
+    "members": [
+      { "project": "coordinator", "role": "coordinator" },
+      { "project": "web", "role": "member" }
+    ]
+  },
+  "messages": [
+    {
+      "id": "msg-replay-user-chat",
+      "role": "user",
+      "content": "你好，帮我看一下你还在吗？",
+      "timestamp": "2026-07-06T10:00:00.000Z"
+    },
+    {
+      "id": "msg-replay-assistant-chat",
+      "role": "assistant",
+      "agent": "coordinator",
+      "content": "我在，可以继续说你的需求。",
+      "timestamp": "2026-07-06T10:00:02.000Z",
+      "mainAgentDecision": {
+        "version": 2,
+        "mode": "conversation",
+        "trace_id": "trace-replay-chat",
+        "decision": {
+          "selected_actions": ["read_group_context", "generate_final_reply"],
+          "dispatch_policy": { "action": "answer", "reason": "普通问候", "nextStep": "直接回复用户" },
+          "reason": "普通问候"
+        },
+        "display_stream": {
+          "schema": "ccm-streamlined-display-v1",
+          "user_visible_text": "已判断为普通对话，直接回复用户。",
+          "tool_use_summary": { "type": "streamlined_tool_use_summary", "tool_summary": "本轮没有需要展示的工具调用" }
+        },
+        "todo_plan": {
+          "title": "我准备这样处理",
+          "source": "cc-style-todo",
+          "schema": "cc-style-todo-v2",
+          "display": { "max_visible_steps": 7, "quiet_completed": true, "show_current_focus": true, "user_visible": false, "hide_for_simple_conversation": true },
+          "steps": [
+            { "id": "understand_intent", "content": "确认用户这句话是普通询问", "activeForm": "正在判断用户意图", "status": "completed" },
+            { "id": "generate_final_reply", "content": "直接回答用户的问题", "activeForm": "正在生成回复", "status": "completed" }
+          ]
+        },
+        "user_plan_steps": [
+          { "id": "understand_intent", "content": "确认用户这句话是普通询问", "activeForm": "正在判断用户意图", "status": "completed" },
+          { "id": "generate_final_reply", "content": "直接回答用户的问题", "activeForm": "正在生成回复", "status": "completed" }
+        ],
+        "permissions": [],
+        "observation": { "message_mode": "conversation", "intent_kind": "chat" },
+        "verify": { "passed": true, "blocked_actions": [], "conclusion": "普通对话已处理" },
+        "reply": { "kind": "assistant_message", "preview": "我在，可以继续说你的需求。" }
+      }
+    },
+    {
+      "id": "msg-replay-user-task",
+      "role": "user",
+      "content": "修复登录刷新后状态丢失的问题，并跑一下验证。",
+      "timestamp": "2026-07-06T10:01:00.000Z",
+      "task_id": "task-replay-login"
+    },
+    {
+      "id": "msg-replay-task-intake",
+      "role": "assistant",
+      "agent": "coordinator",
+      "type": "project_task_intake",
+      "content": "项目任务已创建，主 Agent 正在安排执行。",
+      "timestamp": "2026-07-06T10:01:04.000Z",
+      "task_id": "task-replay-login",
+      "task": {
+        "id": "task-replay-login",
+        "title": "修复登录刷新后状态丢失",
+        "status": "in_progress",
+        "trace_id": "trace-replay-task",
+        "group_id": "group-replay-demo",
+        "business_goal": "用户刷新页面后仍保持登录态。"
+      },
+      "mainAgentDecision": {
+        "version": 2,
+        "mode": "project_task",
+        "trace_id": "trace-replay-task",
+        "task_id": "task-replay-login",
+        "decision": {
+          "selected_actions": ["read_group_context", "create_project_task", "dispatch_child_agent", "read_child_agent_receipts", "generate_final_reply"],
+          "dispatch_policy": { "action": "delegate", "reason": "明确修复请求", "nextStep": "等待子 Agent 回执" },
+          "reason": "明确修复请求"
+        },
+        "display_stream": {
+          "schema": "ccm-streamlined-display-v1",
+          "user_visible_text": "已把明确需求转成项目任务，并进入执行队列。",
+          "tool_use_summary": { "type": "streamlined_tool_use_summary", "tool_summary": "读取/检查 2 项，协作通道 1 个，回执 1 条" },
+          "technical_details": [
+            { "id": "troubleshooting", "title": "排障摘要", "items": [] },
+            { "id": "records", "title": "完整记录", "items": [{ "label": "Trace", "value": "trace-replay-task" }, { "label": "动作", "value": "read_group_context, create_project_task, dispatch_child_agent" }] }
+          ],
+          "raw_events": [
+            { "type": "main_agent_decision", "message": "project_task：read_group_context -> create_project_task -> dispatch_child_agent" }
+          ]
+        },
+        "todo_plan": {
+          "title": "我准备这样处理",
+          "source": "cc-style-todo",
+          "schema": "cc-style-todo-v2",
+          "display": { "max_visible_steps": 7, "quiet_completed": true, "show_current_focus": true, "user_visible": true },
+          "steps": [
+            { "id": "understand_intent", "content": "确认需求目标和涉及范围", "activeForm": "正在确认需求目标", "status": "completed" },
+            { "id": "create_project_task", "content": "创建可跟踪的项目任务卡", "activeForm": "正在创建项目任务卡", "status": "completed" },
+            { "id": "dispatch_child_agent", "content": "派发给 1 个子 Agent 执行", "activeForm": "正在派发子 Agent", "status": "in_progress", "actions": [{ "id": "cancel", "label": "取消任务", "kind": "cancel", "tone": "danger" }] },
+            { "id": "read_child_agent_receipts", "content": "等待子 Agent 回执，再由主 Agent 验收", "activeForm": "正在等待子 Agent 回执", "status": "pending" },
+            { "id": "verify_and_reply", "content": "汇总修改、验证结果和风险，生成最终回复", "activeForm": "正在验收并生成最终回复", "status": "pending" }
+          ]
+        },
+        "user_plan_steps": [],
+        "permissions": [],
+        "observation": { "message_mode": "project_task", "intent_kind": "task", "assignment_count": 1 },
+        "verify": { "passed": true, "blocked_actions": [], "conclusion": "任务已进入执行链路" },
+        "reply": { "kind": "task_card", "preview": "项目任务已创建，主 Agent 正在安排执行。" }
+      },
+      "taskRuntime": {
+        "taskCard": {
+          "version": 1,
+          "visible": true,
+          "task_id": "task-replay-login",
+          "title": "修复登录刷新后状态丢失",
+          "goal": "用户刷新页面后仍保持登录态。",
+          "phase": "executing",
+          "phase_label": "执行中",
+          "status": "in_progress",
+          "progress": 55,
+          "active_agents": ["前端 · web 正在处理"],
+          "agents": [{ "name": "前端 · web", "status": "running", "summary": "正在恢复登录状态", "blockers": [] }],
+          "mainAgentDecision": null,
+          "display_stream": {
+            "schema": "ccm-streamlined-display-v1",
+            "user_visible_text": "项目任务正在执行，完成修改后会自动运行检查。",
+            "tool_use_summary": { "type": "streamlined_tool_use_summary", "tool_summary": "读取/检查 2 项，协作通道 1 个，回执 1 条" },
+            "technical_details": [
+              { "id": "troubleshooting", "title": "排障摘要", "items": [] },
+              { "id": "records", "title": "完整记录", "items": [{ "label": "Trace", "value": "trace-replay-task" }, { "label": "执行", "value": "exec-replay-1" }, { "label": "会话", "value": "session-replay-1" }] }
+            ]
+          },
+          "completed": ["已创建任务卡"],
+          "blockers": [],
+          "next_action": "完成修改后会自动运行检查",
+          "delivery": { "headline": "", "files": [], "verification": [], "risks": [], "acceptance_passed": false },
+          "actions": [],
+          "technical": {
+            "trace_id": "trace-replay-task",
+            "execution_ids": ["exec-replay-1"],
+            "session_ids": ["session-replay-1"],
+            "display_stream": {
+              "schema": "ccm-streamlined-display-v1",
+              "user_visible_text": "项目任务正在执行，完成修改后会自动运行检查。",
+              "tool_use_summary": { "type": "streamlined_tool_use_summary", "tool_summary": "读取/检查 2 项，协作通道 1 个，回执 1 条" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "msg-replay-child-agent",
+      "role": "assistant",
+      "agent": "web",
+      "content": "子 Agent 正在执行。",
+      "timestamp": "2026-07-06T10:01:40.000Z",
+      "task_id": "task-replay-login",
+      "workEvents": [
+        { "kind": "status", "time": "2026-07-06T10:01:41.000Z", "text": "准备读取相关文件" },
+        { "kind": "tool", "time": "2026-07-06T10:01:42.000Z", "text": "Read frontend/src/stores/auth.js" },
+        { "kind": "output", "time": "2026-07-06T10:01:43.000Z", "text": "CCM_AGENT_RECEIPT raw payload with trace_id=session_secret should be folded" },
+        { "kind": "done", "time": "2026-07-06T10:01:44.000Z", "text": "完成登录状态恢复修改，等待主 Agent 验收" }
+      ]
+    }
+  ]
+}

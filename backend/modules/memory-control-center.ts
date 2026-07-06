@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "../context-budget";
 import { CCM_DIR, GROUP_MESSAGES_DIR } from "../utils";
 import { loadTasks } from "../db";
 
@@ -199,7 +200,7 @@ function healthAlerts(scope: MemoryScope, scopeId: string, memory: any) {
     if (compaction.validation?.pass === false) add("critical", "summary_validation", "压缩摘要未通过事实保真校验");
     if (Number(compaction.thrashCount || 0) >= 3) add("warning", "compaction_thrash", "连续压缩释放空间不足");
     if (Number(compaction.consecutiveFailures || 0) > 0) add("warning", "model_compaction_failure", `模型压缩连续失败 ${compaction.consecutiveFailures} 次`);
-    const currentPressure = compaction.postCompactTokenCount ? (Number(compaction.postCompactTokenCount) / 200_000) * 100 : 0;
+    const currentPressure = compaction.postCompactTokenCount ? (Number(compaction.postCompactTokenCount) / DEFAULT_CONTEXT_WINDOW_TOKENS) * 100 : 0;
     if (currentPressure >= 90) add("warning", "token_pressure", `当前上下文占用 ${Math.round(currentPressure * 10) / 10}%`);
   } else if (scope === "project") {
     if (memory?.integrity?.conclusions?.pass === false || memory?.integrity?.decisions?.pass === false) add("critical", "archive_integrity", "项目记忆归档校验失败");
@@ -223,7 +224,7 @@ function memorySummary(scope: MemoryScope, scopeId: string, memory: any, label: 
     pinned: controls.filter((item: any) => item.pinned && !item.deprecated).length,
     edited: controls.filter((item: any) => item.editedText !== undefined && !item.deprecated).length,
     deprecated: controls.filter((item: any) => item.deprecated).length,
-    tokenPressure: Number(compaction.postCompactTokenCount ? Math.round((Number(compaction.postCompactTokenCount) / 200_000) * 1000) / 10 : 0),
+    tokenPressure: Number(compaction.postCompactTokenCount ? Math.round((Number(compaction.postCompactTokenCount) / DEFAULT_CONTEXT_WINDOW_TOKENS) * 1000) / 10 : 0),
     preCompactPressure: Number(compaction.pressurePercent || 0),
     beforeTokens: Number(compaction.preCompactTokenCount || 0),
     afterTokens: Number(compaction.postCompactTokenCount || 0),

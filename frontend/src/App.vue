@@ -22,6 +22,7 @@ const KnowledgeBase = defineAsyncComponent(() => import('./components/KnowledgeB
 const MemoryCenter = defineAsyncComponent(() => import('./components/MemoryCenter.vue'))
 const SystemDiagnostics = defineAsyncComponent(() => import('./components/SystemDiagnostics.vue'))
 const CleanupCenter = defineAsyncComponent(() => import('./components/CleanupCenter.vue'))
+const TraceReplay = defineAsyncComponent(() => import('./components/TraceReplay.vue'))
 
 const currentTab = ref('')
 const projects = ref([])
@@ -87,7 +88,7 @@ let petNavigationReconnectTimer = null
 
 const cleanNavigationUrl = () => {
   const url = new URL(window.location.href)
-  const navigationKeys = ['tab', 'project', 'sessionId', 'groupId', 'keyword']
+  const navigationKeys = ['tab', 'project', 'sessionId', 'groupId', 'keyword', 'trace_id', 'traceId', 'scope']
   let changed = false
   for (const key of navigationKeys) {
     if (url.searchParams.has(key)) {
@@ -106,6 +107,13 @@ const readNavigationTargetFromUrl = () => {
   const tab = params.get('tab')
   if (!tab) return null
   if (tab === 'music') return { tab: 'music' }
+  if (tab === 'trace-replay') {
+    return {
+      tab: 'trace-replay',
+      trace_id: params.get('trace_id') || params.get('traceId') || '',
+      scope: params.get('scope') || 'orchestrator'
+    }
+  }
   if (tab === 'groups') {
     return {
       tab: 'groups',
@@ -343,6 +351,7 @@ const DEFAULT_TABS = [
   { id: 'pets', icon: '🐾', label: '宠物空间' },
   { id: 'changes', icon: '📝', label: '代码变更' },
   { id: 'tasks', icon: '📋', label: '任务派发' },
+  { id: 'trace-replay', icon: '🔁', label: 'Trace 回放' },
   { id: 'autodev', icon: '🧭', label: '自动开发' },
   { id: 'diagnostics', icon: '🩺', label: '系统自检与体检' },
   { id: 'knowledge', icon: '📖', label: '知识库与文档' },
@@ -402,7 +411,7 @@ const DEFAULT_GROUPS = [
   { id: 'system', label: '系统', icon: '⚙️' },
 ]
 const DEFAULT_TAB_GROUPS = {
-  dashboard: 'core', projects: 'core', groups: 'collab', tasks: 'collab', autodev: 'collab', 'global-agent': 'core',
+  dashboard: 'core', projects: 'core', groups: 'collab', tasks: 'collab', 'trace-replay': 'collab', autodev: 'collab', 'global-agent': 'core',
   tools: 'dev', changes: 'dev', terminal: 'dev', templates: 'dev',
   metrics: 'data', search: 'data', 'memory-center': 'data', knowledge: 'data', diagnostics: 'data',
   cron: 'system', pets: 'system', music: 'system', settings: 'system',
@@ -586,6 +595,7 @@ const closeTab = (tabId, event) => {
         <div v-if="isTabOpen('pets')" v-show="currentTab === 'pets'" class="tab-pane pet-tab-pane"><PetMenu :agents="petAgents" :projects="projects" @agents-updated="refreshMusicPetAgent" /></div>
         <div v-if="isTabOpen('changes')" v-show="currentTab === 'changes'" class="tab-pane"><CodeChanges /></div>
         <div v-if="isTabOpen('tasks')" v-show="currentTab === 'tasks'" class="tab-pane"><TaskManager :navigate-to="navigateTo" @navigated="navigateTo = null" /></div>
+        <div v-if="isTabOpen('trace-replay')" v-show="currentTab === 'trace-replay'" class="tab-pane"><TraceReplay :navigate-to="navigateTo" /></div>
         <div v-if="isTabOpen('autodev')" v-show="currentTab === 'autodev'" class="tab-pane"><AutoDevOps /></div>
         <div v-if="isTabOpen('diagnostics')" v-show="currentTab === 'diagnostics'" class="tab-pane"><SystemDiagnostics /></div>
         <div v-if="isTabOpen('knowledge')" v-show="currentTab === 'knowledge'" class="tab-pane"><KnowledgeBase /></div>

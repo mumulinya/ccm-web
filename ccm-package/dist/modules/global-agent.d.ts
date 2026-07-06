@@ -30,7 +30,10 @@ export declare function runGlobalAgentIntentSelfTest(): {
         authorized?: undefined;
     })[];
     actionBlockHidden: boolean;
-    keywordFallbackCannotWrite: boolean;
+    fallbackDelegationCannotWrite: boolean;
+    localGroupDispatchUsesSchema: boolean;
+    fallbackCronCannotWrite: boolean;
+    ambiguousFallbackCannotWrite: boolean;
     visibleReply: string;
 };
 export declare function resumeGlobalAgentLoopsForServer(ctx: CollabCtx, port: number): Promise<{

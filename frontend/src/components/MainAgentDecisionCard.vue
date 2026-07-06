@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { getDisplayStream, getStreamlinedToolSummary, getStreamlinedUserText, getTechnicalDetailSections } from '../utils/agentDisplay.js'
 
 const props = defineProps({
   decision: { type: Object, default: null },
@@ -42,27 +43,79 @@ const dispatchPolicy = computed(() => props.decision?.decision?.dispatch_policy 
 const verify = computed(() => props.decision?.verify || {})
 const internalLoop = computed(() => props.decision?.internal_loop || props.decision?.loop || null)
 const loopStages = computed(() => Array.isArray(internalLoop.value?.stages) ? internalLoop.value.stages : [])
-const planSteps = computed(() => {
+const PLAN_VISIBLE_LIMIT = 7
+const isQuietCompletedStatus = (status) => ['completed', 'skipped', 'cancelled'].includes(status)
+const prioritizePlanSteps = (steps) => {
+  const raw = Array.isArray(steps) ? steps : []
+  if (raw.length <= PLAN_VISIBLE_LIMIT) return raw
+  const activeIndex = raw.findIndex(step => ['failed', 'needs_confirmation', 'reworking', 'reviewing', 'in_progress'].includes(step.status))
+  const finalIndex = raw.length - 1
+  const selected = new Set()
+  const addIndex = (index) => {
+    if (index >= 0 && index < raw.length) selected.add(index)
+  }
+  addIndex(activeIndex)
+  addIndex(finalIndex)
+  addIndex(raw.findIndex(step => step.status === 'pending'))
+  raw.forEach((step, index) => {
+    if (!isQuietCompletedStatus(step.status)) addIndex(index)
+  })
+  raw
+    .map((step, index) => ({ step, index }))
+    .filter(item => isQuietCompletedStatus(item.step.status))
+    .slice(-2)
+    .forEach(item => addIndex(item.index))
+  const ordered = [...selected].sort((a, b) => a - b)
+  while (ordered.length > PLAN_VISIBLE_LIMIT) {
+    const removable = ordered.findIndex(index => isQuietCompletedStatus(raw[index]?.status) && index !== finalIndex)
+    if (removable >= 0) ordered.splice(removable, 1)
+    else ordered.splice(0, 1)
+  }
+  return ordered.map(index => raw[index])
+}
+const rawPlanSteps = computed(() => {
   const raw = Array.isArray(props.decision?.user_plan_steps)
     ? props.decision.user_plan_steps
     : Array.isArray(props.decision?.todo_plan?.steps)
       ? props.decision.todo_plan.steps
       : []
-  return raw.slice(0, 9)
+  return raw
 })
-const planTitle = computed(() => props.decision?.todo_plan?.title || '我准备这样处理')
-const visiblePlanSteps = computed(() => planSteps.value.length ? planSteps.value : selectedActions.value.map((id, index) => ({
-  id,
-  content: actionLabels[id] || id,
-  status: index === 0 ? 'completed' : 'pending',
-  activeForm: actionLabels[id] || id,
-})))
+const planSteps = computed(() => prioritizePlanSteps(rawPlanSteps.value))
+const shouldHideSimpleConversationPlan = computed(() => {
+  if (props.decision?.mode !== 'conversation') return false
+  const display = props.decision?.todo_plan?.display || {}
+  if (display.user_visible === true && display.hide_for_simple_conversation !== true) return false
+  const hasBlockingOrAction = blockedPermissions.value.length > 0 || planSteps.value.some(step => ['failed', 'needs_confirmation', 'reworking', 'reviewing', 'in_progress'].includes(step.status))
+  return display.user_visible === false || display.hide_for_simple_conversation === true || !hasBlockingOrAction
+})
+const hasExplicitPlan = computed(() => planSteps.value.length > 0 && !shouldHideSimpleConversationPlan.value)
+const planTitle = computed(() => props.decision?.todo_plan?.title || (hasExplicitPlan.value ? '我准备这样处理' : '处理步骤'))
+const visiblePlanSteps = computed(() => {
+  if (shouldHideSimpleConversationPlan.value) return []
+  if (hasExplicitPlan.value) return planSteps.value
+  if (props.decision?.mode === 'conversation') return []
+  return selectedActions.value.map((id, index) => ({
+    id,
+    content: actionLabels[id] || id,
+    status: index === 0 ? 'completed' : 'pending',
+    activeForm: actionLabels[id] || id,
+  }))
+})
+const hiddenPlanCount = computed(() => hasExplicitPlan.value ? Math.max(0, rawPlanSteps.value.length - planSteps.value.length) : 0)
 const planProgress = computed(() => {
   const steps = visiblePlanSteps.value
   if (!steps.length) return { done: 0, total: 0 }
   const done = steps.filter(step => ['completed', 'skipped', 'cancelled', 'failed'].includes(step.status)).length
   return { done, total: steps.length }
 })
+const planActiveStatuses = ['failed', 'needs_confirmation', 'reworking', 'reviewing', 'in_progress']
+const currentPlanStep = computed(() => visiblePlanSteps.value.find(step => planActiveStatuses.includes(step.status)) || visiblePlanSteps.value.find(step => step.status === 'pending') || null)
+const nextPlanStep = computed(() => {
+  const currentIndex = visiblePlanSteps.value.findIndex(step => step === currentPlanStep.value)
+  return visiblePlanSteps.value.find((step, index) => index > currentIndex && ['pending', 'in_progress', 'reviewing', 'reworking', 'needs_confirmation'].includes(step.status)) || null
+})
+const currentPlanActions = computed(() => Array.isArray(currentPlanStep.value?.actions) ? currentPlanStep.value.actions : [])
 const isLiveTodoPlan = computed(() => props.decision?.todo_plan?.source === 'ccm-live-task-todo')
 const livePlanActiveStatus = computed(() => visiblePlanSteps.value.find(step => ['failed', 'needs_confirmation', 'reworking', 'reviewing', 'in_progress'].includes(step.status))?.status || '')
 const verifyBadge = computed(() => {
@@ -98,9 +151,24 @@ const statusIcon = (status) => ({
   cancelled: '×',
 }[status] || '○')
 const statusText = (status) => statusLabels[status] || status || '待执行'
+const planFocusLabel = (status) => ({
+  failed: '需要处理',
+  needs_confirmation: '等待确认',
+  reworking: '正在返工',
+  reviewing: '正在验收',
+  in_progress: '正在处理',
+  pending: '下一步',
+}[status] || '当前步骤')
+const stepActiveText = (step) => step?.activeForm || step?.active_form || ''
+const stepContentText = (step) => step?.content || step?.title || step?.subject || stepActiveText(step) || '待处理'
+const stepDisplayText = (step) => {
+  const activeText = stepActiveText(step)
+  if (activeText && ['in_progress', 'reviewing', 'reworking'].includes(step?.status)) return activeText
+  return stepContentText(step)
+}
 const evidenceTypeLabel = (type) => ({
   task: '任务',
-  trace: 'Trace',
+  trace: '技术记录',
   agent: 'Agent',
   execution: '执行',
   receipt: '回执',
@@ -133,7 +201,15 @@ const contextLabels = computed(() => {
 
 const nextStep = computed(() => dispatchPolicy.value?.nextStep || (verify.value?.passed ? '已完成本轮回复' : '等待用户确认或补充信息'))
 const reason = computed(() => dispatchPolicy.value?.reason || props.decision?.decision?.reason || modeInfo.value.summary)
+const publicHeaderNote = computed(() => modeInfo.value.summary)
 const rawJson = computed(() => JSON.stringify(props.decision || {}, null, 2))
+const displayStream = computed(() => getDisplayStream(props.decision))
+const streamlinedText = computed(() => getStreamlinedUserText(props.decision, modeInfo.value.summary))
+const streamlinedToolSummary = computed(() => getStreamlinedToolSummary(props.decision, visibleActions.value.join('、')))
+const technicalSections = computed(() => getTechnicalDetailSections(props.decision, {
+  trace_id: props.decision?.trace_id,
+  blockers: blockedPermissions.value.map(item => item.reason || item.action_id),
+}))
 const decisionExplanation = computed(() => {
   if (blockedPermissions.value.length) return `需要确认：${blockedPermissions.value.map(p => p.reason || actionLabels[p.action_id] || p.action_id).join('；')}`
   if (!selectedActions.value.includes('dispatch_child_agent') && props.decision?.mode === 'conversation') return '没有派发：这轮是普通对话，主 Agent 只回复用户，不创建任务。'
@@ -141,6 +217,13 @@ const decisionExplanation = computed(() => {
   if (selectedActions.value.includes('create_project_task')) return '已创建任务：当前消息包含明确执行意图，允许进入项目任务流程。'
   if (selectedActions.value.includes('dispatch_child_agent')) return '已派发：主 Agent 已生成工作单，等待子 Agent 执行和回执。'
   return modeInfo.value.summary
+})
+const userSummary = computed(() => {
+  if (displayStream.value?.user_visible_text) return streamlinedText.value
+  if (blockedPermissions.value.length) return decisionExplanation.value
+  if (props.decision?.mode === 'conversation') return '已判断为普通对话，主 Agent 直接回复用户，不创建任务。'
+  if (props.decision?.mode === 'project_analysis') return '已判断为只读项目分析，只读取必要上下文并回答，不派发开发任务。'
+  return decisionExplanation.value || modeInfo.value.summary
 })
 const actionRows = computed(() => selectedActions.value.map(id => {
   const permission = permissions.value.find(item => item.action_id === id) || {}
@@ -160,8 +243,8 @@ const actionRows = computed(() => selectedActions.value.map(id => {
       <div class="decision-title">
         <span class="decision-icon">{{ modeInfo.icon }}</span>
         <div>
-          <strong>主 Agent：{{ modeInfo.label }}</strong>
-          <small>{{ reason }}</small>
+          <strong>处理方式：{{ modeInfo.label }}</strong>
+          <small>{{ publicHeaderNote }}</small>
         </div>
       </div>
       <span class="decision-verify" :class="verifyBadge.tone">
@@ -169,25 +252,10 @@ const actionRows = computed(() => selectedActions.value.map(id => {
       </span>
     </header>
 
-    <div v-if="loopStages.length" class="decision-loop">
-      <div class="loop-head">
-        <strong>内部工作循环</strong>
-        <span>{{ internalLoop.current_label || internalLoop.current_stage }}</span>
-      </div>
-      <div class="loop-rail">
-        <div v-for="stage in loopStages" :key="stage.id" :class="['loop-stage', stage.status]">
-          <i>{{ stage.label }}</i>
-          <small>{{ loopStatusText(stage.status) }}</small>
-        </div>
-      </div>
-      <details v-if="!compact" class="loop-details">
-        <summary>循环细节</summary>
-        <div v-for="stage in loopStages" :key="`detail-${stage.id}`" class="loop-detail-row">
-          <strong>{{ stage.title }}</strong>
-          <span>{{ stage.tool_choice }}</span>
-          <small v-if="stage.evidence?.length">{{ stage.evidence.join('；') }}</small>
-        </div>
-      </details>
+    <div class="decision-public-summary">
+      <strong>{{ userSummary }}</strong>
+      <small v-if="nextStep">下一步：{{ nextStep }}</small>
+      <small v-if="streamlinedToolSummary" class="tool-use-summary">工具摘要：{{ streamlinedToolSummary }}</small>
     </div>
 
     <div class="decision-plan" v-if="visiblePlanSteps.length">
@@ -195,11 +263,26 @@ const actionRows = computed(() => selectedActions.value.map(id => {
         <strong>{{ planTitle }}</strong>
         <span>{{ planProgress.done }}/{{ planProgress.total }}</span>
       </div>
+      <div v-if="currentPlanStep" class="plan-focus" :class="`status-${currentPlanStep.status || 'pending'}`">
+        <span>{{ planFocusLabel(currentPlanStep.status) }}</span>
+        <strong>{{ stepDisplayText(currentPlanStep) }}</strong>
+        <small v-if="nextPlanStep">然后：{{ stepDisplayText(nextPlanStep) }}</small>
+        <div v-if="currentPlanActions.length" class="plan-focus-actions">
+          <button
+            v-for="action in currentPlanActions"
+            :key="action.id || action.kind"
+            type="button"
+            :class="['step-action-button', action.tone || 'outline']"
+            @click.stop="emit('step-action', action)"
+          >{{ action.label }}</button>
+        </div>
+      </div>
       <ol>
         <li v-for="(step, index) in visiblePlanSteps" :key="step.id || index" :class="`status-${step.status || 'pending'}`">
           <span class="plan-index">{{ statusIcon(step.status) }}</span>
           <div>
-            <strong>{{ step.content }}</strong>
+            <strong>{{ stepDisplayText(step) }}</strong>
+            <small v-if="stepActiveText(step) && stepDisplayText(step) !== stepContentText(step)">{{ stepContentText(step) }}</small>
             <small v-if="step.detail">{{ step.detail }}</small>
             <details v-if="step.evidence?.length || step.actions?.length" class="plan-step-evidence">
               <summary>证据与处理</summary>
@@ -224,34 +307,66 @@ const actionRows = computed(() => selectedActions.value.map(id => {
           <em>{{ statusText(step.status) }}</em>
         </li>
       </ol>
-    </div>
-
-    <div class="decision-grid">
-      <div>
-        <span>读取内容</span>
-        <strong>{{ contextLabels.length ? contextLabels.join('、') : '无额外读取' }}</strong>
-      </div>
-      <div>
-        <span>本轮动作</span>
-        <strong>{{ visibleActions.join(' → ') }}</strong>
-      </div>
-      <div>
-        <span>权限判断</span>
-        <strong v-if="blockedPermissions.length" class="warn-text">{{ blockedPermissions.map(p => actionLabels[p.action_id] || p.action_id).join('、') }} 需要确认</strong>
-        <strong v-else>{{ allowedWrites.length ? '执行动作已获得当前消息授权' : '只读/安全动作' }}</strong>
-      </div>
-      <div>
-        <span>决策说明</span>
-        <strong>{{ decisionExplanation }}</strong>
-      </div>
-      <div>
-        <span>下一步</span>
-        <strong>{{ nextStep }}</strong>
-      </div>
+      <small v-if="hiddenPlanCount" class="plan-hidden-summary">还有 {{ hiddenPlanCount }} 个步骤，可在任务详情中继续查看。</small>
     </div>
 
     <details class="decision-technical">
       <summary>技术详情</summary>
+
+      <div v-if="loopStages.length" class="decision-loop">
+        <div class="loop-head">
+          <strong>内部工作循环</strong>
+          <span>{{ internalLoop.current_label || internalLoop.current_stage }}</span>
+        </div>
+        <div class="loop-rail">
+          <div v-for="stage in loopStages" :key="stage.id" :class="['loop-stage', stage.status]">
+            <i>{{ stage.label }}</i>
+            <small>{{ loopStatusText(stage.status) }}</small>
+          </div>
+        </div>
+        <div v-if="!compact" class="loop-details">
+          <div v-for="stage in loopStages" :key="`detail-${stage.id}`" class="loop-detail-row">
+            <strong>{{ stage.title }}</strong>
+            <span>{{ stage.tool_choice }}</span>
+            <small v-if="stage.evidence?.length">{{ stage.evidence.join('；') }}</small>
+          </div>
+        </div>
+      </div>
+
+      <div class="decision-grid">
+        <div>
+          <span>读取内容</span>
+          <strong>{{ contextLabels.length ? contextLabels.join('、') : '无额外读取' }}</strong>
+        </div>
+        <div>
+          <span>本轮动作</span>
+          <strong>{{ visibleActions.join(' → ') }}</strong>
+        </div>
+        <div>
+          <span>权限判断</span>
+          <strong v-if="blockedPermissions.length" class="warn-text">{{ blockedPermissions.map(p => actionLabels[p.action_id] || p.action_id).join('、') }} 需要确认</strong>
+          <strong v-else>{{ allowedWrites.length ? '执行动作已获得当前消息授权' : '只读/安全动作' }}</strong>
+        </div>
+        <div>
+          <span>决策说明</span>
+          <strong>{{ decisionExplanation }}</strong>
+        </div>
+        <div>
+          <span>下一步</span>
+          <strong>{{ nextStep }}</strong>
+        </div>
+      </div>
+
+      <div v-if="technicalSections.length" class="technical-sections">
+        <section v-for="section in technicalSections" :key="section.id">
+          <strong>{{ section.title }}</strong>
+          <div v-for="item in section.items" :key="`${section.id}-${item.label}-${item.value}`" class="tech-row">
+            <span>{{ item.label }}</span>
+            <code>{{ item.value }}</code>
+          </div>
+        </section>
+      </div>
+
       <div class="tech-row"><span>Trace</span><code>{{ decision.trace_id || '无' }}</code></div>
       <div class="tech-row"><span>动作</span><code>{{ selectedActions.join(', ') }}</code></div>
       <div class="tech-row"><span>观察</span><code>{{ observation.dispatch_action || observation.intent_kind || decision.mode }}</code></div>
@@ -280,6 +395,10 @@ header { display:flex; justify-content:space-between; align-items:flex-start; ga
 .decision-title small { display:block; margin-top:2px; color:#64748b; line-height:1.45; }
 .decision-verify { flex:0 0 auto; padding:3px 8px; border-radius:999px; font-size:11px; font-weight:700; }
 .decision-verify.ok { background:#dcfce7; color:#166534; }.decision-verify.warn { background:#fef3c7; color:#92400e; }.decision-verify.work { background:#dbeafe; color:#1d4ed8; }
+.decision-public-summary { margin-top:10px; padding:9px 10px; border-radius:10px; background:rgba(255,255,255,.62); border:1px solid rgba(148,163,184,.18); }
+.decision-public-summary strong { display:block; color:#334155; font-size:12.5px; line-height:1.45; }
+.decision-public-summary small { display:block; margin-top:3px; color:#64748b; font-size:11.5px; line-height:1.4; overflow-wrap:anywhere; }
+.decision-public-summary .tool-use-summary { color:#2563eb; font-weight:800; }
 .decision-loop { margin-top:10px; padding:9px; border:1px solid rgba(148,163,184,.18); border-radius:11px; background:rgba(255,255,255,.5); }
 .loop-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:7px; }
 .loop-head strong { font-size:12px; color:#334155; }
@@ -303,6 +422,15 @@ header { display:flex; justify-content:space-between; align-items:flex-start; ga
 .plan-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:7px; }
 .plan-head strong { font-size:12px; color:#1e293b; }
 .plan-head span { padding:2px 7px; border-radius:999px; background:rgba(59,130,246,.1); color:#2563eb; font-size:10px; font-weight:800; }
+.plan-focus { display:grid; gap:3px; margin-bottom:8px; padding:8px 9px; border-radius:9px; border:1px solid rgba(59,130,246,.18); background:rgba(239,246,255,.72); }
+.plan-focus span { color:#2563eb; font-size:10px; font-weight:900; }
+.plan-focus strong { color:#1e293b; font-size:12.5px; line-height:1.4; overflow-wrap:anywhere; }
+.plan-focus small { color:#64748b; font-size:10.5px; line-height:1.35; overflow-wrap:anywhere; }
+.plan-focus-actions { display:flex; flex-wrap:wrap; gap:5px; margin-top:4px; }
+.plan-focus.status-needs_confirmation,.plan-focus.status-reworking { border-color:#fde68a; background:#fffbeb; }
+.plan-focus.status-needs_confirmation span,.plan-focus.status-reworking span { color:#b45309; }
+.plan-focus.status-failed { border-color:#fecaca; background:#fef2f2; }
+.plan-focus.status-failed span { color:#dc2626; }
 .decision-plan ol { list-style:none; margin:0; padding:0; display:grid; gap:6px; }
 .decision-plan li { display:grid; grid-template-columns:20px minmax(0,1fr) auto; gap:7px; align-items:start; padding:6px 7px; border-radius:9px; background:rgba(248,250,252,.78); border:1px solid rgba(148,163,184,.14); }
 .plan-index { width:18px; height:18px; display:grid; place-items:center; border-radius:999px; background:#e2e8f0; color:#475569; font-size:11px; font-weight:900; }
@@ -323,6 +451,8 @@ header { display:flex; justify-content:space-between; align-items:flex-start; ga
 .step-action-button.danger { border-color:#fecaca; color:#b91c1c; }
 .step-action-button.success { background:#dcfce7; border-color:#bbf7d0; color:#166534; }
 .decision-plan li.status-completed .plan-index { background:#dcfce7; color:#15803d; }
+.decision-plan li.status-completed { opacity:.68; }
+.decision-plan li.status-completed strong { text-decoration:line-through; color:#64748b; }
 .decision-plan li.status-in_progress { border-color:rgba(59,130,246,.22); background:rgba(239,246,255,.82); }
 .decision-plan li.status-in_progress .plan-index { background:#dbeafe; color:#2563eb; }
 .decision-plan li.status-reviewing { border-color:rgba(14,165,233,.24); background:rgba(240,249,255,.86); }
@@ -337,13 +467,17 @@ header { display:flex; justify-content:space-between; align-items:flex-start; ga
 .decision-plan li.status-cancelled .plan-index { background:#e2e8f0; color:#64748b; }
 .decision-plan li.status-skipped { opacity:.74; }
 .decision-plan li.status-skipped .plan-index { background:#f1f5f9; color:#94a3b8; }
+.plan-hidden-summary { display:block; margin-top:7px; color:#64748b; font-size:10.5px; line-height:1.35; }
 .decision-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:10px; }
 .decision-grid div { padding:8px; border:1px solid rgba(148,163,184,.2); border-radius:9px; background:rgba(255,255,255,.58); }
 .decision-grid span { display:block; margin-bottom:3px; font-size:11px; color:#64748b; }
 .decision-grid strong { display:block; font-size:12px; color:#334155; line-height:1.45; overflow-wrap:anywhere; }
 .warn-text { color:#92400e !important; }
 .decision-technical { margin-top:9px; color:#64748b; font-size:11px; }
-.decision-technical summary { cursor:pointer; }
+.decision-technical summary { cursor:pointer; font-weight:800; color:#475569; }
+.technical-sections { display:grid; gap:8px; margin-top:9px; }
+.technical-sections section { display:grid; gap:5px; padding:8px; border:1px solid rgba(148,163,184,.18); border-radius:8px; background:rgba(248,250,252,.72); }
+.technical-sections section>strong { color:#334155; font-size:11.5px; }
 .tech-row { display:grid; grid-template-columns:54px 1fr; gap:8px; margin-top:6px; }
 .action-trace-list { display:grid; gap:6px; margin-top:8px; }
 .action-trace-row { display:grid; grid-template-columns:1fr auto; gap:2px 8px; padding:7px 8px; border-radius:8px; background:rgba(255,255,255,.56); border:1px solid rgba(148,163,184,.18); }
@@ -352,11 +486,16 @@ code { overflow-wrap:anywhere; color:#475569; }
 pre { max-height:180px; overflow:auto; margin:8px 0 0; padding:8px; border-radius:8px; background:rgba(15,23,42,.06); white-space:pre-wrap; }
 :global([data-theme="dark"]) .main-agent-decision-card { background:linear-gradient(145deg,rgba(15,23,42,.95),rgba(30,41,59,.88)); border-color:rgba(96,165,250,.28); }
 :global([data-theme="dark"]) .decision-plan { background:rgba(15,23,42,.55); border-color:rgba(148,163,184,.18); }
+:global([data-theme="dark"]) .decision-public-summary { background:rgba(15,23,42,.55); border-color:rgba(148,163,184,.18); }
+:global([data-theme="dark"]) .decision-public-summary strong { color:#e2e8f0; }
 :global([data-theme="dark"]) .decision-loop { background:rgba(15,23,42,.55); border-color:rgba(148,163,184,.18); }
 :global([data-theme="dark"]) .loop-head strong,:global([data-theme="dark"]) .loop-details summary,:global([data-theme="dark"]) .loop-detail-row strong { color:#e2e8f0; }
 :global([data-theme="dark"]) .loop-stage,:global([data-theme="dark"]) .loop-detail-row { background:rgba(15,23,42,.5); border-color:rgba(148,163,184,.16); }
 :global([data-theme="dark"]) .plan-head strong,:global([data-theme="dark"]) .decision-plan li strong { color:#e2e8f0; }
+:global([data-theme="dark"]) .plan-focus { background:rgba(30,41,59,.72); border-color:rgba(96,165,250,.22); }
+:global([data-theme="dark"]) .plan-focus strong { color:#e2e8f0; }
 :global([data-theme="dark"]) .decision-plan li { background:rgba(15,23,42,.5); border-color:rgba(148,163,184,.16); }
+:global([data-theme="dark"]) .decision-plan li.status-completed strong { color:#94a3b8; }
 :global([data-theme="dark"]) .evidence-row { background:rgba(15,23,42,.55); border-color:rgba(148,163,184,.16); }
 :global([data-theme="dark"]) .plan-step-evidence summary,:global([data-theme="dark"]) .evidence-row strong { color:#e2e8f0 !important; }
 :global([data-theme="dark"]) .decision-grid div { background:rgba(15,23,42,.55); border-color:rgba(148,163,184,.18); }

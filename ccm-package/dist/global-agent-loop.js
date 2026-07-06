@@ -56,8 +56,10 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const utils_1 = require("./utils");
 const reliability_ledger_1 = require("./reliability-ledger");
+const agent_runtime_kernel_1 = require("./agent-runtime-kernel");
 const agent_quality_center_1 = require("./agent-quality-center");
 const agent_reasoning_loop_1 = require("./agent-reasoning-loop");
+const global_agent_runtime_1 = require("./global-agent-runtime");
 const STORE_DIR = path.join(utils_1.CCM_DIR, "global-agent-runs");
 const STORE_FILE = path.join(STORE_DIR, "runs.json");
 const STORE_BACKUP = `${STORE_FILE}.bak`;
@@ -327,7 +329,9 @@ function normalizeDecision(value) {
     };
 }
 function buildToolPrompt() {
-    return exports.GLOBAL_AGENT_TOOL_SPECS.map(spec => `- ${spec.name}${spec.required?.length ? `（必填：${spec.required.join("、")}）` : ""}：${spec.description}`).join("\n");
+    return (0, global_agent_runtime_1.buildGlobalAgentToolDefinitions)(exports.GLOBAL_AGENT_TOOL_SPECS)
+        .map(spec => `- ${spec.name}${spec.required?.length ? `（必填：${spec.required.join("、")}）` : ""}：${spec.description}；schema=${JSON.stringify(spec.inputSchema)}；risk=${spec.risk}`)
+        .join("\n");
 }
 async function buildMessages(run, runtime) {
     const context = runtime.getContext ? await runtime.getContext(run) : {};
@@ -394,6 +398,7 @@ function completeRun(run, runtime, status, reply, error = "") {
         run.updated_at = nowIso(runtime);
         run.pending_tool = null;
         saveRun(run, runtime.persist !== false);
+        (0, global_agent_runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "supervising", status: run.status, mission_id: run.mission_id, supervisor_id: run.supervisor_id, reply: run.final_reply });
         (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:supervising:${run.updated_at}`, type: "global_agent.supervising", status: "info", message: run.final_reply, data: { mission_id: run.mission_id, supervisor_id: run.supervisor_id } });
         emit(runtime, { type: "supervising", reply: run.final_reply, mission_id: run.mission_id, supervisor_id: run.supervisor_id }, run);
         return run;
@@ -406,6 +411,7 @@ function completeRun(run, runtime, status, reply, error = "") {
     run.updated_at = run.completed_at;
     run.pending_tool = null;
     saveRun(run, runtime.persist !== false);
+    (0, global_agent_runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "run_terminal", status, reply: run.final_reply, error: run.error });
     (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:${status}:${run.completed_at}`, type: `global_agent.run_${status}`, status: status === "completed" ? "ok" : status === "cancelled" ? "warning" : "error", message: run.final_reply.slice(0, 1000), data: { steps: run.steps.length, model_calls: run.model_calls, tool_calls: run.tool_calls, error: run.error } });
     emit(runtime, { type: status === "completed" ? "completed" : status, reply: run.final_reply, error: run.error }, run);
     return run;
@@ -418,6 +424,8 @@ async function continueLoop(run, runtime) {
         run.status = "running";
         run.updated_at = nowIso(runtime);
         saveRun(run, runtime.persist !== false);
+        (0, global_agent_runtime_1.initializeGlobalAgentRuntimeRun)(run);
+        (0, global_agent_runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "run_started", status: run.status, phase: run.phase });
         emit(runtime, { type: "started" }, run);
         while (run.status === "running") {
             if (cancelRequests.delete(run.id))
@@ -452,6 +460,7 @@ async function continueLoop(run, runtime) {
             const normalizedIntent = (0, agent_quality_center_1.normalizeAgentDecisionIntent)(decision.intent, run.user_message);
             decision.intent = normalizedIntent;
             (0, agent_reasoning_loop_1.updateReasoningPlan)(run.reasoning_loop, decision.plan || [], normalizedIntent.reason || `decision:${decision.state}`);
+            (0, global_agent_runtime_1.updateGlobalAgentTodoLedger)(run, decision.plan || [], decision.tool?.name || "");
             (0, agent_reasoning_loop_1.explainReasoningDecision)(run.reasoning_loop, decision.state, normalizedIntent.reason || decision.message || "模型形成下一步决策");
             const step = {
                 index: run.steps.length + 1,
@@ -478,7 +487,9 @@ async function continueLoop(run, runtime) {
                     reasons: [quality.intent.reason], status: decision.state === "needs_confirmation" ? "warning" : "ok",
                 });
                 emit(runtime, { type: "decision", step }, run);
+                (0, global_agent_runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "decision", state: decision.state, message: step.message, intent: quality.intent });
                 if (decision.state === "needs_confirmation") {
+                    (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, "", "blocked", decision.message || "等待用户澄清");
                     (0, agent_reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, { id: "clarification", label: "目标与影响范围已澄清", kind: "intent", status: "blocked", reason: decision.message });
                     (0, agent_reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "ambiguous_intent", decision.message || normalizedIntent.reason, "warning");
                     run.status = "waiting_clarification";
@@ -530,8 +541,10 @@ async function continueLoop(run, runtime) {
                         parts.push(`风险：\n- ${completion.risks.join("\n- ")}`);
                     if (includeDeliveryDetails && completion.next_action)
                         parts.push(`下一步：${completion.next_action}`);
+                    (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, "", "done", "全局 Agent 本轮回复完成");
                     return completeRun(run, runtime, "completed", parts.filter(Boolean).join("\n\n"));
                 }
+                (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, "", "blocked", "非终态决策缺少工具");
                 return completeRun(run, runtime, "failed", "全局 Agent 给出了非终态决策但没有选择工具，已停止。", "non_terminal_without_tool");
             }
             let args;
@@ -568,6 +581,7 @@ async function continueLoop(run, runtime) {
             run.shadow_mode = quality.policy.shadowMode;
             step.decision = quality;
             if (quality.requiresClarification) {
+                (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", quality.clarificationQuestion);
                 (0, agent_reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, { id: "clarification", label: "目标、授权与影响范围已澄清", kind: "intent", status: "blocked", reason: quality.clarificationReasons.join("；") });
                 (0, agent_reasoning_loop_1.recordReasoningDeviation)(run.reasoning_loop, "decision_quality_gap", quality.clarificationReasons.join("；"), "warning");
                 run.steps.push(step);
@@ -588,6 +602,8 @@ async function continueLoop(run, runtime) {
                 return run;
             }
             if (quality.shadowed) {
+                (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "done", `影子模式记录 ${decision.tool.name}`);
+                (0, global_agent_runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_shadowed", tool: decision.tool.name, risk, arguments: args });
                 step.observation = { success: true, shadowed: true, executed: false, proposed_tool: decision.tool.name, arguments: args };
                 run.steps.push(step);
                 run.tool_calls += 0;
@@ -598,15 +614,36 @@ async function continueLoop(run, runtime) {
                     outcome: "shadowed", reasons: ["影子模式启用，未产生副作用"], status: "info",
                 });
                 (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:shadow:${signature}`, type: "global_agent.tool_shadowed", status: "info", message: `影子模式记录 ${decision.tool.name}，未执行`, data: { tool: decision.tool.name, risk, arguments: args, intent: quality.intent } });
+                (0, agent_runtime_kernel_1.recordAgentRuntimeLifecycle)({
+                    scope: "global",
+                    traceId: run.trace_id,
+                    runId: run.id,
+                    action: decision.tool.name,
+                    phase: "shadow",
+                    risk,
+                    target: signature,
+                    status: "skipped",
+                    message: `影子模式记录 ${decision.tool.name}，未执行`,
+                    data: { arguments: args, intent: quality.intent },
+                });
                 return completeRun(run, runtime, "completed", `${decision.message || "已形成执行方案。"}\n\n当前处于影子模式：拟调用 ${decision.tool.name}，本次没有执行任何写操作。`);
             }
             const priorSame = run.steps.filter(item => item.tool?.signature === signature).length;
             if (priorSame >= 2) {
                 step.error = "检测到重复工具调用，已阻止死循环";
                 run.steps.push(step);
+                (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", step.error);
                 return completeRun(run, runtime, "failed", step.error, "duplicate_tool_loop");
             }
-            const approved = run.approved_tool_signatures.includes(signature);
+            const permission = (0, global_agent_runtime_1.evaluateGlobalAgentPermission)({ run, tool: decision.tool.name, args, risk, signature });
+            if (permission.denied) {
+                step.error = `权限规则拒绝执行 ${decision.tool.name}${permission.rule?.reason ? `：${permission.rule.reason}` : ""}`;
+                run.steps.push(step);
+                (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", step.error);
+                (0, global_agent_runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "permission_denied", tool: decision.tool.name, risk, rule: permission.rule });
+                return completeRun(run, runtime, "failed", step.error, "permission_denied");
+            }
+            const approved = run.approved_tool_signatures.includes(signature) || permission.allowed;
             if ((risk === "write" && !run.explicit_write_authorization && !approved) || (risk === "high" && !approved)) {
                 run.steps.push(step);
                 run.status = "waiting_confirmation";
@@ -623,9 +660,46 @@ async function continueLoop(run, runtime) {
                     outcome: "confirmation_required", reasons: [confirmationLabel], status: "warning",
                 });
                 (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:confirmation:${signature}`, type: "global_agent.confirmation_required", status: "warning", message: run.final_reply, data: { tool: decision.tool.name, risk, arguments: args } });
+                (0, agent_runtime_kernel_1.recordAgentRuntimeLifecycle)({
+                    scope: "global",
+                    traceId: run.trace_id,
+                    runId: run.id,
+                    action: decision.tool.name,
+                    phase: "permission",
+                    risk,
+                    target: signature,
+                    status: "blocked",
+                    message: confirmationLabel,
+                    data: { arguments: args, authorization_basis: quality.authorizationBasis },
+                });
                 emit(runtime, { type: "confirmation_required", pending_tool: run.pending_tool, reply: run.final_reply }, run);
+                (0, global_agent_runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "confirmation_required", tool: decision.tool.name, risk, signature, permission });
+                (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", run.final_reply);
                 return run;
             }
+            const preHooks = (0, global_agent_runtime_1.runGlobalAgentHooks)("pre_tool_use", { run, tool: decision.tool.name, args, risk });
+            if (preHooks.blocked) {
+                step.error = `Hook 阻止执行 ${decision.tool.name}${preHooks.message ? `：${preHooks.message}` : ""}`;
+                run.steps.push(step);
+                (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", step.error);
+                (0, global_agent_runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "hook_blocked", phase: "pre_tool_use", tool: decision.tool.name, risk, hooks: preHooks.fired });
+                (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:hook_blocked:${signature}`, type: "global_agent.hook_blocked", status: "warning", message: step.error, data: { tool: decision.tool.name, risk, hooks: preHooks.fired } });
+                return completeRun(run, runtime, "failed", step.error, "hook_blocked");
+            }
+            (0, agent_runtime_kernel_1.recordAgentRuntimeLifecycle)({
+                scope: "global",
+                traceId: run.trace_id,
+                runId: run.id,
+                action: decision.tool.name,
+                phase: "pre_tool_use",
+                risk,
+                target: signature,
+                status: "running",
+                message: step.message,
+                data: { arguments: args, context: run.user_message },
+            });
+            (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "in_progress", step.message || `执行 ${decision.tool.name}`);
+            (0, global_agent_runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_started", tool: decision.tool.name, risk, arguments: args });
             emit(runtime, { type: "tool_started", tool: step.tool, message: step.message }, run);
             const toolStarted = runtime.now ? runtime.now() : Date.now();
             try {
@@ -661,6 +735,21 @@ async function continueLoop(run, runtime) {
                     outcome: "executed", reasons: [quality.intent.reason], status: "ok",
                 });
                 (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:tool:${step.index}:${signature}`, type: "global_agent.tool_completed", status: "ok", message: `${decision.tool.name} 执行完成`, data: { tool: decision.tool.name, risk, duration_ms: step.duration_ms } });
+                (0, agent_runtime_kernel_1.recordAgentRuntimeLifecycle)({
+                    scope: "global",
+                    traceId: run.trace_id,
+                    runId: run.id,
+                    action: decision.tool.name,
+                    phase: "post_tool_use",
+                    risk,
+                    target: signature,
+                    status: toolSucceeded ? "ok" : "error",
+                    message: `${decision.tool.name} 执行完成`,
+                    data: { duration_ms: step.duration_ms, observation: step.observation },
+                });
+                (0, global_agent_runtime_1.runGlobalAgentHooks)("post_tool_use", { run, tool: decision.tool.name, args, risk, observation: step.observation });
+                (0, global_agent_runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_completed", tool: decision.tool.name, risk, duration_ms: step.duration_ms, observation: step.observation });
+                (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, toolSucceeded ? "done" : "blocked", toolSucceeded ? `${decision.tool.name} 完成` : String(result?.error || `${decision.tool.name} 返回失败`));
                 emit(runtime, { type: "tool_completed", tool: step.tool, observation: step.observation }, run);
             }
             catch (error) {
@@ -679,6 +768,21 @@ async function continueLoop(run, runtime) {
                     outcome: "execution_failed", reasons: [step.error], status: "error",
                 });
                 (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:tool_failed:${step.index}:${signature}`, type: "global_agent.tool_failed", status: "error", message: step.error, data: { tool: decision.tool.name, risk, duration_ms: step.duration_ms } });
+                (0, agent_runtime_kernel_1.recordAgentRuntimeLifecycle)({
+                    scope: "global",
+                    traceId: run.trace_id,
+                    runId: run.id,
+                    action: decision.tool.name,
+                    phase: "post_tool_use",
+                    risk,
+                    target: signature,
+                    status: "error",
+                    message: step.error,
+                    data: { duration_ms: step.duration_ms, observation: step.observation },
+                });
+                (0, global_agent_runtime_1.runGlobalAgentHooks)("post_tool_use", { run, tool: decision.tool.name, args, risk, observation: step.observation });
+                (0, global_agent_runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_failed", tool: decision.tool.name, risk, duration_ms: step.duration_ms, error: step.error });
+                (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, decision.tool.name, "blocked", step.error);
                 emit(runtime, { type: "tool_failed", tool: step.tool, error: step.error }, run);
             }
             run.steps.push(step);
@@ -767,6 +871,11 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
         const step = [...run.steps].reverse().find(item => item.tool?.signature === pending.signature && item.observation === undefined);
         const started = runtime.now ? runtime.now() : Date.now();
         try {
+            const preHooks = (0, global_agent_runtime_1.runGlobalAgentHooks)("pre_tool_use", { run, tool: pending.name, args: pending.arguments, risk: pending.risk });
+            if (preHooks.blocked)
+                throw new Error(`Hook 阻止执行 ${pending.name}${preHooks.message ? `：${preHooks.message}` : ""}`);
+            (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, pending.name, "in_progress", `确认后执行 ${pending.name}`);
+            (0, global_agent_runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_started", tool: pending.name, risk: pending.risk, confirmed: true, arguments: pending.arguments });
             emit(runtime, { type: "tool_started", tool: pending, confirmed: true }, run);
             const result = await runtime.executeTool(pending.name, pending.arguments, run);
             (0, agent_reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, `confirmed_tool:${pending.name}`, result);
@@ -787,6 +896,9 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
                 outcome: "executed", reasons: ["用户确认后执行原待处理工具"], status: "ok",
             });
             (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:tool_confirmed:${pending.signature}`, type: "global_agent.tool_completed", status: "ok", message: `${pending.name} 确认后执行完成`, data: { tool: pending.name, risk: pending.risk } });
+            (0, global_agent_runtime_1.runGlobalAgentHooks)("post_tool_use", { run, tool: pending.name, args: pending.arguments, risk: pending.risk, observation: result });
+            (0, global_agent_runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_completed", tool: pending.name, risk: pending.risk, confirmed: true, observation: compactObservation(result) });
+            (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, pending.name, result?.success === false || result?.error ? "blocked" : "done", result?.error || `${pending.name} 确认后执行完成`);
             emit(runtime, { type: "tool_completed", tool: pending, observation: result, confirmed: true }, run);
         }
         catch (error) {
@@ -807,6 +919,9 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
                 outcome: "execution_failed", reasons: [step?.error || error?.message || String(error)], status: "error",
             });
             (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:tool_confirmed_failed:${pending.signature}`, type: "global_agent.tool_failed", status: "error", message: error?.message || String(error), data: { tool: pending.name, risk: pending.risk } });
+            (0, global_agent_runtime_1.runGlobalAgentHooks)("post_tool_use", { run, tool: pending.name, args: pending.arguments, risk: pending.risk, observation: { success: false, error: error?.message || String(error) } });
+            (0, global_agent_runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "tool_failed", tool: pending.name, risk: pending.risk, confirmed: true, error: error?.message || String(error) });
+            (0, global_agent_runtime_1.markGlobalAgentToolTodo)(run, pending.name, "blocked", error?.message || String(error));
         }
         run.pending_tool = null;
         run.updated_at = nowIso(runtime);

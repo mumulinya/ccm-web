@@ -28,6 +28,8 @@ const soakState = ref(null)
 const soakReport = ref(null)
 const soakLoading = ref(false)
 const soakPreflight = ref(null)
+const runtimeKernelChecks = ref(null)
+const runtimeKernelLoading = ref(false)
 let soakPollTimer = null
 
 const AGENT_PROBE_TIMEOUT_MS = 45000
@@ -110,6 +112,36 @@ const stopSoak = async () => {
   } catch (e) { toast.error(e.message || '停止浸泡测试失败') }
   soakLoading.value = false
 }
+
+const loadRuntimeKernelChecks = async () => {
+  runtimeKernelLoading.value = true
+  try {
+    const [orchestratorRes, globalRes] = await Promise.all([
+      fetch('/api/orchestrator/runtime-kernel/self-test'),
+      fetch('/api/global-agent/runtime-kernel/self-test')
+    ])
+    const [orchestrator, global] = await Promise.all([orchestratorRes.json(), globalRes.json()])
+    runtimeKernelChecks.value = {
+      orchestrator: { ok: orchestratorRes.ok && orchestrator.success !== false, ...orchestrator },
+      global: { ok: globalRes.ok && global.success !== false, ...global },
+    }
+  } catch (e) {
+    runtimeKernelChecks.value = { error: e.message || 'Runtime Kernel 自测失败' }
+  }
+  runtimeKernelLoading.value = false
+}
+
+const runtimeKernelPass = computed(() => runtimeKernelChecks.value?.orchestrator?.result?.pass === true && runtimeKernelChecks.value?.global?.result?.pass === true)
+const runtimeKernelCheckRows = computed(() => {
+  const rows = []
+  const addRows = (scope, result) => {
+    const checks = result?.checks || {}
+    Object.keys(checks).forEach(key => rows.push({ id: `${scope}-${key}`, scope, label: key, ok: checks[key] === true }))
+  }
+  addRows('群聊主 Agent', runtimeKernelChecks.value?.orchestrator?.result)
+  addRows('全局主 Agent', runtimeKernelChecks.value?.global?.result)
+  return rows
+})
 
 
 const agentCliProbeTargetOptions = computed(() => {
@@ -600,6 +632,7 @@ const getExecutionRecoveryReason = () => {
 
 onMounted(() => {
   loadOrchestratorDiagnostics()
+  loadRuntimeKernelChecks()
   loadDailyDevSmokeStatus('', { silent: true })
   loadSoakStatus()
   soakPollTimer = setInterval(() => loadSoakStatus(), 30000)
@@ -711,6 +744,29 @@ onUnmounted(() => {
               <div class="auto-dev-status" :class="orchestratorDiagnostics.readiness">
                 {{ getReadinessText(orchestratorDiagnostics.readiness) }}
               </div>
+            </div>
+          </div>
+
+          <div class="glass-card runtime-kernel-card" :class="runtimeKernelPass ? 'ok' : 'warn'">
+            <div class="runtime-kernel-head">
+              <div>
+                <strong>Agent Runtime Kernel</strong>
+                <span v-if="runtimeKernelLoading">正在检查 lifecycle、权限、上下文预算、WorkerContextPacket 与 Trace Replay</span>
+                <span v-else-if="runtimeKernelChecks?.error">{{ runtimeKernelChecks.error }}</span>
+                <span v-else>{{ runtimeKernelPass ? '群聊主 Agent 与全局主 Agent 运行内核自测通过' : '运行内核存在未通过项' }}</span>
+              </div>
+              <button class="btn btn-outline btn-sm" :disabled="runtimeKernelLoading" @click="loadRuntimeKernelChecks">
+                {{ runtimeKernelLoading ? '检查中...' : '复检内核' }}
+              </button>
+            </div>
+            <div class="runtime-kernel-scope">
+              <span :class="runtimeKernelChecks?.orchestrator?.result?.pass ? 'ok' : 'fail'">群聊主 Agent：{{ runtimeKernelChecks?.orchestrator?.result?.pass ? '通过' : '待复核' }}</span>
+              <span :class="runtimeKernelChecks?.global?.result?.pass ? 'ok' : 'fail'">全局主 Agent：{{ runtimeKernelChecks?.global?.result?.pass ? '通过' : '待复核' }}</span>
+            </div>
+            <div v-if="runtimeKernelCheckRows.length" class="runtime-kernel-checks">
+              <span v-for="row in runtimeKernelCheckRows.slice(0, 12)" :key="row.id" :class="row.ok ? 'ok' : 'fail'">
+                {{ row.scope }} · {{ row.label }}
+              </span>
             </div>
           </div>
 
@@ -1113,6 +1169,17 @@ onUnmounted(() => {
 .auto-dev-status.ready { background: rgba(34,197,94,0.12); color: var(--accent-green); }
 .auto-dev-status.partial { background: rgba(234,179,8,0.16); color: #854d0e; }
 .auto-dev-status.blocked { background: rgba(239,68,68,0.12); color: #b91c1c; }
+
+.runtime-kernel-card.ok { border-left: 4px solid var(--accent-green); background: rgba(20, 184, 166, 0.06); }
+.runtime-kernel-card.warn { border-left: 4px solid var(--accent-yellow); background: rgba(245, 158, 11, 0.06); }
+.runtime-kernel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.runtime-kernel-head > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.runtime-kernel-head strong { color: var(--text-primary); font-size: 14px; }
+.runtime-kernel-head span { color: var(--text-secondary); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.runtime-kernel-scope,.runtime-kernel-checks { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.runtime-kernel-scope span,.runtime-kernel-checks span { padding: 4px 8px; border-radius: 6px; background: rgba(100, 116, 139, 0.1); color: var(--text-secondary); font-size: 11px; font-weight: 800; }
+.runtime-kernel-scope span.ok,.runtime-kernel-checks span.ok { background: rgba(34,197,94,0.12); color: var(--accent-green); }
+.runtime-kernel-scope span.fail,.runtime-kernel-checks span.fail { background: rgba(239,68,68,0.1); color: #b91c1c; }
 
 /* Summary Card */
 .summary-card {

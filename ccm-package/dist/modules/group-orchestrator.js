@@ -70,6 +70,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const db_1 = require("../db");
+const agent_runtime_kernel_1 = require("../agent-runtime-kernel");
 exports.COORDINATOR_PROJECT = "coordinator";
 exports.DEFAULT_GROUP_ORCHESTRATOR = {
     enabled: true,
@@ -831,8 +832,22 @@ function buildSelfContainedWorkerTask(project, rawTask, analysis, options = {}) 
     const alreadyStructured = /主 Agent 工作单|需求理解|交付物|验证要求|CCM_AGENT_RECEIPT/i.test(task);
     if (alreadyStructured)
         return task;
+    const workerContextPacket = (0, agent_runtime_kernel_1.buildWorkerContextPacket)({
+        group: options.group || null,
+        project,
+        task: task || analysis?.raw || "根据主 Agent 的需求理解完成本项目相关工作。",
+        analysis,
+        traceId: options.traceId || options.trace_id || "",
+        taskId: options.taskId || options.task_id || "",
+        dependencies: dependsOn ? [{ project: dependsOn, reason: "前置依赖" }] : [],
+        contractInjections: Array.isArray(options.contractInjections) ? options.contractInjections : [],
+        memory: options.memory || null,
+        verification: options.verification || null,
+    });
     const lines = [
         `主 Agent 工作单：${project}`,
+        (0, agent_runtime_kernel_1.renderWorkerContextPacket)(workerContextPacket),
+        "",
         `- 需求理解：${analysis?.summary || compactText(analysis?.raw || task, 260)}`,
         `- 你的职责：只处理 ${project} 项目职责范围内的代码、配置、文档或验证；不要越权修改其他项目。`,
         reason ? `- 派发原因：${reason}` : "",
@@ -887,6 +902,11 @@ function buildAssignment(member, task, reason = "", dependsOn = "") {
         task: String(task || "").trim(),
         reason: String(reason || "").trim(),
         dependsOn: String(dependsOn || "").trim(),
+        worker_context_packet: (0, agent_runtime_kernel_1.buildWorkerContextPacket)({
+            project: String(member?.project || "").trim(),
+            task: String(task || "").trim(),
+            dependencies: dependsOn ? [{ project: dependsOn, reason: "前置依赖" }] : [],
+        }),
     };
 }
 function buildAssignmentsFromTargets(targets) {
@@ -1070,6 +1090,7 @@ function runCodedGroupOrchestrator(input) {
     const plannedRouted = executionPlan.routed.map((item) => ({
         ...item,
         task: buildSelfContainedWorkerTask(item.member.project, item.task || input.message, analysis, {
+            group,
             reason: item.reason || "规则主 Agent 根据需求范围和项目职责派发",
             dependsOn: item.dependsOn || "",
             coordinationStrategy,
@@ -1186,6 +1207,8 @@ function runCoordinatorProtocolSelfTest() {
             project: assignment.project,
             dependsOn: assignment.dependsOn || "",
             hasWorkerPacket: task.includes("主 Agent 工作单"),
+            hasRuntimeWorkerContextPacket: task.includes("WorkerContextPacket") && task.includes("ACK gate"),
+            hasStructuredWorkerPacket: !!assignment.worker_context_packet?.packet_id,
             hasUnderstanding: task.includes("需求理解"),
             hasVerification: task.includes("验证要求"),
             hasReceipt: task.includes("CCM_AGENT_RECEIPT"),
@@ -1226,7 +1249,7 @@ function runCoordinatorProtocolSelfTest() {
         && assignments.length >= 2
         && result.executionOrder === "backend_first"
         && frontendDependsOnBackend
-        && taskChecks.every((item) => item.hasWorkerPacket && item.hasUnderstanding && item.hasVerification && item.hasReceipt && item.hasDocumentEvidence && item.hasCoordinatorWorkerProtocol && item.forbidsLazyDelegation)
+        && taskChecks.every((item) => item.hasWorkerPacket && item.hasRuntimeWorkerContextPacket && item.hasStructuredWorkerPacket && item.hasUnderstanding && item.hasVerification && item.hasReceipt && item.hasDocumentEvidence && item.hasCoordinatorWorkerProtocol && item.forbidsLazyDelegation)
         && llmDocumentGuardPass
         && semanticReasoningPass
         && shortDocBackendFirstPass
@@ -1907,6 +1930,7 @@ function sanitizeLlmTargets(group, parsed, message, fallbackAnalysis, allowRuleR
             continue;
         const enrichedTask = enrichTaskWithDocumentFindings(String(target?.task || "").trim() || message, documentFindings);
         const task = buildSelfContainedWorkerTask(project, enrichedTask, taskAnalysis, {
+            group,
             reason: target?.reason || "LLM 主 Agent 根据需求理解和项目职责派发",
             dependsOn: target?.dependsOn || "",
             coordinationStrategy: taskAnalysis.coordinationStrategy,
@@ -1924,6 +1948,7 @@ function sanitizeLlmTargets(group, parsed, message, fallbackAnalysis, allowRuleR
         return routeMembers(group, message, fallbackAnalysis).map((item) => ({
             ...item,
             task: buildSelfContainedWorkerTask(item.member.project, enrichTaskWithDocumentFindings(item.task || message, documentFindings), taskAnalysis, {
+                group,
                 reason: broadDevelopmentRequest ? "业务开发需求规则补派" : "规则回退路由",
                 dependsOn: item.dependsOn || "",
                 coordinationStrategy: taskAnalysis.coordinationStrategy,

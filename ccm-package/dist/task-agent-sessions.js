@@ -177,6 +177,16 @@ function advanceTaskAgentSession(current, result = {}) {
         lastPermissionDriftAt: permissionDrift ? new Date().toISOString() : current.lastPermissionDriftAt || "",
         lastUsedAt: new Date().toISOString(),
     };
+    if (result.runtimeToolSnapshot && typeof result.runtimeToolSnapshot === "object") {
+        next.runtimeSnapshotId = String(result.runtimeToolSnapshot.snapshotId || current.runtimeSnapshotId || "");
+        next.runtimeSnapshotPath = String(result.runtimeToolSnapshot.snapshotPath || current.runtimeSnapshotPath || "");
+        next.mcpConfigPath = String(result.runtimeToolSnapshot.mcpConfigPath || current.mcpConfigPath || "");
+        next.allowedTools = result.runtimeToolSnapshot.allowedTools || current.allowedTools || null;
+        next.permissionRules = Array.isArray(result.runtimeToolSnapshot.permissionRules)
+            ? result.runtimeToolSnapshot.permissionRules.slice(0, 50)
+            : current.permissionRules || [];
+        next.runtimeToolUpdatedAt = new Date().toISOString();
+    }
     return next;
 }
 function closeTaskAgentSessions(input, reason = "主 Agent 已完成最终验收") {
@@ -233,6 +243,8 @@ function getTaskAgentSessionOptions(session) {
         sessionId: session.nativeSessionId,
         resumeSession: session.resumeMode === "native" && session.turnCount > 0 && !!session.nativeSessionId,
         persistSession: session.resumeMode === "native",
+        runtimeSnapshotId: session.runtimeSnapshotId || "",
+        mcpConfigPath: session.mcpConfigPath || "",
     };
 }
 function getTaskAgentSessionContinuity(session) {
@@ -244,6 +256,9 @@ function getTaskAgentSessionContinuity(session) {
         turnCount: session.turnCount,
         recoveryAttempts: Number(session.nativeRecoveryAttempts || 0),
         previousNativeSessionIds: session.nativeSessionHistory || [],
+        runtimeSnapshotId: session.runtimeSnapshotId || "",
+        mcpConfigPath: session.mcpConfigPath || "",
+        runtimeToolUpdatedAt: session.runtimeToolUpdatedAt || "",
     };
 }
 function listTaskAgentSessions(filter = {}) {
@@ -304,6 +319,16 @@ function runTaskAgentSessionSelfTest() {
     const cursorWithoutCapturedId = advanceTaskAgentSession({ ...claude, id: "cursor-test", agentType: "cursor", nativeSessionId: "", turnCount: 0 }, { success: true });
     const codexWithCapturedId = advanceTaskAgentSession({ ...claude, id: "codex-test", agentType: "codex", nativeSessionId: "", turnCount: 0 }, { success: true, nativeSessionId: "codex-thread-1" });
     const invalidCursor = advanceTaskAgentSession({ ...claude, id: "cursor-invalid", agentType: "cursor", nativeSessionId: "cursor-thread-old", turnCount: 2 }, { success: false, error: "session not found" });
+    const runtimeSnapshotSession = advanceTaskAgentSession({ ...claude, id: "runtime-snapshot", agentType: "claudecode", nativeSessionId: "claude-session", turnCount: 1 }, {
+        success: true,
+        runtimeToolSnapshot: {
+            snapshotId: "snap-runtime",
+            snapshotPath: "/tmp/runtime-tool-snapshot.json",
+            mcpConfigPath: "/tmp/mcp.json",
+            allowedTools: { mcp: ["payments/createInvoice"], skill: ["release-notes"] },
+            permissionRules: [{ rule: "mcp__ccm__payments__createInvoice" }],
+        },
+    });
     const checks = {
         persistsNativeSession: options.persistSession,
         resumesAfterFirstTurn: options.resumeSession,
@@ -319,6 +344,7 @@ function runTaskAgentSessionSelfTest() {
         missingNativeIdCanDegradeSafely: cursorWithoutCapturedId.resumeMode === "scratchpad" && cursorWithoutCapturedId.nativeCaptureFailures === 1,
         capturedNativeIdStaysResumable: codexWithCapturedId.resumeMode === "native" && getTaskAgentSessionOptions(codexWithCapturedId).resumeSession,
         invalidNativeSessionCreatesRecoveryPath: invalidCursor.resumeMode === "native" && invalidCursor.nativeSessionId === "" && invalidCursor.nativeSessionHistory?.includes("cursor-thread-old") && invalidCursor.nativeRecoveryAttempts === 1,
+        runtimeSnapshotPersistsAcrossTurns: runtimeSnapshotSession.runtimeSnapshotId === "snap-runtime" && getTaskAgentSessionOptions(runtimeSnapshotSession).runtimeSnapshotId === "snap-runtime" && getTaskAgentSessionContinuity(runtimeSnapshotSession).mcpConfigPath === "/tmp/mcp.json",
         permissionDriftRebuildsNativeSession: (() => {
             const drifted = advanceTaskAgentSession({ ...claude, id: "codex-drift", agentType: "codex", nativeSessionId: "codex-readonly", turnCount: 3 }, { success: false, error: "sandbox read-only", permissionDrift: true });
             return drifted.resumeMode === "native" && drifted.nativeSessionId === "" && drifted.turnCount === 0 && drifted.nativeSessionHistory?.includes("codex-readonly") && drifted.permissionDriftCount === 1;

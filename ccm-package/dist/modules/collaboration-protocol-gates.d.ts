@@ -54,11 +54,12 @@ export declare function getTaskContractInjectionRows(task: any): {
     };
     rows: any[];
 };
-export declare function evaluateContractInjectionGate(rows?: any[], assignments?: any[]): {
+export declare function evaluateContractInjectionGate(rows?: any[], assignments?: any[], receipts?: any[]): {
     required: boolean;
     pass: boolean;
     rows: any[];
     missing: any[];
+    unconsumed: any[];
     status: string;
     summary: string;
 };

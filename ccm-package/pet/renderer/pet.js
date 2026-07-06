@@ -804,9 +804,9 @@ function getSpeechLabel(role) {
       status: '正在播放',
       error: '播放遇到问题',
       ask: '需要你确认',
-      assistant: '歌词',
+      assistant: '',
     };
-    return musicLabels[role] || '歌词';
+    return musicLabels[role] ?? '';
   }
   const labels = {
     user: '你的消息',
@@ -867,7 +867,9 @@ function showSpeech(data = {}) {
   const streaming = mode === 'append' && !data.final;
 
   setSpeechTone(displayRole, streaming);
-  speechLabel.textContent = getSpeechLabel(displayRole);
+  const label = getSpeechLabel(displayRole);
+  speechLabel.textContent = label;
+  speechLabel.hidden = !label;
   speechText.textContent = speechBuffer;
   speech.classList.remove('hidden');
   nameEl.classList.add('suppressed-by-speech');
@@ -1163,7 +1165,9 @@ window.petBridge.onLabelUpdate((data) => {
   if (data.agent === agentName) {
     setPetName(data.label || data.displayName);
     if (!speech.classList.contains('hidden')) {
-      speechLabel.textContent = getSpeechLabel('assistant');
+      const label = getSpeechLabel('assistant');
+      speechLabel.textContent = label;
+      speechLabel.hidden = !label;
     }
   }
 });

@@ -23,6 +23,7 @@ const audioEl = ref(null)
 const leftCanvasRef = ref(null)
 const rightCanvasRef = ref(null)
 const headerCanvasRef = ref(null)
+const RANDOM_MUSIC_KEYWORD = '__random__'
 
 // === 歌词状态 ===
 const lyrics = ref([])
@@ -79,6 +80,11 @@ const weatherEmoji = computed(() => {
   if (w.includes('风') || w.includes('wind')) return '💨'
   return '🌡️'
 })
+
+const isRandomMusicKeyword = (keyword) => {
+  const value = String(keyword || '').trim().toLowerCase()
+  return !value || [RANDOM_MUSIC_KEYWORD, 'random', '随机', '随便', '任意', '播放音乐', '听歌'].includes(value)
+}
 
 watch(currentWeather, () => {
   weatherIconError.value = false
@@ -336,6 +342,38 @@ const lyricsOffset = computed(() => {
 const formatTrackLabel = (track) => {
   if (!track) return '等待播放'
   return [track.title, track.artist].filter(Boolean).join(' - ') || track.filename || '未知曲目'
+}
+
+const normalizeTrackSearchText = (value) => String(value || '')
+  .toLowerCase()
+  .replace(/\.[a-z0-9]{2,5}$/i, '')
+  .replace(/[《》「」『』()[\]（）【】"'`~!@#$%^&*_+=|\\:;，。,.?？!！、/\-]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+
+const buildTrackSearchText = (track) => normalizeTrackSearchText([
+  track?.title,
+  track?.artist,
+  track?.album,
+  track?.filename
+].filter(Boolean).join(' '))
+
+const splitMusicKeywordTokens = (keyword) => normalizeTrackSearchText(keyword)
+  .replace(/\b(feat|ft|cover|live|伴奏|纯音乐|歌词版|完整版|官方|mv)\b/g, ' ')
+  .split(/[\s的]+/)
+  .map(token => token.trim())
+  .filter(token => token.length >= 2)
+
+const findLocalTrackByKeyword = (keyword) => {
+  const normalizedKeyword = normalizeTrackSearchText(keyword)
+  const tokens = splitMusicKeywordTokens(keyword)
+  if (!normalizedKeyword && !tokens.length) return null
+  return tracks.value.find(track => {
+    const haystack = buildTrackSearchText(track)
+    if (!haystack) return false
+    if (normalizedKeyword && haystack.includes(normalizedKeyword)) return true
+    return tokens.length > 0 && tokens.every(token => haystack.includes(token))
+  }) || null
 }
 
 const toPetTrack = (track) => {
@@ -1194,23 +1232,28 @@ onMounted(() => {
   window.__cc_global_play_music = async (keyword) => {
     console.log('[GlobalPlay] 收到全局播放指令:', keyword)
     const kw = String(keyword || '').toLowerCase().trim()
-    if (!kw) return { success: false, error: '关键字为空' }
 
     if (!tracks.value.length) {
       await loadTracks()
     }
 
-    // 1. 先在本地已下载音乐中搜索
-    const matchedLocal = tracks.value.find(t =>
-      (t.title && t.title.toLowerCase().includes(kw)) ||
-      (t.filename && t.filename.toLowerCase().includes(kw)) ||
-      (t.artist && t.artist.toLowerCase().includes(kw))
-    )
+    if (isRandomMusicKeyword(kw)) {
+      const pool = (playlist.value.length ? playlist.value : tracks.value).filter(track => track?.filename)
+      if (!pool.length) return { success: false, error: '本地没有可随机播放的音乐' }
+      const randomTrack = pool[Math.floor(Math.random() * pool.length)]
+      console.log('[GlobalPlay] 随机播放本地音乐:', randomTrack.title || randomTrack.filename)
+      const playResult = await play(randomTrack, { remote: true })
+      if (!playResult?.success) return { success: false, error: playResult?.error || '播放失败' }
+      return { success: true, source: 'local-random', title: formatTrackLabel(randomTrack) }
+    }
+
+    // 1. 先在本地已下载音乐中搜索，支持“歌手 + 歌名”组合匹配。
+    const matchedLocal = findLocalTrackByKeyword(kw)
     if (matchedLocal) {
-      console.log('[GlobalPlay] 本地匹配成功，直接播放:', matchedLocal.title)
+      console.log('[GlobalPlay] 本地匹配成功，直接播放:', formatTrackLabel(matchedLocal))
       const playResult = await play(matchedLocal, { remote: true })
       if (!playResult?.success) return { success: false, error: playResult?.error || '播放失败' }
-      return { success: true, source: 'local', title: matchedLocal.title }
+      return { success: true, source: 'local', title: formatTrackLabel(matchedLocal) }
     }
 
     // 2. 本地未找到，再去 B 站搜索并转码播放
@@ -1237,9 +1280,10 @@ onMounted(() => {
       const command = data.command
       if (!command?.id || command.type !== 'play' || !command.keyword) return
       await fetch('/api/music/remote-command/consume', { method: 'POST' })
-      toast.info(`收到远程点歌：${command.keyword}`)
+      const remoteRandom = isRandomMusicKeyword(command.keyword)
+      toast.info(remoteRandom ? '收到远程随机播放音乐指令' : `收到远程点歌：${command.keyword}`)
       const result = await window.__cc_global_play_music(command.keyword)
-      if (result.success) toast.success(`远程点歌已播放：${result.title}`)
+      if (result.success) toast.success(remoteRandom ? `远程随机播放已开始：${result.title}` : `远程点歌已播放：${result.title}`)
       else toast.error(`远程点歌失败：${result.error || '未找到歌曲'}`)
     } catch {}
   }, 3000)
@@ -1305,18 +1349,10 @@ const formatTimeHHMMSS = () => {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
 }
 
-const extractPlayKeyword = (message) => {
-  const text = String(message || '').replace(/[，。！？、]/g, ' ').trim()
-  const match = text.match(/(?:播放|放一首?|听一首?|来一首?|来点|来些|我想听|我要听|想听)(.+)/)
-  if (!match) return ''
-  return match[1]
-    .replace(/^(一下|下|首|点|些)\s*/g, '')
-    .replace(/(音乐|歌曲|歌)$/g, '')
-    .trim()
-}
-
-const autoplayFromAgentRequest = async (message) => {
-  const keyword = extractPlayKeyword(message)
+const autoplayFromAgentAction = async (action) => {
+  if (!action || action.type !== 'play_music') return null
+  if (action.source !== 'agent') return null
+  const keyword = String(action.keyword || '').trim()
   if (!keyword || typeof window.__cc_global_play_music !== 'function') return null
   const result = await window.__cc_global_play_music(keyword)
   if (result?.success) {
@@ -1384,6 +1420,7 @@ const sendToClaudeAgent = async (msg) => {
   scrollChat()
   let petStreamStarted = false
   let petStreamHadError = false
+  let musicAction = null
   try {
     const res = await fetch('/api/music/agent', {
       method: 'POST',
@@ -1413,6 +1450,8 @@ const sendToClaudeAgent = async (msg) => {
               source: 'music-chat'
             })
             petStreamStarted = true
+          } else if (data.type === 'music_action') {
+            musicAction = data.action || null
           } else if (data.type === 'error') {
             const anchor = captureAgentChatScroll()
             appendAgentMessageContent(agentMsg, `\n❌ ${data.text}`)
@@ -1426,7 +1465,7 @@ const sendToClaudeAgent = async (msg) => {
     if (petStreamStarted && !petStreamHadError) {
       notifyMusicPetSpeech('', { role: 'assistant', mode: 'append', final: true, source: 'music-chat' })
     }
-    const playResult = await autoplayFromAgentRequest(msg)
+    const playResult = await autoplayFromAgentAction(musicAction)
     // if (playResult) {
     //   pushAgentMessage({
     //     role: 'system',
@@ -1467,8 +1506,8 @@ const sendToSimpleAgent = async (msg) => {
       })
       scrollChat()
       notifyMusicPetSpeech(replyText, { role: 'assistant', mode: 'replace', final: true, source: 'music-chat' })
-      if (data.intent === 'play') {
-        const result = await autoplayFromAgentRequest(msg)
+      if (data.action?.type === 'play_music') {
+        const result = await autoplayFromAgentAction(data.action)
         // if (result) {
         //   pushAgentMessage({
         //     role: 'system',

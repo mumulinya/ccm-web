@@ -1,3 +1,5 @@
+import * as crypto from "crypto";
+
 function normalizeStringArray(value: any): string[] {
   if (Array.isArray(value)) return value.map((item: any) => String(item || "").trim()).filter(Boolean);
   if (value === undefined || value === null || value === "") return [];
@@ -24,6 +26,72 @@ function uniqueStrings(...values: any[]): string[] {
 function compactMemoryText(value: any, max = 400) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function stableInjectionId(row: any) {
+  const source = [
+    row?.target || row?.consumer || "",
+    row?.endpoint || row?.path || "",
+    row?.type || "contract",
+    row?.summary || row?.note || row?.response || row?.request || "",
+  ].join("|");
+  return `ci_${crypto.createHash("sha256").update(source).digest("hex").slice(0, 16)}`;
+}
+
+function normalizeConsumedInjectionIds(receipt: any) {
+  return uniqueStrings(
+    receipt?.consumedInjectionIds,
+    receipt?.consumed_injection_ids,
+    receipt?.contractInjectionConsumed,
+    receipt?.contract_injection_consumed,
+    receipt?.contractInjection?.consumedInjectionIds,
+    receipt?.contract_injection?.consumed_injection_ids,
+    ...(Array.isArray(receipt?.contractConsumption || receipt?.contract_consumption)
+      ? (receipt.contractConsumption || receipt.contract_consumption).map((item: any) => item?.injection_id || item?.injectionId)
+      : []),
+  );
+}
+
+function normalizeContractConsumptionEntries(receipt: any) {
+  const entries = [
+    ...(Array.isArray(receipt?.contractConsumption) ? receipt.contractConsumption : []),
+    ...(Array.isArray(receipt?.contract_consumption) ? receipt.contract_consumption : []),
+    ...(Array.isArray(receipt?.contractInjection?.consumption) ? receipt.contractInjection.consumption : []),
+    ...(Array.isArray(receipt?.contract_injection?.consumption) ? receipt.contract_injection.consumption : []),
+  ];
+  return entries
+    .filter((item: any) => item && typeof item === "object")
+    .map((item: any) => ({
+      injection_id: String(item.injection_id || item.injectionId || item.id || "").trim(),
+      status: String(item.status || item.result || item.decision || "").trim().toLowerCase(),
+      summary: compactMemoryText(item.summary || item.note || item.reason || item.evidence || "", 240),
+      evidence: normalizeStringArray(item.evidence || item.files || item.verification || item.tests).slice(0, 12),
+    }))
+    .filter((item: any) => item.injection_id);
+}
+
+function evaluateContractConsumptionQuality(receipt: any, injectionId: string) {
+  const consumedIds = normalizeConsumedInjectionIds(receipt);
+  if (!consumedIds.includes(injectionId)) {
+    return { consumed: false, pass: false, status: "missing_reference", reason: "回执未引用 injection_id", entry: null };
+  }
+  const entries = normalizeContractConsumptionEntries(receipt);
+  const entry = entries.find((item: any) => item.injection_id === injectionId) || null;
+  if (!entry) {
+    return { consumed: true, pass: false, status: "missing_consumption_detail", reason: "缺少 contractConsumption 消费结论", entry: null };
+  }
+  const status = entry.status;
+  const okStatuses = ["adapted", "verified", "no_change", "no_change_needed", "not_required", "not_applicable", "ok", "passed"];
+  if (["blocked", "needs_info", "failed", "partial", "unknown"].includes(status) || !okStatuses.includes(status)) {
+    return { consumed: true, pass: false, status: status || "missing_status", reason: "contractConsumption 状态未通过", entry };
+  }
+  const files = normalizeStringArray(receipt?.filesChanged || receipt?.files_changed || receipt?.files);
+  const verification = normalizeStringArray(receipt?.verification || receipt?.tests);
+  const evidence = normalizeStringArray(entry.evidence);
+  if (["adapted", "verified", "ok", "passed"].includes(status) && (!files.length || !verification.length) && !evidence.length) {
+    return { consumed: true, pass: false, status: "missing_evidence", reason: "已适配契约但缺少文件或验证证据", entry };
+  }
+  return { consumed: true, pass: true, status, reason: entry.summary || "contractConsumption 消费结论已记录", entry };
 }
 
 export function extractContractSyncHints(task: any, summary: any = {}) {
@@ -100,6 +168,7 @@ export function buildContractTransferPlan(contractSync: any, orders: any[] = [])
     const targets = consumers.length ? consumers : [...orderProjects].filter(project => !normalizeStringArray(change.producers || change.provider || change.owner).includes(project));
     return targets.map((target: string) => ({
       id: `contract_transfer_${index + 1}_${target}`,
+      injection_id: stableInjectionId({ ...change, target }),
       target,
       endpoint: change.endpoint || change.path || "",
       type: change.type || "contract",
@@ -146,6 +215,7 @@ export function getTaskContractInjectionRows(task: any) {
       .filter((row: any) => row?.target)
       .map((row: any) => ({
         ...row,
+        injection_id: row.injection_id || stableInjectionId(row),
         target: String(row.target || "").trim(),
         status: row.status || "ready_to_inject",
       }))
@@ -153,9 +223,10 @@ export function getTaskContractInjectionRows(task: any) {
   };
 }
 
-export function evaluateContractInjectionGate(rows: any[] = [], assignments: any[] = []) {
+export function evaluateContractInjectionGate(rows: any[] = [], assignments: any[] = [], receipts: any[] = []) {
   const normalizedRows = (rows || []).filter((row: any) => row?.target);
   const injected = normalizedRows.map((row: any) => {
+    const injectionId = row.injection_id || stableInjectionId(row);
     const target = String(row.target || "").toLowerCase();
     const endpoint = String(row.endpoint || "").toLowerCase();
     const type = String(row.type || "").toLowerCase();
@@ -172,24 +243,41 @@ export function evaluateContractInjectionGate(rows: any[] = [], assignments: any
       if (endpoint && taskText.includes(endpoint)) return true;
       return !!type && !["contract", "api", "接口"].includes(type) && taskText.includes(type);
     });
+    const consumerReceipt = (receipts || []).find((receipt: any) => {
+      const agent = String(receipt?.agent || receipt?.project || "").toLowerCase();
+      if (agent !== target) return false;
+      return normalizeConsumedInjectionIds(receipt).includes(injectionId);
+    });
+    const consumptionQuality = consumerReceipt ? evaluateContractConsumptionQuality(consumerReceipt, injectionId) : null;
     return {
       ...row,
+      injection_id: injectionId,
       injected: !!found,
+      consumed: !!consumerReceipt && consumptionQuality?.pass === true,
+      consumption_status: consumptionQuality?.status || "",
+      consumption_reason: consumptionQuality?.reason || "",
+      consumption_entry: consumptionQuality?.entry || null,
+      consumer_receipt_status: consumerReceipt?.status || "",
       assignment_message_id: found?.message_id || "",
       assignment_source: found?.source || "",
+      missing_reason: !found ? "needs_injection" : !consumerReceipt ? "needs_consumption_receipt" : consumptionQuality?.pass !== true ? "needs_consumption_evidence" : "",
     };
   });
   const missing = injected.filter((row: any) => !row.injected);
+  const unconsumed = injected.filter((row: any) => row.injected && !row.consumed);
   return {
     required: normalizedRows.length > 0,
-    pass: missing.length === 0,
+    pass: missing.length === 0 && unconsumed.length === 0,
     rows: injected,
     missing,
-    status: !normalizedRows.length ? "not_required" : missing.length ? "needs_injection" : "injected",
+    unconsumed,
+    status: !normalizedRows.length ? "not_required" : missing.length ? "needs_injection" : unconsumed.length ? "needs_consumption" : "injected",
     summary: !normalizedRows.length
       ? "无依赖 Agent 契约注入需求"
       : missing.length
         ? `仍需注入 ${missing.length} 个依赖 Agent`
-        : "结构化 contractChanges 已注入依赖 Agent",
+        : unconsumed.length
+          ? `仍有 ${unconsumed.length} 个依赖 Agent 未引用 injection_id 回执消费结果`
+          : "结构化 contractChanges 已注入并被依赖 Agent 回执消费",
   };
 }

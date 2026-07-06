@@ -21,6 +21,7 @@ const { runAgentRuntimeSessionSelfTest } = require("../dist/agent-runtime.js");
 const { runProjectMemorySelfTest } = require("../dist/project-memory.js");
 const { runTaskAgentSessionSelfTest } = require("../dist/task-agent-sessions.js");
 const { runRuntimeToolSyncSelfTest } = require("../dist/runtime-tool-sync.js");
+const { runToolManagerRuntimeSelfTest } = require("../dist/tool-manager.js");
 const { runExecutionKernelSelfTest, runExecutionKernelCancellationSelfTest } = require("../dist/execution-kernel.js");
 const { runCollaborationResilienceSelfTest, runCollaborationResilienceIntegrationSelfTest } = require("../dist/collaboration-resilience.js");
 const { runReliabilityLedgerSelfTest } = require("../dist/reliability-ledger.js");
@@ -49,6 +50,7 @@ async function main() {
   const projectMemory = runProjectMemorySelfTest();
   const taskAgentSession = runTaskAgentSessionSelfTest();
   const runtimeToolSync = runRuntimeToolSyncSelfTest();
+  const toolManagerRuntime = runToolManagerRuntimeSelfTest();
   const executionKernel = runExecutionKernelSelfTest();
   const executionKernelCancellation = await runExecutionKernelCancellationSelfTest();
   const collaborationResilience = runCollaborationResilienceSelfTest();
@@ -87,6 +89,7 @@ async function main() {
   assert.ok(projectMemory.pass, "独立项目记忆压缩自测未通过");
   assert.ok(taskAgentSession.pass, "任务级 Agent 会话生命周期自测未通过");
   assert.ok(runtimeToolSync.pass, "Codex 统一网关与密钥隔离自测未通过");
+  assert.ok(toolManagerRuntime.pass, "ToolManager MCP 真实工具诊断自测未通过");
   assert.ok(executionKernel.pass, "开发执行内核检查点/回滚/绿灯自测未通过");
   assert.ok(executionKernelCancellation.pass, "开发执行内核真实取消自测未通过");
   assert.ok(collaborationResilience.pass, "群聊原生续跑/冲突保护/执行器恢复自测未通过");
@@ -120,6 +123,7 @@ async function main() {
     projectMemory,
     taskAgentSession,
     runtimeToolSync,
+    toolManagerRuntime,
     executionKernel,
     executionKernelCancellation,
     collaborationResilience,

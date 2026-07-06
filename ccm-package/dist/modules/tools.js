@@ -207,6 +207,25 @@ function handleToolsAndMetricsApi(pathname, req, res, parsed) {
         toolManager.loadTools().then(() => (0, utils_1.sendJson)(res, { success: true, ...toolManager.getToolList() }));
         return true;
     }
+    if (pathname === "/api/tools/skills/discover" && req.method === "GET") {
+        (0, utils_1.sendJson)(res, { success: true, skills: toolManager.discoverSkills() });
+        return true;
+    }
+    if (pathname === "/api/tools/skills/invoke" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk) => body += chunk);
+        req.on("end", () => {
+            try {
+                const payload = JSON.parse(body || "{}");
+                const result = toolManager.invokeSkill(payload.name || payload.skill, payload.input || payload.context || "", payload.scope);
+                (0, utils_1.sendJson)(res, { success: !!result.ok, result });
+            }
+            catch (e) {
+                (0, utils_1.sendJson)(res, { success: false, error: e.message }, 400);
+            }
+        });
+        return true;
+    }
     // === MCP 工具管理 API ===
     if (pathname === "/api/mcp" && req.method === "GET") {
         (0, utils_1.sendJson)(res, { tools: (0, db_1.loadMcpTools)() });

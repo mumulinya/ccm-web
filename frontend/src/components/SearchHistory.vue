@@ -137,7 +137,7 @@ const copyContent = (item) => {
 
 // 导出 Markdown 对话卡片
 const exportMarkdown = (item) => {
-  const roleName = item.role === 'user' ? '👤 用户' : `🤖 Agent (${item.agent || 'Coordinator'})`
+  const roleName = item.role === 'user' ? '👤 用户' : `🤖 Agent (${item.agent || '主 Agent'})`
   const formattedTime = formatTime(item.timestamp)
   
   const md = `### ${item.isGroup ? '💬 群聊' : '📂 项目'}: ${item.project} | 会话: ${item.sessionName}

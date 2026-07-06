@@ -42,10 +42,11 @@ exports.runProjectMemorySelfTest = runProjectMemorySelfTest;
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const context_budget_1 = require("./context-budget");
 const utils_1 = require("./utils");
 const memory_control_center_1 = require("./modules/memory-control-center");
 const PROJECT_MEMORY_DIR = path.join(utils_1.CCM_DIR, "project-memory");
-const PROJECT_MEMORY_VERSION = 2;
+const PROJECT_MEMORY_VERSION = 3;
 const CONCLUSION_COMPACT_THRESHOLD = 20;
 const CONCLUSION_RECENT_KEEP = 10;
 const DECISION_COMPACT_THRESHOLD = 80;
@@ -242,6 +243,7 @@ function createEmptyProjectMemory(project, workDir = "") {
             recentConclusions: 0,
             lastCompactedAt: "",
         },
+        compactBoundary: null,
         updatedAt: new Date().toISOString(),
     };
 }
@@ -348,10 +350,30 @@ function compactConclusions(memory) {
         };
         return memory;
     }
+    const preCompactTokenCount = (0, context_budget_1.estimateTextTokens)(JSON.stringify({ compressedConclusions: memory.compressedConclusions || "", conclusions }));
     const older = conclusions.slice(0, -CONCLUSION_RECENT_KEEP);
+    const archive = createArchive("conclusions", older);
     memory.conclusions = conclusions.slice(-CONCLUSION_RECENT_KEEP);
-    memory.conclusionArchives = appendArchive(memory.conclusionArchives, createArchive("conclusions", older));
+    memory.conclusionArchives = appendArchive(memory.conclusionArchives, archive);
     memory.compressedConclusions = renderArchiveIndex(memory.conclusionArchives, memory.legacyCompressedConclusions, 14_000);
+    const postCompactTokenCount = (0, context_budget_1.estimateTextTokens)(JSON.stringify({ compressedConclusions: memory.compressedConclusions || "", conclusions: memory.conclusions || [] }));
+    const contextBudget = (0, context_budget_1.buildContextBudget)({ context: { compressedConclusions: memory.compressedConclusions, recentConclusions: memory.conclusions }, maxChars: 30_000, maxTokens: 90_000 });
+    memory.compactBoundary = {
+        type: "project_memory_boundary",
+        archiveId: archive.id,
+        kind: "conclusions",
+        preCompactTokenCount,
+        postCompactTokenCount,
+        preservedRecentItems: memory.conclusions.length,
+        post_compact_restore: {
+            strategy: "project_memory_brief_reinject",
+            recentConclusionTaskIds: memory.conclusions.map((item) => item.taskId).filter(Boolean).slice(-8),
+            filesModified: (memory.filesModified || []).slice(-12),
+            archiveIds: (memory.conclusionArchives || []).slice(-5).map((item) => item.id).filter(Boolean),
+        },
+        context_budget: contextBudget,
+        createdAt: new Date().toISOString(),
+    };
     memory.compression = {
         ...(memory.compression || {}),
         threshold: CONCLUSION_COMPACT_THRESHOLD,
@@ -359,6 +381,9 @@ function compactConclusions(memory) {
         compressedConclusions: Number(memory.compression?.compressedConclusions || 0) + older.length,
         recentConclusions: memory.conclusions.length,
         archivedChunks: memory.conclusionArchives.length,
+        preCompactTokenCount,
+        postCompactTokenCount,
+        context_budget: contextBudget,
         lastCompactedAt: new Date().toISOString(),
     };
     return memory;
@@ -367,9 +392,28 @@ function compactDecisions(memory) {
     const decisions = Array.isArray(memory.decisions) ? memory.decisions : [];
     if (decisions.length <= DECISION_COMPACT_THRESHOLD)
         return memory;
+    const preCompactTokenCount = (0, context_budget_1.estimateTextTokens)(JSON.stringify({ decisions, decisionArchives: memory.decisionArchives || [] }));
     const older = decisions.slice(0, -DECISION_RECENT_KEEP);
+    const archive = createArchive("decisions", older);
     memory.decisions = decisions.slice(-DECISION_RECENT_KEEP);
-    memory.decisionArchives = appendArchive(memory.decisionArchives, createArchive("decisions", older));
+    memory.decisionArchives = appendArchive(memory.decisionArchives, archive);
+    const postCompactTokenCount = (0, context_budget_1.estimateTextTokens)(JSON.stringify({ decisions: memory.decisions, decisionArchives: memory.decisionArchives || [] }));
+    const contextBudget = (0, context_budget_1.buildContextBudget)({ context: { decisions: memory.decisions, decisionArchives: memory.decisionArchives }, maxChars: 30_000, maxTokens: 90_000 });
+    memory.decisionCompactBoundary = {
+        type: "project_memory_boundary",
+        archiveId: archive.id,
+        kind: "decisions",
+        preCompactTokenCount,
+        postCompactTokenCount,
+        preservedRecentItems: memory.decisions.length,
+        post_compact_restore: {
+            strategy: "project_decision_reinject",
+            recentDecisionIds: memory.decisions.map((item) => item.id).filter(Boolean).slice(-8),
+            archiveIds: (memory.decisionArchives || []).slice(-5).map((item) => item.id).filter(Boolean),
+        },
+        context_budget: contextBudget,
+        createdAt: new Date().toISOString(),
+    };
     return memory;
 }
 function updateProjectMemoryFromReceipt(input) {
@@ -388,6 +432,7 @@ function updateProjectMemoryFromReceipt(input) {
         verification: uniqueStrings(receipt.verification || []).slice(0, 20),
         memoryUsed: uniqueStrings(receipt.memoryUsed || receipt.memory_used || []).slice(0, 20),
         memoryIgnored: uniqueStrings(receipt.memoryIgnored || receipt.memory_ignored || []).slice(0, 20),
+        invokedSkills: uniqueStrings((receipt.invokedSkills || receipt.invoked_skills || []).map((item) => typeof item === "string" ? item : `Skill:${item.name || ""}${item.contentHash ? `#${item.contentHash}` : ""}`), (receipt.memoryUsed || receipt.memory_used || []).filter((item) => /Skill\s*[:：]/i.test(String(item || "")))).slice(0, 20),
     };
     memory.conclusions = [...(memory.conclusions || []), conclusion];
     const decisions = Array.isArray(receipt.newDecisions || receipt.new_decisions) ? (receipt.newDecisions || receipt.new_decisions) : [];
@@ -426,12 +471,21 @@ function buildProjectMemoryPacket(project, options = {}) {
     if (memory.integrity?.conclusions?.pass === false || memory.integrity?.decisions?.pass === false) {
         lines.push(`- ⚠ 项目记忆归档校验异常：${[...(memory.integrity?.conclusions?.corrupted || []), ...(memory.integrity?.decisions?.corrupted || [])].join("、")}`);
     }
+    const boundary = memory.compactBoundary || memory.decisionCompactBoundary;
+    if (boundary) {
+        lines.push(`- 项目记忆压缩边界：${boundary.kind || "memory"} archive=${boundary.archiveId || ""}；压缩前 ${boundary.preCompactTokenCount || 0} tokens，压缩后 ${boundary.postCompactTokenCount || 0} tokens，压力 ${boundary.context_budget?.pressure ?? 0}%。`);
+    }
+    if (memory.filesModified?.length)
+        lines.push(`- 压缩后恢复锚点：${memory.filesModified.slice(-12).join("、")}`);
+    if (Array.isArray(boundary?.post_compact_restore?.archiveIds) && boundary.post_compact_restore.archiveIds.length) {
+        lines.push(`- 压缩后归档回灌：${boundary.post_compact_restore.archiveIds.slice(-5).join("、")}`);
+    }
     if (memory.compressedConclusions)
         lines.push(`- 历史结论压缩摘要：\n${compact(memory.compressedConclusions, 3500)}`);
     if (memory.conclusions?.length) {
         lines.push("- 最近 3 条任务结论：");
         for (const item of memory.conclusions.slice(-3))
-            lines.push(`  - [${item.status || "unknown"}] ${item.summary || "无摘要"}${item.filesModified?.length ? `；文件：${item.filesModified.slice(0, 8).join("、")}` : ""}`);
+            lines.push(`  - [${item.status || "unknown"}] ${item.summary || "无摘要"}${item.filesModified?.length ? `；文件：${item.filesModified.slice(0, 8).join("、")}` : ""}${item.invokedSkills?.length ? `；Skill：${item.invokedSkills.slice(0, 6).join("、")}` : ""}`);
     }
     if (memory.decisions?.length) {
         lines.push("- 架构/实现决策：");
@@ -506,6 +560,34 @@ function runProjectMemorySelfTest() {
     const tamperedIntegrity = validateArchiveIntegrity(tampered);
     const recalled = buildRelevantArchiveEvidence(sample, "后续结论 0 g0.ts");
     const brief = buildProjectExecutionBrief("self-test", "继续处理 g0.ts 相关问题", { query: "g0.ts", workDir: "", verificationHints: ["npm test"] });
+    const skillMemoryProject = `skill-memory-self-test-${process.pid}`;
+    let invokedSkillPreserved = false;
+    try {
+        const updated = updateProjectMemoryFromReceipt({
+            project: skillMemoryProject,
+            receipt: {
+                status: "done",
+                summary: "使用 Skill 生成发布说明",
+                invokedSkills: [{ name: "release-notes", contentHash: "abc123" }],
+                memoryUsed: ["Skill:release-notes"],
+            },
+        });
+        const packet = buildProjectMemoryPacket(skillMemoryProject);
+        invokedSkillPreserved = updated.conclusions.at(-1)?.invokedSkills?.includes("Skill:release-notes#abc123")
+            && packet.includes("Skill:release-notes");
+    }
+    finally {
+        try {
+            if (fs.existsSync(memoryFile(skillMemoryProject)))
+                fs.unlinkSync(memoryFile(skillMemoryProject));
+        }
+        catch { }
+        try {
+            if (fs.existsSync(`${memoryFile(skillMemoryProject)}.bak`))
+                fs.unlinkSync(`${memoryFile(skillMemoryProject)}.bak`);
+        }
+        catch { }
+    }
     const recoveryFile = memoryFile(`storage-self-test-${process.pid}`);
     let backupRecoveryWorks = false;
     try {
@@ -536,6 +618,10 @@ function runProjectMemorySelfTest() {
         decisionsRollIntoLosslessArchives: sample.decisions.length === DECISION_RECENT_KEEP && archivedDecisions.some((item) => item.decision === "决策 0"),
         integrityValidationDetectsTampering: validIntegrity.pass && !tamperedIntegrity.pass,
         retrievesRelevantArchivedEvidence: recalled.includes("后续结论 0") && recalled.includes("g0.ts"),
+        projectBoundaryTracksTokenPressure: !!sample.compactBoundary?.context_budget && Number(sample.compression?.postCompactTokenCount || 0) > 0,
+        decisionBoundaryTracksTokenPressure: !!sample.decisionCompactBoundary?.context_budget && Number(sample.decisionCompactBoundary?.postCompactTokenCount || 0) > 0,
+        postCompactRestoreAnchorsRecorded: sample.compactBoundary?.post_compact_restore?.archiveIds?.length > 0 && sample.decisionCompactBoundary?.post_compact_restore?.archiveIds?.length > 0,
+        invokedSkillPreservedInMemory: invokedSkillPreserved,
         buildsExecutionBriefWithRecallAndRules: brief.includes("CCM 项目执行前简报") && brief.includes("继续处理 g0.ts") && brief.includes("历史记忆只能辅助判断") && brief.includes("npm test"),
         atomicBackupRecoveryWorks: backupRecoveryWorks,
     };

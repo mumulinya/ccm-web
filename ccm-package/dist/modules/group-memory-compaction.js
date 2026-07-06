@@ -47,6 +47,7 @@ exports.runGroupMemoryCompactionSelfTest = runGroupMemoryCompactionSelfTest;
 exports.runGroupMemoryCompactionIntegrationSelfTest = runGroupMemoryCompactionIntegrationSelfTest;
 exports.runGroupMemoryCompactionStressSelfTest = runGroupMemoryCompactionStressSelfTest;
 const crypto = __importStar(require("crypto"));
+const context_budget_1 = require("../context-budget");
 exports.GROUP_MEMORY_COMPACTION_VERSION = 3;
 exports.GROUP_COMPACT_TRIGGER_TOKENS = 137_000;
 exports.GROUP_COMPACT_MIN_KEEP_MESSAGES = 5;
@@ -209,16 +210,7 @@ function mergePersistentRequirements(existing = [], incoming = []) {
     return [...result.values()].slice(-200);
 }
 function estimateGroupTextTokens(value) {
-    const text = String(value || "");
-    let ascii = 0;
-    let nonAscii = 0;
-    for (const char of text) {
-        if (char.charCodeAt(0) <= 0x7f)
-            ascii++;
-        else
-            nonAscii++;
-    }
-    return Math.max(1, Math.ceil((ascii / 4 + nonAscii) * (4 / 3)));
+    return (0, context_budget_1.estimateTextTokens)(value);
 }
 function estimateGroupMessageTokens(message) {
     return estimateGroupTextTokens([
@@ -272,7 +264,7 @@ function getGroupAutoCompactThreshold(config = {}) {
         ? configuredWindow
         : exports.GROUP_CONTEXT_WINDOW_DEFAULT;
     const reserved = Math.min(contextWindow - 16_000, Math.max(20_000, Number(config?.memoryReservedTokens || exports.GROUP_CONTEXT_RESERVED_TOKENS)));
-    return Math.max(18_000, contextWindow - reserved - exports.GROUP_AUTOCOMPACT_BUFFER_TOKENS);
+    return (0, context_budget_1.getAutoCompactThreshold)({ maxTokens: contextWindow, reservedOutputTokens: reserved, autoCompactBufferTokens: exports.GROUP_AUTOCOMPACT_BUFFER_TOKENS });
 }
 function createEmptyConversationSummary() {
     return {
@@ -302,6 +294,26 @@ function extractFiles(message) {
     const matched = content.match(/(?:[A-Za-z]:\\[^\s，。；]+|(?:[\w.-]+\/)+[\w.-]+\.[A-Za-z0-9]+|[\w.-]+\.(?:ts|tsx|js|jsx|vue|java|py|go|rs|md|json|toml|yaml|yml|xml|sql))/g) || [];
     return [...explicit, ...matched].map(item => typeof item === "string" ? item : JSON.stringify(item)).filter(Boolean);
 }
+function extractRuntimeSkillFacts(message) {
+    const facts = [];
+    const actor = message?.agent || message?.role || "Agent";
+    const add = (item) => {
+        const name = typeof item === "string" ? item.replace(/^Skill\s*[:：]\s*/i, "") : item?.name;
+        const hash = typeof item === "object" && item?.contentHash ? `#${item.contentHash}` : "";
+        if (name)
+            facts.push(`${actor} 使用 Skill:${name}${hash}`);
+    };
+    for (const item of Array.isArray(message?.invokedSkills) ? message.invokedSkills : [])
+        add(item);
+    for (const item of Array.isArray(message?.receipt?.invokedSkills) ? message.receipt.invokedSkills : [])
+        add(item);
+    for (const item of Array.isArray(message?.delivery_summary?.runtime_tooling?.invoked_skills) ? message.delivery_summary.runtime_tooling.invoked_skills : [])
+        add(item);
+    for (const item of Array.isArray(message?.receipt?.memoryUsed) ? message.receipt.memoryUsed : [])
+        if (/Skill\s*[:：]/i.test(String(item || "")))
+            add(item);
+    return Array.from(new Set(facts)).slice(0, 12);
+}
 function memorySeed(memory) {
     const completed = (memory?.completed || []).slice(-12).map((item) => `${item.project || "unknown"}: ${item.summary || ""}`);
     const blocked = (memory?.blocked || []).slice(-10).map((item) => `${item.project || "unknown"}: ${item.reason || item.summary || ""}`);
@@ -318,6 +330,7 @@ function buildDeterministicConversationSummary(messages, memory, previous = {}) 
     const pending = [];
     const participantState = [];
     const taskStates = [];
+    const runtimeFacts = [];
     for (let index = 0; index < messages.length; index++) {
         const message = messages[index];
         const content = messageContent(message);
@@ -328,6 +341,7 @@ function buildDeterministicConversationSummary(messages, memory, previous = {}) 
         if (message?.role === "user")
             users.push(`#${id} ${compactText(content, 900)}`);
         files.push(...extractFiles(message));
+        runtimeFacts.push(...extractRuntimeSkillFacts(message));
         if (/(错误|失败|异常|阻塞|超时|拒绝|error|failed|timeout|blocked)/i.test(content))
             errors.push(`${actor}: ${compactText(content, 600)}`);
         if (message?.dispatchPolicy?.action || Array.isArray(message?.assignments) && message.assignments.length) {
@@ -355,7 +369,7 @@ function buildDeterministicConversationSummary(messages, memory, previous = {}) 
     return {
         primaryRequest: compactText(messageContent(latestUser) || base.primaryRequest || memory?.goal, 1200),
         userMessages: mergeUnique(base.userMessages, users, 40, 900),
-        keyConcepts: mergeUnique(base.keyConcepts, [], 24, 400),
+        keyConcepts: mergeUnique(base.keyConcepts, runtimeFacts, 24, 400),
         filesAndCode: mergeUnique(base.filesAndCode, files, 40, 500),
         errorsAndFixes: mergeUnique(base.errorsAndFixes, errors, 30, 700),
         decisions: mergeUnique(base.decisions, [...seed.decisions, ...decisions], 30, 700),
@@ -537,9 +551,10 @@ function buildBoundedRecentGroupContext(messages, fullCount = 5) {
         const who = message?.role === "user" ? `[用户 -> ${message?.target || "all"}]` : `[${message?.agent || message?.role || "Agent"}]`;
         const isFull = index >= messages.length - fullCount;
         const max = message?.role === "user" ? (isFull ? 5000 : 1200) : (isFull ? 6000 : 900);
-        const content = compactText(messageContent(message), max);
+        const compacted = (0, context_budget_1.microCompactText)(messageContent(message), max);
+        const content = compacted.text;
         const originalLength = messageContent(message).length;
-        const suffix = originalLength > max ? `\n[该消息原文 ${originalLength} 字符，已做 micro-compact；可按 #${messageIdentity(message, index)} 回溯]` : "";
+        const suffix = compacted.compacted ? `\n[该消息原文 ${originalLength} 字符，已做 micro-compact；可按 #${messageIdentity(message, index)} 回溯]` : "";
         return `${who} ${content}${suffix}`;
     });
     return rows.join("\n");
@@ -656,6 +671,19 @@ async function compactGroupConversationMemory(input) {
     const summaryChecksum = crypto.createHash("sha256").update(JSON.stringify(conversationSummary)).digest("hex").slice(0, 24);
     const reductionRatio = preCompactTokenCount > 0 ? Math.max(0, 1 - postCompactTokenCount / preCompactTokenCount) : 0;
     const pressurePercent = triggerTokens > 0 ? Math.round((activeTokens / triggerTokens) * 1000) / 10 : 0;
+    const contextBudget = (0, context_budget_1.buildContextBudget)({
+        context: {
+            conversationSummary,
+            keptRecent: keptMessages.map((message, index) => ({
+                id: messageIdentity(message, keepIndex + index),
+                role: message?.role,
+                agent: message?.agent,
+                content: (0, context_budget_1.microCompactText)(messageContent(message), 1800).text,
+            })),
+        },
+        maxChars: 48_000,
+        maxTokens: triggerTokens,
+    });
     const previousThrashCount = Number(previousState.thrashCount || 0);
     const thrashCount = reductionRatio < 0.2 ? previousThrashCount + 1 : 0;
     const health = !validation.pass ? "degraded" : thrashCount >= 3 ? "thrashing" : "healthy";
@@ -668,6 +696,13 @@ async function compactGroupConversationMemory(input) {
         preservedMessageIds: keptMessages.slice(-40).map((message, index) => messageIdentity(message, keepIndex + index)),
         preCompactTokenCount,
         postCompactTokenCount,
+        post_compact_restore: {
+            strategy: "conversation_summary_recent_reinject",
+            preservedMessageIds: keptMessages.slice(-20).map((message, index) => messageIdentity(message, keepIndex + index)),
+            summaryChecksum,
+            transcriptPath: input.transcriptPath,
+        },
+        context_budget: contextBudget,
         summarySource,
         createdAt: now,
     };
@@ -693,6 +728,7 @@ async function compactGroupConversationMemory(input) {
             preservedRecentMessages: keptMessages.length,
             preCompactTokenCount,
             postCompactTokenCount,
+            context_budget: contextBudget,
             activeTokensBeforeCompact: activeTokens,
             triggerTokens,
             pressurePercent,
@@ -816,6 +852,7 @@ async function runGroupMemoryCompactionIntegrationSelfTest() {
         rawMessagesRemainImmutable: JSON.stringify(messages) === originalMessages,
         incrementalSecondCompaction: !!second.compacted,
         nextBoundaryStartsAfterPrevious: second.boundary?.summarizedFromMessageId === expectedSecondStart,
+        postCompactRestoreAnchorsRecorded: Array.isArray(first.boundary?.post_compact_restore?.preservedMessageIds) && first.boundary.post_compact_restore.preservedMessageIds.length > 0,
         legacyVersionRebuildsFromRawTranscript: migrated.memory?.compaction?.version === exports.GROUP_MEMORY_COMPACTION_VERSION
             && migrated.memory?.compaction?.migratedFromVersion === 2
             && migrated.boundary?.summarizedFromMessageId === "m0",

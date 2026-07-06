@@ -21,6 +21,12 @@ export type TaskAgentSession = {
     lastError?: string;
     permissionDriftCount?: number;
     lastPermissionDriftAt?: string;
+    runtimeSnapshotId?: string;
+    runtimeSnapshotPath?: string;
+    mcpConfigPath?: string;
+    allowedTools?: any;
+    permissionRules?: any[];
+    runtimeToolUpdatedAt?: string;
 };
 export declare function openTaskAgentSession(input: {
     scopeId: string;
@@ -35,6 +41,7 @@ export declare function recordTaskAgentSessionTurn(sessionId: string, result?: {
     error?: string;
     nativeSessionInvalid?: boolean;
     permissionDrift?: boolean;
+    runtimeToolSnapshot?: any;
 }): TaskAgentSession;
 export declare function advanceTaskAgentSession(current: TaskAgentSession, result?: {
     nativeSessionId?: string;
@@ -42,6 +49,7 @@ export declare function advanceTaskAgentSession(current: TaskAgentSession, resul
     error?: string;
     nativeSessionInvalid?: boolean;
     permissionDrift?: boolean;
+    runtimeToolSnapshot?: any;
 }): TaskAgentSession;
 export declare function closeTaskAgentSessions(input: {
     scopeId?: string;
@@ -53,6 +61,8 @@ export declare function getTaskAgentSessionOptions(session: TaskAgentSession): {
     sessionId: string;
     resumeSession: boolean;
     persistSession: boolean;
+    runtimeSnapshotId: string;
+    mcpConfigPath: string;
 };
 export declare function getTaskAgentSessionContinuity(session: TaskAgentSession): {
     mode: "native" | "scratchpad";
@@ -62,6 +72,9 @@ export declare function getTaskAgentSessionContinuity(session: TaskAgentSession)
     turnCount: number;
     recoveryAttempts: number;
     previousNativeSessionIds: string[];
+    runtimeSnapshotId: string;
+    mcpConfigPath: string;
+    runtimeToolUpdatedAt: string;
 };
 export declare function listTaskAgentSessions(filter?: {
     scopeId?: string;
@@ -97,6 +110,7 @@ export declare function runTaskAgentSessionSelfTest(): {
         missingNativeIdCanDegradeSafely: boolean;
         capturedNativeIdStaysResumable: boolean;
         invalidNativeSessionCreatesRecoveryPath: boolean;
+        runtimeSnapshotPersistsAcrossTurns: boolean;
         permissionDriftRebuildsNativeSession: boolean;
     };
 };

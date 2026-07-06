@@ -14,6 +14,9 @@ class McpClient {
     serverName = "";
     tools = [];
     stderrBuffer = "";
+    lastError = "";
+    elicitationRequired = false;
+    elicitationMessage = "";
     constructor(command, args = [], env = {}) {
         this.command = command;
         this.args = args;
@@ -47,6 +50,7 @@ class McpClient {
             });
             this.process.on("exit", () => {
                 this.connected = false;
+                this.lastError = this.lastError || "MCP process exited";
                 for (const [id, pending] of this.pending) {
                     clearTimeout(pending.timer);
                     pending.reject(new Error("MCP process exited"));
@@ -69,7 +73,8 @@ class McpClient {
             return true;
         }
         catch (e) {
-            console.error(`[MCP] 连接失败: ${this.command}`, e.message, this.stderrBuffer);
+            this.lastError = e.message || "MCP connect failed";
+            console.error(`[MCP] 连接失败: ${this.command}`, this.lastError, this.stderrBuffer);
             this.connected = false;
             this.disconnect();
             return false;
@@ -97,12 +102,32 @@ class McpClient {
             this.pending.delete(message.id);
             clearTimeout(p.timer);
             if (message.error) {
-                p.reject(new Error(message.error.message || "MCP error"));
+                this.lastError = message.error.message || "MCP error";
+                p.reject(new Error(this.lastError));
             }
             else {
                 p.resolve(message.result);
             }
+            return;
         }
+        if (message.id !== undefined && message.method) {
+            this.handleServerRequest(message);
+        }
+    }
+    handleServerRequest(message) {
+        const method = String(message.method || "");
+        if (/elicitation|consent|auth/i.test(method)) {
+            this.elicitationRequired = true;
+            this.elicitationMessage = `MCP server requested controlled user input via ${method}`;
+            this.sendResponseError(message.id, -32000, "CCM blocked uncontrolled MCP elicitation; ask the user through CCM UI and retry.");
+            return;
+        }
+        this.sendResponseError(message.id, -32601, `Unsupported MCP server request: ${method}`);
+    }
+    sendResponseError(id, code, message) {
+        if (!this.process?.stdin?.writable)
+            return;
+        this.process.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }) + "\n");
     }
     sendRequest(method, params) {
         return new Promise((resolve, reject) => {
@@ -139,6 +164,7 @@ class McpClient {
             return result || { content: [{ type: "text", text: "无返回结果" }] };
         }
         catch (e) {
+            this.lastError = e.message || "工具调用失败";
             return { content: [{ type: "text", text: `工具调用失败: ${e.message}` }], isError: true };
         }
     }
@@ -147,6 +173,14 @@ class McpClient {
     }
     getServerName() {
         return this.serverName;
+    }
+    getDiagnostics() {
+        return {
+            lastError: this.lastError,
+            stderr: this.stderrBuffer,
+            elicitationRequired: this.elicitationRequired,
+            elicitationMessage: this.elicitationMessage,
+        };
     }
     disconnect() {
         if (this.process) {

@@ -5,11 +5,13 @@ import TaskExperienceCard from './TaskExperienceCard.vue'
 import AgentCodeChangeDrawer from './AgentCodeChangeDrawer.vue'
 import { globalAgentRunTaskCard, globalMissionTaskCard } from '../utils/taskExperience.js'
 import { buildGlobalConversationKnowledgePayload, buildGlobalTaskKnowledgePayload, postKnowledgeCapture } from '../utils/knowledgeCapture.js'
+import { getTechnicalDetailSections, sanitizeUserFacingAgentText } from '../utils/agentDisplay.js'
 
 const emit = defineEmits(['switch-tab', 'set-navigation'])
 
 const SESSIONS_STORAGE_KEY = 'cc_global_assistant_sessions_v2'
 const CURRENT_ID_STORAGE_KEY = 'cc_global_assistant_current_id_v2'
+const RANDOM_MUSIC_KEYWORD = '__random__'
 
 const DEFAULT_WELCOME = {
   role: 'assistant',
@@ -191,6 +193,12 @@ const isPinnedToBottom = ref(true)
 const qualitySnapshot = ref(null)
 const qualityLoading = ref(false)
 const qualityExpanded = ref(false)
+const controlCenterExpanded = ref(false)
+const controlCenterLoading = ref(false)
+const controlCenter = ref(null)
+const intentPreviewText = ref('')
+const runtimePermissionForm = ref({ tool: '*', decision: 'deny', target: '', reason: '' })
+const runtimeHookForm = ref({ phase: 'pre_tool_use', tool: '*', effect: 'annotate', message: '' })
 let globalAgentResizeObserver = null
 
 const loadQualitySnapshot = async () => {
@@ -222,6 +230,82 @@ const toggleShadowMode = async () => {
     toast.error(error.message || '影子模式更新失败')
   } finally {
     qualityLoading.value = false
+  }
+}
+
+const loadGlobalControlCenter = async (message = '') => {
+  controlCenterLoading.value = true
+  try {
+    const query = message ? `?message=${encodeURIComponent(message)}` : ''
+    const res = await fetch('/api/global-agent/control-center' + query)
+    const data = await res.json()
+    if (!res.ok || data.success === false) throw new Error(data.error || '加载总控状态失败')
+    controlCenter.value = data.control
+    if (!intentPreviewText.value) intentPreviewText.value = chatInput.value || ''
+  } catch (error) {
+    toast.error(error?.message || '加载总控状态失败')
+  } finally {
+    controlCenterLoading.value = false
+  }
+}
+
+const toggleControlCenter = async () => {
+  controlCenterExpanded.value = !controlCenterExpanded.value
+  if (controlCenterExpanded.value && !controlCenter.value) await loadGlobalControlCenter(chatInput.value)
+}
+
+const previewGlobalIntent = async () => {
+  await loadGlobalControlCenter(intentPreviewText.value || chatInput.value || '')
+}
+
+const saveRuntimePermission = async () => {
+  try {
+    const data = await postJson('/api/global-agent/runtime/permissions', runtimePermissionForm.value)
+    if (controlCenter.value) controlCenter.value.governance.permissions = data.rules || []
+    toast.success('权限规则已保存')
+  } catch (error) {
+    toast.error(error?.message || '保存权限规则失败')
+  }
+}
+
+const deleteRuntimePermission = async (rule) => {
+  try {
+    const data = await postJson('/api/global-agent/runtime/permissions', { operation: 'delete', id: rule.id })
+    if (controlCenter.value) controlCenter.value.governance.permissions = data.rules || []
+    toast.success('权限规则已删除')
+  } catch (error) {
+    toast.error(error?.message || '删除权限规则失败')
+  }
+}
+
+const saveRuntimeHook = async () => {
+  try {
+    const data = await postJson('/api/global-agent/runtime/hooks', runtimeHookForm.value)
+    if (controlCenter.value) controlCenter.value.governance.hooks = data.hooks || []
+    toast.success('Hook 规则已保存')
+  } catch (error) {
+    toast.error(error?.message || '保存 Hook 失败')
+  }
+}
+
+const deleteRuntimeHook = async (hook) => {
+  try {
+    const data = await postJson('/api/global-agent/runtime/hooks', { operation: 'delete', id: hook.id })
+    if (controlCenter.value) controlCenter.value.governance.hooks = data.hooks || []
+    toast.success('Hook 已删除')
+  } catch (error) {
+    toast.error(error?.message || '删除 Hook 失败')
+  }
+}
+
+const controlSupervisorFromCenter = async (row, operation) => {
+  if (!row?.id) return
+  try {
+    await postJson('/api/global-agent/supervisors/control', { id: row.id, operation, reason: '全局 Agent 总控面板操作' })
+    await loadGlobalControlCenter(intentPreviewText.value || chatInput.value || '')
+    toast.success('监工状态已更新')
+  } catch (error) {
+    toast.error(error?.message || '监工控制失败')
   }
 }
 
@@ -561,6 +645,19 @@ const getActionParam = (action, ...keys) => {
     if (value !== undefined && value !== null && String(value).trim() !== '') return value
   }
   return ''
+}
+
+const normalizeMusicAction = (action) => {
+  const params = action?.params || {}
+  const rawKeyword = String(getActionParam(action, 'keyword', 'query', 'song')).trim()
+  const lowered = rawKeyword.toLowerCase()
+  const isRandom = params.random === true || !rawKeyword || ['__random__', 'random', '随机', '随便', '任意', '播放音乐', '听歌'].includes(lowered)
+  const keyword = isRandom ? RANDOM_MUSIC_KEYWORD : rawKeyword
+  return {
+    keyword,
+    isRandom,
+    requestLabel: isRandom ? '随机播放音乐' : `《${rawKeyword}》`
+  }
 }
 
 const GLOBAL_STREAM_EVENT_LIMIT = 12
@@ -991,6 +1088,41 @@ const getGlobalTaskCard = (msg) => {
   return globalMissionTaskCard(msg) || globalAgentRunTaskCard(msg)
 }
 
+const runtimeDebugRows = (msg) => {
+  const debug = msg?.agenticRun?.runtime_debug || null
+  if (!debug) return []
+  const rows = []
+  if (msg?.agenticRun?.id) rows.push({ label: '运行 ID', value: msg.agenticRun.id })
+  rows.push({ label: '状态', value: `${debug.status || '-'} / ${debug.phase || '-'}` })
+  if (debug.pending_tool?.name) rows.push({ label: '待确认工具', value: `${debug.pending_tool.name} · ${debug.pending_tool.risk || ''}` })
+  rows.push({ label: '调用', value: `模型 ${debug.model_calls || 0} · 工具 ${debug.tool_calls || 0} · 恢复 ${debug.resume_count || 0}` })
+  if (debug.todos?.length) rows.push({ label: 'Todo', value: debug.todos.slice(-4).map(item => `${item.status}:${item.text}`).join(' / ') })
+  if (debug.permissions?.length) rows.push({ label: '权限', value: debug.permissions.slice(-2).map(item => item.result?.rule?.decision || (item.result?.allowed ? 'allow' : item.result?.denied ? 'deny' : 'ask')).join(' / ') })
+  if (debug.hooks?.length) rows.push({ label: 'Hook', value: debug.hooks.slice(-2).map(item => `${item.phase}:${item.blocked ? 'blocked' : 'ok'}`).join(' / ') })
+  if (debug.output_tail?.length) rows.push({ label: '输出', value: debug.output_tail.slice(-2).map(item => item.type || 'event').join(' / ') })
+  return rows
+}
+
+const runtimeDebugSections = (msg) => {
+  const debug = msg?.agenticRun?.runtime_debug || null
+  if (!debug) return []
+  const fallback = {
+    run_id: msg?.agenticRun?.id || '',
+    blockers: debug.failed_gates || [],
+    trace_id: debug.trace_id || msg?.agenticRun?.trace_id || '',
+  }
+  const sections = getTechnicalDetailSections({ technical: fallback }, fallback)
+  const records = sections.find(section => section.id === 'records') || { id: 'records', title: '完整记录', items: [] }
+  for (const row of runtimeDebugRows(msg)) {
+    if (!records.items.some(item => item.label === row.label && item.value === row.value)) records.items.push(row)
+  }
+  if (!sections.includes(records)) sections.push(records)
+  return sections.map(section => ({
+    ...section,
+    items: section.items.map(item => ({ ...item, value: sanitizeUserFacingAgentText(item.value, String(item.value || ''), 420) }))
+  }))
+}
+
 const inferGlobalChangeProject = (msg) => {
   const direct = msg?.agenticRun?.project || msg?.agenticRun?.target_project || msg?.globalMission?.target_project
   if (direct) return direct
@@ -1038,6 +1170,12 @@ const handleGlobalTaskAction = async (msg, action) => {
         sessionId: currentSessionId.value,
       }))
       toast.success(`已保存到知识库：${data.entry?.title || card?.title || '全局任务'}`)
+      return
+    }
+    if (action.kind === 'view_trace') {
+      localStorage.setItem('trace-replay-target', JSON.stringify({ scope: 'global', trace_id: action.trace_id || card?.technical?.trace_id || '', at: Date.now() }))
+      emit('switch-tab', 'trace-replay')
+      window.dispatchEvent(new CustomEvent('trace-replay-target', { detail: { scope: 'global', trace_id: action.trace_id || card?.technical?.trace_id || '' } }))
       return
     }
     if (msg?.agenticRun?.id) {
@@ -1263,14 +1401,15 @@ const executeAction = async (action, actionFiles = []) => {
     if (managementActionTypes.has(action.type)) {
       await executeManagementAction(action)
     } else if (action.type === 'play_music') {
-      const keyword = getActionParam(action, 'keyword', 'query', 'song')
-      toast.info(`正在为您后台检索并播放《${keyword}》...`)
+      const { keyword, isRandom, requestLabel } = normalizeMusicAction(action)
+      toast.info(isRandom ? '正在为您随机播放音乐...' : `正在为您后台检索并播放${requestLabel}...`)
       if (typeof window.__cc_global_play_music === 'function') {
         try {
           const result = await window.__cc_global_play_music(keyword)
           if (result.success) {
-            toast.success(`找到音乐《${result.title}》(${result.source})，已开始播放！`)
-            addAssistantMessage(`🎵 [系统回执] 成功点歌《${result.title}》！\n- **来源**: ${result.source}\n- **状态**: 正在后台播放中...`)
+            const playedTitle = result.title ? `《${result.title}》` : requestLabel
+            toast.success(`${isRandom ? '已随机播放' : '找到音乐'}${playedTitle}(${result.source})，已开始播放！`)
+            addAssistantMessage(`🎵 [系统回执] ${isRandom ? '随机播放成功' : '成功点歌'}${playedTitle}！\n- **来源**: ${result.source}\n- **状态**: 正在后台播放中...`)
           } else {
             toast.error(`播放失败: ${result.error}`)
             addAssistantMessage(`❌ [音乐播放失败]: ${result.error || '未找到可播放的音乐'}`)
@@ -1280,8 +1419,21 @@ const executeAction = async (action, actionFiles = []) => {
           addAssistantMessage(`❌ [音乐播放失败]: ${err.message || err}`)
         }
       } else {
-        toast.error('音乐播放器组件未准备就绪')
-        addAssistantMessage('❌ [音乐播放失败]: 音乐播放器组件未准备就绪，请稍后重试。')
+        try {
+          const res = await fetch('/api/music/remote-command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keyword, source: 'global-agent-web' })
+          })
+          const data = await res.json()
+          if (!res.ok || data.success === false) throw new Error(data.error || '创建音乐播放指令失败')
+          toast.success('已发送给音乐播放器，打开音乐页后会自动播放')
+          addAssistantMessage(`🎵 [系统回执] 已把${requestLabel}发送给音乐播放器。\n- **状态**: 等待音乐播放器消费指令\n- **指令ID**: ${data.command?.id || '已创建'}`)
+          emit('switch-tab', 'music')
+        } catch (err) {
+          toast.error(`播放出错: ${err.message || err}`)
+          addAssistantMessage(`❌ [音乐播放失败]: ${err.message || err}`)
+        }
       }
     } else if (action.type === 'toggle_pet') {
       const petAction = getActionParam(action, 'action', 'operation')
@@ -1795,9 +1947,130 @@ const handleGitCommitCardSubmit = async (msg) => {
         <div class="quality-header-actions">
           <span :class="['quality-mode', qualitySnapshot?.policy?.shadowMode ? 'shadow' : 'live']">{{ qualitySnapshot?.policy?.shadowMode ? '影子模式' : '真实执行' }}</span>
           <button class="btn btn-outline" @click="saveCurrentGlobalSessionKnowledge">保存知识</button>
+          <button class="btn btn-outline" :disabled="controlCenterLoading" @click="toggleControlCenter">总控面板</button>
           <button class="btn btn-outline" :disabled="qualityLoading" @click="qualityExpanded = !qualityExpanded; qualityExpanded && loadQualitySnapshot()">决策评测</button>
         </div>
       </div>
+      <section v-if="controlCenterExpanded" class="global-control-center">
+        <div class="control-center-head">
+          <div>
+            <span>CCM CONTROL BRAIN</span>
+            <strong>全局 Agent 总控</strong>
+          </div>
+          <button class="btn btn-outline" :disabled="controlCenterLoading" @click="loadGlobalControlCenter(intentPreviewText || chatInput)">刷新</button>
+        </div>
+        <div class="intent-preview-row">
+          <input v-model="intentPreviewText" placeholder="输入一句话预览全局 Agent 会如何路由" @keyup.enter="previewGlobalIntent" />
+          <button class="btn btn-primary" :disabled="controlCenterLoading" @click="previewGlobalIntent">预览</button>
+        </div>
+        <div v-if="controlCenterLoading && !controlCenter" class="control-loading">正在读取 CCM 总控状态...</div>
+        <template v-else-if="controlCenter">
+          <div class="control-metrics">
+            <div>
+              <span>健康评分</span>
+              <strong>{{ controlCenter.health?.score || 0 }}</strong>
+              <small>{{ controlCenter.health?.severity || 'ok' }}</small>
+            </div>
+            <div>
+              <span>意图路由</span>
+              <strong>{{ controlCenter.intent?.route || '-' }}</strong>
+              <small>{{ Math.round((controlCenter.intent?.confidence || 0) * 100) }}%</small>
+            </div>
+            <div>
+              <span>监工队列</span>
+              <strong>{{ controlCenter.supervision?.total || 0 }}</strong>
+              <small>全局任务</small>
+            </div>
+            <div>
+              <span>治理规则</span>
+              <strong>{{ controlCenter.governance?.summary?.permission_rules || 0 }}/{{ controlCenter.governance?.summary?.hooks || 0 }}</strong>
+              <small>权限 / Hook</small>
+            </div>
+          </div>
+          <div class="control-grid">
+            <section>
+              <div class="control-section-head"><strong>系统健康</strong><span>{{ controlCenter.health?.counts?.projects || 0 }} 项目</span></div>
+              <div class="health-list">
+                <div v-for="row in controlCenter.health?.rows || []" :key="row.id" :class="['health-row', row.severity]">
+                  <span>{{ row.label }}</span>
+                  <strong>{{ row.summary }}</strong>
+                </div>
+              </div>
+            </section>
+            <section>
+              <div class="control-section-head"><strong>意图与调度</strong><span>{{ controlCenter.intent?.recommended_tool || '自然回复' }}</span></div>
+              <p class="control-reason">{{ controlCenter.intent?.reason }}</p>
+              <div class="dispatch-targets">
+                <div v-for="target in controlCenter.dispatch?.targets || []" :key="target.type + target.id">
+                  <span>{{ target.type }}</span>
+                  <strong>{{ target.name || target.id }}</strong>
+                  <small>{{ target.reason }}</small>
+                </div>
+                <p v-if="!(controlCenter.dispatch?.targets || []).length">{{ (controlCenter.dispatch?.missing || []).join('、') || '当前无需调度' }}</p>
+              </div>
+            </section>
+            <section>
+              <div class="control-section-head"><strong>权限治理</strong><span>{{ controlCenter.governance?.summary?.deny_rules || 0 }} 拒绝规则</span></div>
+              <div class="governance-form">
+                <select v-model="runtimePermissionForm.decision">
+                  <option value="deny">拒绝</option>
+                  <option value="allow">允许</option>
+                </select>
+                <input v-model="runtimePermissionForm.tool" placeholder="工具名或 *" />
+                <input v-model="runtimePermissionForm.target" placeholder="目标，可空" />
+                <button class="btn btn-outline" @click="saveRuntimePermission">保存</button>
+              </div>
+              <div class="rule-list">
+                <div v-for="rule in (controlCenter.governance?.permissions || []).slice(0, 6)" :key="rule.id">
+                  <span>{{ rule.decision }}</span>
+                  <strong>{{ rule.tool }}{{ rule.target ? ' · ' + rule.target : '' }}</strong>
+                  <button @click="deleteRuntimePermission(rule)">删除</button>
+                </div>
+              </div>
+            </section>
+            <section>
+              <div class="control-section-head"><strong>Hook 治理</strong><span>{{ controlCenter.governance?.summary?.blocking_hooks || 0 }} 阻断 Hook</span></div>
+              <div class="governance-form">
+                <select v-model="runtimeHookForm.phase">
+                  <option value="pre_tool_use">前置</option>
+                  <option value="post_tool_use">后置</option>
+                </select>
+                <select v-model="runtimeHookForm.effect">
+                  <option value="annotate">标注</option>
+                  <option value="block">阻断</option>
+                </select>
+                <input v-model="runtimeHookForm.tool" placeholder="工具名或 *" />
+                <input v-model="runtimeHookForm.message" placeholder="说明" />
+                <button class="btn btn-outline" @click="saveRuntimeHook">保存</button>
+              </div>
+              <div class="rule-list">
+                <div v-for="hook in (controlCenter.governance?.hooks || []).slice(0, 6)" :key="hook.id">
+                  <span>{{ hook.effect }}</span>
+                  <strong>{{ hook.phase }} · {{ hook.tool || '*' }}</strong>
+                  <button @click="deleteRuntimeHook(hook)">删除</button>
+                </div>
+              </div>
+            </section>
+          </div>
+          <section class="supervision-console">
+            <div class="control-section-head"><strong>任务监督控制台</strong><span>{{ controlCenter.supervision?.total || 0 }} 个监工</span></div>
+            <div class="supervision-list">
+              <div v-for="row in controlCenter.supervision?.rows || []" :key="row.id" :class="['supervision-row', { waiting: row.waiting, failed: row.failed }]">
+                <div>
+                  <strong>{{ row.business_goal || row.mission_id }}</strong>
+                  <span>{{ row.status }} · {{ row.cycle_count }}/{{ row.max_attempts }} · {{ row.updated_at }}</span>
+                </div>
+                <div class="supervision-actions">
+                  <button @click="controlSupervisorFromCenter(row, 'check_now')">检查</button>
+                  <button v-if="row.status === 'paused'" @click="controlSupervisorFromCenter(row, 'resume')">恢复</button>
+                  <button v-else @click="controlSupervisorFromCenter(row, 'pause')">暂停</button>
+                  <button @click="controlSupervisorFromCenter(row, 'takeover')">接管</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </template>
+      </section>
       <section v-if="qualityExpanded && qualitySnapshot" class="quality-center-card">
         <div class="quality-center-head">
           <div><span>AGENT QUALITY CENTER</span><strong>决策与真实交付质量</strong></div>
@@ -1968,6 +2241,21 @@ const handleGitCommitCardSubmit = async (msg) => {
                     @action="handleGlobalTaskAction(msg, $event)"
                   />
                   <div v-else class="bubble-content">{{ msg.content }}</div>
+                  <details v-if="runtimeDebugSections(msg).length" class="global-runtime-debug">
+                    <summary class="runtime-debug-head">
+                      <strong>技术详情</strong>
+                      <small>可展开排查</small>
+                    </summary>
+                    <div class="runtime-debug-grid">
+                      <section v-for="section in runtimeDebugSections(msg)" :key="section.id" class="runtime-debug-section">
+                        <strong>{{ section.title }}</strong>
+                        <div v-for="row in section.items" :key="`${section.id}-${row.label}`">
+                          <span>{{ row.label }}</span>
+                          <code>{{ row.value }}</code>
+                        </div>
+                      </section>
+                    </div>
+                  </details>
                 </template>
 
                 <!-- 1. 系统回执高阶卡片 -->
@@ -3551,7 +3839,8 @@ const handleGitCommitCardSubmit = async (msg) => {
 @keyframes scaleUp {
   to { transform: scale(1); }
 }
-.quality-header-actions{margin-left:auto;display:flex;align-items:center;gap:8px}.quality-mode{font-size:11px;padding:4px 8px;border-radius:999px;background:rgba(34,197,94,.12);color:#22c55e}.quality-mode.shadow{background:rgba(245,158,11,.14);color:#f59e0b}.quality-center-card{margin:10px 18px 0;padding:14px;border:1px solid var(--border-color);border-radius:12px;background:var(--surface);position:relative;z-index:2}.quality-center-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.quality-center-head>div{display:flex;flex-direction:column;gap:3px}.quality-center-head span{font-size:9px;letter-spacing:.12em;color:var(--text-muted)}.quality-center-head strong{font-size:15px}.quality-metrics{display:grid;grid-template-columns:repeat(7,minmax(90px,1fr));gap:7px;margin-top:11px}.quality-metrics>div{padding:9px;border-radius:8px;background:var(--bg-primary);display:flex;flex-direction:column;gap:4px}.quality-metrics span{font-size:9px;color:var(--text-muted)}.quality-metrics strong{font-size:16px}.quality-center-card>p{margin:10px 0 0;font-size:10px;color:var(--text-muted)}
+.quality-header-actions{margin-left:auto;display:flex;align-items:center;gap:8px}.quality-mode{font-size:11px;padding:4px 8px;border-radius:999px;background:rgba(34,197,94,.12);color:#22c55e}.quality-mode.shadow{background:rgba(245,158,11,.14);color:#f59e0b}.quality-center-card,.global-control-center{margin:10px 18px 0;padding:14px;border:1px solid var(--border-color);border-radius:8px;background:var(--surface);position:relative;z-index:2}.quality-center-head,.control-center-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.quality-center-head>div,.control-center-head>div{display:flex;flex-direction:column;gap:3px}.quality-center-head span,.control-center-head span{font-size:9px;letter-spacing:.12em;color:var(--text-muted)}.quality-center-head strong,.control-center-head strong{font-size:15px}.quality-metrics,.control-metrics{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:7px;margin-top:11px}.quality-metrics{grid-template-columns:repeat(7,minmax(90px,1fr))}.quality-metrics>div,.control-metrics>div{padding:9px;border-radius:7px;background:var(--bg-primary);display:flex;flex-direction:column;gap:4px}.quality-metrics span,.control-metrics span{font-size:9px;color:var(--text-muted)}.quality-metrics strong,.control-metrics strong{font-size:16px}.control-metrics small{color:var(--text-muted);font-size:10px}.quality-center-card>p{margin:10px 0 0;font-size:10px;color:var(--text-muted)}
+.intent-preview-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:12px}.intent-preview-row input,.governance-form input,.governance-form select{min-width:0;border:1px solid var(--border-color);border-radius:7px;background:var(--bg-primary);color:var(--text-primary);font-size:12px;padding:7px 9px}.control-loading{margin-top:12px;color:var(--text-muted);font-size:12px}.control-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:10px}.control-grid>section,.supervision-console{padding:11px;border:1px solid rgba(148,163,184,.18);border-radius:8px;background:rgba(148,163,184,.045)}.control-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.control-section-head strong{font-size:13px;color:var(--text-primary)}.control-section-head span{font-size:10px;color:var(--text-muted)}.health-list,.dispatch-targets,.rule-list,.supervision-list{display:grid;gap:6px}.health-row,.dispatch-targets>div,.rule-list>div,.supervision-row{display:grid;gap:3px;padding:8px;border-radius:7px;background:rgba(255,255,255,.055);border-left:3px solid rgba(34,197,94,.75)}.health-row.warn,.supervision-row.waiting{border-left-color:#f59e0b}.health-row.error,.supervision-row.failed{border-left-color:#ef4444}.health-row span,.dispatch-targets span,.rule-list span,.supervision-row span{color:var(--text-muted);font-size:10px}.health-row strong,.dispatch-targets strong,.rule-list strong,.supervision-row strong{color:var(--text-secondary);font-size:11.5px;overflow-wrap:anywhere}.dispatch-targets small{color:var(--text-muted);font-size:10px}.dispatch-targets p,.control-reason{margin:0;color:var(--text-secondary);font-size:11px;line-height:1.45}.governance-form{display:grid;grid-template-columns:80px minmax(0,1fr) minmax(0,1fr) auto;gap:6px;margin-bottom:8px}.rule-list>div{grid-template-columns:58px minmax(0,1fr) auto;align-items:center}.rule-list button,.supervision-actions button{border:1px solid var(--border-color);border-radius:6px;background:transparent;color:var(--text-secondary);font-size:10px;padding:4px 7px;cursor:pointer}.supervision-console{margin-top:10px}.supervision-row{grid-template-columns:minmax(0,1fr) auto;align-items:center}.supervision-actions{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
 
 .agentic-run-card {
   width: 100%;
@@ -3578,8 +3867,73 @@ const handleGitCommitCardSubmit = async (msg) => {
 .agentic-run-metrics { flex-wrap: wrap; margin-top: 12px; color: var(--text-muted); font-size: 12px; }
 .agentic-run-metrics span { padding: 4px 7px; border-radius: 5px; background: rgba(255,255,255,.05); }
 .agentic-decision-summary{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding:9px;border-radius:7px;background:rgba(59,130,246,.07)}.agentic-decision-summary span{font-size:10px;color:var(--text-muted)}.agentic-decision-summary p{width:100%;margin:2px 0 0;font-size:11px;color:var(--text-secondary)}.agentic-clarification{margin-top:10px;padding:10px;border-radius:7px;background:rgba(245,158,11,.1);color:#f59e0b;font-size:12px;line-height:1.5}
-@media (max-width:1100px){.quality-metrics{grid-template-columns:repeat(4,minmax(90px,1fr))}}
+@media (max-width:1100px){.quality-metrics,.control-metrics{grid-template-columns:repeat(2,minmax(90px,1fr))}.control-grid{grid-template-columns:1fr}.governance-form{grid-template-columns:1fr 1fr}.supervision-row{grid-template-columns:1fr}.supervision-actions{justify-content:flex-start}}
 .agentic-run-actions { justify-content: flex-end; margin-top: 14px; }
+.global-runtime-debug {
+  width: 100%;
+  margin-top: 10px;
+  padding: 11px;
+  border: 1px solid rgba(20, 184, 166, 0.2);
+  border-radius: 8px;
+  background: rgba(20, 184, 166, 0.045);
+}
+.runtime-debug-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 0;
+  cursor: pointer;
+  user-select: none;
+}
+.global-runtime-debug[open] .runtime-debug-head { margin-bottom: 9px; }
+.runtime-debug-head strong {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.runtime-debug-head small {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+.runtime-debug-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 7px;
+}
+.runtime-debug-section {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.runtime-debug-section > strong {
+  color: var(--text-primary);
+  font-size: 11.5px;
+}
+.runtime-debug-grid div {
+  min-width: 0;
+  padding: 7px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.runtime-debug-grid span {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+.runtime-debug-grid code {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+}
 
 .skeleton-line {
   background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);

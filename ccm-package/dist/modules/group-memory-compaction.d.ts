@@ -59,6 +59,29 @@ export declare function compactGroupConversationMemory(input: {
         preservedMessageIds: string[];
         preCompactTokenCount: any;
         postCompactTokenCount: any;
+        post_compact_restore: {
+            strategy: string;
+            preservedMessageIds: string[];
+            summaryChecksum: string;
+            transcriptPath: string;
+        };
+        context_budget: {
+            chars: number;
+            estimated_tokens: number;
+            max_chars: number;
+            max_tokens: number;
+            reserved_output_tokens: number;
+            auto_compact_threshold: number;
+            warning_threshold: number;
+            blocking_threshold: number;
+            pressure: number;
+            compact_recommended: boolean;
+            boundary: {
+                type: string;
+                preserved_head_chars: number;
+                preserved_tail_chars: number;
+            };
+        };
         summarySource: string;
         createdAt: string;
     };
@@ -95,6 +118,7 @@ export declare function runGroupMemoryCompactionIntegrationSelfTest(): Promise<{
         rawMessagesRemainImmutable: boolean;
         incrementalSecondCompaction: boolean;
         nextBoundaryStartsAfterPrevious: boolean;
+        postCompactRestoreAnchorsRecorded: boolean;
         legacyVersionRebuildsFromRawTranscript: boolean;
     };
 }>;

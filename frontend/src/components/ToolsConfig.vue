@@ -223,6 +223,33 @@ const getServerStatus = (name) => {
   return server ? server.connected : false
 }
 
+const getServerStatusInfo = (name) => {
+  return (toolStatus.value.servers || []).find(s => s.name === name) || { state: 'disconnected', connected: false, retryCount: 0 }
+}
+
+const serverStatusLabel = (server) => {
+  if (server.connected || server.state === 'connected') return '● 已连接'
+  if (server.state === 'auth_required') return '● 需授权'
+  if (server.state === 'failed') return '● 失败'
+  if (server.state === 'pending') return '● 连接中'
+  return '○ 未连接'
+}
+
+const getAuthStatusInfo = (name) => {
+  return getServerStatusInfo(name).auth || {}
+}
+
+const authStatusLabel = (auth) => {
+  if (!auth || (!auth.authRequired && !auth.authConfigured)) return 'auth: none'
+  if (auth.needsUserAuth) return 'auth: action_required'
+  if (auth.authConfigured) return 'auth: configured'
+  return 'auth: required'
+}
+
+const getSkillToolInfo = (name) => {
+  return (toolStatus.value.skillTools || []).find(s => s.name === name) || {}
+}
+
 // 展开某个 MCP 服务器拥有的具体 Tools
 const getMcpToolsList = (serverName) => {
   return (toolStatus.value.mcp || []).filter(t => t.server === serverName)
@@ -466,12 +493,24 @@ onMounted(loadTools)
                   <div style="flex:1">
                     <div class="tool-name">
                       {{ tool.name }}
-                      <span class="conn-status" :class="{ connected: getServerStatus(tool.name) }">
-                        {{ getServerStatus(tool.name) ? '● 已连接' : '○ 未连接' }}
+                      <span class="conn-status" :class="{ connected: getServerStatus(tool.name), failed: getServerStatusInfo(tool.name).state === 'failed', auth: getServerStatusInfo(tool.name).state === 'auth_required' }">
+                        {{ serverStatusLabel(getServerStatusInfo(tool.name)) }}
                       </span>
                     </div>
                     <div class="tool-desc" style="margin-top:4px">{{ tool.description || '暂无描述' }}</div>
                     <div class="tool-cmd font-mono" style="margin-top:8px">{{ tool.command }}</div>
+                    <div class="mcp-runtime-status">
+                      <span>state: {{ getServerStatusInfo(tool.name).state || 'unknown' }}</span>
+                      <span>tools: {{ getMcpToolsList(tool.name).length }}</span>
+                      <span>retry: {{ getServerStatusInfo(tool.name).retryCount || 0 }}</span>
+                      <span :class="{ danger: getAuthStatusInfo(tool.name).needsUserAuth }">{{ authStatusLabel(getAuthStatusInfo(tool.name)) }}</span>
+                      <span v-if="getAuthStatusInfo(tool.name).refreshConfigured">refresh: configured</span>
+                      <span v-if="getAuthStatusInfo(tool.name).tokenExpiresAt" :class="{ danger: getAuthStatusInfo(tool.name).tokenExpired }">expires: {{ getAuthStatusInfo(tool.name).tokenExpiresAt }}</span>
+                      <span v-if="getAuthStatusInfo(tool.name).elicitationRequired" class="danger">elicitation: blocked</span>
+                      <span v-if="getServerStatusInfo(tool.name).lastConnectedAt">connected: {{ getServerStatusInfo(tool.name).lastConnectedAt }}</span>
+                      <span v-if="getServerStatusInfo(tool.name).error" class="danger">error: {{ getServerStatusInfo(tool.name).error }}</span>
+                      <span v-if="getAuthStatusInfo(tool.name).message" :class="{ danger: getAuthStatusInfo(tool.name).needsUserAuth }">{{ getAuthStatusInfo(tool.name).message }}</span>
+                    </div>
                     
                     <!-- 展开的工具列表 -->
                     <div v-if="getServerStatus(tool.name)" class="mcp-details-section">
@@ -553,8 +592,17 @@ onMounted(loadTools)
                 <div style="display:flex;align-items:flex-start;gap:12px;width:100%">
                   <span style="font-size:24px;line-height:1">⚡</span>
                   <div style="flex:1">
-                    <div class="tool-name">{{ tool.name }}</div>
+                    <div class="tool-name">
+                      {{ tool.name }}
+                      <span class="security-badge sec-success">SkillTool</span>
+                    </div>
                     <div class="tool-desc" style="margin-top:4px">{{ tool.description || '暂无描述' }}</div>
+                    <div class="mcp-runtime-status">
+                      <span>invoke: {{ getSkillToolInfo(tool.name).invokeToolName || 'invoke_skill' }}</span>
+                      <span>tool: {{ getSkillToolInfo(tool.name).toolName || `skill:${tool.name}` }}</span>
+                      <span v-if="getSkillToolInfo(tool.name).contentHash">hash: {{ getSkillToolInfo(tool.name).contentHash }}</span>
+                      <span v-if="toolStatus.skillAuditFile">audit: {{ toolStatus.skillAuditFile }}</span>
+                    </div>
                     <div class="tool-prompt" style="margin-top:8px">📝 {{ tool.prompt }}</div>
                   </div>
                   <div style="display:flex;align-items:center;gap:8px">
@@ -747,6 +795,11 @@ onMounted(loadTools)
 .tool-name { font-size: 14px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .conn-status { font-size: 10.5px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: rgba(239, 68, 68, 0.08); color: var(--accent-red); }
 .conn-status.connected { background: rgba(34, 197, 94, 0.08); color: var(--accent-green); }
+.conn-status.failed { background: rgba(245, 158, 11, 0.12); color: #b45309; }
+.conn-status.auth { background: rgba(59, 130, 246, 0.10); color: var(--accent-blue); }
+.mcp-runtime-status { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; font-size:11px; color:var(--text-muted); }
+.mcp-runtime-status span { max-width:100%; padding:2px 6px; border-radius:6px; background:rgba(148,163,184,.12); overflow-wrap:anywhere; }
+.mcp-runtime-status .danger { color:#b91c1c; background:rgba(239,68,68,.1); }
 
 .security-badge { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; }
 .sec-success { background: rgba(34, 197, 94, 0.08); color: var(--accent-green); }

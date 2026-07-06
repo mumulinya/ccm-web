@@ -2,10 +2,14 @@ import { McpClient } from "./mcp-client";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import * as crypto from "crypto";
 
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const MCP_DIR = path.join(CCM_DIR, "mcp");
 const SKILLS_DIR = path.join(CCM_DIR, "skills");
+const TOOL_AUDIT_DIR = path.join(CCM_DIR, "agent-runner");
+const TOOL_PERMISSION_AUDIT_FILE = path.join(TOOL_AUDIT_DIR, "tool-permission-violations.jsonl");
+const SKILL_INVOCATION_AUDIT_FILE = path.join(TOOL_AUDIT_DIR, "skill-invocations.jsonl");
 
 interface ToolDef {
   name: string;
@@ -19,6 +23,9 @@ interface SkillDef {
   description: string;
   prompt?: string;
   enabled: boolean;
+  filename?: string;
+  sourcePath?: string;
+  contentHash?: string;
 }
 
 export interface ToolScope {
@@ -26,12 +33,176 @@ export interface ToolScope {
   skill?: string[];
 }
 
+interface McpServerStatus {
+  name: string;
+  state: "pending" | "connected" | "failed" | "disconnected" | "auth_required";
+  toolsCount: number;
+  error?: string;
+  lastConnectedAt?: string;
+  lastErrorAt?: string;
+  retryCount: number;
+  auth?: McpAuthStatus;
+}
+
+interface McpAuthStatus {
+  authRequired: boolean;
+  authConfigured: boolean;
+  tokenExpiresAt?: string;
+  tokenExpired: boolean;
+  refreshConfigured: boolean;
+  needsUserAuth: boolean;
+  elicitationRequired: boolean;
+  message: string;
+  detectedSignals: string[];
+}
+
 function normalizeScopeList(value: any) {
   return Array.isArray(value) ? value.map(item => String(item || "").trim()).filter(Boolean) : [];
 }
 
+function appendJsonlBounded(file: string, entry: any) {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    if (fs.existsSync(file) && fs.statSync(file).size > 2 * 1024 * 1024) {
+      const content = fs.readFileSync(file, "utf-8");
+      const tail = content.slice(-1024 * 1024);
+      fs.writeFileSync(file, tail.slice(Math.max(0, tail.indexOf("\n") + 1)), "utf-8");
+    }
+    fs.appendFileSync(file, `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`, "utf-8");
+  } catch {}
+}
+
+function safeSlug(value: string) {
+  const slug = String(value || "").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug || "tool";
+}
+
+function parseMcpGrant(value: any) {
+  const raw = String(value || "").trim();
+  if (!raw) return { raw, server: "", tool: "" };
+  const mcpRule = raw.match(/^mcp__(.+?)(?:__(.+))?$/);
+  if (mcpRule) return { raw, server: mcpRule[1] || "", tool: mcpRule[2] === "*" ? "" : mcpRule[2] || "" };
+  const match = raw.match(/^([^/:]+)[/:](.+)$/);
+  if (match) return { raw, server: match[1] || "", tool: match[2] === "*" ? "" : match[2] || "" };
+  return { raw, server: raw, tool: "" };
+}
+
+function serverMatches(grantServer: string, serverName: string) {
+  return grantServer === serverName || safeSlug(grantServer) === safeSlug(serverName) || grantServer === `ccm__${safeSlug(serverName)}`;
+}
+
+function isMcpToolAllowed(scope: ToolScope | undefined, tool: ToolDef) {
+  const grants = normalizeScopeList(scope?.mcp);
+  if (!scope || !grants.length) return true;
+  return grants.some(raw => {
+    if (raw === tool.name) return true;
+    const grant = parseMcpGrant(raw);
+    if (!serverMatches(grant.server, tool.serverName)) return false;
+    return !grant.tool || grant.tool === tool.name;
+  });
+}
+
+function isSkillAllowed(scope: ToolScope | undefined, skillName: string) {
+  const grants = normalizeScopeList(scope?.skill);
+  if (!scope || !grants.length) return true;
+  return grants.includes(skillName) || grants.includes(`skill:${skillName}`) || grants.includes(`Skill:${skillName}`);
+}
+
+function appendToolPermissionAudit(entry: any) {
+  appendJsonlBounded(TOOL_PERMISSION_AUDIT_FILE, entry);
+}
+
+function appendSkillInvocationAudit(entry: any) {
+  appendJsonlBounded(SKILL_INVOCATION_AUDIT_FILE, entry);
+}
+
+function safeIsoDate(value: any): string {
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value === "number") {
+    const ms = value > 100000000000 ? value : value * 1000;
+    const date = new Date(ms);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : "";
+  }
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && String(value).trim().match(/^\d+$/)) return safeIsoDate(numeric);
+  const date = new Date(String(value));
+  return Number.isFinite(date.getTime()) ? date.toISOString() : "";
+}
+
+function flattenConfigSignals(value: any, prefix = "", rows: Array<{ key: string; value: any }> = []) {
+  if (!value || typeof value !== "object") return rows;
+  for (const [key, item] of Object.entries(value)) {
+    const fullKey = prefix ? `${prefix}.${key}` : key;
+    rows.push({ key: fullKey, value: item });
+    if (item && typeof item === "object" && !Array.isArray(item)) flattenConfigSignals(item, fullKey, rows);
+  }
+  return rows;
+}
+
+function parseEnv(envStr: any): Record<string, string> {
+  if (envStr && typeof envStr === "object" && !Array.isArray(envStr)) {
+    return Object.fromEntries(Object.entries(envStr).map(([key, value]) => [key, String(value ?? "")]));
+  }
+  if (!envStr) return {};
+  const env: Record<string, string> = {};
+  for (const line of String(envStr).split(/\r?\n/)) {
+    const idx = line.indexOf("=");
+    if (idx > 0) {
+      env[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
+    }
+  }
+  return env;
+}
+
+function deriveMcpAuthStatus(config: any = {}, diagnosticText = "", elicitationRequired = false): McpAuthStatus {
+  const rows = flattenConfigSignals(config);
+  const env = parseEnv(config?.env);
+  const envRows = Object.entries(env).map(([key, value]) => ({ key: `env.${key}`, value }));
+  const allRows = [...rows, ...envRows];
+  const keyText = allRows.map(row => row.key).join(" ");
+  const errorText = String(diagnosticText || "");
+  const authError = /\b(401|403)\b|unauthorized|forbidden|invalid[_ -]?token|expired token|token expired|oauth|login required|authentication|consent|device code|authorization/i.test(errorText);
+  const explicitAuth = config?.authRequired === true || config?.requiresAuth === true || !!config?.auth || !!config?.oauth || /(^|\.)auth|oauth|authorization/i.test(keyText);
+  const secretRows = allRows.filter(row => /(authorization|access[_-]?token|api[_-]?key|token|client[_-]?secret|client[_-]?id)$/i.test(row.key) && String(row.value || "").trim());
+  const refreshRows = allRows.filter(row => /(refresh[_-]?token|refreshToken|token_refresh|refresh)$/i.test(row.key) && String(row.value || "").trim());
+  const expiresRow = allRows.find(row => /(expires[_-]?at|expiresAt|token_expiry|expires_on|expiration)$/i.test(row.key) && String(row.value || "").trim());
+  const tokenExpiresAt = safeIsoDate(expiresRow?.value);
+  const tokenExpired = !!tokenExpiresAt && new Date(tokenExpiresAt).getTime() <= Date.now();
+  const authRequired = !!(explicitAuth || authError);
+  const authConfigured = secretRows.length > 0 || !!config?.headers?.Authorization || !!config?.authorization;
+  const refreshConfigured = refreshRows.length > 0 || !!config?.oauth?.refresh_token || !!config?.oauth?.refreshToken;
+  const elicitation = !!(elicitationRequired || config?.elicitation === true || config?.auth?.elicitation === true || /consent|device code|browser login|interactive/i.test(errorText));
+  const needsUserAuth = authRequired && (!authConfigured || tokenExpired || authError || elicitation);
+  const detectedSignals = [
+    explicitAuth ? "auth_config" : "",
+    authError ? "auth_error" : "",
+    authConfigured ? "credential_present" : "",
+    refreshConfigured ? "refresh_configured" : "",
+    tokenExpired ? "token_expired" : "",
+    elicitation ? "elicitation_required" : "",
+  ].filter(Boolean);
+  const message = needsUserAuth
+    ? tokenExpired
+      ? (refreshConfigured ? "Token 已过期；检测到 refresh 配置，请刷新后重载 MCP。" : "Token 已过期且未检测到 refresh 配置，需要重新授权。")
+      : !authConfigured
+        ? "该 MCP 需要鉴权，但未检测到 token/API key/Authorization 配置。"
+        : elicitation
+          ? "该 MCP 请求交互式授权/确认，CCM 已阻止无控制的 elicitation。"
+          : "MCP 返回鉴权失败，请检查凭据或重新授权。"
+    : authConfigured
+      ? "已检测到鉴权配置。"
+      : "未检测到鉴权要求。";
+  return { authRequired, authConfigured, tokenExpiresAt: tokenExpiresAt || undefined, tokenExpired, refreshConfigured, needsUserAuth, elicitationRequired: elicitation, message, detectedSignals };
+}
+
+function contentHash(value: any) {
+  return crypto.createHash("sha256").update(JSON.stringify(value || {})).digest("hex").slice(0, 16);
+}
+
 export class ToolManager {
   private clients = new Map<string, McpClient>(); // serverName -> client
+  private serverConfigs = new Map<string, any>();
+  private serverStatuses = new Map<string, McpServerStatus>();
   private tools: ToolDef[] = [];
   private skills: SkillDef[] = [];
   private initialized = false;
@@ -43,6 +214,28 @@ export class ToolManager {
     const mcpConfigs = this.loadMcpConfigs();
     for (const config of mcpConfigs) {
       if (!config.enabled || !config.command) continue;
+      this.serverConfigs.set(config.name, config);
+      const auth = deriveMcpAuthStatus(config);
+      this.serverStatuses.set(config.name, {
+        name: config.name,
+        state: "pending",
+        toolsCount: 0,
+        retryCount: this.serverStatuses.get(config.name)?.retryCount || 0,
+        auth,
+      });
+      if (auth.needsUserAuth && auth.authRequired && (!auth.authConfigured || auth.tokenExpired)) {
+        this.serverStatuses.set(config.name, {
+          name: config.name,
+          state: "auth_required",
+          toolsCount: 0,
+          error: auth.message,
+          lastErrorAt: new Date().toISOString(),
+          retryCount: this.serverStatuses.get(config.name)?.retryCount || 0,
+          auth,
+        });
+        console.warn(`[ToolManager] MCP "${config.name}" 需要鉴权: ${auth.message}`);
+        continue;
+      }
       if (this.clients.has(config.name)) continue;
 
       const client = new McpClient(config.command, this.parseArgs(config.args), this.parseEnv(config.env));
@@ -58,8 +251,27 @@ export class ToolManager {
             inputSchema: t.inputSchema,
           });
         }
+        this.serverStatuses.set(config.name, {
+          name: config.name,
+          state: "connected",
+          toolsCount: serverTools.length,
+          lastConnectedAt: new Date().toISOString(),
+          retryCount: this.serverStatuses.get(config.name)?.retryCount || 0,
+          auth: deriveMcpAuthStatus(config, "", client.getDiagnostics().elicitationRequired),
+        });
         console.log(`[ToolManager] MCP "${config.name}" 已连接, ${serverTools.length} 个工具`);
       } else {
+        const diagnostics = client.getDiagnostics();
+        const failedAuth = deriveMcpAuthStatus(config, `${diagnostics.lastError}\n${diagnostics.stderr}`, diagnostics.elicitationRequired);
+        this.serverStatuses.set(config.name, {
+          name: config.name,
+          state: failedAuth.needsUserAuth ? "auth_required" : "failed",
+          toolsCount: 0,
+          error: failedAuth.needsUserAuth ? failedAuth.message : (diagnostics.lastError || "连接失败"),
+          lastErrorAt: new Date().toISOString(),
+          retryCount: this.serverStatuses.get(config.name)?.retryCount || 0,
+          auth: failedAuth,
+        });
         console.warn(`[ToolManager] MCP "${config.name}" 连接失败`);
       }
     }
@@ -73,17 +285,21 @@ export class ToolManager {
   buildToolPrompt(scope?: ToolScope): string {
     if (!this.initialized) return "";
 
-    const allowedMcp = scope ? new Set(normalizeScopeList(scope.mcp)) : null;
     const allowedSkills = scope ? new Set(normalizeScopeList(scope.skill)) : null;
-    const tools = allowedMcp
-      ? this.tools.filter(tool => allowedMcp.has(tool.serverName) || allowedMcp.has(tool.name))
+    const mcpGrants = normalizeScopeList(scope?.mcp);
+    const tools = scope
+      ? this.tools.filter(tool => isMcpToolAllowed(scope, tool))
       : this.tools;
     const skills = allowedSkills
       ? this.skills.filter(skill => allowedSkills.has(skill.name))
       : this.skills;
     const parts: string[] = [];
-    const missingMcp = allowedMcp
-      ? Array.from(allowedMcp).filter(name => !tools.some(tool => tool.serverName === name || tool.name === name))
+    const missingMcp = scope
+      ? mcpGrants.filter(name => {
+        const grant = parseMcpGrant(name);
+        if (!grant.server && !name) return false;
+        return !this.tools.some(tool => isMcpToolAllowed({ mcp: [name] }, tool));
+      })
       : [];
     const missingSkills = allowedSkills
       ? Array.from(allowedSkills).filter(name => !skills.some(skill => skill.name === name))
@@ -96,6 +312,7 @@ export class ToolManager {
         let desc = `\n\n### 工具: ${tool.name}`;
         desc += `\n描述: ${tool.description}`;
         desc += `\n来源: ${tool.serverName}`;
+        desc += `\n权限规则: mcp__ccm__${safeSlug(tool.serverName)}__${tool.name}`;
         if (tool.inputSchema?.properties) {
           desc += `\n参数:`;
           for (const [key, val] of Object.entries(tool.inputSchema.properties)) {
@@ -122,21 +339,227 @@ export class ToolManager {
     if (skills.length > 0) {
       parts.push("\n\n你可以使用以下 Skills（技能）：");
       for (const skill of skills) {
-        parts.push(`\n- ${skill.name}: ${skill.description}`);
+        parts.push(`\n- ${skill.name}: ${skill.description}（SkillTool: skill:${skill.name}，hash=${skill.contentHash || ""}）`);
         if (skill.prompt) {
           parts.push(`  模板: ${skill.prompt}`);
         }
       }
+      parts.push(`\n\n调用 SkillTool 的格式（严格遵守）：
+<tool_call>
+{"name": "invoke_skill", "arguments": {"name": "Skill 名称", "input": "本次要交给该 Skill 的任务或上下文"}}
+</tool_call>
+
+注意：
+- SkillTool 也受当前 Agent 的 skill 授权范围限制
+- 不得使用未授权或未列出的 Skill
+- 成功调用 Skill 后，应在 CCM_AGENT_RECEIPT.memoryUsed 中写入 Skill:<name>`);
     }
 
     if (missingMcp.length > 0 || missingSkills.length > 0) {
       parts.push("\n\n已配置但当前未加载成功的工具：");
-      if (missingMcp.length > 0) parts.push(`\n- MCP 服务器：${missingMcp.join(", ")}`);
+      if (missingMcp.length > 0) {
+        const mcpDetails = missingMcp.map(name => {
+          const grant = parseMcpGrant(name);
+          const status = Array.from(this.serverStatuses.values()).find(item => serverMatches(grant.server, item.name));
+          return status?.auth?.needsUserAuth
+            ? `${name}（${status.state}: ${status.auth.message}）`
+            : status
+              ? `${name}（${status.state}${status.error ? `: ${status.error}` : ""}）`
+              : name;
+        });
+        parts.push(`\n- MCP 服务器：${mcpDetails.join(", ")}`);
+      }
       if (missingSkills.length > 0) parts.push(`\n- Skills：${missingSkills.join(", ")}`);
       parts.push("\n如果任务依赖这些工具，请说明工具暂不可用，不要假装已经调用。");
     }
 
     return parts.join("");
+  }
+
+  buildScopeAudit(scope?: ToolScope) {
+    const grants = normalizeScopeList(scope?.mcp);
+    const rows = grants.map(raw => {
+      const grant = parseMcpGrant(raw);
+      const serverTools = this.tools.filter(tool => serverMatches(grant.server, tool.serverName));
+      const status = Array.from(this.serverStatuses.values()).find(item => serverMatches(grant.server, item.name));
+      const matchedTools = grant.tool ? serverTools.filter(tool => tool.name === grant.tool) : serverTools;
+      const state = !grant.server
+        ? "invalid_grant"
+        : status && status.state !== "connected" && serverTools.length === 0
+          ? status.state
+          : serverTools.length === 0
+            ? "missing_server"
+            : grant.tool && matchedTools.length === 0
+              ? "missing_tool"
+              : "available";
+      return {
+        raw,
+        server: grant.server,
+        tool: grant.tool,
+        state,
+        availableTools: serverTools.map(tool => tool.name).slice(0, 80),
+        missingTools: grant.tool && matchedTools.length === 0 ? [grant.tool] : [],
+        serverStatus: status || null,
+      };
+    });
+    const skillGrants = normalizeScopeList(scope?.skill);
+    const skillRows = skillGrants.map(name => {
+      const skill = this.skills.find(item => item.name === name);
+      return {
+        name,
+        state: skill ? "available" : "missing",
+        description: skill?.description || "",
+        contentHash: skill?.contentHash || "",
+        toolName: skill ? `skill:${skill.name}` : "",
+      };
+    });
+    return {
+      mcp: rows,
+      skills: skillRows,
+      missing_mcp_tools: rows.filter(row => row.state === "missing_tool"),
+      missing_mcp_servers: rows.filter(row => row.state === "missing_server" || row.state === "failed" || row.state === "disconnected" || row.state === "auth_required"),
+      missing_skills: skillRows.filter(row => row.state === "missing"),
+    };
+  }
+
+  discoverSkills(scope?: ToolScope) {
+    const skills = scope
+      ? this.skills.filter(skill => isSkillAllowed(scope, skill.name))
+      : this.skills;
+    return skills.map(skill => ({
+      name: skill.name,
+      description: skill.description || "",
+      enabled: skill.enabled !== false,
+      contentHash: skill.contentHash || contentHash(skill),
+      sourcePath: skill.sourcePath || "",
+      toolName: `skill:${skill.name}`,
+      invokeToolName: "invoke_skill",
+    }));
+  }
+
+  invokeSkill(name: string, input: any = "", scope?: ToolScope) {
+    const skillName = String(name || "").replace(/^Skill\s*[:：]\s*/i, "").replace(/^skill:/i, "").trim();
+    const skill = this.skills.find(item => item.name === skillName && item.enabled !== false);
+    if (!skill) {
+      appendSkillInvocationAudit({ type: "skill_missing", skill: skillName, scope });
+      return {
+        ok: false,
+        name: skillName,
+        error: `Skill "${skillName}" 不存在或未启用`,
+        invokedAt: new Date().toISOString(),
+      };
+    }
+    if (scope && !isSkillAllowed(scope, skill.name)) {
+      appendSkillInvocationAudit({ type: "skill_unauthorized", skill: skill.name, scope, contentHash: skill.contentHash });
+      return {
+        ok: false,
+        name: skill.name,
+        contentHash: skill.contentHash || contentHash(skill),
+        error: `Skill "${skill.name}" 未授权给当前 Agent 使用`,
+        invokedAt: new Date().toISOString(),
+      };
+    }
+    const inputText = typeof input === "string" ? input : JSON.stringify(input ?? {});
+    const prompt = String(skill.prompt || "").trim();
+    const renderedPrompt = prompt.includes("{{input}}") || prompt.includes("${input}")
+      ? prompt.replace(/\{\{\s*input\s*\}\}/g, inputText).replace(/\$\{\s*input\s*\}/g, inputText)
+      : `${prompt}${prompt ? "\n\n" : ""}[SkillTool 输入]\n${inputText}`;
+    const result = {
+      ok: true,
+      name: skill.name,
+      description: skill.description || "",
+      contentHash: skill.contentHash || contentHash(skill),
+      prompt,
+      renderedPrompt,
+      input: inputText,
+      invokedAt: new Date().toISOString(),
+      auditFile: SKILL_INVOCATION_AUDIT_FILE,
+    };
+    appendSkillInvocationAudit({ type: "skill_invoked", skill: skill.name, contentHash: result.contentHash, scope, inputBytes: Buffer.byteLength(inputText, "utf-8") });
+    return result;
+  }
+
+  private parseSkillToolCall(toolName: string, args: any) {
+    const raw = String(toolName || "").trim();
+    if (/^(invoke_skill|skilltool|skill)$/i.test(raw)) {
+      return { name: String(args?.name || args?.skill || args?.skillName || "").trim(), input: args?.input ?? args?.arguments ?? args?.context ?? "" };
+    }
+    const colon = raw.match(/^Skill\s*[:：]\s*(.+)$/i) || raw.match(/^skill:(.+)$/i);
+    if (colon) return { name: colon[1].trim(), input: args?.input ?? args ?? "" };
+    const double = raw.match(/^skill__(.+)$/i);
+    if (double) return { name: double[1].trim(), input: args?.input ?? args ?? "" };
+    return null;
+  }
+
+  private async reconnectServer(serverName: string) {
+    const config = this.serverConfigs.get(serverName) || this.loadMcpConfigs().find(item => item?.name === serverName);
+    if (!config?.enabled || !config?.command) {
+      const auth = deriveMcpAuthStatus(config || {});
+      this.serverStatuses.set(serverName, {
+        name: serverName,
+        state: "failed",
+        toolsCount: 0,
+        error: "MCP 配置不存在或未启用",
+        lastErrorAt: new Date().toISOString(),
+        retryCount: Number(this.serverStatuses.get(serverName)?.retryCount || 0) + 1,
+        auth,
+      });
+      return false;
+    }
+    const auth = deriveMcpAuthStatus(config);
+    if (auth.needsUserAuth && auth.authRequired && (!auth.authConfigured || auth.tokenExpired)) {
+      this.serverStatuses.set(serverName, {
+        name: serverName,
+        state: "auth_required",
+        toolsCount: 0,
+        error: auth.message,
+        lastErrorAt: new Date().toISOString(),
+        retryCount: Number(this.serverStatuses.get(serverName)?.retryCount || 0) + 1,
+        auth,
+      });
+      return false;
+    }
+    const previous = this.clients.get(serverName);
+    try { previous?.disconnect(); } catch {}
+    const retryCount = Number(this.serverStatuses.get(serverName)?.retryCount || 0) + 1;
+    const client = new McpClient(config.command, this.parseArgs(config.args), this.parseEnv(config.env));
+    const connected = await client.connect();
+    if (!connected) {
+      const diagnostics = client.getDiagnostics();
+      const failedAuth = deriveMcpAuthStatus(config, `${diagnostics.lastError}\n${diagnostics.stderr}`, diagnostics.elicitationRequired);
+      this.clients.delete(serverName);
+      this.tools = this.tools.filter(tool => tool.serverName !== serverName);
+      this.serverStatuses.set(serverName, {
+        name: serverName,
+        state: failedAuth.needsUserAuth ? "auth_required" : "failed",
+        toolsCount: 0,
+        error: failedAuth.needsUserAuth ? failedAuth.message : (diagnostics.lastError || "重连失败"),
+        lastErrorAt: new Date().toISOString(),
+        retryCount,
+        auth: failedAuth,
+      });
+      return false;
+    }
+    const serverTools = await client.listTools();
+    this.clients.set(serverName, client);
+    this.tools = [
+      ...this.tools.filter(tool => tool.serverName !== serverName),
+      ...serverTools.map((t: any) => ({
+        name: t.name,
+        description: t.description || "",
+        serverName,
+        inputSchema: t.inputSchema,
+      })),
+    ];
+    this.serverStatuses.set(serverName, {
+      name: serverName,
+      state: "connected",
+      toolsCount: serverTools.length,
+      lastConnectedAt: new Date().toISOString(),
+      retryCount,
+      auth: deriveMcpAuthStatus(config, "", client.getDiagnostics().elicitationRequired),
+    });
+    return true;
   }
 
   // 解析 Agent 输出中的工具调用
@@ -157,23 +580,51 @@ export class ToolManager {
 
   // 执行工具调用
   async executeToolCall(toolName: string, args: any, scope?: ToolScope): Promise<string> {
+    const skillCall = this.parseSkillToolCall(toolName, args);
+    if (skillCall) {
+      const result = this.invokeSkill(skillCall.name, skillCall.input, scope);
+      return JSON.stringify({ skillTool: result }, null, 2);
+    }
     const tool = this.tools.find(t => t.name === toolName);
     if (!tool) {
       return `[错误] 工具 "${toolName}" 不存在`;
     }
-    const allowedMcp = scope ? new Set(normalizeScopeList(scope.mcp)) : null;
-    if (allowedMcp && !allowedMcp.has(tool.serverName) && !allowedMcp.has(tool.name)) {
+    if (scope && !isMcpToolAllowed(scope, tool)) {
+      appendToolPermissionAudit({
+        type: "mcp_unauthorized_tool_call",
+        tool: toolName,
+        server: tool.serverName,
+        scope,
+        rule: "ToolManager.isMcpToolAllowed",
+      });
       return `[错误] 工具 "${toolName}" 未授权给当前 Agent 使用`;
     }
 
-    const client = this.clients.get(tool.serverName);
+    let client = this.clients.get(tool.serverName);
     if (!client || !client.isConnected()) {
-      return `[错误] MCP 服务器 "${tool.serverName}" 未连接`;
+      const reconnected = await this.reconnectServer(tool.serverName);
+      client = this.clients.get(tool.serverName);
+      if (!reconnected || !client || !client.isConnected()) return `[错误] MCP 服务器 "${tool.serverName}" 未连接，自动重连失败`;
     }
 
     const result = await client.callTool(toolName, args);
     if (result.isError) {
-      return `[工具错误] ${result.content.map(c => c.text).join("\n")}`;
+      const errorText = result.content.map(c => c.text).join("\n");
+      const diagnostics = client.getDiagnostics();
+      const auth = deriveMcpAuthStatus(this.serverConfigs.get(tool.serverName) || {}, `${errorText}\n${diagnostics.lastError}\n${diagnostics.stderr}`, diagnostics.elicitationRequired);
+      if (auth.needsUserAuth) {
+        const previous = this.serverStatuses.get(tool.serverName);
+        this.serverStatuses.set(tool.serverName, {
+          name: tool.serverName,
+          state: "auth_required",
+          toolsCount: previous?.toolsCount || this.tools.filter(t => t.serverName === tool.serverName).length,
+          error: auth.message,
+          lastErrorAt: new Date().toISOString(),
+          retryCount: previous?.retryCount || 0,
+          auth,
+        });
+      }
+      return `[工具错误] ${errorText}`;
     }
     return result.content.map(c => c.text).join("\n");
   }
@@ -188,24 +639,43 @@ export class ToolManager {
         schema: t.inputSchema,
       })),
       skills: this.skills,
-      servers: Array.from(this.clients.entries()).map(([name, client]) => ({
-        name,
-        connected: client.isConnected(),
-        toolsCount: this.tools.filter(t => t.serverName === name).length,
-      })),
+      skillTools: this.discoverSkills(),
+      skillAuditFile: SKILL_INVOCATION_AUDIT_FILE,
+      servers: Array.from(new Set([...Array.from(this.serverStatuses.keys()), ...Array.from(this.clients.keys())])).map((name) => {
+        const client = this.clients.get(name);
+        const status = this.serverStatuses.get(name);
+        return {
+          name,
+          connected: !!client?.isConnected(),
+          toolsCount: this.tools.filter(t => t.serverName === name).length,
+          state: client?.isConnected() ? "connected" : status?.state || "disconnected",
+          error: status?.error || "",
+          lastConnectedAt: status?.lastConnectedAt || "",
+          lastErrorAt: status?.lastErrorAt || "",
+          retryCount: status?.retryCount || 0,
+          auth: status?.auth || deriveMcpAuthStatus(this.serverConfigs.get(name) || {}),
+        };
+      }),
     };
   }
 
   // 测试 MCP 连接
-  async testConnection(command: string, env: string, args: any = []): Promise<{ success: boolean; tools: string[]; error?: string }> {
+  async testConnection(command: string, env: string, args: any = []): Promise<{ success: boolean; tools: string[]; error?: string; auth?: McpAuthStatus }> {
+    const auth = deriveMcpAuthStatus({ command, args, env });
+    if (auth.needsUserAuth && auth.authRequired && (!auth.authConfigured || auth.tokenExpired)) {
+      return { success: false, tools: [], error: auth.message, auth };
+    }
     const client = new McpClient(command, this.parseArgs(args), this.parseEnv(env));
     const connected = await client.connect();
     if (!connected) {
-      return { success: false, tools: [], error: "连接失败" };
+      const diagnostics = client.getDiagnostics();
+      const failedAuth = deriveMcpAuthStatus({ command, args, env }, `${diagnostics.lastError}\n${diagnostics.stderr}`, diagnostics.elicitationRequired);
+      return { success: false, tools: [], error: failedAuth.needsUserAuth ? failedAuth.message : (diagnostics.lastError || "连接失败"), auth: failedAuth };
     }
     const tools = await client.listTools();
+    const connectedAuth = deriveMcpAuthStatus({ command, args, env }, "", client.getDiagnostics().elicitationRequired);
     client.disconnect();
-    return { success: true, tools: tools.map(t => t.name) };
+    return { success: true, tools: tools.map(t => t.name), auth: connectedAuth };
   }
 
   // 关闭所有连接
@@ -214,6 +684,9 @@ export class ToolManager {
       client.disconnect();
     }
     this.clients.clear();
+    for (const [name, status] of this.serverStatuses.entries()) {
+      this.serverStatuses.set(name, { ...status, state: "disconnected", toolsCount: 0 });
+    }
     this.tools = [];
     this.initialized = false;
   }
@@ -234,7 +707,16 @@ export class ToolManager {
     return fs.readdirSync(SKILLS_DIR)
       .filter(f => f.endsWith(".json"))
       .map(f => {
-        try { return JSON.parse(fs.readFileSync(path.join(SKILLS_DIR, f), "utf-8")); }
+        try {
+          const sourcePath = path.join(SKILLS_DIR, f);
+          const parsed = JSON.parse(fs.readFileSync(sourcePath, "utf-8"));
+          return {
+            ...parsed,
+            filename: f,
+            sourcePath,
+            contentHash: contentHash({ name: parsed.name, description: parsed.description || "", prompt: parsed.prompt || "", enabled: parsed.enabled !== false }),
+          };
+        }
         catch { return null; }
       })
       .filter(Boolean);
@@ -261,3 +743,41 @@ export class ToolManager {
 
 // 单例
 export const toolManager = new ToolManager();
+
+export function runToolManagerRuntimeSelfTest() {
+  const manager = new ToolManager() as any;
+  manager.initialized = true;
+  manager.tools = [
+    { name: "createInvoice", description: "create", serverName: "payments", inputSchema: {} },
+  ];
+  manager.skills = [{ name: "release-notes", description: "notes", prompt: "Write release notes for {{input}}", enabled: true, contentHash: "skillhash1" }];
+  manager.serverStatuses = new Map([
+    ["payments", { name: "payments", state: "connected", toolsCount: 1, retryCount: 0 }],
+    ["github", {
+      name: "github",
+      state: "auth_required",
+      toolsCount: 0,
+      retryCount: 1,
+      auth: deriveMcpAuthStatus({ name: "github", auth: { type: "oauth", expires_at: "2001-01-01T00:00:00.000Z" } }, "401 unauthorized"),
+    }],
+  ]);
+  const audit = manager.buildScopeAudit({ mcp: ["payments/createInvoice", "payments/deleteInvoice"], skill: ["release-notes", "missing-skill"] });
+  const prompt = manager.buildToolPrompt({ mcp: ["payments/createInvoice"], skill: ["release-notes"] });
+  const discovered = manager.discoverSkills({ skill: ["release-notes"] });
+  const invoked = manager.invokeSkill("release-notes", "v1.2.3", { skill: ["release-notes"] });
+  const invokedViaTool = manager.parseSkillToolCall("invoke_skill", { name: "release-notes", input: "v1.2.3" });
+  const denied = manager.invokeSkill("release-notes", "v1.2.3", { skill: ["other-skill"] });
+  const authStatus = manager.getToolList().servers.find((server: any) => server.name === "github")?.auth;
+  const checks = {
+    detectsMissingTool: audit.missing_mcp_tools.length === 1 && audit.missing_mcp_tools[0].missingTools.includes("deleteInvoice"),
+    detectsMissingSkill: audit.missing_skills.length === 1 && audit.missing_skills[0].name === "missing-skill",
+    promptOnlyShowsAuthorizedTool: prompt.includes("createInvoice") && !prompt.includes("deleteInvoice"),
+    promptShowsSkillToolProtocol: prompt.includes('"name": "invoke_skill"') && prompt.includes("skill:release-notes"),
+    discoversAuthorizedSkillTool: discovered.length === 1 && discovered[0].toolName === "skill:release-notes",
+    invokesAuthorizedSkillTool: invoked.ok === true && invoked.renderedPrompt.includes("v1.2.3") && !!invoked.contentHash,
+    parsesInvokeSkillToolCall: invokedViaTool?.name === "release-notes",
+    rejectsUnauthorizedSkillTool: denied.ok === false && /未授权/.test(denied.error),
+    detectsMcpAuthRequired: authStatus?.needsUserAuth === true && authStatus?.tokenExpired === true,
+  };
+  return { pass: Object.values(checks).every(Boolean), checks, audit, discovered, invoked, denied, authStatus };
+}

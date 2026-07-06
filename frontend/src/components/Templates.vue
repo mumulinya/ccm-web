@@ -293,7 +293,7 @@ onMounted(loadTemplates)
             <div style="display: flex; gap: 16px; margin-top: 8px;">
               <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13.5px; color: var(--text-primary);">
                 <input type="radio" v-model="targetSessionType" value="group" style="width: auto; margin: 0;">
-                💬 群聊协作 (Coordinator)
+                💬 群聊协作（主 Agent）
               </label>
               <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13.5px; color: var(--text-primary);">
                 <input type="radio" v-model="targetSessionType" value="project" style="width: auto; margin: 0;">

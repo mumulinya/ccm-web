@@ -51,6 +51,7 @@ exports.handleMemoryCenterApi = handleMemoryCenterApi;
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const context_budget_1 = require("../context-budget");
 const utils_1 = require("../utils");
 const db_1 = require("../db");
 const CONTROL_DIR = process.env.CCM_MEMORY_CONTROL_DIR || path.join(utils_1.CCM_DIR, "memory-control");
@@ -265,7 +266,7 @@ function healthAlerts(scope, scopeId, memory) {
             add("warning", "compaction_thrash", "连续压缩释放空间不足");
         if (Number(compaction.consecutiveFailures || 0) > 0)
             add("warning", "model_compaction_failure", `模型压缩连续失败 ${compaction.consecutiveFailures} 次`);
-        const currentPressure = compaction.postCompactTokenCount ? (Number(compaction.postCompactTokenCount) / 200_000) * 100 : 0;
+        const currentPressure = compaction.postCompactTokenCount ? (Number(compaction.postCompactTokenCount) / context_budget_1.DEFAULT_CONTEXT_WINDOW_TOKENS) * 100 : 0;
         if (currentPressure >= 90)
             add("warning", "token_pressure", `当前上下文占用 ${Math.round(currentPressure * 10) / 10}%`);
     }
@@ -296,7 +297,7 @@ function memorySummary(scope, scopeId, memory, label) {
         pinned: controls.filter((item) => item.pinned && !item.deprecated).length,
         edited: controls.filter((item) => item.editedText !== undefined && !item.deprecated).length,
         deprecated: controls.filter((item) => item.deprecated).length,
-        tokenPressure: Number(compaction.postCompactTokenCount ? Math.round((Number(compaction.postCompactTokenCount) / 200_000) * 1000) / 10 : 0),
+        tokenPressure: Number(compaction.postCompactTokenCount ? Math.round((Number(compaction.postCompactTokenCount) / context_budget_1.DEFAULT_CONTEXT_WINDOW_TOKENS) * 1000) / 10 : 0),
         preCompactPressure: Number(compaction.pressurePercent || 0),
         beforeTokens: Number(compaction.preCompactTokenCount || 0),
         afterTokens: Number(compaction.postCompactTokenCount || 0),

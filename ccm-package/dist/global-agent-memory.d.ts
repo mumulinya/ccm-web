@@ -134,6 +134,9 @@ export declare function runGlobalAgentMemorySelfTest(): {
         explicitIgnoreMemoryWorks: boolean;
         evidenceTraceable: boolean;
         recentWindowPreserved: boolean;
+        tokenAwareBoundaryRecorded: boolean;
+        microCompactRecordsLargeOutput: boolean;
+        postCompactRestoreAnchorsRecorded: boolean;
         corruptedTranscriptRecoversFromBackup: boolean;
     };
     packetPreview: string;

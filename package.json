@@ -11,6 +11,8 @@
     "build:frontend": "npm --prefix frontend run build",
     "build:mcp-feishu": "tsc -p integrations/mcp-feishu/tsconfig.json",
     "build": "npm run build:frontend && npm run build:mcp-feishu && npm run build:backend",
+    "test:render-regression": "node scripts/main-agent-render-regression.mjs",
+    "test:replay-regression": "node scripts/main-agent-replay-regression.mjs",
     "test:coordinator": "npm run build:backend && node ccm-package/scripts/coordinator-smoke.js",
     "test:chat-experience": "node scripts/unified-chat-task-experience-selftest.mjs && node scripts/unified-chat-task-experience-e2e.mjs",
     "test:code-changes": "node scripts/agent-code-change-visualization-selftest.mjs",
@@ -26,6 +28,7 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
+    "playwright": "^1.61.1",
     "typescript": "^6.0.3"
   },
   "engines": {
