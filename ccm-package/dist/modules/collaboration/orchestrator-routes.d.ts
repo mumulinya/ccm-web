@@ -1,0 +1,24 @@
+import type { IncomingMessage, ServerResponse } from "http";
+import type { UrlWithParsedQuery } from "url";
+type OrchestratorRouteDeps = {
+    buildCoordinatorSharedFilesContext: (ctx: any, group: any) => string;
+    runGroupOrchestrator: (options: any) => Promise<any>;
+    buildDailyDevAgentDiagnostics: () => any;
+    replayAgentTrace: (traceId: string) => any;
+    buildTraceReplaySuite: (limit?: number) => any;
+    runAgentRuntimeKernelSelfTest: () => any;
+    runGroupMainAgentActionRegistrySelfTest: () => any;
+    runGroupMainAgentToolLoopSelfTest: () => any;
+    getGroupMainAgentActionRegistry: () => any;
+    applyRuntimeMonitorControl: (action: string, ctx: any) => any;
+    buildDailyDevWorkflowRehearsal: (payload?: any) => any;
+    createDailyDevSmokeTask: (payload: any, ctx: any) => any;
+    getDailyDevSmokeStatus: (payload?: any) => any;
+    runAgentCliProbeBatch: (payload: any, ctx: any) => Promise<any>;
+    runAgentCliProbe: (payload: any, ctx: any) => Promise<any>;
+    switchTaskExecutor: (taskId: string, runtime: string, ctx: any, payload: any) => any;
+    runRuntimeFallbackProbe: (payload: any, ctx: any) => Promise<any>;
+    runAgentRecoveryMonitorOnce: (ctx: any, payload: any) => Promise<any>;
+};
+export declare function handleOrchestratorRoutes(req: IncomingMessage, res: ServerResponse, parsed: UrlWithParsedQuery, ctx: any, deps: OrchestratorRouteDeps): boolean;
+export {};

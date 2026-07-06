@@ -1,6 +1,11 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
+import PetAgentList from './PetAgentList.vue'
+import PetSkinGrid from './PetSkinGrid.vue'
+import PetAssetGrid from './PetAssetGrid.vue'
+import PetCreateModal from './PetCreateModal.vue'
+import PetSkinCreateModal from './PetSkinCreateModal.vue'
 
 const props = defineProps({
   agents: { type: Array, default: () => [] },
@@ -822,50 +827,22 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="glass-panel pet-card-section flex-1">
-        <div class="section-title-row">
-          <div class="section-title">🤖 系统 Agent 宠物</div>
-          <div class="section-actions" style="display: flex; gap: 8px;">
-            <button class="btn btn-outline btn-sm" @click="toggleAll" v-if="allPetAgents.length > 0">
-              {{ allEnabled ? '全部隐藏' : '全部显示' }}
-            </button>
-            <button class="btn btn-primary btn-sm" @click="showCreateModal = true">
-              ➕ 创建宠物
-            </button>
-          </div>
-        </div>
-        
-        <div class="pet-list-scroll">
-          <div v-for="agent in allPetAgents" :key="agent.name" 
-            class="pet-list-item" 
-            :class="{ active: selectedAgent === agent.name }"
-            @click="selectAgent(agent.name)">
-            <div class="pet-preview-wrap">
-              <img :src="getPetIconPath(getConfig(agent.name).type)" width="42" height="42" />
-            </div>
-            <div class="pet-text-info">
-              <div class="agent-label-name">{{ getAgentLabel(agent) }}</div>
-              <div class="pet-type-label">{{ petTypes.find(p => p.id === getConfig(agent.name).type)?.name || '月薪喵' }}</div>
-              <div v-if="[GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME].includes(agent.name)" class="pet-live-status" :class="agent.state || 'idle'">
-                <span>{{ getAgentStateLabel(agent) }}</span>
-                <em>{{ getAgentStateDetail(agent) }}</em>
-              </div>
-            </div>
-            <button
-              class="state-toggle-btn"
-              :class="{ enabled: getConfig(agent.name).enabled !== false }"
-              @click.stop="togglePet(agent.name)"
-            >
-              {{ getConfig(agent.name).enabled !== false ? '显示中' : '已隐藏' }}
-            </button>
-          </div>
-          <div v-if="allPetAgents.length === 0" class="empty-state-text">
-            <span>🎵</span>
-            <p>暂无独立宠物</p>
-            <p class="sub">全局 Agent 和音乐 Agent 会保留为独立宠物，也可以创建自定义挂件</p>
-          </div>
-        </div>
-      </div>
+      <PetAgentList
+        :agents="allPetAgents"
+        :selected-agent="selectedAgent"
+        :pet-types="petTypes"
+        :all-enabled="allEnabled"
+        :get-config="getConfig"
+        :get-pet-icon-path="getPetIconPath"
+        :get-agent-label="getAgentLabel"
+        :get-agent-state-label="getAgentStateLabel"
+        :get-agent-state-detail="getAgentStateDetail"
+        :system-agent-names="[GLOBAL_PET_AGENT_NAME, MUSIC_PET_AGENT_NAME]"
+        @select-agent="selectAgent"
+        @toggle-agent="togglePet"
+        @toggle-all="toggleAll"
+        @create-pet="showCreateModal = true"
+      />
     </div>
 
     <!-- 右半边：选中的配置 或 宠物图鉴 -->
@@ -924,26 +901,14 @@ onMounted(async () => {
 
               <div class="skins-selection">
                 <div class="sub-section-title">✨ 更换精美皮肤</div>
-                <div class="skins-grid">
-                  <div v-for="pt in petTypes" :key="pt.id" 
-                    class="skin-card"
-                    :class="{ active: getConfig(selectedAgent).type === pt.id }"
-                    @click="updatePetType(selectedAgent, pt.id)">
-                    <div class="skin-avatar-wrap" :style="getConfig(selectedAgent).type === pt.id ? `border-color: ${pt.color || '#3b82f6'};` : ''">
-                      <img :src="getPetIconPath(pt.id)" width="44" height="44" :class="{ pixelated: isPixelated(pt.id) }" />
-                    </div>
-                    <span class="skin-name">{{ pt.name }}</span>
-                    <span class="skin-indicator" v-if="getConfig(selectedAgent).type === pt.id">✓ 已装扮</span>
-                  </div>
-                  <!-- 新建皮肤虚线网格卡片 -->
-                  <div class="skin-card skin-card-add" @click="showCreateSkinModal = true">
-                    <div class="skin-avatar-wrap add-icon">
-                      <span>➕</span>
-                    </div>
-                    <span class="skin-name">新建宠物皮肤</span>
-                    <span class="skin-indicator" style="color: var(--text-muted);">自定义外观</span>
-                  </div>
-                </div>
+                <PetSkinGrid
+                  :pet-types="petTypes"
+                  :selected-type="getConfig(selectedAgent).type"
+                  :get-pet-icon-path="getPetIconPath"
+                  :is-pixelated="isPixelated"
+                  @select-skin="updatePetType(selectedAgent, $event)"
+                  @create-skin="showCreateSkinModal = true"
+                />
                 <!-- 仅当前装扮为自定义皮肤时，才显示彻底删除皮肤分类的按钮 -->
                 <div v-if="isCustomSkin(getConfig(selectedAgent).type)" class="delete-skin-section" style="margin-top: 24px; padding-top: 16px; border-top: 1px dashed rgba(0,0,0,0.08);">
                   <button class="btn btn-outline btn-danger btn-sm" @click="deleteCustomSkin(getConfig(selectedAgent).type)">
@@ -1029,127 +994,44 @@ onMounted(async () => {
           </div>
 
           <!-- 动作资源 -->
-          <div v-if="rightTab === 'assets'" class="assets-tab-pane">
-            <div class="asset-toolbar">
-              <div class="asset-select-wrap">
-                <label>宠物外观</label>
-                <select v-model="actionPetType" @change="imageErrors = {}">
-                  <option v-for="pt in petTypes" :key="pt.id" :value="pt.id">{{ pt.name }}</option>
-                </select>
-              </div>
-              <div class="asset-count">{{ actionAssetRows.length }} 个动作资源</div>
-            </div>
-
-            <div class="asset-grid">
-              <div v-for="row in actionAssetRows" :key="row.key" class="asset-card">
-                <div class="asset-preview">
-                  <img 
-                    :src="assetUrl(row.assetPath)" 
-                    alt="" 
-                    aria-hidden="true"
-                    :class="{ missing: imageErrors[row.assetPath] }"
-                    @error="handleImageError(row)" 
-                  />
-                </div>
-                <div class="asset-info">
-                  <div class="asset-title-row">
-                    <span class="asset-title">{{ row.label }}</span>
-                    <span class="asset-group">{{ row.group }}</span>
-                  </div>
-                  <div class="asset-path" :title="row.assetPath">{{ row.assetPath }}</div>
-                  <div class="asset-file">{{ assetFileName(row.assetPath) }}</div>
-                </div>
-                <div class="asset-actions">
-                  <button
-                    v-if="canUploadAsset(row)"
-                    class="btn btn-outline btn-sm"
-                    :disabled="uploadingAsset === row.assetPath"
-                    @click="chooseAssetFile(row)"
-                  >
-                    {{ uploadingAsset === row.assetPath ? '上传中' : (row.assetPath.toLowerCase().endsWith('.png') ? '上传图片' : '上传 SVG') }}
-                  </button>
-                  <span v-else class="asset-readonly">只读</span>
-                  <input
-                    v-if="canUploadAsset(row)"
-                    class="hidden-file-input"
-                    type="file"
-                    accept=".svg,.png,image/svg+xml,image/png"
-                    :ref="el => setUploadInput(row.assetPath, el)"
-                    @change="uploadAssetFile(row, $event)"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
+          <PetAssetGrid
+            v-if="rightTab === 'assets'"
+            v-model:action-pet-type="actionPetType"
+            :pet-types="petTypes"
+            :rows="actionAssetRows"
+            :image-errors="imageErrors"
+            :uploading-asset="uploadingAsset"
+            :asset-url="assetUrl"
+            :asset-file-name="assetFileName"
+            :can-upload-asset="canUploadAsset"
+            :set-upload-input="setUploadInput"
+            @reset-errors="imageErrors = {}"
+            @image-error="handleImageError"
+            @choose-file="chooseAssetFile"
+            @upload-file="uploadAssetFile"
+          />
         </div>
       </div>
       
-      <!-- 创建宠物 Modal -->
-      <div v-if="showCreateModal" class="modal-overlay">
-        <div class="glass-panel modal-card">
-          <div class="modal-header">
-            <span class="modal-title-text">🐾 创建自定义桌面宠物</span>
-            <button class="close-btn" @click="showCreateModal = false">×</button>
-          </div>
-          <div class="modal-body-content">
-            <div class="form-item">
-              <label class="form-label">宠物昵称</label>
-              <input class="form-input" v-model="newPetLabel" placeholder="例如：我的月薪喵" maxlength="20" />
-            </div>
-            <div class="form-item">
-              <label class="form-label">初始外观类型</label>
-              <select class="form-select" v-model="newPetType">
-                <option v-for="pt in petTypes" :key="pt.id" :value="pt.id">
-                  {{ pt.emoji }} {{ pt.name }}
-                </option>
-              </select>
-            </div>
-          </div>
-          <div class="modal-footer-btns">
-            <button class="btn btn-outline btn-sm" @click="showCreateModal = false">取消</button>
-            <button class="btn btn-primary btn-sm" @click="createCustomPet">确认创建</button>
-          </div>
-        </div>
-      </div>
+      <PetCreateModal
+        v-if="showCreateModal"
+        v-model:label="newPetLabel"
+        v-model:type="newPetType"
+        :pet-types="petTypes"
+        @submit="createCustomPet"
+        @close="showCreateModal = false"
+      />
 
-      <!-- 创建皮肤 Modal -->
-      <div v-if="showCreateSkinModal" class="modal-overlay">
-        <div class="glass-panel modal-card">
-          <div class="modal-header">
-            <span class="modal-title-text">🎨 创建自定义宠物皮肤外观</span>
-            <button class="close-btn" @click="showCreateSkinModal = false">×</button>
-          </div>
-          <div class="modal-body-content">
-            <div class="form-item">
-              <label class="form-label">皮肤 ID (拼音/英文，如 yuexinmiao)</label>
-              <input class="form-input" v-model="newSkinId" placeholder="例如：yuexinmiao" maxlength="20" />
-            </div>
-            <div class="form-item">
-              <label class="form-label">皮肤中文名称</label>
-              <input class="form-input" v-model="newSkinLabel" placeholder="例如：月薪喵" maxlength="20" />
-            </div>
-            <div class="form-item">
-              <label class="form-label">代表 Emoji</label>
-              <input class="form-input" v-model="newSkinEmoji" placeholder="🐱" maxlength="5" />
-            </div>
-            <div class="form-item">
-              <label class="form-label">动作图片默认格式</label>
-              <select class="form-select" v-model="newSkinFormat">
-                <option value="png">PNG (推荐，适用于去背手绘动作图)</option>
-                <option value="svg">SVG (适用于矢量动作图)</option>
-              </select>
-            </div>
-            <div class="form-item">
-              <label class="form-label">主题配色 (用于高亮显示)</label>
-              <input type="color" class="form-input color-picker-input" v-model="newSkinColor" />
-            </div>
-          </div>
-          <div class="modal-footer-btns">
-            <button class="btn btn-outline btn-sm" @click="showCreateSkinModal = false">取消</button>
-            <button class="btn btn-primary btn-sm" @click="createCustomSkin">确认创建</button>
-          </div>
-        </div>
-      </div>
+      <PetSkinCreateModal
+        v-if="showCreateSkinModal"
+        v-model:skin-id="newSkinId"
+        v-model:label="newSkinLabel"
+        v-model:emoji="newSkinEmoji"
+        v-model:color="newSkinColor"
+        v-model:format="newSkinFormat"
+        @submit="createCustomSkin"
+        @close="showCreateSkinModal = false"
+      />
     </div>
   </div>
 </template>
@@ -2295,135 +2177,4 @@ onMounted(async () => {
   color: var(--accent-blue) !important;
 }
 
-/* 创建宠物 Modal 样式 */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 99999;
-}
-.modal-card {
-  width: 380px;
-  padding: 24px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.15);
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.modal-title-text {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary, #0f172a);
-}
-.close-btn {
-  background: transparent;
-  border: none;
-  font-size: 24px;
-  cursor: pointer;
-  color: var(--text-muted, #64748b);
-  line-height: 1;
-}
-.modal-body-content {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.form-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.form-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary, #475569);
-  text-align: left;
-}
-.form-input {
-  padding: 8px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.6);
-  font-size: 13.5px;
-  outline: none;
-  transition: all 0.2s;
-  color: var(--text-primary, #0f172a);
-}
-.form-input:focus {
-  border-color: var(--accent-blue, #3b82f6);
-  background: #fff;
-}
-.form-select {
-  padding: 8px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.6);
-  font-size: 13.5px;
-  outline: none;
-  color: var(--text-primary, #0f172a);
-}
-.modal-footer-btns {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 8px;
-}
-
-[data-theme="dark"] .modal-card {
-  background: var(--bg-primary, #1e293b) !important;
-  border-color: var(--border-color, rgba(255, 255, 255, 0.08)) !important;
-}
-[data-theme="dark"] .form-input,
-[data-theme="dark"] .form-select {
-  background: var(--bg-secondary, #0f172a) !important;
-  border-color: var(--border-color, rgba(255, 255, 255, 0.08)) !important;
-  color: var(--text-primary, #f8fafc) !important;
-}
-[data-theme="dark"] .close-btn {
-  color: var(--text-muted, #94a3b8) !important;
-}
-
-/* 新建皮肤卡片特有样式 */
-.skin-card-add {
-  border-style: dashed !important;
-  border-width: 2px !important;
-  background: rgba(0, 0, 0, 0.015) !important;
-  border-color: rgba(0, 0, 0, 0.12) !important;
-}
-.skin-card-add:hover {
-  background: rgba(59, 130, 246, 0.03) !important;
-  border-color: var(--accent-blue, #3b82f6) !important;
-}
-.skin-card-add .add-icon {
-  font-size: 20px;
-  color: var(--text-muted, #64748b);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.color-picker-input {
-  height: 38px;
-  padding: 4px !important;
-  cursor: pointer;
-}
-[data-theme="dark"] .skin-card-add {
-  background: rgba(255, 255, 255, 0.01) !important;
-  border-color: rgba(255, 255, 255, 0.12) !important;
-}
-[data-theme="dark"] .skin-card-add:hover {
-  background: rgba(59, 130, 246, 0.06) !important;
-  border-color: var(--accent-blue, #3b82f6) !important;
-}
 </style>

@@ -56,7 +56,9 @@ const globalActionRoutes = {
 }
 
 const checks = {}
-const groupChatSource = readFileSync(join(process.cwd(), 'frontend/src/components/GroupChat.vue'), 'utf-8')
+const groupChatSource = readFileSync(join(process.cwd(), 'frontend/src/components/collaboration/GroupChat.vue'), 'utf-8')
+const agentExecutionSource = readFileSync(join(process.cwd(), 'frontend/src/components/agents/AgentExecutionMessage.vue'), 'utf-8')
+const agentDisplaySource = readFileSync(join(process.cwd(), 'frontend/src/utils/agentDisplay.js'), 'utf-8')
 
 // 入口 1：群聊协作，多 Agent 整体任务卡。这里使用后端 task card 形状作为契约输入，
 // GroupChat 通过 TaskCollaborationCard 直接渲染为 TaskExperienceCard。
@@ -96,10 +98,13 @@ checks.groupCardActionsMapped = ['view_changes', 'continue', 'cancel', 'retry', 
 checks.groupCardHidesProtocolByDefault = noProtocolNoise(groupCard)
 checks.groupDirectAnswerHidesOrchestrationPanel = groupChatSource.includes('const shouldShowOrchestrationPlan')
   && groupChatSource.includes("action === 'delegate'")
-  && groupChatSource.includes('v-if="shouldShowOrchestrationPlan(msg)"')
-checks.groupWorkPanelSanitizesInternalProtocol = groupChatSource.includes('sanitizeUserVisibleWorkText')
+  && groupChatSource.includes(':show-orchestration-plan="shouldShowOrchestrationPlan(msg)"')
+  && agentExecutionSource.includes('v-if="showOrchestrationPlan"')
+checks.groupWorkPanelSanitizesInternalProtocol = groupChatSource.includes('isInternalProtocolMessage')
+  && groupChatSource.includes('shouldShowGroupMessage')
   && groupChatSource.includes('CCM_AGENT_RECEIPT')
-  && groupChatSource.includes('已为用户视图折叠')
+  && agentDisplaySource.includes('INTERNAL_TEXT_PATTERN')
+  && agentDisplaySource.includes('sanitizeUserFacingAgentText')
 
 // 入口 2：项目管理聊天，单项目执行卡；普通问答保持直接文本。
 const projectQa = projectExecutionTaskCard({

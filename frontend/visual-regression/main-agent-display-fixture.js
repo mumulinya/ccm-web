@@ -1,7 +1,7 @@
 import { createApp, computed } from 'vue/dist/vue.esm-bundler.js'
 import '../src/style.css'
-import MainAgentDecisionCard from '../src/components/MainAgentDecisionCard.vue'
-import TaskExperienceCard from '../src/components/TaskExperienceCard.vue'
+import MainAgentDecisionCard from '../src/components/agents/MainAgentDecisionCard.vue'
+import TaskExperienceCard from '../src/components/tasks/TaskExperienceCard.vue'
 import { summarizeWorkEvents, sanitizeUserFacingAgentText } from '../src/utils/agentDisplay.js'
 
 const style = document.createElement('style')

@@ -40,35 +40,37 @@ const path = __importStar(require("path"));
 const url = __importStar(require("url"));
 const os = __importStar(require("os"));
 const child_process_1 = require("child_process");
-const tool_manager_1 = require("./tool-manager");
-const agent_runtime_1 = require("./agent-runtime");
-const task_agent_sessions_1 = require("./task-agent-sessions");
-const runtime_tool_sync_1 = require("./runtime-tool-sync");
-const execution_kernel_1 = require("./execution-kernel");
-const project_memory_1 = require("./project-memory");
+const tool_manager_1 = require("./tools/tool-manager");
+const runtime_1 = require("./agents/runtime");
+const agent_sessions_1 = require("./tasks/agent-sessions");
+const runtime_tool_sync_1 = require("./tools/runtime-tool-sync");
+const execution_kernel_1 = require("./agents/execution-kernel");
+const memory_1 = require("./projects/memory");
 // 导入底座与持久层
-const utils_1 = require("./utils");
-const db_1 = require("./db");
+const utils_1 = require("./core/utils");
+const db_1 = require("./core/db");
 // 导入子模块控制器
-const projects_1 = require("./modules/projects");
-const sessions_1 = require("./modules/sessions");
-const git_1 = require("./modules/git");
-const marketplace_1 = require("./modules/marketplace");
-const templates_1 = require("./modules/templates");
-const cron_1 = require("./modules/cron");
-const tools_1 = require("./modules/tools");
-const pets_1 = require("./modules/pets");
-const music_1 = require("./modules/music");
-const collaboration_1 = require("./modules/collaboration");
-const reliability_drills_1 = require("./reliability-drills");
-const soak_test_1 = require("./soak-test");
-const process_lifecycle_1 = require("./process-lifecycle");
-const global_agent_1 = require("./modules/global-agent");
-const rag_1 = require("./modules/rag");
-const slash_commands_1 = require("./modules/slash-commands");
-const credential_store_1 = require("./credential-store");
-const usability_1 = require("./modules/usability");
-const sessions_2 = require("./modules/sessions");
+const projects_1 = require("./modules/projects/projects");
+const sessions_1 = require("./modules/projects/sessions");
+const git_1 = require("./modules/tools/git");
+const marketplace_1 = require("./modules/tools/marketplace");
+const templates_1 = require("./modules/templates/templates");
+const cron_1 = require("./modules/scheduling/cron");
+const tools_1 = require("./modules/tools/tools");
+const pets_1 = require("./modules/pets/pets");
+const music_1 = require("./modules/music/music");
+const collaboration_1 = require("./modules/collaboration/collaboration");
+const reliability_drills_1 = require("./system/reliability-drills");
+const soak_test_1 = require("./system/soak-test");
+const process_lifecycle_1 = require("./system/process-lifecycle");
+const global_agent_1 = require("./modules/global/global-agent");
+const rag_1 = require("./modules/knowledge/rag");
+const slash_commands_1 = require("./modules/tools/slash-commands");
+const credential_store_1 = require("./core/credential-store");
+const usability_1 = require("./modules/system/usability");
+const chat_runs_1 = require("./projects/chat-runs");
+const cleanup_center_1 = require("./system/cleanup-center");
+const sessions_2 = require("./modules/projects/sessions");
 // === 运行时内存状态与心跳推送 ===
 const petStatusClients = new Set();
 const petWorkspaceClients = new Set();
@@ -81,7 +83,6 @@ const MUSIC_PET_AGENT_DEFAULT_LABEL = "乖乖";
 const AGENT_RUNNER_DIR = path.join(utils_1.CCM_DIR, "agent-runner");
 const AGENT_RUNNER_REQUESTS_DIR = path.join(AGENT_RUNNER_DIR, "requests");
 const AGENT_RUNNER_RESULTS_DIR = path.join(AGENT_RUNNER_DIR, "results");
-const PROJECT_CHAT_RUNS_FILE = path.join(utils_1.CCM_DIR, "project-chat-runs.json");
 let musicPetState = {
     state: "idle",
     detail: "等待音乐指令",
@@ -110,396 +111,11 @@ function writeSse(res, data) {
     }
     catch { }
 }
-const projectChatRuns = new Map();
-function serializableProjectChatRun(run) {
-    if (!run)
-        return null;
-    return {
-        id: run.id,
-        trace_id: run.trace_id,
-        project: run.project,
-        message: run.message,
-        workDir: run.workDir,
-        status: run.status,
-        checkpoint_id: run.checkpoint_id || "",
-        checkpoint: run.checkpoint || null,
-        rollback: run.rollback || null,
-        fileChanges: run.fileChanges || null,
-        workEvents: Array.isArray(run.workEvents) ? run.workEvents.slice(-80) : [],
-        parent_run_id: run.parent_run_id || "",
-        task_session_scope_id: run.task_session_scope_id || "",
-        task_agent_session_id: run.task_agent_session_id || "",
-        native_session_id: run.native_session_id || "",
-        resume_mode: run.resume_mode || "",
-        archived: !!run.archived,
-        archived_at: run.archived_at || "",
-        deleted_at: run.deleted_at || "",
-        deletion_reason: run.deletion_reason || "",
-        created_at: run.created_at,
-        updated_at: run.updated_at,
-    };
-}
-function saveProjectChatRuns() {
-    try {
-        const runs = [...projectChatRuns.values()].map(serializableProjectChatRun).filter(Boolean).slice(-200);
-        fs.mkdirSync(path.dirname(PROJECT_CHAT_RUNS_FILE), { recursive: true });
-        fs.writeFileSync(PROJECT_CHAT_RUNS_FILE, JSON.stringify({ version: 1, updated_at: new Date().toISOString(), runs }, null, 2), "utf-8");
-    }
-    catch (error) {
-        console.warn("[项目聊天运行] 持久化失败", error);
-    }
-}
-function loadProjectChatRuns() {
-    try {
-        if (!fs.existsSync(PROJECT_CHAT_RUNS_FILE))
-            return;
-        const data = JSON.parse(fs.readFileSync(PROJECT_CHAT_RUNS_FILE, "utf-8"));
-        const runs = Array.isArray(data?.runs) ? data.runs : [];
-        for (const item of runs) {
-            if (!item?.id)
-                continue;
-            projectChatRuns.set(String(item.id), { ...item, child: null });
-        }
-    }
-    catch (error) {
-        console.warn("[项目聊天运行] 读取持久化记录失败", error);
-    }
-}
-function createProjectChatRun(project, message, workDir, parentRunId = "") {
-    const now = new Date().toISOString();
-    const runId = "pchat_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
-    const traceId = "project_chat_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 10);
-    let checkpoint = null;
-    try {
-        if (workDir)
-            checkpoint = (0, execution_kernel_1.createExecutionCheckpoint)({ executionId: runId, taskId: runId, workDir, mode: "project-chat", label: `项目聊天执行：${project}` });
-    }
-    catch (error) {
-        checkpoint = { success: false, error: error?.message || String(error) };
-    }
-    const run = { id: runId, trace_id: traceId, project, message, workDir, status: "running", checkpoint_id: checkpoint?.checkpointId || checkpoint?.id || "", checkpoint, parent_run_id: parentRunId, task_session_scope_id: "", task_agent_session_id: "", native_session_id: "", resume_mode: "", created_at: now, updated_at: now, child: null, fileChanges: null, workEvents: [] };
-    projectChatRuns.set(runId, run);
-    saveProjectChatRuns();
-    return run;
-}
-loadProjectChatRuns();
-function publicProjectChatRun(run) {
-    if (!run)
-        return null;
-    return {
-        id: run.id,
-        trace_id: run.trace_id,
-        project: run.project,
-        status: run.status,
-        checkpoint_id: run.checkpoint_id || "",
-        rollback_available: !!run.checkpoint_id,
-        parent_run_id: run.parent_run_id || "",
-        task_session_scope_id: run.task_session_scope_id || "",
-        task_agent_session_id: run.task_agent_session_id || "",
-        native_session_id: run.native_session_id || "",
-        resume_mode: run.resume_mode || "",
-        archived: !!run.archived,
-        archived_at: run.archived_at || "",
-        deleted_at: run.deleted_at || "",
-        deletion_reason: run.deletion_reason || "",
-        created_at: run.created_at,
-        updated_at: run.updated_at,
-    };
-}
-function archiveProjectChatRun(id, reason = "用户删除项目执行记录") {
-    const run = projectChatRuns.get(String(id || "").trim());
-    if (!run)
-        return null;
-    if (run.child) {
-        try {
-            (0, execution_kernel_1.terminateManagedChildProcess)(run.child);
-        }
-        catch {
-            try {
-                run.child.kill();
-            }
-            catch { }
-        }
-    }
-    run.status = run.status === "running" ? "cancelled" : (run.status || "archived");
-    run.archived = true;
-    run.archived_at = run.archived_at || new Date().toISOString();
-    run.deleted_at = new Date().toISOString();
-    run.deletion_reason = reason;
-    run.updated_at = new Date().toISOString();
-    saveProjectChatRuns();
-    return run;
-}
-function purgeProjectChatRun(id) {
-    const runId = String(id || "").trim();
-    const run = projectChatRuns.get(runId);
-    if (!run)
-        return null;
-    if (run.child) {
-        try {
-            (0, execution_kernel_1.terminateManagedChildProcess)(run.child);
-        }
-        catch {
-            try {
-                run.child.kill();
-            }
-            catch { }
-        }
-    }
-    const cleanupIds = Array.from(new Set([
-        run.id,
-        run.task_session_scope_id,
-        run.task_agent_session_id,
-    ].map(value => String(value || "").trim()).filter(Boolean)));
-    const cleanup = { sessions: 0, executions: 0, checkpoints: 0, outputs: 0 };
-    for (const cleanupId of cleanupIds) {
-        try {
-            cleanup.sessions += (0, task_agent_sessions_1.purgeTaskAgentSessions)(cleanupId).length;
-        }
-        catch { }
-        try {
-            const artifacts = (0, execution_kernel_1.purgeTaskExecutionArtifacts)(cleanupId);
-            cleanup.executions += Number(artifacts.executions || 0);
-            cleanup.checkpoints += Number(artifacts.checkpoints || 0);
-            cleanup.outputs += Number(artifacts.outputs || 0);
-        }
-        catch { }
-    }
-    projectChatRuns.delete(runId);
-    saveProjectChatRuns();
-    return { run, cleanup };
-}
-function readJsonSafe(file, fallback = null) {
-    try {
-        if (!fs.existsSync(file))
-            return fallback;
-        return JSON.parse(fs.readFileSync(file, "utf-8"));
-    }
-    catch {
-        return fallback;
-    }
-}
-function countFilesAndBytes(dir) {
-    const result = { files: 0, bytes: 0 };
-    const walk = (target) => {
-        if (!fs.existsSync(target))
-            return;
-        const stat = fs.statSync(target);
-        if (stat.isFile()) {
-            result.files += 1;
-            result.bytes += stat.size;
-            return;
-        }
-        if (!stat.isDirectory())
-            return;
-        for (const name of fs.readdirSync(target))
-            walk(path.join(target, name));
-    };
-    try {
-        walk(dir);
-    }
-    catch { }
-    return result;
-}
-function getCleanupSummary() {
-    const tasks = (0, db_1.loadTasks)();
-    const cronJobs = (0, db_1.loadCronJobs)();
-    const projectRuns = [...projectChatRuns.values()];
-    const groups = readJsonSafe(utils_1.GROUPS_FILE, []);
-    const projectSessionsRoot = path.join(utils_1.CCM_DIR, "web-sessions");
-    const globalHistory = readJsonSafe(path.join(utils_1.CCM_DIR, "global-agent-history.json"), { sessions: [] });
-    const kernelRoot = path.join(utils_1.CCM_DIR, "execution-kernel");
-    const executions = countFilesAndBytes(path.join(kernelRoot, "executions"));
-    const checkpoints = countFilesAndBytes(path.join(kernelRoot, "checkpoints"));
-    const outputs = countFilesAndBytes(path.join(kernelRoot, "outputs"));
-    const projectSessions = countFilesAndBytes(projectSessionsRoot);
-    const groupMessages = Array.isArray(groups) ? groups.map((group) => {
-        const file = path.join(utils_1.GROUP_MESSAGES_DIR, `${group.id}.json`);
-        const messages = readJsonSafe(file, []);
-        return { id: group.id, name: group.name || group.id, messages: Array.isArray(messages) ? messages.length : 0 };
-    }) : [];
-    const detailRows = {
-        tasks: tasks.slice(-200).reverse().map((task) => ({
-            id: task.id,
-            title: task.title || task.description || task.message || task.goal || "未命名任务",
-            status: task.status || "",
-            project: task.target_project || task.project || task.group_id || "",
-            updated_at: task.updated_at || task.created_at || "",
-            archived: !!(task.archived || task.deleted_at || task.status === "archived"),
-        })),
-        cron: cronJobs.slice(-200).reverse().map((job) => ({
-            id: job.id,
-            title: job.name || job.title || "未命名定时任务",
-            status: job.archived || job.deleted_at ? "archived" : job.enabled === false ? "disabled" : "enabled",
-            target: job.target_type === "project" ? job.project : (job.group_id || job.target || ""),
-            schedule: job.schedule || job.cron || "",
-            updated_at: job.updated_at || job.created_at || "",
-            archived: !!(job.archived || job.deleted_at),
-        })),
-        project_runs: projectRuns.slice(-200).reverse().map((run) => ({
-            id: run.id,
-            title: run.message || run.project || "项目运行",
-            status: run.status || "",
-            project: run.project || "",
-            trace_id: run.trace_id || "",
-            native_session_id: run.native_session_id || "",
-            updated_at: run.updated_at || run.created_at || "",
-            archived: !!(run.archived || run.deleted_at || run.status === "archived"),
-        })),
-        project_sessions: (() => {
-            const rows = [];
-            try {
-                if (fs.existsSync(projectSessionsRoot)) {
-                    for (const project of fs.readdirSync(projectSessionsRoot)) {
-                        const dir = path.join(projectSessionsRoot, project);
-                        if (!fs.statSync(dir).isDirectory())
-                            continue;
-                        for (const file of fs.readdirSync(dir).filter(name => name.endsWith(".json"))) {
-                            const data = readJsonSafe(path.join(dir, file), {});
-                            rows.push({
-                                id: data.id || file.replace(/\.json$/, ""),
-                                title: data.name || data.title || file.replace(/\.json$/, ""),
-                                project,
-                                messages: Array.isArray(data.history) ? data.history.length : 0,
-                                updated_at: data.updated_at || data.created_at || "",
-                            });
-                        }
-                    }
-                }
-            }
-            catch { }
-            return rows.slice(-200).reverse();
-        })(),
-        group_messages: groupMessages.map((group) => ({
-            id: group.id,
-            title: group.name,
-            messages: group.messages,
-            status: group.messages > 0 ? "has_messages" : "empty",
-        })),
-        global_sessions: (Array.isArray(globalHistory.sessions) ? globalHistory.sessions : []).slice(-200).reverse().map((session) => ({
-            id: session.id,
-            title: session.name || session.title || session.id || "全局会话",
-            messages: Array.isArray(session.messages) ? session.messages.length : 0,
-            updated_at: session.updatedAt || session.updated_at || session.createdAt || "",
-        })),
-        execution_artifacts: [
-            { id: "executions", title: "execution records", files: executions.files, bytes: executions.bytes },
-            { id: "checkpoints", title: "checkpoints", files: checkpoints.files, bytes: checkpoints.bytes },
-            { id: "outputs", title: "outputs", files: outputs.files, bytes: outputs.bytes },
-        ],
-    };
-    return {
-        success: true,
-        updated_at: new Date().toISOString(),
-        cards: [
-            { id: "tasks", title: "任务", count: tasks.length, detail: `已归档 ${tasks.filter((t) => t.archived || t.deleted_at || t.status === "archived").length}；失败 ${tasks.filter((t) => t.status === "failed").length}` },
-            { id: "cron", title: "定时任务", count: cronJobs.length, detail: `已归档 ${cronJobs.filter((j) => j.archived || j.deleted_at).length}` },
-            { id: "project_runs", title: "项目运行记录", count: projectRuns.length, detail: `已归档 ${projectRuns.filter((r) => r.archived || r.deleted_at || r.status === "archived").length}；失败 ${projectRuns.filter((r) => r.status === "failed").length}` },
-            { id: "project_sessions", title: "项目会话文件", count: projectSessions.files, detail: `${Math.round(projectSessions.bytes / 1024)} KB` },
-            { id: "group_messages", title: "群聊消息", count: groupMessages.reduce((sum, item) => sum + item.messages, 0), detail: `${groupMessages.length} 个群聊` },
-            { id: "global_sessions", title: "全局 Agent 会话", count: Array.isArray(globalHistory.sessions) ? globalHistory.sessions.length : 0, detail: "聊天历史" },
-            { id: "execution_artifacts", title: "执行产物", count: executions.files + checkpoints.files + outputs.files, detail: `execution ${executions.files}；checkpoint ${checkpoints.files}；output ${outputs.files}` },
-        ],
-        details: {
-            tasks: { total: tasks.length, archived: tasks.filter((t) => t.archived || t.deleted_at || t.status === "archived").length, failed: tasks.filter((t) => t.status === "failed").length, done: tasks.filter((t) => t.status === "done").length },
-            cron: { total: cronJobs.length, archived: cronJobs.filter((j) => j.archived || j.deleted_at).length, disabled: cronJobs.filter((j) => j.enabled === false).length },
-            project_runs: { total: projectRuns.length, archived: projectRuns.filter((r) => r.archived || r.deleted_at || r.status === "archived").length, failed: projectRuns.filter((r) => r.status === "failed").length },
-            group_messages: groupMessages,
-            project_sessions: projectSessions,
-            execution_artifacts: { executions, checkpoints, outputs },
-        },
-        rows: detailRows,
-        actions: [
-            { id: "purge_archived_tasks", label: "永久清除已归档任务", risk: "high", target_count: tasks.filter((t) => t.archived || t.deleted_at || t.status === "archived").length },
-            { id: "purge_archived_cron", label: "永久清除已归档定时任务", risk: "high", target_count: cronJobs.filter((j) => j.archived || j.deleted_at).length },
-            { id: "purge_archived_project_runs", label: "永久清除已归档项目运行", risk: "high", target_count: projectRuns.filter((r) => r.archived || r.deleted_at || r.status === "archived").length },
-            { id: "archive_failed_project_runs", label: "归档失败项目运行", risk: "medium", target_count: projectRuns.filter((r) => r.status === "failed").length },
-        ],
-    };
-}
-function previewCleanupAction(action) {
-    const summary = getCleanupSummary();
-    const found = (summary.actions || []).find((item) => item.id === action);
-    if (!found)
-        return { success: false, error: "不支持的清理动作" };
-    return {
-        success: true,
-        action: found,
-        preview: {
-            will_affect: found.target_count,
-            risk: found.risk,
-            irreversible: String(found.id).startsWith("purge_"),
-            note: found.risk === "high" ? "永久清除不可撤销，请确认已不需要复盘记录。" : "归档后仍可在对应管理页查看或继续清理。",
-        },
-    };
-}
-function runCleanupAction(action) {
-    const now = new Date().toISOString();
-    if (action === "archive_failed_project_runs") {
-        let archived = 0;
-        for (const run of [...projectChatRuns.values()]) {
-            if (run.status !== "failed")
-                continue;
-            archiveProjectChatRun(run.id, "清理中心归档失败项目运行");
-            archived += 1;
-        }
-        return { success: true, action, archived };
-    }
-    if (action === "purge_archived_project_runs") {
-        let purged = 0;
-        const cleanup = { sessions: 0, executions: 0, checkpoints: 0, outputs: 0 };
-        for (const run of [...projectChatRuns.values()]) {
-            if (!(run.archived || run.deleted_at || run.status === "archived"))
-                continue;
-            const result = purgeProjectChatRun(run.id);
-            if (!result)
-                continue;
-            purged += 1;
-            cleanup.sessions += result.cleanup.sessions || 0;
-            cleanup.executions += result.cleanup.executions || 0;
-            cleanup.checkpoints += result.cleanup.checkpoints || 0;
-            cleanup.outputs += result.cleanup.outputs || 0;
-        }
-        return { success: true, action, purged, cleanup };
-    }
-    if (action === "purge_archived_tasks") {
-        const tasks = (0, db_1.loadTasks)();
-        const keep = [];
-        const cleanup = { sessions: 0, executions: 0, checkpoints: 0, outputs: 0 };
-        let purged = 0;
-        for (const task of tasks) {
-            if (!(task.archived || task.deleted_at || task.status === "archived")) {
-                keep.push(task);
-                continue;
-            }
-            purged += 1;
-            try {
-                cleanup.sessions += (0, task_agent_sessions_1.purgeTaskAgentSessions)(task.id).length;
-            }
-            catch { }
-            try {
-                const artifacts = (0, execution_kernel_1.purgeTaskExecutionArtifacts)(task.id);
-                cleanup.executions += artifacts.executions || 0;
-                cleanup.checkpoints += artifacts.checkpoints || 0;
-                cleanup.outputs += artifacts.outputs || 0;
-            }
-            catch { }
-        }
-        (0, db_1.saveTasks)(keep);
-        return { success: true, action, purged, cleanup, updated_at: now };
-    }
-    if (action === "purge_archived_cron") {
-        const jobs = (0, db_1.loadCronJobs)();
-        const keep = jobs.filter((job) => !(job.archived || job.deleted_at));
-        (0, db_1.saveCronJobs)(keep);
-        return { success: true, action, purged: jobs.length - keep.length, updated_at: now };
-    }
-    return { success: false, error: "不支持的清理动作" };
-}
+(0, chat_runs_1.loadProjectChatRuns)();
 function bindProjectRunAgentSession(projectRun, projectName, agentType) {
-    const parentRun = projectRun?.parent_run_id ? projectChatRuns.get(projectRun.parent_run_id) : null;
+    const parentRun = projectRun?.parent_run_id ? chat_runs_1.projectChatRuns.get(projectRun.parent_run_id) : null;
     const taskSessionScopeId = String(parentRun?.task_session_scope_id || parentRun?.parent_run_id || projectRun?.parent_run_id || projectRun?.id || "");
-    const session = (0, task_agent_sessions_1.openTaskAgentSession)({
+    const session = (0, agent_sessions_1.openTaskAgentSession)({
         scopeId: taskSessionScopeId,
         taskId: taskSessionScopeId,
         groupId: "project-chat",
@@ -510,8 +126,8 @@ function bindProjectRunAgentSession(projectRun, projectName, agentType) {
     projectRun.task_agent_session_id = session.id;
     projectRun.native_session_id = session.nativeSessionId || "";
     projectRun.resume_mode = session.resumeMode || "";
-    saveProjectChatRuns();
-    return { session, options: (0, task_agent_sessions_1.getTaskAgentSessionOptions)(session) };
+    (0, chat_runs_1.saveProjectChatRuns)();
+    return { session, options: (0, agent_sessions_1.getTaskAgentSessionOptions)(session) };
 }
 function broadcastPetSpeech(agent, payload = {}) {
     const text = payload.text == null ? "" : String(payload.text);
@@ -1066,7 +682,7 @@ function createAgentRunnerRequest(projectName, message, workDir, agentType, time
         id,
         projectName,
         workDir,
-        agentType: (0, agent_runtime_1.normalizeAgentRuntimeId)(agentType || "claudecode"),
+        agentType: (0, runtime_1.normalizeAgentRuntimeId)(agentType || "claudecode"),
         timeoutMs,
         allowedTools,
         mcpConfigPath,
@@ -1104,7 +720,7 @@ async function callAgentViaExternalRunner(projectName, message, workDir, agentTy
         (0, execution_kernel_1.registerExternalRunnerRequest)(executionInfo.executionId, request.id);
     const result = await waitForAgentRunnerResult(request.resultFile, timeoutMs);
     if (!result?.success) {
-        const label = result?.command || (0, agent_runtime_1.getAgentCommandLabel)(agentType);
+        const label = result?.command || (0, runtime_1.getAgentCommandLabel)(agentType);
         const exitText = result?.exitCode === undefined || result?.exitCode === null ? "" : `，exitCode=${result.exitCode}`;
         throw new Error(`[${projectName}] 外部 Agent Runner 执行 ${label} 失败${exitText}：${result?.error || result?.output || "未知错误"}`);
     }
@@ -1137,7 +753,7 @@ async function callAgent(projectName, message, workDir, agentType, timeoutMs, wo
         fs.mkdirSync(utils_1.UPLOAD_DIR, { recursive: true });
     }
     fs.writeFileSync(tmpMsg, message, "utf-8");
-    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: workspaceTarget?.mcpConfigPath, ...(workspaceTarget?.agentSession || {}) });
+    const cmd = (0, runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: workspaceTarget?.mcpConfigPath, ...(workspaceTarget?.agentSession || {}) });
     const taskId = String(workspaceTarget?.taskId || workspaceTarget?.executionId || `standalone-${projectName}-${Date.now()}`);
     const executionId = String(workspaceTarget?.executionId || workspaceTarget?.taskId || "");
     try {
@@ -1152,14 +768,14 @@ async function callAgent(projectName, message, workDir, agentType, timeoutMs, wo
             project: projectName,
             agentType,
             source: workspaceTarget?.probe ? "agent-probe" : "project-agent",
-            commandLabel: (0, agent_runtime_1.getAgentCommandLabel)(agentType),
+            commandLabel: (0, runtime_1.getAgentCommandLabel)(agentType),
             title: String(workspaceTarget?.title || message || "").slice(0, 120),
         });
         try {
             fs.unlinkSync(tmpMsg);
         }
         catch { }
-        const normalized = (0, agent_runtime_1.normalizeAgentCommandOutput)(agentType, managed.stdout);
+        const normalized = (0, runtime_1.normalizeAgentCommandOutput)(agentType, managed.stdout);
         const bounded = (0, execution_kernel_1.persistBoundedOutput)(taskId, normalized.output, Number(workspaceTarget?.maxContextOutputBytes || 256 * 1024));
         let output = await appendToolResults(bounded.content, workspaceTarget?.allowedTools);
         if (!/CCM_AGENT_PROBE_OK|执行通道健康探针/i.test(message)) {
@@ -1231,7 +847,7 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
         fs.mkdirSync(utils_1.UPLOAD_DIR, { recursive: true });
     }
     fs.writeFileSync(tmpMsg, message, "utf-8");
-    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: options.mcpConfigPath, ...(options.agentSession || {}) });
+    const cmd = (0, runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: options.mcpConfigPath, ...(options.agentSession || {}) });
     const taskId = String(options.taskId || options.executionId || `standalone-${projectName}-${Date.now()}`);
     const executionId = String(options.executionId || options.taskId || "");
     const streamRes = options.res;
@@ -1266,7 +882,7 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
                 source: options.probe ? "agent-probe" : "group-agent",
                 cwd: safeCwd,
                 timeoutMs: options.timeoutMs || 300000,
-                commandLabel: (0, agent_runtime_1.getAgentCommandLabel)(agentType),
+                commandLabel: (0, runtime_1.getAgentCommandLabel)(agentType),
                 title: String(options.title || message || "").slice(0, 120),
             });
         }
@@ -1350,7 +966,7 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             }
             catch { }
             let finalText = text || output.trim();
-            const normalized = isError ? { output: finalText, sessionId: "" } : (0, agent_runtime_1.normalizeAgentCommandOutput)(agentType, finalText);
+            const normalized = isError ? { output: finalText, sessionId: "" } : (0, runtime_1.normalizeAgentCommandOutput)(agentType, finalText);
             finalText = normalized.output;
             finalText = (0, execution_kernel_1.persistBoundedOutput)(taskId, finalText, Number(options.maxContextOutputBytes || 256 * 1024)).content;
             if (!isError) {
@@ -1383,7 +999,7 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
             if (!text)
                 return;
             output += text;
-            const jsonSessionStream = ["codex", "cursor"].includes((0, agent_runtime_1.normalizeAgentRuntimeId)(agentType)) && !!options.agentSession?.persistSession;
+            const jsonSessionStream = ["codex", "cursor"].includes((0, runtime_1.normalizeAgentRuntimeId)(agentType)) && !!options.agentSession?.persistSession;
             if (!jsonSessionStream) {
                 pushWorkEvent("output", text);
                 writeSse(streamRes, { type: "chunk", agent: projectName, text });
@@ -1412,17 +1028,17 @@ function callAgentForGroupStream(projectName, message, workDir, agentType, optio
 function callAgentStream(projectName, message, workDir, agentType, res, options = {}) {
     const startedAt = Date.now();
     const changeSnapshot = workDir ? (0, utils_1.createFileChangeSnapshot)(workDir) : null;
-    const projectRun = createProjectChatRun(projectName, options.userMessage || message, workDir, String(options.parentRunId || options.parent_run_id || ""));
+    const projectRun = (0, chat_runs_1.createProjectChatRun)(projectName, options.userMessage || message, workDir, String(options.parentRunId || options.parent_run_id || ""));
     const { session: taskAgentSession, options: taskAgentSessionOptions } = bindProjectRunAgentSession(projectRun, projectName, agentType);
     const safeCwd = (workDir || process.cwd()).replace(/\\/g, "/");
     const tmpMsg = path.join(utils_1.UPLOAD_DIR, `_msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.txt`);
-    const executionBrief = (0, project_memory_1.buildProjectExecutionBrief)(projectName, options.userMessage || message, {
+    const executionBrief = (0, memory_1.buildProjectExecutionBrief)(projectName, options.userMessage || message, {
         workDir,
         query: options.userMessage || message,
         verificationHints: getProjectVerificationCommandsForRunner(projectName),
     });
     fs.writeFileSync(tmpMsg, executionBrief, "utf-8");
-    const cmd = (0, agent_runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: options.mcpConfigPath, ...taskAgentSessionOptions });
+    const cmd = (0, runtime_1.buildAgentCommand)(agentType, tmpMsg, { mcpConfigPath: options.mcpConfigPath, ...taskAgentSessionOptions });
     const send = (data) => writeSse(res, data);
     const workEvents = Array.isArray(options.initialWorkEvents) ? options.initialWorkEvents.slice(-20) : [];
     const pushProjectWorkEvent = (kind, text, extra = {}) => {
@@ -1450,7 +1066,7 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
     });
     if (typeof res.flushHeaders === "function")
         res.flushHeaders();
-    send({ type: "task_runtime", run: publicProjectChatRun(projectRun), taskExperience: {
+    send({ type: "task_runtime", run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: {
             task_id: projectRun.id,
             trace_id: projectRun.trace_id,
             title: String(options.userMessage || "项目 Agent 执行").slice(0, 90),
@@ -1475,12 +1091,12 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
         source: "project-chat",
         cwd: safeCwd,
         timeoutMs: 300000,
-        commandLabel: (0, agent_runtime_1.getAgentCommandLabel)(agentType),
+        commandLabel: (0, runtime_1.getAgentCommandLabel)(agentType),
         title: String(options.userMessage || message || "").slice(0, 120),
     });
     projectRun.child = child;
     projectRun.updated_at = new Date().toISOString();
-    saveProjectChatRuns();
+    (0, chat_runs_1.saveProjectChatRuns)();
     // 关闭 stdin（已通过临时文件传入）
     child.stdin.end();
     let fullOutput = "";
@@ -1488,7 +1104,7 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
     let finished = false;
     let timeoutTimer = null;
     let lastStderrStatusAt = 0;
-    const jsonSessionStream = ["codex", "cursor"].includes((0, agent_runtime_1.normalizeAgentRuntimeId)(agentType)) && !!taskAgentSessionOptions.persistSession;
+    const jsonSessionStream = ["codex", "cursor"].includes((0, runtime_1.normalizeAgentRuntimeId)(agentType)) && !!taskAgentSessionOptions.persistSession;
     const heartbeatTimer = setInterval(() => {
         if (!res.writableEnded && !res.destroyed) {
             try {
@@ -1532,11 +1148,11 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
                 fs.unlinkSync(tmpMsg);
             }
             catch { }
-            const normalized = (0, agent_runtime_1.normalizeAgentCommandOutput)(agentType, fullOutput.trim());
-            const nativeFailure = (0, agent_runtime_1.detectAgentCommandFailure)(agentType, fullOutput.trim(), code, stderrOutput);
+            const normalized = (0, runtime_1.normalizeAgentCommandOutput)(agentType, fullOutput.trim());
+            const nativeFailure = (0, runtime_1.detectAgentCommandFailure)(agentType, fullOutput.trim(), code, stderrOutput);
             let displayOutput = normalized.output || fullOutput.trim();
             if (nativeFailure.failed) {
-                const failedSession = (0, task_agent_sessions_1.recordTaskAgentSessionTurn)(taskAgentSession.id, { nativeSessionId: normalized.sessionId, success: false, error: nativeFailure.message }) || taskAgentSession;
+                const failedSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(taskAgentSession.id, { nativeSessionId: normalized.sessionId, success: false, error: nativeFailure.message }) || taskAgentSession;
                 projectRun.native_session_id = failedSession.nativeSessionId || normalized.sessionId || projectRun.native_session_id || "";
                 projectRun.resume_mode = failedSession.resumeMode || projectRun.resume_mode || "";
                 if (jsonSessionStream && displayOutput) {
@@ -1548,7 +1164,7 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
                 projectRun.fileChanges = fileChanges;
                 projectRun.workEvents = workEvents;
                 projectRun.updated_at = new Date().toISOString();
-                saveProjectChatRuns();
+                (0, chat_runs_1.saveProjectChatRuns)();
                 (0, db_1.recordMetric)(projectName, {
                     success: false,
                     durationMs: Date.now() - startedAt,
@@ -1556,7 +1172,7 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
                 });
                 setAgentActivity(projectName, "error", "执行失败");
                 pushProjectWorkEvent("error", nativeFailure.message || "Agent 执行失败", { final: true, fileChanges });
-                send({ type: "error", text: nativeFailure.message || "Agent 执行失败", fileChanges, workEvents, run: publicProjectChatRun(projectRun), taskExperience: {
+                send({ type: "error", text: nativeFailure.message || "Agent 执行失败", fileChanges, workEvents, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: {
                         task_id: projectRun.id,
                         trace_id: projectRun.trace_id,
                         title: String(options.userMessage || "项目 Agent 执行").slice(0, 90),
@@ -1570,7 +1186,7 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
                 res.end();
                 return;
             }
-            const updatedSession = (0, task_agent_sessions_1.recordTaskAgentSessionTurn)(taskAgentSession.id, { nativeSessionId: normalized.sessionId, success: true }) || taskAgentSession;
+            const updatedSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(taskAgentSession.id, { nativeSessionId: normalized.sessionId, success: true }) || taskAgentSession;
             projectRun.native_session_id = updatedSession.nativeSessionId || normalized.sessionId || projectRun.native_session_id || "";
             projectRun.resume_mode = updatedSession.resumeMode || projectRun.resume_mode || "";
             if (jsonSessionStream && displayOutput) {
@@ -1590,7 +1206,7 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
             projectRun.fileChanges = fileChanges;
             projectRun.workEvents = workEvents;
             projectRun.updated_at = new Date().toISOString();
-            saveProjectChatRuns();
+            (0, chat_runs_1.saveProjectChatRuns)();
             (0, db_1.recordMetric)(projectName, {
                 success: true,
                 durationMs: Date.now() - startedAt,
@@ -1599,7 +1215,7 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
             setAgentActivity(projectName, "happy", "任务完成");
             setTimeout(() => setAgentActivity(projectName, "idle", "空闲"), 10000);
             pushProjectWorkEvent("done", "执行完成", { final: true, fileChanges });
-            send({ type: "done", fileChanges, workEvents, run: publicProjectChatRun(projectRun), taskExperience: {
+            send({ type: "done", fileChanges, workEvents, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: {
                     task_id: projectRun.id,
                     trace_id: projectRun.trace_id,
                     title: String(options.userMessage || "项目 Agent 执行").slice(0, 90),
@@ -1613,14 +1229,14 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
             res.end();
         })().catch((err) => {
             pushProjectWorkEvent("error", err.message, { final: true });
-            const failedSession = (0, task_agent_sessions_1.recordTaskAgentSessionTurn)(taskAgentSession.id, { success: false, error: err.message }) || taskAgentSession;
+            const failedSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(taskAgentSession.id, { success: false, error: err.message }) || taskAgentSession;
             projectRun.status = "failed";
             projectRun.workEvents = workEvents;
             projectRun.native_session_id = failedSession.nativeSessionId || projectRun.native_session_id || "";
             projectRun.resume_mode = failedSession.resumeMode || projectRun.resume_mode || "";
             projectRun.updated_at = new Date().toISOString();
-            saveProjectChatRuns();
-            send({ type: "error", text: err.message, workEvents, run: publicProjectChatRun(projectRun), taskExperience: {
+            (0, chat_runs_1.saveProjectChatRuns)();
+            send({ type: "error", text: err.message, workEvents, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: {
                     task_id: projectRun.id,
                     trace_id: projectRun.trace_id,
                     title: String(options.userMessage || "项目 Agent 执行").slice(0, 90),
@@ -1650,14 +1266,14 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
         }
         catch { }
         pushProjectWorkEvent("error", err.message, { final: true });
-        const failedSession = (0, task_agent_sessions_1.recordTaskAgentSessionTurn)(taskAgentSession.id, { success: false, error: err.message }) || taskAgentSession;
+        const failedSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(taskAgentSession.id, { success: false, error: err.message }) || taskAgentSession;
         projectRun.status = "failed";
         projectRun.workEvents = workEvents;
         projectRun.native_session_id = failedSession.nativeSessionId || projectRun.native_session_id || "";
         projectRun.resume_mode = failedSession.resumeMode || projectRun.resume_mode || "";
         projectRun.updated_at = new Date().toISOString();
-        saveProjectChatRuns();
-        send({ type: "error", text: err.message, workEvents, run: publicProjectChatRun(projectRun), taskExperience: {
+        (0, chat_runs_1.saveProjectChatRuns)();
+        send({ type: "error", text: err.message, workEvents, run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: {
                 task_id: projectRun.id,
                 trace_id: projectRun.trace_id,
                 title: String(options.userMessage || "项目 Agent 执行").slice(0, 90),
@@ -1692,13 +1308,13 @@ function callAgentStream(projectName, message, workDir, agentType, res, options 
             fs.unlinkSync(tmpMsg);
         }
         catch { }
-        const failedSession = (0, task_agent_sessions_1.recordTaskAgentSessionTurn)(taskAgentSession.id, { success: false, error: "Agent 响应超时" }) || taskAgentSession;
+        const failedSession = (0, agent_sessions_1.recordTaskAgentSessionTurn)(taskAgentSession.id, { success: false, error: "Agent 响应超时" }) || taskAgentSession;
         projectRun.status = "failed";
         projectRun.native_session_id = failedSession.nativeSessionId || projectRun.native_session_id || "";
         projectRun.resume_mode = failedSession.resumeMode || projectRun.resume_mode || "";
         projectRun.updated_at = new Date().toISOString();
-        saveProjectChatRuns();
-        send({ type: "error", text: "Agent 响应超时", run: publicProjectChatRun(projectRun), taskExperience: {
+        (0, chat_runs_1.saveProjectChatRuns)();
+        send({ type: "error", text: "Agent 响应超时", run: (0, chat_runs_1.publicProjectChatRun)(projectRun), taskExperience: {
                 task_id: projectRun.id,
                 trace_id: projectRun.trace_id,
                 title: String(options.userMessage || "项目 Agent 执行").slice(0, 90),
@@ -1915,15 +1531,15 @@ function handleRequest(req, res) {
             fs.writeFileSync(path.join(dir, "tracked.txt"), "before\n", "utf-8");
             (0, child_process_1.execSync)("git add tracked.txt", { cwd: dir, stdio: "ignore" });
             (0, child_process_1.execSync)("git -c user.name=ccm -c user.email=ccm@example.local commit -m init", { cwd: dir, stdio: "ignore" });
-            const run = createProjectChatRun("self-test-project", "修改 tracked.txt", dir);
+            const run = (0, chat_runs_1.createProjectChatRun)("self-test-project", "修改 tracked.txt", dir);
             runForCleanup = run;
             const firstSession = bindProjectRunAgentSession(run, "self-test-project", "claudecode").session;
-            const afterFirstTurn = (0, task_agent_sessions_1.recordTaskAgentSessionTurn)(firstSession.id, { nativeSessionId: firstSession.nativeSessionId, success: true }) || firstSession;
-            const continuationRun = createProjectChatRun("self-test-project", "继续修改 tracked.txt", dir, run.id);
+            const afterFirstTurn = (0, agent_sessions_1.recordTaskAgentSessionTurn)(firstSession.id, { nativeSessionId: firstSession.nativeSessionId, success: true }) || firstSession;
+            const continuationRun = (0, chat_runs_1.createProjectChatRun)("self-test-project", "继续修改 tracked.txt", dir, run.id);
             continuationRunForCleanup = continuationRun;
             const continuationSession = bindProjectRunAgentSession(continuationRun, "self-test-project", "claudecode").session;
             if (!run.checkpoint_id)
-                return (0, utils_1.sendJson)(res, { success: false, error: run.checkpoint?.error || "未创建检查点", run: publicProjectChatRun(run), checkpoint: run.checkpoint }, 500);
+                return (0, utils_1.sendJson)(res, { success: false, error: run.checkpoint?.error || "未创建检查点", run: (0, chat_runs_1.publicProjectChatRun)(run), checkpoint: run.checkpoint }, 500);
             fs.writeFileSync(path.join(dir, "tracked.txt"), "after\n", "utf-8");
             const beforeRollback = fs.readFileSync(path.join(dir, "tracked.txt"), "utf-8");
             const rollback = (0, execution_kernel_1.rollbackExecutionCheckpoint)(run.checkpoint_id, "project run self-test", { allowShared: true });
@@ -1931,7 +1547,7 @@ function handleRequest(req, res) {
             const normalizedAfter = afterRollback.replace(/\r\n/g, "\n");
             let persistedBeforeCleanup = false;
             try {
-                const persisted = JSON.parse(fs.readFileSync(PROJECT_CHAT_RUNS_FILE, "utf-8"));
+                const persisted = JSON.parse(fs.readFileSync(chat_runs_1.PROJECT_CHAT_RUNS_FILE, "utf-8"));
                 persistedBeforeCleanup = (persisted.runs || []).some((item) => item.id === run.id && item.checkpoint_id === run.checkpoint_id);
             }
             catch { }
@@ -1939,7 +1555,7 @@ function handleRequest(req, res) {
                 && continuationRun.task_agent_session_id === run.task_agent_session_id
                 && continuationSession.id === firstSession.id
                 && Number(continuationSession.turnCount || 0) >= Number(afterFirstTurn.turnCount || 0);
-            (0, utils_1.sendJson)(res, { success: rollback.success && beforeRollback === "after\n" && normalizedAfter === "before\n" && persistedBeforeCleanup && continuationReusesSession, run: publicProjectChatRun(run), continuationRun: publicProjectChatRun(continuationRun), rollback, checks: { hasRunId: !!run.id, hasTrace: !!run.trace_id, hasCheckpoint: !!run.checkpoint_id, rollbackRestored: normalizedAfter === "before\n", persistedRunRecord: persistedBeforeCleanup, continuationReusesTaskAgentSession: continuationReusesSession }, contents: { beforeRollback, afterRollback } });
+            (0, utils_1.sendJson)(res, { success: rollback.success && beforeRollback === "after\n" && normalizedAfter === "before\n" && persistedBeforeCleanup && continuationReusesSession, run: (0, chat_runs_1.publicProjectChatRun)(run), continuationRun: (0, chat_runs_1.publicProjectChatRun)(continuationRun), rollback, checks: { hasRunId: !!run.id, hasTrace: !!run.trace_id, hasCheckpoint: !!run.checkpoint_id, rollbackRestored: normalizedAfter === "before\n", persistedRunRecord: persistedBeforeCleanup, continuationReusesTaskAgentSession: continuationReusesSession }, contents: { beforeRollback, afterRollback } });
         }
         catch (error) {
             (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 500);
@@ -1952,12 +1568,12 @@ function handleRequest(req, res) {
                 catch { }
             }
             if (runForCleanup?.id) {
-                projectChatRuns.delete(runForCleanup.id);
+                chat_runs_1.projectChatRuns.delete(runForCleanup.id);
             }
             if (continuationRunForCleanup?.id)
-                projectChatRuns.delete(continuationRunForCleanup.id);
+                chat_runs_1.projectChatRuns.delete(continuationRunForCleanup.id);
             if (runForCleanup?.id || continuationRunForCleanup?.id)
-                saveProjectChatRuns();
+                (0, chat_runs_1.saveProjectChatRuns)();
             try {
                 fs.rmSync(dir, { recursive: true, force: true });
             }
@@ -1967,10 +1583,10 @@ function handleRequest(req, res) {
     }
     if (pathname === "/api/project-runs/get" && req.method === "GET") {
         const id = String(parsed.query.id || parsed.query.run_id || "").trim();
-        const run = id ? projectChatRuns.get(id) : null;
+        const run = id ? chat_runs_1.projectChatRuns.get(id) : null;
         if (!run)
             return (0, utils_1.sendJson)(res, { success: false, error: "项目执行不存在或服务已重启" }, 404);
-        return (0, utils_1.sendJson)(res, { success: true, run: publicProjectChatRun(run), fileChanges: run.fileChanges || null, workEvents: Array.isArray(run.workEvents) ? run.workEvents.slice(-80) : [] });
+        return (0, utils_1.sendJson)(res, { success: true, run: (0, chat_runs_1.publicProjectChatRun)(run), fileChanges: run.fileChanges || null, workEvents: Array.isArray(run.workEvents) ? run.workEvents.slice(-80) : [] });
     }
     if (pathname === "/api/project-runs/cancel" && req.method === "POST") {
         let body = "";
@@ -1979,7 +1595,7 @@ function handleRequest(req, res) {
             try {
                 const payload = body ? JSON.parse(body) : {};
                 const id = String(payload.id || payload.run_id || payload.task_id || "").trim();
-                const run = projectChatRuns.get(id);
+                const run = chat_runs_1.projectChatRuns.get(id);
                 if (!run)
                     return (0, utils_1.sendJson)(res, { success: false, error: "项目执行不存在或服务已重启" }, 404);
                 if (run.child) {
@@ -1995,8 +1611,8 @@ function handleRequest(req, res) {
                 }
                 run.status = "cancelled";
                 run.updated_at = new Date().toISOString();
-                saveProjectChatRuns();
-                (0, utils_1.sendJson)(res, { success: true, run: publicProjectChatRun(run) });
+                (0, chat_runs_1.saveProjectChatRuns)();
+                (0, utils_1.sendJson)(res, { success: true, run: (0, chat_runs_1.publicProjectChatRun)(run) });
             }
             catch (error) {
                 (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400);
@@ -2011,7 +1627,7 @@ function handleRequest(req, res) {
             try {
                 const payload = body ? JSON.parse(body) : {};
                 const id = String(payload.id || payload.run_id || payload.task_id || "").trim();
-                const run = projectChatRuns.get(id);
+                const run = chat_runs_1.projectChatRuns.get(id);
                 if (!run)
                     return (0, utils_1.sendJson)(res, { success: false, error: "项目执行不存在或服务已重启" }, 404);
                 if (!run.checkpoint_id)
@@ -2020,8 +1636,8 @@ function handleRequest(req, res) {
                 run.status = "reverted";
                 run.rollback = rollback;
                 run.updated_at = new Date().toISOString();
-                saveProjectChatRuns();
-                (0, utils_1.sendJson)(res, { success: true, run: publicProjectChatRun(run), rollback });
+                (0, chat_runs_1.saveProjectChatRuns)();
+                (0, utils_1.sendJson)(res, { success: true, run: (0, chat_runs_1.publicProjectChatRun)(run), rollback });
             }
             catch (error) {
                 (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400);
@@ -2036,10 +1652,10 @@ function handleRequest(req, res) {
             try {
                 const payload = body ? JSON.parse(body) : {};
                 const id = String(payload.id || payload.run_id || payload.task_id || "").trim();
-                const run = archiveProjectChatRun(id, String(payload.reason || "用户删除项目执行记录").slice(0, 500));
+                const run = (0, chat_runs_1.archiveProjectChatRun)(id, String(payload.reason || "用户删除项目执行记录").slice(0, 500));
                 if (!run)
                     return (0, utils_1.sendJson)(res, { success: false, error: "项目执行不存在或服务已重启" }, 404);
-                (0, utils_1.sendJson)(res, { success: true, archived: true, run: publicProjectChatRun(run) });
+                (0, utils_1.sendJson)(res, { success: true, archived: true, run: (0, chat_runs_1.publicProjectChatRun)(run) });
             }
             catch (error) {
                 (0, utils_1.sendJson)(res, { success: false, error: error?.message || String(error) }, 400);
@@ -2054,7 +1670,7 @@ function handleRequest(req, res) {
             try {
                 const payload = body ? JSON.parse(body) : {};
                 const id = String(payload.id || payload.run_id || payload.task_id || "").trim();
-                const result = purgeProjectChatRun(id);
+                const result = (0, chat_runs_1.purgeProjectChatRun)(id);
                 if (!result)
                     return (0, utils_1.sendJson)(res, { success: false, error: "项目执行不存在或服务已重启" }, 404);
                 (0, utils_1.sendJson)(res, { success: true, purged: true, run_id: id, cleanup: result.cleanup });
@@ -2066,7 +1682,7 @@ function handleRequest(req, res) {
         return;
     }
     if (pathname === "/api/cleanup/summary" && req.method === "GET") {
-        return (0, utils_1.sendJson)(res, getCleanupSummary());
+        return (0, utils_1.sendJson)(res, (0, cleanup_center_1.getCleanupSummary)());
     }
     if (pathname === "/api/cleanup/preview" && req.method === "POST") {
         let body = "";
@@ -2074,7 +1690,7 @@ function handleRequest(req, res) {
         req.on("end", () => {
             try {
                 const payload = body ? JSON.parse(body) : {};
-                const result = previewCleanupAction(String(payload.action || ""));
+                const result = (0, cleanup_center_1.previewCleanupAction)(String(payload.action || ""));
                 (0, utils_1.sendJson)(res, result, result.success === false ? 400 : 200);
             }
             catch (error) {
@@ -2091,7 +1707,7 @@ function handleRequest(req, res) {
                 const payload = body ? JSON.parse(body) : {};
                 if (payload.confirm !== true)
                     return (0, utils_1.sendJson)(res, { success: false, error: "缺少确认参数 confirm=true" }, 400);
-                const result = runCleanupAction(String(payload.action || ""));
+                const result = (0, cleanup_center_1.runCleanupAction)(String(payload.action || ""));
                 (0, utils_1.sendJson)(res, result, result.success === false ? 400 : 200);
             }
             catch (error) {
@@ -2116,7 +1732,7 @@ function handleRequest(req, res) {
             const info = (0, db_1.getConfigInfo)(config.path);
             const workDir = info[0]?.workDir;
             const configuredAgentType = info[0]?.agent || "claudecode";
-            const resolvedRuntime = (0, agent_runtime_1.resolveAvailableAgentRuntime)(configuredAgentType);
+            const resolvedRuntime = (0, runtime_1.resolveAvailableAgentRuntime)(configuredAgentType);
             const agentType = resolvedRuntime.selected;
             const toolContext = buildProjectToolContext(project, workDir, agentType);
             if (resolvedRuntime.switched) {
@@ -2174,7 +1790,7 @@ function handleRequest(req, res) {
             if (!fullMessage)
                 return (0, utils_1.sendJson)(res, { error: "消息不能为空" }, 400);
             const configuredAgentType = info[0]?.agent || "claudecode";
-            const resolvedRuntime = (0, agent_runtime_1.resolveAvailableAgentRuntime)(configuredAgentType);
+            const resolvedRuntime = (0, runtime_1.resolveAvailableAgentRuntime)(configuredAgentType);
             const agentType = resolvedRuntime.selected;
             const toolContext = buildProjectToolContext(project, workDir, agentType);
             const promptWithTools = `${toolContext.prompt}\n\n${fullMessage}`;

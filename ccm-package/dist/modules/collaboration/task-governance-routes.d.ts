@@ -1,0 +1,23 @@
+import type { IncomingMessage, ServerResponse } from "http";
+import type { UrlWithParsedQuery } from "url";
+type TaskGovernanceDeps = {
+    compactFormText: (value: any, fallback?: string) => string;
+    uniqueStrings: (items: any[]) => string[];
+    archiveTask: (id: string, reason?: string) => any;
+    restoreArchivedTask: (id: string) => any;
+    purgeArchivedTask: (id: string) => any;
+    removeTaskFromQueues: (taskId: string) => number;
+    updateTask: (id: string, updates: any) => any;
+    enqueueTask: (taskId: string, ctx: any) => any;
+    retryTask: (taskId: string, ctx: any, reason?: string, autoExecute?: boolean) => any;
+    retryRuntimeFailedTasks: (ctx: any, payload?: any) => any;
+    getQueueStatus: () => any;
+    getTaskWatchdogStatus: (staleMs?: number) => any;
+    runTaskWatchdog: (ctx: any) => any;
+    cleanupRuntimeDebt: (payload?: any) => any;
+    resumeTaskQueues: (ctx: any, options?: any) => any;
+    clearTaskQueues: () => void;
+    taskWatchdogStaleMs: number;
+};
+export declare function handleTaskGovernanceRoutes(req: IncomingMessage, res: ServerResponse, parsed: UrlWithParsedQuery, ctx: any, deps: TaskGovernanceDeps): boolean;
+export {};

@@ -6,18 +6,19 @@ import { globalMissionTaskCard } from '../frontend/src/utils/taskExperience.js'
 const root = process.cwd()
 const read = (path) => readFileSync(join(root, path), 'utf-8')
 
-const component = read('frontend/src/components/AgentCodeChangeDrawer.vue')
-const project = read('frontend/src/components/ProjectManager.vue')
-const group = read('frontend/src/components/GroupChat.vue')
-const global = read('frontend/src/components/GlobalAgent.vue')
-const gitModule = read('backend/modules/git.ts')
+const component = read('frontend/src/components/agents/AgentCodeChangeDrawer.vue')
+const project = read('frontend/src/components/projects/ProjectManager.vue')
+const group = read('frontend/src/components/collaboration/GroupChat.vue')
+const groupTaskActions = read('frontend/src/composables/useGroupTaskCardActions.js')
+const global = read('frontend/src/components/global/GlobalAgent.vue')
+const gitModule = read('backend/modules/tools/git.ts')
 
 const checks = {
   drawerComponentExists: component.includes('Agent 代码改动') && component.includes('完整文件') && component.includes('/api/git/diff'),
   drawerCanReadFullFile: component.includes('/api/git/file') && component.includes('file-preview'),
   projectChatUsesDrawer: project.includes("import AgentCodeChangeDrawer") && project.includes('<AgentCodeChangeDrawer') && project.includes('openCodeChangeDrawer(msg.fileChanges'),
-  groupChatUsesDrawer: group.includes("import AgentCodeChangeDrawer") && group.includes('<AgentCodeChangeDrawer') && group.includes("action.kind === 'view_changes'"),
-  groupViewChangesPrefersCode: group.includes("openCodeChangeDrawer(msg.fileChanges") && group.includes('return openPipelineViewer(msg)'),
+  groupChatUsesDrawer: group.includes("import AgentCodeChangeDrawer") && group.includes('<AgentCodeChangeDrawer') && groupTaskActions.includes("action.kind === 'view_changes'"),
+  groupViewChangesPrefersCode: groupTaskActions.includes('openCodeChangeDrawer?.(msg.fileChanges') && groupTaskActions.includes('return openPipelineViewer?.(msg)'),
   globalChatUsesDrawer: global.includes("import AgentCodeChangeDrawer") && global.includes('<AgentCodeChangeDrawer') && global.includes('openGlobalCodeChangeDrawer'),
   backendFilePreviewEndpointExists: gitModule.includes('pathname === "/api/git/file"') && gitModule.includes('非法文件路径') && gitModule.includes('readWorkingFileText'),
 }

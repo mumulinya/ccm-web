@@ -1,6 +1,6 @@
 // Toast 通知系统
 import { createApp } from 'vue'
-import Toast from '../components/Toast.vue'
+import Toast from '../components/common/Toast.vue'
 
 let toastContainer = null
 

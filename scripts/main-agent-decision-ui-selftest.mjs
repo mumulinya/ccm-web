@@ -3,20 +3,21 @@ import path from 'node:path'
 
 const root = process.cwd()
 const files = {
-  component: path.join(root, 'frontend/src/components/MainAgentDecisionCard.vue'),
-  groupChat: path.join(root, 'frontend/src/components/GroupChat.vue'),
+  component: path.join(root, 'frontend/src/components/agents/MainAgentDecisionCard.vue'),
+  groupChat: path.join(root, 'frontend/src/components/collaboration/GroupChat.vue'),
   groupMainAgentDisplay: path.join(root, 'frontend/src/composables/useMainAgentDisplay.js'),
-  agentExecution: path.join(root, 'frontend/src/components/AgentExecutionMessage.vue'),
-  agentWorkEvents: path.join(root, 'frontend/src/components/AgentWorkEventDetails.vue'),
-  groupMainAgentStatus: path.join(root, 'frontend/src/components/GroupMainAgentStatusCard.vue'),
+  agentExecution: path.join(root, 'frontend/src/components/agents/AgentExecutionMessage.vue'),
+  agentWorkEvents: path.join(root, 'frontend/src/components/agents/AgentWorkEventDetails.vue'),
+  groupMainAgentStatus: path.join(root, 'frontend/src/components/collaboration/GroupMainAgentStatusCard.vue'),
   groupTaskActions: path.join(root, 'frontend/src/composables/useGroupTaskCardActions.js'),
-  taskCard: path.join(root, 'frontend/src/components/TaskExperienceCard.vue'),
-  globalAgent: path.join(root, 'frontend/src/components/GlobalAgent.vue'),
+  taskCard: path.join(root, 'frontend/src/components/tasks/TaskExperienceCard.vue'),
+  globalAgent: path.join(root, 'frontend/src/components/global/GlobalAgent.vue'),
   agentDisplay: path.join(root, 'frontend/src/utils/agentDisplay.js'),
-  templates: path.join(root, 'frontend/src/components/Templates.vue'),
-  searchHistory: path.join(root, 'frontend/src/components/SearchHistory.vue'),
-  backend: path.join(root, 'backend/modules/collaboration.ts'),
-  backendDisplay: path.join(root, 'backend/modules/collaboration-display.ts'),
+  templates: path.join(root, 'frontend/src/components/templates/Templates.vue'),
+  searchHistory: path.join(root, 'frontend/src/components/workspace/SearchHistory.vue'),
+  backend: path.join(root, 'backend/modules/collaboration/collaboration.ts'),
+  backendDisplay: path.join(root, 'backend/modules/collaboration/display.ts'),
+  backendGroupLiveRoutes: path.join(root, 'backend/modules/collaboration/group-live-routes.ts'),
 }
 
 const read = (file) => fs.readFileSync(file, 'utf-8')
@@ -34,6 +35,7 @@ const templates = read(files.templates)
 const searchHistory = read(files.searchHistory)
 const backend = read(files.backend)
 const backendDisplay = read(files.backendDisplay)
+const backendGroupLiveRoutes = read(files.backendGroupLiveRoutes)
 
 const checks = {
   componentExists: fs.existsSync(files.component),
@@ -69,7 +71,7 @@ const checks = {
   taskCardFoldsRuntimeKernel: taskCard.includes('<details v-if="runtimeKernel"') && taskCard.includes('runtime-kernel-summary') && taskCard.includes('可展开排查'),
   taskCardUsesStreamlinedDisplay: taskCard.includes('getStreamlinedUserText') && taskCard.includes('getStreamlinedToolSummary') && taskCard.includes('technicalSections') && taskCard.includes('task-card-streamlined'),
   globalAgentUsesTechnicalSections: globalAgent.includes('runtimeDebugSections') && globalAgent.includes('getTechnicalDetailSections') && globalAgent.includes('runtime-debug-section'),
-  backendTaskCreatedCarriesDecision: backend.includes('mainAgentDecision,') && backend.includes('main_agent_decision: mainAgentDecision'),
+  backendTaskCreatedCarriesDecision: backendGroupLiveRoutes.includes('mainAgentDecision,') && backendGroupLiveRoutes.includes('main_agent_decision: mainAgentDecision'),
   backendPetLinkage: backend.includes('mainAgentPetStateFromDecision') && backend.includes('applyMainAgentDecisionPetState') && backend.includes('"global-agent"') && backend.includes('workspace-group'),
   backendBuildsUserTodoPlan: backend.includes('buildMainAgentUserPlanSteps') && backend.includes('buildUserVisiblePlanStep') && backend.includes('user_visible') && backend.includes('schema: "cc-style-todo-v2"') && backend.includes('show_current_focus: true') && backend.includes('hide_for_simple_conversation'),
   backendBuildsStreamlinedDisplay: backend.includes('buildMainAgentDisplayStream') && backendDisplay.includes('ccm-streamlined-display-v1') && backendDisplay.includes('streamlined_text') && backendDisplay.includes('streamlined_tool_use_summary') && backendDisplay.includes('tool_message_visible: false') && backendDisplay.includes('technical_details'),
@@ -80,7 +82,7 @@ const checks = {
   backendBuildsLiveTodoPlan: backend.includes('buildLiveMainAgentTodoPlan') && backend.includes('ccm-live-task-todo') && backend.includes('buildLiveMainAgentDecisionForTask'),
   backendSelftestCoversLiveTodo: backend.includes('liveTodoReviewing') && backend.includes('liveTodoReworking') && backend.includes('liveTodoCancelled'),
   backendBuildsTodoEvidenceAndActions: backend.includes('buildTodoStepEvidence') && backend.includes('buildTodoStepActions') && backend.includes('liveTodoEvidenceTraceable') && backend.includes('liveTodoFailureHasActions'),
-  backendBuildsPlanMode: backend.includes('buildGroupPlanModePreflight') && backend.includes('classifyPlanModeRisk') && backend.includes('planModePreflight.requires_confirmation'),
+  backendBuildsPlanMode: backendGroupLiveRoutes.includes('buildGroupPlanModePreflight') && backend.includes('classifyPlanModeRisk') && backendGroupLiveRoutes.includes('planModePreflight.requires_confirmation'),
   backendPlanModeSelftest: backend.includes('planModeHighRiskRequiresConfirmation') && backend.includes('awaitingPlanCardShowsPlan') && backend.includes('planModeLowRiskAutoContinues'),
   backendBuildsWorkOrderExecutionAndAcceptance: backend.includes('buildUserWorkOrderPreview') && backend.includes('buildUserExecutionStory') && backend.includes('buildUserAcceptanceReview') && backend.includes('work_order_preview') && backend.includes('execution_story') && backend.includes('acceptance_review'),
   backendSelftestCoversWorkOrderExecutionAndAcceptance: backend.includes('workOrderPreviewVisible') && backend.includes('executionStoryShowsCodingFlow') && backend.includes('acceptanceReviewHardGateVisible') && backend.includes('missingEvidenceAcceptanceReviewBlocksCompletion'),
