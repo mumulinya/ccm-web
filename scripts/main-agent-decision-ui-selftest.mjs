@@ -7,6 +7,7 @@ const files = {
   groupChat: path.join(root, 'frontend/src/components/GroupChat.vue'),
   groupMainAgentDisplay: path.join(root, 'frontend/src/composables/useMainAgentDisplay.js'),
   agentWorkEvents: path.join(root, 'frontend/src/components/AgentWorkEventDetails.vue'),
+  groupMainAgentStatus: path.join(root, 'frontend/src/components/GroupMainAgentStatusCard.vue'),
   groupTaskActions: path.join(root, 'frontend/src/composables/useGroupTaskCardActions.js'),
   taskCard: path.join(root, 'frontend/src/components/TaskExperienceCard.vue'),
   globalAgent: path.join(root, 'frontend/src/components/GlobalAgent.vue'),
@@ -22,6 +23,7 @@ const component = read(files.component)
 const groupChat = read(files.groupChat)
 const groupMainAgentDisplay = read(files.groupMainAgentDisplay)
 const agentWorkEvents = read(files.agentWorkEvents)
+const groupMainAgentStatus = read(files.groupMainAgentStatus)
 const groupTaskActions = read(files.groupTaskActions)
 const taskCard = read(files.taskCard)
 const globalAgent = read(files.globalAgent)
@@ -50,7 +52,7 @@ const checks = {
   groupPersistsDecisionInMessage: groupChat.includes('mainAgentDecision') && groupChat.includes('main_agent_decision'),
   groupRendersDecisionCard: groupChat.includes('<MainAgentDecisionCard v-if="getMainAgentDecision(msg)"'),
   groupRendersTopLatestDecision: groupChat.includes('latestMainAgentDecision') && groupChat.includes('latest-decision') && groupChat.includes('scrollToLatestMainDecision'),
-  groupRendersTopPlanPreview: groupChat.includes('mainDecisionPlanSummary') && groupChat.includes('decision-plan-preview') && groupChat.includes('card?.mainAgentDecision || card?.main_agent_decision'),
+  groupRendersTopPlanPreview: groupChat.includes('GroupMainAgentStatusCard') && groupMainAgentStatus.includes('mainDecisionPlanSummary') && groupMainAgentStatus.includes('decision-plan-preview') && groupChat.includes('card?.mainAgentDecision || card?.main_agent_decision'),
   groupHandlesTodoStepActions: groupChat.includes('@step-action="handleTaskCardAction(msg, $event)"') && groupTaskActions.includes("action.kind === 'confirm_done'") && groupTaskActions.includes('action?.task_id'),
   groupDoesNotUseDeadPetEvent: !groupChat.includes('ccm-pet-speech'),
   groupUsesUserFacingCollaborationLabels: groupChat.includes('协作计划') && groupChat.includes('查看协作看板') && groupChat.includes('正在处理...') && !groupChat.includes('Coordinator 计划') && !groupChat.includes('查看协同 Pipeline'),

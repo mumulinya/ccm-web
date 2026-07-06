@@ -11,10 +11,10 @@ import TaskCollaborationCard from './TaskCollaborationCard.vue'
 import AgentCodeChangeDrawer from './AgentCodeChangeDrawer.vue'
 import AgentQaMessage from './AgentQaMessage.vue'
 import AgentWorkEventDetails from './AgentWorkEventDetails.vue'
+import GroupMainAgentStatusCard from './GroupMainAgentStatusCard.vue'
 import MainAgentDecisionCard from './MainAgentDecisionCard.vue'
 import { useSlashCommands } from '../composables/useSlashCommands.js'
 import { createGroupTaskCardActionHandler } from '../composables/useGroupTaskCardActions.js'
-import { compactStatusText, mainDecisionActionSummary, mainDecisionModeLabel, mainDecisionNextStep, mainDecisionPlanSummary, mainDecisionTone } from '../composables/useMainAgentDisplay.js'
 import { downloadCommandJson } from '../utils/commandExport.js'
 import { buildGroupConversationKnowledgePayload, postKnowledgeCapture } from '../utils/knowledgeCapture.js'
 
@@ -2143,65 +2143,14 @@ const applyRecommendation = () => {
               <span class="sub">创建群聊并添加 Agent 成员</span>
             </div>
             <div v-else class="messages-flow" :key="currentGroup?.id" style="width: 100%; display: flex; flex-direction: column;">
-              <div v-if="hasMainAgentStatusDetail" class="main-agent-status-card">
-                <div class="main-agent-status-head">
-                  <div>
-                    <span class="main-agent-status-title" title="群聊主 Agent 只负责当前群聊内的计划、派发、回执验收和交付报告；规则兜底协调器是本地运行时，不是新的群成员。">主 Agent 状态</span>
-                    <span class="main-agent-phase">{{ mainAgentStatus?.label || '空闲' }}</span>
-                  </div>
-                  <button v-if="mainAgentStatus?.latest_delivery_summary" class="btn btn-outline btn-xs" @click="openMainAgentPipeline">协作看板</button>
-                </div>
-                <div class="main-agent-status-grid">
-                  <div v-if="latestMainAgentDecision" class="main-agent-status-item latest-decision" :class="mainDecisionTone(latestMainAgentDecision)">
-                    <span class="item-label">最近决策</span>
-                    <span class="item-value">
-                      {{ mainDecisionModeLabel(latestMainAgentDecision.mode) }} · {{ mainDecisionActionSummary(latestMainAgentDecision) }}
-                    </span>
-                    <small>{{ mainDecisionNextStep(latestMainAgentDecision) }}</small>
-                    <small v-if="mainDecisionPlanSummary(latestMainAgentDecision)" class="decision-plan-preview">{{ mainDecisionPlanSummary(latestMainAgentDecision) }}</small>
-                    <button class="btn btn-outline btn-xs" @click="scrollToLatestMainDecision">定位到消息</button>
-                  </div>
-                  <div class="main-agent-status-item">
-                    <span class="item-label">执行中</span>
-                    <span class="item-value">{{ mainAgentStatus?.running_child_agents?.length ? mainAgentStatus.running_child_agents.join('、') : '无' }}</span>
-                  </div>
-                  <div class="main-agent-status-item">
-                    <span class="item-label">开放问答</span>
-                    <span class="item-value">{{ mainAgentStatus?.open_qa_count || groupAgentQa.filter(q => ['waiting','asking','queued','needs_user','timeout','manual'].includes(q.status)).length || 0 }} 个</span>
-                  </div>
-                  <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary">
-                    <span class="item-label">交付进度</span>
-                    <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.actual_file_change_count || 0 }} 个文件 · {{ mainAgentStatus.latest_delivery_summary.external_runner_verification_count || 0 }} 项验证</span>
-                  </div>
-                  <details class="main-agent-technical-detail">
-                    <summary>技术详情</summary>
-                    <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary?.lifecycle">
-                      <span class="item-label">任务阶段</span>
-                      <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.lifecycle.state }} · {{ mainAgentStatus.latest_delivery_summary.lifecycle.terminal ? '终态' : '会话保留' }}</span>
-                    </div>
-                    <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary?.session_continuity?.length">
-                      <span class="item-label">执行器 / 会话</span>
-                      <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.session_continuity.slice(0, 3).map(s => `${s.project}:${s.executor}/${s.resume_mode}#${s.turn_count}`).join('；') }}</span>
-                    </div>
-                    <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary">
-                      <span class="item-label">文件 / 验证</span>
-                      <span class="item-value">{{ mainAgentStatus.latest_delivery_summary.actual_file_change_count || 0 }} 个文件 · {{ mainAgentStatus.latest_delivery_summary.external_runner_verification_count || 0 }} 条外部验证</span>
-                    </div>
-                    <div class="main-agent-status-item" v-if="mainAgentStatus?.latest_delivery_summary?.reasoning_loop">
-                      <span class="item-label">推理闭环</span>
-                      <span class="item-value">计划 v{{ mainAgentStatus.latest_delivery_summary.reasoning_loop.plan_version || 0 }} · 待证明 {{ mainAgentStatus.latest_delivery_summary.reasoning_open_assertions || 0 }} · 偏差 {{ mainAgentStatus.latest_delivery_summary.reasoning_deviation_count || 0 }} · 复盘 {{ mainAgentStatus.latest_delivery_summary.reasoning_loop.postmortems?.length || 0 }}</span>
-                    </div>
-                    <div class="main-agent-status-item warning" v-if="mainAgentStatus?.failed_gates?.length">
-                      <span class="item-label">未过门禁</span>
-                      <span class="item-value">{{ mainAgentStatus.failed_gates.map(g => g.label || g.id).join('、') }}</span>
-                    </div>
-                  </details>
-                  <div class="main-agent-status-item warning" v-if="mainAgentStatus?.blockers?.length || mainAgentStatus?.needs?.length">
-                    <span class="item-label">阻塞/待补</span>
-                    <span class="item-value">{{ [...(mainAgentStatus.blockers || []), ...(mainAgentStatus.needs || [])].slice(0, 3).map(x => compactStatusText(x)).join('；') }}</span>
-                  </div>
-                </div>
-              </div>
+              <GroupMainAgentStatusCard
+                v-if="hasMainAgentStatusDetail"
+                :status="mainAgentStatus"
+                :group-agent-qa="groupAgentQa"
+                :latest-decision="latestMainAgentDecision"
+                @open-pipeline="openMainAgentPipeline"
+                @locate-decision="scrollToLatestMainDecision"
+              />
               <div v-for="(msg, i) in messages" v-show="shouldShowGroupMessage(msg, i)" :key="getGroupMessageKey(msg)" :id="'gc-msg-' + i" class="message" :class="[msg.role, { 'msg-highlight': highlightMsgIndex === i }]">
                 <CommandResultCard v-if="msg.type === 'command_result'" :result="msg.commandResult" />
                 <!-- 思考过程消息 -->
@@ -2788,29 +2737,6 @@ const applyRecommendation = () => {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
-.main-agent-status-card { margin: 0 0 16px; padding: 14px; border-radius: 14px; border: 1px solid rgba(59, 130, 246, 0.18); background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(14, 165, 233, 0.05)); box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); }
-.main-agent-status-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
-.main-agent-status-title { font-size: 12px; font-weight: 900; color: var(--text-primary); margin-right: 8px; }
-.main-agent-phase { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; background: rgba(59, 130, 246, 0.12); color: var(--accent-blue); font-size: 11px; font-weight: 800; }
-.main-agent-status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
-.main-agent-technical-detail{grid-column:1/-1;padding:7px 9px;border:1px solid var(--border-color);border-radius:9px;color:var(--text-muted)}
-.main-agent-technical-detail>summary{cursor:pointer;font-size:10px;font-weight:800;user-select:none}
-.main-agent-technical-detail[open]{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px}
-.main-agent-technical-detail[open]>summary{grid-column:1/-1;margin-bottom:2px}
-.main-agent-status-item { min-width: 0; padding: 8px 10px; border-radius: 10px; background: rgba(255, 255, 255, 0.55); border: 1px solid rgba(148, 163, 184, 0.16); }
-.main-agent-status-item.latest-decision { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; border-color: rgba(59, 130, 246, 0.22); background: linear-gradient(135deg, rgba(255,255,255,.72), rgba(239,246,255,.58)); }
-.main-agent-status-item.latest-decision .item-label,
-.main-agent-status-item.latest-decision .item-value,
-.main-agent-status-item.latest-decision small { grid-column: 1; }
-.main-agent-status-item.latest-decision button { grid-column: 2; grid-row: 1 / span 4; align-self: center; }
-.decision-plan-preview { color: var(--accent-blue) !important; font-weight: 800; }
-.main-agent-status-item.latest-decision.active { border-color: rgba(124, 58, 237, 0.28); background: linear-gradient(135deg, rgba(250,245,255,.82), rgba(239,246,255,.64)); }
-.main-agent-status-item.latest-decision.analysis { border-color: rgba(14, 165, 233, 0.25); background: linear-gradient(135deg, rgba(240,249,255,.82), rgba(224,242,254,.58)); }
-.main-agent-status-item.latest-decision.idle { border-color: rgba(148, 163, 184, 0.18); background: rgba(255, 255, 255, 0.56); }
-.main-agent-status-item.warning { border-color: rgba(245, 158, 11, 0.25); background: rgba(245, 158, 11, 0.08); }
-.main-agent-status-item .item-label { display: block; font-size: 10px; color: var(--text-muted); font-weight: 800; margin-bottom: 4px; }
-.main-agent-status-item .item-value { display: block; font-size: 12px; color: var(--text-primary); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.main-agent-status-item small { display:block; color: var(--text-muted); font-size: 11px; line-height: 1.35; overflow-wrap: anywhere; }
 .delivery-summary-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .delivery-gate-warning { font-size: 11px; font-weight: 800; color: #d97706; }
 .messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; }
