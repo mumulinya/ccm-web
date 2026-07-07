@@ -1991,6 +1991,8 @@ export async function runTestAgentCliSelfTest() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-cli-selftest-"));
   const workOrderPath = path.join(dir, "work-order.json");
   const handoffPath = path.join(dir, "handoff.json");
+  const invalidHandoffPath = path.join(dir, "invalid-handoff.json");
+  const warningHandoffPath = path.join(dir, "warning-handoff.json");
   const artifactDir = path.join(dir, "artifacts");
   const handoffArtifactDir = path.join(dir, "handoff-artifacts");
   const workOrder = {
@@ -2021,8 +2023,21 @@ export async function runTestAgentCliSelfTest() {
       browserProvider: "none",
     },
   };
+  const warningHandoff = {
+    taskId: `cli-warning-handoff-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify handoff builder diagnostics are surfaced by the CLI.",
+    projects: [{
+      name: "warning-handoff-self-test",
+      verificationCommands: [`"${process.execPath}" -e "console.log('warning handoff command ok')"`],
+    }],
+    options: {
+      browserProvider: "none",
+    },
+  };
   fs.writeFileSync(workOrderPath, JSON.stringify(workOrder, null, 2), "utf-8");
   fs.writeFileSync(handoffPath, JSON.stringify(handoff, null, 2), "utf-8");
+  fs.writeFileSync(invalidHandoffPath, "null", "utf-8");
+  fs.writeFileSync(warningHandoffPath, JSON.stringify(warningHandoff, null, 2), "utf-8");
 
   const parsed = parseTestAgentCliArgs([
     workOrderPath,
@@ -2118,6 +2133,33 @@ export async function runTestAgentCliSelfTest() {
   const handoffReport = fs.existsSync(handoffReportJsonPath) ? JSON.parse(fs.readFileSync(handoffReportJsonPath, "utf-8")) : null;
   const handoffReportSummary = handoffReport ? formatTestAgentCliReportSummary(handoffReport) : "";
 
+  const invalidHandoffStdout: string[] = [];
+  const invalidHandoffStderr: string[] = [];
+  const invalidHandoffResult = await runTestAgentCli([
+    "--from-handoff",
+    invalidHandoffPath,
+    "--validate-only",
+  ], {
+    stdout: { write: message => invalidHandoffStdout.push(String(message)) },
+    stderr: { write: message => invalidHandoffStderr.push(String(message)) },
+  });
+
+  const warningHandoffStdout: string[] = [];
+  const warningHandoffStderr: string[] = [];
+  const warningHandoffResult = await runTestAgentCli([
+    "--from-handoff",
+    warningHandoffPath,
+    "--validate-only",
+    "--browser-provider",
+    "none",
+    "--no-auto-discover",
+  ], {
+    stdout: { write: message => warningHandoffStdout.push(String(message)) },
+    stderr: { write: message => warningHandoffStderr.push(String(message)) },
+  });
+  let warningHandoffValidation: any = null;
+  try { warningHandoffValidation = JSON.parse(warningHandoffStdout.join("")); } catch {}
+
   const pass = parsed.errors.length === 0
     && parsed.options.workOrderPath === workOrderPath
     && parsed.options.summary === true
@@ -2160,7 +2202,16 @@ export async function runTestAgentCliSelfTest() {
     && handoffReport?.requiredChecks?.includes("commands")
     && handoffReport?.metadata?.handoffSource === "test-agent-handoff-builder"
     && handoffReport?.metadata?.completedByProjectAgents?.includes("handoff-builder-agent")
-    && handoffReportSummary.includes("Artifacts:");
+    && handoffReportSummary.includes("Artifacts:")
+    && invalidHandoffResult.exitCode === 2
+    && invalidHandoffStdout.length === 0
+    && invalidHandoffStderr.join("").includes("root value must be a JSON object")
+    && warningHandoffResult.exitCode === 0
+    && warningHandoffStderr.length === 0
+    && warningHandoffValidation?.valid === true
+    && warningHandoffValidation?.warnings?.some((item: any) => item.code === "handoff_builder_warning" && String(item.message || "").includes("missing workDir"))
+    && warningHandoffValidation?.warnings?.some((item: any) => item.code === "handoff_builder_warning" && String(item.message || "").includes("No acceptance criteria"))
+    && warningHandoffValidation?.normalized?.metadata?.handoffWarnings?.some((item: string) => item.includes("missing workDir"));
 
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
   return {
@@ -2173,9 +2224,13 @@ export async function runTestAgentCliSelfTest() {
     runResult,
     handoffValidateResult,
     handoffRunResult,
+    invalidHandoffResult,
+    warningHandoffResult,
     validationSummary,
     reportSummary,
     handoffReportSummary,
+    invalidHandoffError: invalidHandoffStderr.join(""),
+    warningHandoffValidation,
   };
 }
 

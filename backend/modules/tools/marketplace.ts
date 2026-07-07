@@ -524,8 +524,8 @@ function maybeAutoResyncMarketplaceRuntime(impact: any, options: any = {}, store
       groups: store.loadGroups ? store.loadGroups() : loadGroups(),
       catalog,
     });
-    const existingSummary = existing?.summary || {};
-    const missingSummary = missing?.summary || {};
+    const existingSummary: any = existing?.summary || {};
+    const missingSummary: any = missing?.summary || {};
     const result = {
       schema: "ccm-runtime-tool-resync-v1",
       success: true,

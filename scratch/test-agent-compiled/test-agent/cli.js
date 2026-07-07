@@ -243,4 +243,3 @@ if (require.main === module) {
         process.exit(2);
     });
 }
-//# sourceMappingURL=cli.js.map
