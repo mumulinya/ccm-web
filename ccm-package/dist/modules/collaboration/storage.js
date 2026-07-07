@@ -35,6 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.loadGroups = loadGroups;
 exports.saveGroups = saveGroups;
+exports.registerGroupMessageAppendHook = registerGroupMessageAppendHook;
 exports.getGroupMessages = getGroupMessages;
 exports.appendGroupMessage = appendGroupMessage;
 exports.saveGroupMessages = saveGroupMessages;
@@ -89,6 +90,17 @@ function saveGroups(groups) {
     fs.renameSync(temp, utils_1.GROUPS_FILE);
 }
 const groupMessagesCache = new Map();
+var groupMessageAppendHooks = null;
+function getGroupMessageAppendHooks() {
+    if (!groupMessageAppendHooks)
+        groupMessageAppendHooks = new Set();
+    return groupMessageAppendHooks;
+}
+function registerGroupMessageAppendHook(hook) {
+    const hooks = getGroupMessageAppendHooks();
+    hooks.add(hook);
+    return () => hooks.delete(hook);
+}
 function getGroupMessages(groupId) {
     const file = path.join(utils_1.GROUP_MESSAGES_DIR, `${groupId}.json`);
     if (!fs.existsSync(file)) {
@@ -132,6 +144,12 @@ function appendGroupMessage(groupId, msg) {
     messages.push(next);
     saveGroupMessages(groupId, messages);
     (0, reliability_ledger_1.appendTraceEvent)(traceId, { id: `group-message:${groupId}:${messageId || messages.length}`, type: "group.message_persisted", status: "ok", group_id: groupId, task_id: msg?.task_id || "", agent: msg?.agent || msg?.role || "", message: String(msg?.content || "").slice(0, 500), data: { message_id: messageId } });
+    for (const hook of getGroupMessageAppendHooks()) {
+        try {
+            hook(groupId, next, messages);
+        }
+        catch { }
+    }
     return next;
 }
 function saveGroupMessages(groupId, messages) {

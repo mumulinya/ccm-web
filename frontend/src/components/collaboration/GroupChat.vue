@@ -31,9 +31,26 @@ import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
 import { usePinnedScroll } from '../../composables/usePinnedScroll.js'
 import { downloadCommandJson } from '../../utils/commandExport.js'
 import { buildGroupConversationKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
+import { sanitizeUserFacingAgentText, sanitizeUserFacingLegacyTerminology } from '../../utils/agentDisplay.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
 const emit = defineEmits(['navigated'])
+
+const GROUP_VISIBLE_INTERNAL_TEXT_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|<\s*\/?\s*task-notification|task-notification|receipt[-_\s]*status|trace_id|session_id|WorkerContextPacket|raw\s+receipt|raw\s+payload|raw_report|scratchpad|Runtime Kernel|workflow_timeline/i
+const sanitizeGroupVisibleText = (value, fallback = '主 Agent 正在处理当前请求。', max = 4000) => {
+  const raw = String(value || '')
+  if (!raw) return ''
+  if (GROUP_VISIBLE_INTERNAL_TEXT_PATTERN.test(raw)) {
+    return sanitizeUserFacingAgentText(raw, fallback, Math.min(max, 1200))
+  }
+  const text = sanitizeUserFacingLegacyTerminology(raw)
+  return text.length > max ? `${text.slice(0, max)}...` : text
+}
+function getVisibleGroupMessageContent(msg, fallback = '主 Agent 已整理这条消息。') {
+  if (!msg) return ''
+  if (msg.role === 'user') return String(msg.content || '')
+  return sanitizeGroupVisibleText(msg.content, fallback, 4000)
+}
 
 // 处理搜索结果跳转
 const handleGroupNavigation = async () => {
@@ -87,7 +104,7 @@ const {
   attachResizeObserver: attachGroupMessagesResizeObserver,
   detachResizeObserver: detachGroupMessagesResizeObserver,
 } = usePinnedScroll(groupMessagesEl, { observeRef: groupMessagesContentEl })
-const { navMessages } = useMessageNavigation(messages)
+const { navMessages } = useMessageNavigation(messages, { getAssistantContent: (message) => getVisibleGroupMessageContent(message, '这条回复已整理，技术细节已放入技术详情。') })
 
 const scrollToMessage = (originalIndex) => {
   const el = document.getElementById(`gc-msg-${originalIndex}`)
@@ -274,7 +291,7 @@ const getWorkPanelState = (msg) => {
   if (events.some(event => event.kind === 'error')) return { tone: 'fail', label: '失败' }
   if (msg?.streaming) return { tone: 'running', label: '执行中' }
   if (events.some(event => event.kind === 'done')) return { tone: 'ok', label: '完成' }
-  return { tone: 'idle', label: events.length ? '等待回执' : '待执行' }
+  return { tone: 'idle', label: events.length ? '等待结果说明' : '待执行' }
 }
 const getAgentMessageStatus = (msg) => {
   if (msg?.agent === 'system') return { tone: 'fail', label: '系统' }
@@ -293,7 +310,7 @@ const isLegacyNonTaskCard = (card) => {
   return greetingOnly && !hasEvidence
 }
 const getTaskCard = (msg) => {
-  const card = getTaskRuntime(msg)?.taskCard || getTaskRuntime(msg)?.task_card || null
+  const card = msg?.taskCard || msg?.task_card || getTaskRuntime(msg)?.taskCard || getTaskRuntime(msg)?.task_card || null
   if (card?.visible === false) return null
   if (isLegacyNonTaskCard(card)) return null
   return card
@@ -325,7 +342,7 @@ const shouldShowGroupMessage = (msg, index) => {
   const taskId = getMessageTaskId(msg)
   if (!taskId) return true
   if (isPrimaryTaskMessage(msg, index)) return true
-  // 用户主动补充仍属于对话；Agent 工作单、回执、执行输出统一进入任务卡技术详情。
+  // 用户主动补充仍属于对话；Agent 工作单、结果说明、执行输出统一进入任务卡技术详情。
   return msg.role === 'user' && !/【主 Agent 业务开发工作单】|任务前沙盘演练|CCM_AGENT_RECEIPT|task-notification/i.test(String(msg.content || ''))
 }
 const isPrimaryTaskCard = (msg, index) => {
@@ -354,6 +371,8 @@ const applyTransientTaskRuntime = (taskId, updater) => {
     const next = updater({ ...current, agents: [...(current.agents || [])], sessions: [...(current.sessions || [])] })
     msg.taskRuntime = next
     msg.task_runtime = next
+    msg.taskCard = next?.taskCard || next?.task_card || msg.taskCard || msg.task_card || null
+    msg.task_card = next?.task_card || next?.taskCard || msg.task_card || msg.taskCard || null
   })
 }
 const appendAgentWorkEvent = (agent, event) => {
@@ -438,6 +457,32 @@ const appendAgentQaMessage = (payload) => {
   mergeIncomingMessage(msg)
 }
 
+const applyMainAgentProgressCheckpoint = (payload = {}) => {
+  const checkpoint = payload.progressCheckpoint || payload.progress_checkpoint || payload.latest_progress_checkpoint || payload.latestProgressCheckpoint || null
+  if (!checkpoint?.label) return false
+  const current = mainAgentStatus.value || {}
+  const existing = Array.isArray(current.progress_checkpoints || current.progressCheckpoints)
+    ? [...(current.progress_checkpoints || current.progressCheckpoints)]
+    : []
+  const key = checkpoint.id || `${checkpoint.label}:${checkpoint.detail || ''}:${checkpoint.phase || ''}`
+  const nextItems = [...existing.filter(item => (item.id || `${item.label}:${item.detail || ''}:${item.phase || ''}`) !== key), checkpoint].slice(-6)
+  mainAgentStatus.value = {
+    ...current,
+    schema: current.schema || 'ccm-group-main-agent-status-v1',
+    phase: checkpoint.phase || current.phase || 'running',
+    label: current.label || checkpoint.label || '正在处理',
+    task_id: payload.taskId || payload.task_id || checkpoint.task_id || current.task_id || '',
+    latest_progress_checkpoint: checkpoint,
+    latestProgressCheckpoint: checkpoint,
+    recent_progress_checkpoints: nextItems.slice(-3),
+    recentProgressCheckpoints: nextItems.slice(-3),
+    progress_checkpoints: nextItems,
+    progressCheckpoints: nextItems,
+    updated_at: checkpoint.at || new Date().toISOString(),
+  }
+  return true
+}
+
 const groupMessageKeyMap = new WeakMap()
 let groupMessageKeySeq = 0
 const getGroupMessageKey = (msg) => {
@@ -459,6 +504,10 @@ const showMembers = ref(false)
 const showTools = ref(false)
 const showSharedFiles = ref(false)
 const showLogs = ref(false)
+const groupTools = ref({ mcp: [], skill: [] })
+const groupAllTools = ref({ mcp: [], skill: [] })
+const groupToolAudit = ref(null)
+const groupAuthorizationReadiness = ref(null)
 
 // 表单
 const newGroupName = ref('')
@@ -551,6 +600,8 @@ const mergeIncomingMessage = (msg) => {
       workflow: msg.workflow || current.workflow,
       mainAgentDecision: msg.mainAgentDecision || msg.main_agent_decision || current.mainAgentDecision || current.main_agent_decision,
       main_agent_decision: msg.main_agent_decision || msg.mainAgentDecision || current.main_agent_decision || current.mainAgentDecision,
+      clarificationSummary: msg.clarificationSummary || msg.clarification_summary || current.clarificationSummary || current.clarification_summary,
+      clarification_summary: msg.clarification_summary || msg.clarificationSummary || current.clarification_summary || current.clarificationSummary,
       taskRuntime: msg.taskRuntime || msg.task_runtime || current.taskRuntime || current.task_runtime,
       task_runtime: msg.task_runtime || msg.taskRuntime || current.task_runtime || current.taskRuntime,
       delivery_summary: msg.delivery_summary || current.delivery_summary,
@@ -704,7 +755,7 @@ const getPlanTitle = (msg) => {
 }
 
 const compactPlanText = (text, max = 180) => {
-  const value = String(text || '').replace(/\s+/g, ' ').trim()
+  const value = sanitizeGroupVisibleText(text, '计划详情已整理，可在技术详情查看。', max).replace(/\s+/g, ' ').trim()
   return value.length > max ? value.slice(0, max) + '...' : value
 }
 
@@ -1011,8 +1062,12 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
   // 跟踪每个 Agent 的流式消息
   activeAgentStreamMsgs = {}
   const agentStreamMsgs = activeAgentStreamMsgs
+  const agentStreamRawBuffers = {}
+  const agentStreamHiddenBuffers = {}
   let hasMention = false
   let agentMsgAdded = false
+  let singleStreamRawBuffer = ''
+  let singleStreamHiddenBuffer = false
 
   let payload
   if (filesToSend.length > 0) {
@@ -1044,13 +1099,15 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
     try {
       const data = JSON.parse(line.slice(6))
       if (data.type === 'status') {
+        applyMainAgentProgressCheckpoint(data)
         // 更新思考状态
-        thinkingMsg.content = data.text
-        if (data.text.includes('分派') || data.text.includes('等待')) {
+        thinkingMsg.content = sanitizeGroupVisibleText(data.text, '主 Agent 正在整理当前进展。', 600)
+        if (String(data.text || '').includes('分派') || String(data.text || '').includes('等待')) {
           waitingCrossReply.value = true
         }
         scrollToBottom()
       } else if (data.type === 'task_created') {
+        applyMainAgentProgressCheckpoint(data)
         const taskMessage = {
           id: data.messageId,
           role: 'assistant',
@@ -1061,7 +1118,15 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
           task_id: data.task?.id,
           task: data.task || null,
           queue: data.queue || null,
+          intakeSummary: data.intakeSummary || data.intake_summary || null,
+          intake_summary: data.intake_summary || data.intakeSummary || null,
           workflow: data.workflow || null,
+          planMode: data.planMode || data.plan_mode || null,
+          plan_mode: data.plan_mode || data.planMode || null,
+          taskCard: data.taskCard || data.task_card || null,
+          task_card: data.task_card || data.taskCard || null,
+          taskRuntime: data.taskRuntime || data.task_runtime || null,
+          task_runtime: data.task_runtime || data.taskRuntime || null,
           mainAgentDecision: data.mainAgentDecision || data.main_agent_decision || null,
           main_agent_decision: data.main_agent_decision || data.mainAgentDecision || null
         }
@@ -1088,15 +1153,16 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
         })
         scrollToBottom()
       } else if (data.type === 'runtime_fallback') {
+        const fallbackText = sanitizeGroupVisibleText(data.text, 'Agent 执行通道正在切换，排障信息已放入技术详情。', 600)
         applyTransientTaskRuntime(data.taskId, (runtime) => {
           const agents = runtime.agents || []
           const index = agents.findIndex(item => item.project === data.agent)
           const patch = { project: data.agent, state: 'spawning', runtimeFallbacks: Number(agents[index]?.runtimeFallbacks || 0) + 1, runtime: data.toRuntime }
           if (index >= 0) agents[index] = { ...agents[index], ...patch }
           else agents.push(patch)
-          return { ...runtime, status: 'in_progress', agents, statusText: data.text }
+          return { ...runtime, status: 'in_progress', agents, statusText: fallbackText }
         })
-        appendAgentWorkEvent(data.agent, { id: `fallback-${Date.now()}`, time: new Date().toISOString(), kind: 'warning', text: data.text })
+        appendAgentWorkEvent(data.agent, { id: `fallback-${Date.now()}`, time: new Date().toISOString(), kind: 'warning', text: fallbackText })
         scrollToBottom()
       } else if (data.type === 'conflict_plan') {
         messages.value.push({
@@ -1121,30 +1187,41 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
         scrollToBottom()
       } else if (data.type === 'chunk' && data.agent) {
         // 流式 chunk：为每个 Agent 创建独立的流式消息
-        if (!agentStreamMsgs[data.agent]) {
+        const agentKey = data.agent
+        if (!agentStreamMsgs[agentKey]) {
           const streamMsg = {
             role: 'assistant',
-            agent: data.agent,
+            agent: agentKey,
             content: '',
             streaming: true,
             workEvents: [],
             timestamp: new Date().toISOString()
           }
-          agentStreamMsgs[data.agent] = streamMsg
+          agentStreamMsgs[agentKey] = streamMsg
           messages.value.push(streamMsg)
         }
-        agentStreamMsgs[data.agent].content += data.text
-        if (data.text.includes('@')) {
+        const chunkText = String(data.text || '')
+        const nextRaw = `${agentStreamRawBuffers[agentKey] || ''}${chunkText}`
+        agentStreamRawBuffers[agentKey] = nextRaw
+        if (agentStreamHiddenBuffers[agentKey] || GROUP_VISIBLE_INTERNAL_TEXT_PATTERN.test(nextRaw)) {
+          agentStreamHiddenBuffers[agentKey] = true
+          agentStreamMsgs[agentKey].content = sanitizeGroupVisibleText(nextRaw, 'Agent 已提交技术执行信息，主 Agent 正在整理用户可读结论。', 1200)
+        } else {
+          agentStreamMsgs[agentKey].content += sanitizeGroupVisibleText(chunkText)
+        }
+        if (chunkText.includes('@')) {
           hasMention = true
           waitingCrossReply.value = true
         }
         scrollToBottom()
       } else if (data.type === 'agent_done') {
         // 某个 Agent 完成：用最终完整内容替换流式消息
-        const streamMsg = agentStreamMsgs[data.agent]
+        const agentKey = data.agent
+        const streamMsg = agentStreamMsgs[agentKey]
+        const finalText = sanitizeGroupVisibleText(data.text || agentStreamRawBuffers[agentKey], 'Agent 已提交结果说明，主 Agent 正在汇总验收。', 3000)
         if (streamMsg) {
           if (data.messageId) streamMsg.id = data.messageId
-          streamMsg.content = data.text
+          streamMsg.content = finalText
           streamMsg.streaming = false
           if (Array.isArray(data.assignments)) streamMsg.assignments = data.assignments
           streamMsg.executionOrder = data.executionOrder || streamMsg.executionOrder || ''
@@ -1154,17 +1231,19 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
           streamMsg.workflow = data.workflow || streamMsg.workflow
           streamMsg.mainAgentDecision = data.mainAgentDecision || data.main_agent_decision || streamMsg.mainAgentDecision || streamMsg.main_agent_decision
           streamMsg.main_agent_decision = data.main_agent_decision || data.mainAgentDecision || streamMsg.main_agent_decision || streamMsg.mainAgentDecision
+          streamMsg.clarificationSummary = data.clarificationSummary || data.clarification_summary || streamMsg.clarificationSummary || streamMsg.clarification_summary
+          streamMsg.clarification_summary = data.clarification_summary || data.clarificationSummary || streamMsg.clarification_summary || streamMsg.clarificationSummary
           streamMsg.workEvents = data.workEvents || streamMsg.workEvents
           if (data.fileChanges && data.fileChanges.count > 0) {
             streamMsg.fileChanges = data.fileChanges
           }
         } else {
-          if ((data.text && data.text.trim()) || (data.fileChanges && data.fileChanges.count > 0)) {
+          if ((finalText && finalText.trim()) || (data.fileChanges && data.fileChanges.count > 0)) {
             messages.value.push({
               id: data.messageId,
               role: 'assistant',
               agent: data.agent,
-              content: data.text,
+              content: finalText,
               timestamp: new Date().toISOString(),
               assignments: data.assignments || null,
               executionOrder: data.executionOrder || '',
@@ -1174,12 +1253,16 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
               workflow: data.workflow || null,
               mainAgentDecision: data.mainAgentDecision || data.main_agent_decision || null,
               main_agent_decision: data.main_agent_decision || data.mainAgentDecision || null,
+              clarificationSummary: data.clarificationSummary || data.clarification_summary || null,
+              clarification_summary: data.clarification_summary || data.clarificationSummary || null,
               fileChanges: data.fileChanges || null,
               workEvents: data.workEvents || []
             })
           }
         }
-        if (data.text.includes('@')) {
+        delete agentStreamRawBuffers[agentKey]
+        delete agentStreamHiddenBuffers[agentKey]
+        if (String(data.text || '').includes('@')) {
           hasMention = true
           waitingCrossReply.value = true
         }
@@ -1190,8 +1273,15 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
           messages.value.push(agentMsg)
           agentMsgAdded = true
         }
-        agentMsg.content += data.text
-        if (data.text.includes('@')) hasMention = true
+        const chunkText = String(data.text || '')
+        singleStreamRawBuffer += chunkText
+        if (singleStreamHiddenBuffer || GROUP_VISIBLE_INTERNAL_TEXT_PATTERN.test(singleStreamRawBuffer)) {
+          singleStreamHiddenBuffer = true
+          agentMsg.content = sanitizeGroupVisibleText(singleStreamRawBuffer, 'Agent 已提交技术执行信息，主 Agent 正在整理用户可读结论。', 1200)
+        } else {
+          agentMsg.content += sanitizeGroupVisibleText(chunkText)
+        }
+        if (chunkText.includes('@')) hasMention = true
         scrollToBottom()
       } else if (data.type === 'done') {
         isStreaming.value = false
@@ -1208,7 +1298,7 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
         messages.value.push({
           role: 'assistant',
           agent: 'system',
-          content: '❌ 错误: ' + data.text,
+          content: '错误：' + sanitizeGroupVisibleText(data.text, '请求处理失败，排障信息已放入技术详情。', 800),
           timestamp: new Date().toISOString()
         })
         isStreaming.value = false
@@ -1386,21 +1476,67 @@ const clearLogs = async () => {
 }
 
 // 群聊成员管理
+const normalizeGroupTools = (tools = {}) => ({
+  mcp: Array.from(new Set((Array.isArray(tools.mcp) ? tools.mcp : []).map(item => String(item || '').trim()).filter(Boolean))),
+  skill: Array.from(new Set((Array.isArray(tools.skill) ? tools.skill : []).map(item => String(item || '').trim()).filter(Boolean)))
+})
+
+const loadAvailableGroupTools = async () => {
+  const options = await fetch('/api/tools/authorization-options').then(r => r.json()).catch(() => ({ mcp: [], skill: [] }))
+  groupAllTools.value = {
+    mcp: options.mcp || [],
+    skill: options.skill || []
+  }
+}
+
 const loadGroupTools = async () => {
   if (!currentGroup.value) return
-  const data = await fetch(`/api/groups/tools?id=${currentGroup.value.id}`).then(r => r.json())
-  groupTools.value = data.tools || { mcp: [], skill: [] }
+  const [data] = await Promise.all([
+    fetch(`/api/groups/tools?id=${currentGroup.value.id}`).then(r => r.json()),
+    loadAvailableGroupTools()
+  ])
+  groupTools.value = normalizeGroupTools(data.tools)
+  groupToolAudit.value = data.tool_audit || null
+  groupAuthorizationReadiness.value = data.authorization_readiness || null
   showTools.value = true
 }
 
+const toggleGroupTool = (type, name) => {
+  const normalized = normalizeGroupTools(groupTools.value)
+  const list = normalized[type] || []
+  const index = list.indexOf(name)
+  if (index >= 0) {
+    list.splice(index, 1)
+  } else {
+    list.push(name)
+    if (type === 'mcp' && !String(name).includes('/')) {
+      normalized.mcp = normalized.mcp.filter(item => item === name || !item.startsWith(`${name}/`))
+    }
+  }
+  groupTools.value = normalized
+}
+
 const saveGroupTools = async () => {
-  await fetch('/api/groups/tools', {
+  groupTools.value = normalizeGroupTools(groupTools.value)
+  const res = await fetch('/api/groups/tools', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ group_id: currentGroup.value.id, tools: groupTools.value })
   })
+  const data = await res.json()
+  if (!data.success) {
+    toast.error('工具配置保存失败: ' + (data.error || '未知错误'))
+    return
+  }
+  groupTools.value = normalizeGroupTools(data.tools)
+  groupToolAudit.value = data.tool_audit || null
+  groupAuthorizationReadiness.value = data.authorization_readiness || null
   showTools.value = false
-  toast.success('工具配置已保存')
+  if (data.authorization_readiness && data.authorization_readiness.dispatchReady === false) {
+    toast.warning('工具配置已保存，但有授权项当前不可用')
+  } else {
+    toast.success('工具配置已保存')
+  }
 }
 
 // 群聊共享文件
@@ -1638,8 +1774,8 @@ if (activeSelectedTemplate) {
                   <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
                 </div>
                 <!-- 项目主 Agent 任务接管 -->
-                <ProjectTaskIntakeMessage v-else-if="msg.type === 'project_task_intake'" :msg="msg" :accent-style="getAgentAccentStyle(msg.agent)">
-                  <MainAgentDecisionCard v-if="getMainAgentDecision(msg)" :decision="getMainAgentDecision(msg)" compact @step-action="handleTaskCardAction(msg, $event)" />
+                <ProjectTaskIntakeMessage v-else-if="msg.type === 'project_task_intake'" :msg="msg" :display-content="getVisibleGroupMessageContent(msg, '项目任务已由主 Agent 接管。')" :accent-style="getAgentAccentStyle(msg.agent)">
+                  <MainAgentDecisionCard v-if="getMainAgentDecision(msg) && !isPrimaryTaskCard(msg, i)" :decision="getMainAgentDecision(msg)" compact @step-action="handleTaskCardAction(msg, $event)" />
                   <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
                 </ProjectTaskIntakeMessage>
                 <ConflictPlanMessage v-else-if="msg.type === 'conflict_plan'" :msg="msg" />
@@ -1647,6 +1783,7 @@ if (activeSelectedTemplate) {
                 <AgentQaMessage
                   v-else-if="isAgentQaMessage(msg)"
                   :msg="msg"
+                  :display-content="getVisibleGroupMessageContent(msg, 'Agent 回复已整理，技术细节已放入技术详情。')"
                   :accent-style="getAgentAccentStyle(msg.agent)"
                   :action-loading="agentQaActionLoading"
                   :highlight-mentions="highlightMentions"
@@ -1804,7 +1941,11 @@ if (activeSelectedTemplate) {
       v-if="showTools"
       :group-name="currentGroup?.name"
       :tools="groupTools"
+      :all-tools="groupAllTools"
+      :tool-audit="groupToolAudit"
+      :authorization-readiness="groupAuthorizationReadiness"
       @close="showTools = false"
+      @toggle-tool="toggleGroupTool"
       @save="saveGroupTools"
     />
 

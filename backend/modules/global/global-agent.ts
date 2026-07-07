@@ -23,6 +23,7 @@ import {
   sendFeishuReportMessage,
   type CollabCtx,
 } from "../collaboration/collaboration";
+import { sanitizeMainAgentUserText } from "../collaboration/display";
 import {
   acquireIdempotency,
   appendTraceEvent,
@@ -33,6 +34,15 @@ import {
   settleIdempotencyByTrace,
 } from "../../system/reliability-ledger";
 import { buildProjectMemoryPacket } from "../../projects/memory";
+import {
+  buildSelfContainedWorkerHandoff,
+  renderSelfContainedWorkerHandoff,
+  summarizeWorkerHandoffForUser,
+} from "../../agents/worker-handoff";
+import {
+  buildGlobalGroupMemoryContext,
+  runGlobalGroupMemoryContextSelfTest,
+} from "../collaboration/memory";
 import {
   cancelGlobalAgentRun,
   attachGlobalAgentRunSupervision,
@@ -119,6 +129,10 @@ function compactPetText(value: any, max = 260) {
   return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
+function globalVisibleText(value: any, fallback = "全局主 Agent 正在处理当前请求。", max = 260) {
+  return sanitizeMainAgentUserText(value, fallback, max);
+}
+
 function getGlobalPetToolState(toolName: string) {
   const name = String(toolName || "").toLowerCase();
   if (!name) return "working";
@@ -139,6 +153,7 @@ function getGlobalToolDisplayName(toolName: string) {
     list_cron: "读取定时任务",
     query_knowledge: "查询知识库",
     query_global_memory: "查询全局记忆",
+    query_group_memory: "查询群聊记忆",
     manage_global_memory: "管理全局记忆",
     inspect_mission: "查询全局任务",
     inspect_supervision: "查询监工状态",
@@ -167,26 +182,75 @@ function buildGlobalAgentEventUi(event: any = {}) {
   const type = String(event.type || "");
   const toolName = event.tool?.name || event.pending_tool?.name || event.step?.tool?.name || event.step?.toolName || "";
   const toolLabel = getGlobalToolDisplayName(toolName);
-  const text = (value: any, max = 220) => compactPetText(value, max);
-  if (type === "started") return { phase: "understanding", tone: "running", title: "理解需求", text: "正在理解你的消息，判断是普通对话还是需要执行操作。" };
+  const text = (value: any, max = 220, fallback = "状态已更新。") => globalVisibleText(value, fallback, max);
+  const dispatchSummary = event.dispatch_launch_summary || event.dispatchLaunchSummary || null;
+  const clarificationSummary = event.clarification_summary || event.clarificationSummary || null;
+  const confirmationSummary = event.confirmation_summary || event.confirmationSummary || null;
+  const dispatchSummaryText = () => {
+    const rows = Array.isArray(dispatchSummary?.rows) ? dispatchSummary.rows : [];
+    const targets = rows
+      .map((row: any) => [row.role || "执行 Agent", row.agent].filter(Boolean).join(" · "))
+      .filter(Boolean)
+      .slice(0, 4)
+      .join("、");
+    const parts = [
+      dispatchSummary?.headline || (targets ? `全局主 Agent 已把这次需求交给：${targets}。` : ""),
+      dispatchSummary?.next_action ? `下一步：${dispatchSummary.next_action}` : "",
+    ].filter(Boolean).join(" ");
+    return text(parts, 280, "已完成派发，正在等待下游 Agent 更新结果。");
+  };
+  const withCheckpoint = (ui: any) => ({
+    ...ui,
+    checkpoint: {
+      schema: "ccm-main-agent-live-checkpoint-v1",
+      id: event.id || `${type || "event"}:${event.run_id || event.trace_id || Date.now()}`,
+      label: ui.title,
+      detail: ui.text,
+      status: ui.tone === "ok" ? "done" : ui.tone === "error" ? "failed" : ui.tone === "waiting" ? "warning" : "active",
+      phase: ui.phase || "",
+      at: event.at || new Date().toISOString(),
+      run_id: event.run_id || "",
+      source: "global-agent-stream",
+    },
+  });
+  if (event.progress_checkpoint?.label || event.progressCheckpoint?.label) {
+    const checkpoint = event.progress_checkpoint || event.progressCheckpoint;
+    return withCheckpoint({
+      phase: checkpoint.phase || "planning",
+      tone: checkpoint.status === "done" ? "ok" : checkpoint.status === "failed" ? "error" : checkpoint.status === "warning" ? "waiting" : "running",
+      title: checkpoint.label,
+      text: text(checkpoint.detail || ""),
+    });
+  }
+  if (type === "started") return withCheckpoint({ phase: "understanding", tone: "running", title: "理解需求", text: "正在理解你的消息，判断是普通对话还是需要执行操作。" });
+  if (type === "plan_mode_ready") {
+    const planMode = event.plan_mode || event.planMode || {};
+    return withCheckpoint({
+      phase: "planning",
+      tone: "running",
+      title: planMode.title || "执行前计划已整理",
+      text: text(planMode.next_step || planMode.risk?.summary || event.message || "主 Agent 已整理计划，会继续执行并在完成后总结。", 280, "主 Agent 已整理计划，会继续执行并在完成后总结。"),
+    });
+  }
   if (type === "decision") {
     const state = String(event.step?.state || "");
     const message = text(event.step?.message || event.step?.decision?.intent?.reason || "");
-    if (toolName) return { phase: "planning", tone: "running", title: "形成行动计划", text: message || `准备执行：${toolLabel}` };
-    if (state === "answer" || state === "complete") return { phase: "answering", tone: "running", title: "组织回复", text: message || "已经形成回答，正在整理给你。" };
-    if (state === "needs_confirmation") return { phase: "waiting", tone: "waiting", title: "需要确认", text: message || "需要你确认目标或授权范围。" };
-    return { phase: "planning", tone: "running", title: "规划下一步", text: message || "正在规划下一步。" };
+    if (toolName) return withCheckpoint({ phase: "planning", tone: "running", title: "形成行动计划", text: message || `准备执行：${toolLabel}` });
+    if (state === "answer" || state === "complete") return withCheckpoint({ phase: "answering", tone: "running", title: "组织回复", text: message || "已经形成回答，正在整理给你。" });
+    if (state === "needs_confirmation") return withCheckpoint({ phase: "waiting", tone: "waiting", title: "需要确认", text: message || "需要你确认目标或授权范围。" });
+    return withCheckpoint({ phase: "planning", tone: "running", title: "规划下一步", text: message || "正在规划下一步。" });
   }
-  if (type === "tool_started") return { phase: "executing", tone: "running", title: "执行工具", text: `正在${toolLabel}。` };
-  if (type === "tool_completed") return { phase: "reviewing", tone: "ok", title: "工具完成", text: `${toolLabel}已完成，正在检查结果。` };
-  if (type === "tool_failed" || type === "tool_validation_failed") return { phase: "debugging", tone: "error", title: "执行遇到问题", text: text(event.error || event.step?.error || `${toolLabel}失败`) };
-  if (type === "clarification_required") return { phase: "waiting", tone: "waiting", title: "需要补充信息", text: text(event.reply || "需要你补充目标、范围或验收标准。") };
-  if (type === "confirmation_required") return { phase: "waiting", tone: "waiting", title: "等待授权确认", text: text(event.reply || "这个操作需要你确认后才会继续。") };
-  if (type === "paused") return { phase: "paused", tone: "waiting", title: "已暂停", text: text(event.reply || "全局 Agent 已暂停。") };
-  if (type === "supervising") return { phase: "supervising", tone: "running", title: "监工中", text: text(event.reply || "已经创建长期任务，正在监督群聊/项目 Agent 交付。") };
-  if (type === "completed") return { phase: "completed", tone: "ok", title: "完成", text: text(event.reply || "本轮处理完成。") };
-  if (type === "failed") return { phase: "failed", tone: "error", title: "失败", text: text(event.error || event.reply || "本轮处理失败。") };
-  if (type === "cancelled") return { phase: "cancelled", tone: "waiting", title: "已取消", text: text(event.reply || "本轮处理已取消。") };
+  if (type === "tool_started") return withCheckpoint({ phase: "executing", tone: "running", title: "执行工具", text: `正在${toolLabel}。` });
+  if (type === "dispatch_launch_summary") return withCheckpoint({ phase: "dispatching", tone: "ok", title: dispatchSummary?.title || "已派发的工作", text: dispatchSummaryText() });
+  if (type === "tool_completed") return withCheckpoint({ phase: "reviewing", tone: "ok", title: "工具完成", text: `${toolLabel}已完成，正在检查结果。` });
+  if (type === "tool_failed" || type === "tool_validation_failed") return withCheckpoint({ phase: "debugging", tone: "error", title: "执行遇到问题", text: text(event.reply || event.step?.message, 220, `${toolLabel}执行遇到问题，主 Agent 正在重新判断下一步。`) });
+  if (type === "clarification_required") return withCheckpoint({ phase: "waiting", tone: "waiting", title: clarificationSummary?.title || "需要补充信息", text: text(clarificationSummary?.question || clarificationSummary?.headline || event.reply || "需要你补充目标、范围或验收标准。") });
+  if (type === "confirmation_required") return withCheckpoint({ phase: "waiting", tone: "waiting", title: confirmationSummary?.title || "等待授权确认", text: text(confirmationSummary?.headline || confirmationSummary?.question || event.reply || "这个操作需要你确认后才会继续。") });
+  if (type === "paused") return withCheckpoint({ phase: "paused", tone: "waiting", title: "已暂停", text: text(event.reply || "全局 Agent 已暂停。") });
+  if (type === "supervising") return withCheckpoint({ phase: "supervising", tone: "running", title: "监工中", text: text(event.reply || "已经创建长期任务，正在监督群聊/项目 Agent 交付。") });
+  if (type === "completed") return withCheckpoint({ phase: "completed", tone: "ok", title: "完成", text: text(event.reply || "本轮处理完成。") });
+  if (type === "failed") return withCheckpoint({ phase: "failed", tone: "error", title: "失败", text: text(event.reply, 220, "任务没有完成，主 Agent 已整理未完成原因和下一步。") });
+  if (type === "cancelled") return withCheckpoint({ phase: "cancelled", tone: "waiting", title: "已取消", text: text(event.reply || "本轮处理已取消。") });
   return null;
 }
 
@@ -207,25 +271,33 @@ function relayGlobalPetEvent(ctx: CollabCtx, event: any = {}, options: { message
     return;
   }
   if (type === "tool_started") {
-    const message = toolName ? `正在执行：${toolName}` : "正在执行工具操作...";
+    const message = toolName ? `正在执行：${getGlobalToolDisplayName(toolName)}` : "正在执行工具操作...";
     ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, getGlobalPetToolState(toolName), message, { tab: "global-agent" }, 12 * 60 * 1000);
     speech("status", message, false);
     return;
   }
   if (type === "tool_completed") {
-    const message = toolName ? `完成工具：${toolName}` : "工具执行完成";
+    const message = toolName ? `完成工具：${getGlobalToolDisplayName(toolName)}` : "工具执行完成";
     ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "reviewing", message, { tab: "global-agent" }, 45 * 1000);
     speech("assistant", message, false);
     return;
   }
+  if (type === "dispatch_launch_summary") {
+    const summary = event.dispatch_launch_summary || event.dispatchLaunchSummary || {};
+    const message = globalVisibleText(summary.headline || summary.next_action, "已完成派发，正在等待下游 Agent 更新结果。", 180);
+    ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "building", compactPetText(message), { tab: "global-agent" }, 90 * 1000);
+    speech("status", message, false);
+    return;
+  }
   if (type === "tool_failed" || type === "tool_validation_failed") {
-    const message = event.error || event.step?.error || "全局 Agent 工具执行失败";
+    const message = globalVisibleText(event.reply || event.step?.message, "工具执行遇到问题，主 Agent 正在重新判断下一步。", 180);
     ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "debugging", compactPetText(message), { tab: "global-agent" }, 90 * 1000);
     speech("error", message, true);
     return;
   }
   if (type === "clarification_required" || type === "confirmation_required" || type === "paused") {
-    const message = event.reply || "全局 Agent 需要你确认后继续";
+    const summary = event.clarification_summary || event.clarificationSummary || event.confirmation_summary || event.confirmationSummary || null;
+    const message = summary?.question || summary?.headline || event.reply || "全局 Agent 需要你确认后继续";
     ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "waiting", compactPetText(message), { tab: "global-agent" }, 5 * 60 * 1000);
     speech("status", message, true);
     return;
@@ -243,7 +315,7 @@ function relayGlobalPetEvent(ctx: CollabCtx, event: any = {}, options: { message
     return;
   }
   if (type === "failed" || type === "cancelled" || options.error) {
-    const message = options.error || event.error || event.reply || "全局 Agent 本轮处理失败";
+    const message = globalVisibleText(options.finalRun?.final_reply || run.final_reply || event.reply, type === "cancelled" ? "任务已取消，当前状态已整理。" : "任务没有完成，主 Agent 已整理未完成原因和下一步。", 180);
     ctx.setAgentActivity(GLOBAL_PET_AGENT_NAME, "error", compactPetText(message), { tab: "global-agent" }, 90 * 1000);
     speech("error", message, true);
   }
@@ -258,15 +330,147 @@ function writeGlobalJsonAtomic(file: string, value: any) {
   fs.renameSync(temp, file);
 }
 
+const GLOBAL_AGENT_HISTORY_METADATA_KEYS = [
+  "type",
+  "source",
+  "files",
+  "agenticRun",
+  "agentic_run",
+  "globalMission",
+  "global_mission",
+  "globalMissionChildren",
+  "global_mission_children",
+  "globalMissionSupervisor",
+  "global_mission_supervisor",
+  "progressCheckpoints",
+  "progress_checkpoints",
+  "final_delivery_report",
+  "finalDeliveryReport",
+  "delivery_report",
+  "deliveryReport",
+  "display_stream",
+  "displayStream",
+  "workchain",
+  "technical",
+  "trace_id",
+  "mission_id",
+  "run_id",
+  "finalNotified",
+];
+
+function truncateGlobalHistoryValue(value: any, maxChars = 80_000): any {
+  if (value === undefined) return undefined;
+  if (typeof value === "string") return value.length > maxChars ? value.slice(0, maxChars) : value;
+  if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
+  try {
+    const json = JSON.stringify(value);
+    if (json.length <= maxChars) return value;
+    return { truncated: true, preview: json.slice(0, maxChars), original_chars: json.length };
+  } catch {
+    return null;
+  }
+}
+
+function pickGlobalAgentHistoryMetadata(message: any) {
+  const metadata: any = {};
+  for (const key of GLOBAL_AGENT_HISTORY_METADATA_KEYS) {
+    if (message?.[key] !== undefined) {
+      const value = truncateGlobalHistoryValue(message[key]);
+      if (value !== undefined) metadata[key] = value;
+    }
+  }
+  return metadata;
+}
+
+function normalizeGlobalAgentMessage(item: any) {
+  if (!item || !["user", "assistant"].includes(String(item.role || "")) || !String(item.content || "").trim()) return null;
+  return {
+    ...pickGlobalAgentHistoryMetadata(item),
+    role: String(item.role),
+    content: String(item.content || "").slice(0, 8000),
+    timestamp: item.timestamp || new Date().toISOString(),
+  };
+}
+
 function normalizeGlobalAgentMessages(messages: any[] = []) {
   return messages
-    .filter((item: any) => item && ["user", "assistant"].includes(String(item.role || "")) && String(item.content || "").trim())
-    .map((item: any) => ({
-      role: String(item.role),
-      content: String(item.content || "").slice(0, 8000),
-      timestamp: item.timestamp || new Date().toISOString(),
-    }))
+    .map((item: any) => normalizeGlobalAgentMessage(item))
+    .filter(Boolean)
     .slice(-GLOBAL_AGENT_HISTORY_LIMIT);
+}
+
+function globalAgentHistoryMessageKey(message: any) {
+  return [
+    String(message?.role || ""),
+    String(message?.timestamp || ""),
+    String(message?.content || ""),
+  ].join("\u0001");
+}
+
+function mergeGlobalAgentMessages(existing: any[] = [], incoming: any[] = []) {
+  const seen = new Set<string>();
+  const byKey = new Map<string, any>();
+  const candidates = [...(existing || []), ...(incoming || [])]
+    .map((item: any) => normalizeGlobalAgentMessage(item))
+    .filter(Boolean);
+  for (const message of candidates) {
+    const key = globalAgentHistoryMessageKey(message);
+    const previous = byKey.get(key);
+    byKey.set(key, previous ? { ...previous, ...pickGlobalAgentHistoryMetadata(message), role: previous.role, content: previous.content, timestamp: previous.timestamp } : message);
+  }
+  const merged: any[] = [];
+  for (const message of byKey.values()) {
+    const key = globalAgentHistoryMessageKey(message);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(message);
+  }
+  return merged
+    .sort((a, b) => String(a.timestamp || "").localeCompare(String(b.timestamp || "")))
+    .slice(-GLOBAL_AGENT_HISTORY_LIMIT);
+}
+
+export function runGlobalAgentHistorySyncSelfTest() {
+  const timestamp = "2026-07-07T10:00:00.000Z";
+  const completedRun = {
+    id: "run-history-sync",
+    status: "completed",
+    final_reply: "登录修复已完成。",
+    final_delivery_report: {
+      schema: "ccm-main-agent-delivery-report-v1",
+      headline: "登录修复已完成。",
+      status: "done",
+      files: ["src/Login.vue"],
+      verification: ["npm test"],
+    },
+    display_stream: {
+      schema: "ccm-streamlined-display-v2",
+      delivery_report: {
+        schema: "ccm-main-agent-delivery-report-v1",
+        headline: "登录修复已完成。",
+      },
+    },
+  };
+  const normalized = normalizeGlobalAgentMessages([{
+    role: "assistant",
+    content: "登录修复已完成。",
+    timestamp,
+    type: "global_agent_result",
+    agenticRun: completedRun,
+    progress_checkpoints: { items: [{ label: "任务交付完成", status: "done" }] },
+  }])[0] as any;
+  const merged = mergeGlobalAgentMessages(
+    [{ role: "assistant", content: "登录修复已完成。", timestamp }],
+    [normalized],
+  )[0] as any;
+  const checks = {
+    preservesType: normalized?.type === "global_agent_result",
+    preservesRun: normalized?.agenticRun?.id === "run-history-sync",
+    preservesDeliveryReport: normalized?.agenticRun?.final_delivery_report?.headline === "登录修复已完成。",
+    mergesRicherMetadata: merged?.agenticRun?.final_delivery_report?.files?.includes("src/Login.vue"),
+    preservesProgressCheckpoints: merged?.progress_checkpoints?.items?.[0]?.label === "任务交付完成",
+  };
+  return { pass: Object.values(checks).every(Boolean), checks };
 }
 
 function loadGlobalAgentHistoryStore(): any {
@@ -310,13 +514,14 @@ function syncGlobalAgentWebHistory(payload: any) {
     } catch (error: any) {
       console.warn(`[全局记忆] Web 会话写入失败 (${id})：${error?.message || error}`);
     }
+    const existing = byId.get(id);
     byId.set(id, {
       id,
-      name: session.name || "全局 Agent 会话",
+      name: session.name || existing?.name || "全局 Agent 会话",
       source: "web",
-      createdAt: session.createdAt || new Date().toISOString(),
+      createdAt: existing?.createdAt || session.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      messages: normalizeGlobalAgentMessages(session.messages || []),
+      messages: mergeGlobalAgentMessages(existing?.messages || [], session.messages || []),
     });
   }
   store.sessions = Array.from(byId.values());
@@ -942,7 +1147,7 @@ function inferLocalGlobalAction(message: string, projects: string[], groups: any
             business_goal: text,
             scope: "由全局 Agent结合项目和群聊成员关系识别影响范围",
             documents: text,
-            acceptance: "所有群聊主 Agent和项目 Agent子任务必须通过代码变更与验证门禁，全局 Agent再汇总报告完成",
+            acceptance: "所有群聊主 Agent和项目 Agent子任务必须通过代码变更与验证检查，全局 Agent再汇总报告完成",
             execution_order: "parallel",
             targets,
           }
@@ -983,7 +1188,7 @@ function inferLocalGlobalAction(message: string, projects: string[], groups: any
           business_goal: text,
           scope: text,
           group_id: group?.id,
-          acceptance: "子 Agent 提供回执；主 Agent 输出最终报告"
+          acceptance: "子 Agent 提供结果说明；主 Agent 输出最终报告"
         }
       }
     };
@@ -1100,7 +1305,184 @@ export function runGlobalAgentIntentSelfTest() {
   const fallbackCronCannotWrite = modelUnavailableCronCreate?.state === "answer" && !modelUnavailableCronCreate.tool;
   const modelUnavailableAmbiguousWrite = localActionToAgenticDecision({ reply: "准备派发", action: { type: "create_task", params: { title: "优化", business_goal: "帮我优化一下" } } }, { steps: [], user_message: "帮我优化一下", explicit_write_authorization: true } as any);
   const ambiguousFallbackCannotWrite = modelUnavailableAmbiguousWrite?.state === "answer" && !modelUnavailableAmbiguousWrite.tool;
-  return { passed: results.every(item => item.passed) && actionBlockHidden && fallbackDelegationCannotWrite && localGroupDispatchUsesSchema && fallbackCronCannotWrite && ambiguousFallbackCannotWrite, results, actionBlockHidden, fallbackDelegationCannotWrite, localGroupDispatchUsesSchema, fallbackCronCannotWrite, ambiguousFallbackCannotWrite, visibleReply };
+  const modelUnavailableObservationSummary = localActionToAgenticDecision(
+    { reply: "查询完成", action: { type: "system_status", params: {} } },
+    { steps: [{ tool: { name: "inspect_system" }, observation: { success: true, summary: "CCM_AGENT_RECEIPT done", trace_id: "trace-should-hide" } }], user_message: "查看系统状态", explicit_write_authorization: false } as any
+  );
+  const fallbackObservationFriendly = modelUnavailableObservationSummary?.state === "complete"
+    && !/[{}"]|trace_id|CCM_AGENT_RECEIPT/i.test(modelUnavailableObservationSummary.message || "")
+    && /查询完成|技术详情|完成信息/.test(modelUnavailableObservationSummary.message || "");
+  const staleLocalHistory = Array.from({ length: GLOBAL_AGENT_HISTORY_LIMIT }, (_, index) => ({
+    role: index % 2 === 0 ? "user" : "assistant",
+    content: `旧前端历史 ${index}`,
+    timestamp: `2026-07-07T07:${String(index).padStart(2, "0")}:00.000Z`,
+  }));
+  const mergedGlobalHistory = mergeGlobalAgentMessages(
+    [
+      ...staleLocalHistory,
+      { role: "assistant", content: "你派发到群聊主 Agent 的任务已经通过验收。", timestamp: "2026-07-07T09:00:00.000Z" },
+    ],
+    staleLocalHistory
+  );
+  const globalHistoryMergePreservesBackendCompletion = mergedGlobalHistory.length === GLOBAL_AGENT_HISTORY_LIMIT
+    && mergedGlobalHistory.some(item => item.content.includes("通过验收"));
+  const directGroupDispatch = buildGlobalDirectDispatchHandoff({
+    kind: "group",
+    group: groups[0],
+    targetProject: "coordinator",
+    message: "修复登录问题并完成测试",
+    originalText: "给开发群派发任务，修复登录问题并完成测试",
+    traceId: "trace-direct-group",
+  });
+  const directGroupMessage = renderGlobalDirectGroupWorkOrder({
+    group: groups[0],
+    targetProject: "coordinator",
+    message: "修复登录问题并完成测试",
+    originalText: "给开发群派发任务，修复登录问题并完成测试",
+    handoff: directGroupDispatch.handoff,
+  });
+  const directProjectDispatch = buildGlobalDirectDispatchHandoff({
+    kind: "project",
+    project: "backend-api",
+    message: "运行测试并总结失败项",
+    originalText: "我明确授权：现在给 backend-api 运行测试，影响范围仅限测试，不修改代码",
+    traceId: "trace-direct-project",
+  });
+  const directProjectMessage = renderGlobalDirectProjectWorkOrder({
+    project: "backend-api",
+    message: "运行测试并总结失败项",
+    originalText: "我明确授权：现在给 backend-api 运行测试，影响范围仅限测试，不修改代码",
+    handoff: directProjectDispatch.handoff,
+  });
+  const dispatchLaunchUi = buildGlobalAgentEventUi({
+    type: "dispatch_launch_summary",
+    run_id: "global-run-ui-test",
+    dispatch_launch_summary: {
+      schema: "ccm-main-agent-dispatch-launch-summary-v1",
+      title: "已派发的工作",
+      headline: "全局主 Agent 已把这次需求交给 1 个执行目标：dev-group。",
+      rows: [{ agent: "dev-group", role: "群聊主 Agent", task: "修复登录问题", status_label: "已进入任务链路" }],
+      next_action: "后续进度以群聊任务卡为准。",
+    },
+  });
+  const protocolDispatchLaunchUi = buildGlobalAgentEventUi({
+    type: "dispatch_launch_summary",
+    dispatch_launch_summary: {
+      schema: "ccm-main-agent-dispatch-launch-summary-v1",
+      title: "已派发的工作",
+      headline: "CCM_AGENT_RECEIPT trace_id raw payload",
+      rows: [{ agent: "dev-group", role: "群聊主 Agent", task: "CCM_AGENT_RECEIPT", status_label: "已派发" }],
+      next_action: "trace_id",
+    },
+  });
+  const statusSummary = formatMissionStatus({
+    missions: [{
+      id: "mission-status-demo",
+      title: "修复登录状态恢复",
+      status: "in_progress",
+      child_task_ids: ["status-child-web", "status-child-api"],
+      updated_at: "2020-01-01T00:00:00.000Z",
+      mission_summary: { total: 2, completed: 1, failed: 0, blocked: 0 },
+      workflow_timeline: [{ title: "主 Agent 检查中", detail: "web 已完成，api 正在验证" }],
+    }],
+    tasks: [
+      { id: "status-child-web", status: "done", target_project: "web", status_detail: "已提交结构化结果说明" },
+      { id: "status-child-api", status: "in_progress", target_project: "api", status_detail: "正在运行验证", updated_at: "2020-01-01T00:00:00.000Z" },
+      {
+        id: "status-direct",
+        title: "直派修复首页",
+        status: "in_progress",
+        target_project: "frontend-app",
+        updated_at: "2020-01-01T00:00:00.000Z",
+        plan_revision_required: true,
+        collaboration_state: {
+          last_continuation: {
+            kind: "revise_goal",
+            at: "2026-07-07T09:01:00.000Z",
+            reason: "先保留旧首页入口，只新增兼容开关。",
+            replan_required: true,
+            interrupt_current_run: true,
+          },
+          goal_revision_interruption: {
+            requested: true,
+            requested_at: "2026-07-07T09:01:00.000Z",
+            reason: "先保留旧首页入口，只新增兼容开关。",
+          },
+        },
+        workflow_meta: { global_direct_dispatch: { schema: "ccm-global-direct-dispatch-v1", user_goal: "修复首页", session_id: "s1" } },
+        workflow_timeline: [{ title: "群聊主 Agent 已接管", detail: "等待子 Agent 返回结果" }],
+        delivery_summary: {
+          delivery_report: {
+            schema: "ccm-main-agent-delivery-report-v1",
+            status: "active",
+            headline: "首页兼容开关正在按新要求接续。",
+            next_action: "等待重核计划后继续验收。",
+            pickup_summary: {
+              schema: "ccm-main-agent-pickup-summary-v1",
+              title: "回来继续看这里",
+              current_state: "目标调整已收到；原始执行记录在技术详情里。",
+              review_items: ["接续：正在重核计划", "验证：等待子 Agent 返回", "隐藏：CCM_AGENT_RECEIPT trace_id=secret"],
+              resume_action: "等待重核计划后继续验收。",
+            },
+          },
+        },
+      },
+    ],
+  });
+  const statusChecks = {
+    globalStatusFollowupRecognized: isGlobalProgressStatusRequest("现在进展怎么样？") && isGlobalProgressStatusRequest("How's it going?"),
+    globalStatusFollowupAvoidsManagementMutation: !isGlobalProgressStatusRequest("把任务状态设置为 done"),
+    globalStatusSummaryFriendly: statusSummary.includes("最近全局任务进展") && statusSummary.includes("子目标") && statusSummary.includes("web 已完成") && statusSummary.includes("api 处理中"),
+    globalStatusShowsChildAgentWaitingState: statusSummary.includes("子 Agent 等待情况") && statusSummary.includes("已完成：web") && statusSummary.includes("处理中：api"),
+    globalStatusIncludesDirectDispatch: statusSummary.includes("最近全局直派任务") && statusSummary.includes("修复首页"),
+    globalStatusShowsDirectDispatchContinuation: statusSummary.includes("接续状态") && statusSummary.includes("保留旧首页入口") && statusSummary.includes("重核计划"),
+    globalStatusShowsPickupSummary: statusSummary.includes("回来继续看这里")
+      && statusSummary.includes("回看要点")
+      && statusSummary.includes("等待重核计划后继续验收"),
+    globalStatusShowsProgressRefreshSummary: statusSummary.includes("进度刷新提醒")
+      && statusSummary.includes("接续要点")
+      && statusSummary.includes("没有新的可展示进展")
+      && statusSummary.includes("刷新状态"),
+    globalStatusHidesProtocol: !/CCM_AGENT_RECEIPT|trace_id|session_id|raw payload|WorkerContextPacket/i.test(statusSummary),
+  };
+  const directDispatchChecks = {
+    groupVisibleWorkOrderFriendly: directGroupMessage.includes("全局主 Agent 指令工作单") && directGroupMessage.includes("请按这个链路接管") && directGroupMessage.includes("最终总结"),
+    groupVisibleWorkOrderNoProtocolLeak: !GLOBAL_DIRECT_DISPATCH_INTERNAL_PATTERN.test(directGroupMessage),
+    groupDirectDispatchSaysAcceptedNotDone: renderGlobalDirectGroupDispatchAcceptedSummary({ group: groups[0], groupId: "dev-group", taskId: "task-1", queueText: "已进入执行队列（位置 1）", reply: "我已接管" }).includes("不代表需求已经完成"),
+    groupDirectDispatchUsesFriendlyReplyLabel: (() => {
+      const legacyReplyLabel = "主 Agent " + "回执";
+      const summary = renderGlobalDirectGroupDispatchAcceptedSummary({ group: groups[0], groupId: "dev-group", taskId: "task-1", queueText: "已进入执行队列（位置 1）", reply: "我已接管" });
+      return summary.includes("主 Agent 说明") && !summary.includes(legacyReplyLabel);
+    })(),
+    projectInternalWorkOrderSelfContained: directProjectMessage.includes("全局主 Agent 指令工作单") && directProjectMessage.includes("你看不到用户和主 Agent 的完整历史对话") && directProjectMessage.includes("CCM_AGENT_RECEIPT"),
+    directDispatchHandoffSummary: directGroupDispatch.summary.label === "工作单已补齐" && directProjectDispatch.summary.project === "backend-api",
+    verificationOnlyCanAvoidCodeChanges: directProjectDispatch.handoff.verification.required.includes("说明产出和人工核验依据"),
+    dispatchLaunchUiFriendly: dispatchLaunchUi?.title === "已派发的工作" && dispatchLaunchUi?.text.includes("dev-group") && dispatchLaunchUi?.checkpoint?.label === "已派发的工作",
+    dispatchLaunchUiHidesProtocol: !/CCM_AGENT_RECEIPT|trace_id|raw payload/i.test(JSON.stringify(protocolDispatchLaunchUi || {})),
+  };
+  return {
+    passed: results.every(item => item.passed)
+      && actionBlockHidden
+      && fallbackDelegationCannotWrite
+      && localGroupDispatchUsesSchema
+      && fallbackCronCannotWrite
+      && ambiguousFallbackCannotWrite
+      && fallbackObservationFriendly
+      && globalHistoryMergePreservesBackendCompletion
+      && Object.values(statusChecks).every(Boolean)
+      && Object.values(directDispatchChecks).every(Boolean),
+    results,
+    actionBlockHidden,
+    fallbackDelegationCannotWrite,
+    localGroupDispatchUsesSchema,
+    fallbackCronCannotWrite,
+    ambiguousFallbackCannotWrite,
+    fallbackObservationFriendly,
+    globalHistoryMergePreservesBackendCompletion,
+    statusChecks,
+    directDispatchChecks,
+    visibleReply,
+  };
 }
 
 function decryptFeishuEvent(encrypted: string, encryptKey: string): any {
@@ -1191,21 +1573,503 @@ function postLocalApi(baseUrl: string, pathname: string, body: any): Promise<any
   });
 }
 
-function formatMissionStatus(): string {
-  const missions = refreshGlobalDevelopmentMissions();
-  if (!missions.length) return "当前还没有全局开发任务。";
-  const rows = missions.slice(-8).reverse().map((mission: any) => {
+function parseSseApiEvents(text: string) {
+  const events: any[] = [];
+  for (const block of String(text || "").split(/\r?\n\r?\n/)) {
+    const data = block
+      .split(/\r?\n/)
+      .filter(line => line.startsWith("data:"))
+      .map(line => line.slice(5).trimStart())
+      .join("\n")
+      .trim();
+    if (!data || data === "[DONE]") continue;
+    try {
+      events.push(JSON.parse(data));
+    } catch {
+      events.push({ type: "message", text: data });
+    }
+  }
+  return events;
+}
+
+async function postLocalSseOrJsonApi(baseUrl: string, pathname: string, body: any): Promise<any> {
+  const response = await fetch(baseUrl + pathname, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "text/event-stream, application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  const contentType = response.headers.get("content-type") || "";
+  const text = await response.text();
+  let data: any = null;
+  if (contentType.includes("application/json") || /^\s*[{[]/.test(text)) {
+    try { data = text ? JSON.parse(text) : {}; } catch { data = null; }
+  }
+  if (!data) {
+    const events = parseSseApiEvents(text);
+    const errorEvent = events.find(event => event?.type === "error");
+    const taskEvent = events.find(event => event?.type === "task_created" || event?.type === "task_updated");
+    const agentEvent = events.find(event => event?.type === "agent_done");
+    const doneEvent = [...events].reverse().find(event => event?.type === "done");
+    data = {
+      success: !errorEvent,
+      events,
+      error: errorEvent?.text || errorEvent?.error || "",
+      reply: taskEvent?.text || agentEvent?.text || "",
+      task: taskEvent?.task || null,
+      queue: taskEvent?.queue || null,
+      messageId: taskEvent?.messageId || agentEvent?.messageId || doneEvent?.messageId || "",
+      taskId: taskEvent?.task?.id || doneEvent?.taskId || "",
+    };
+  }
+  if (!response.ok || data?.success === false || data?.error) {
+    throw new Error(data?.error || `接口执行失败 (${response.status})`);
+  }
+  return data;
+}
+
+const GLOBAL_DIRECT_DISPATCH_INTERNAL_PATTERN = /CCM_AGENT_RECEIPT|WorkerContextPacket|trace_id|session_ids|native_session|task_agent_session|Runtime Kernel|Trace Replay|scratchpad|回执要求/i;
+
+function sanitizeGlobalDirectAgentOutput(value: any, fallback = "Agent 已返回执行结果，详细排障信息已放入技术详情。", max = 700) {
+  let text = String(value || "").replace(/\r/g, "").trim();
+  if (!text) return fallback;
+  if (GLOBAL_DIRECT_DISPATCH_INTERNAL_PATTERN.test(text)) {
+    if (/error|失败|denied|invalid|权限|门禁/i.test(text)) return "Agent 执行时遇到需要排查的问题，详细原因已放入技术详情。";
+    if (/done|完成|receipt|回执/i.test(text)) return "Agent 已提交结构化完成信息，主 Agent 会继续汇总验收。";
+    return fallback;
+  }
+  text = text.replace(/\n{3,}/g, "\n\n").trim();
+  return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function resolveGlobalDispatchProject(project: string) {
+  const config = getConfigs().find((item: any) => item.name === project);
+  const info = config ? (getConfigInfo(config.path)?.[0] || {}) : {};
+  return {
+    project,
+    config,
+    workDir: info.workDir || "",
+    agentType: info.agent || "claudecode",
+    platform: info.platform || "",
+  };
+}
+
+function inferGlobalDirectDispatchRequiresCodeChanges(message: string) {
+  const text = normalizeText(message);
+  const explicitCodeChange = /(修改|修复|实现|新增|删除|重构|改代码|开发|接入|对接|bug|页面|接口|字段|schema|配置)/i.test(text);
+  const readOnlyOnly = /(只读|仅分析|只分析|不要修改|不修改|不改代码|无需代码|无需修改|运行测试|执行测试|跑测试|检查|审查|review)/i.test(text);
+  if (readOnlyOnly && !explicitCodeChange) return false;
+  return true;
+}
+
+function buildGlobalDirectDispatchHandoff(input: {
+  kind: "group" | "project";
+  message: string;
+  originalText?: string;
+  project?: string;
+  group?: any;
+  targetProject?: string;
+  traceId?: string;
+}) {
+  const targetProject = input.project || input.targetProject || "coordinator";
+  const runtime = resolveGlobalDispatchProject(targetProject);
+  const groupLabel = input.group ? `${input.group.name || input.group.id || "未命名群聊"}` : "";
+  const userGoal = String(input.originalText || input.message || "").trim();
+  const kindLabel = input.kind === "group" ? "群聊主 Agent" : "项目 Agent";
+  const handoff = buildSelfContainedWorkerHandoff({
+    group: input.group || null,
+    project: targetProject,
+    task: input.message,
+    userGoal,
+    source: "全局主 Agent 直接派发",
+    reason: input.kind === "group"
+      ? `全局主 Agent 判断该需求需要交给群聊「${groupLabel || input.group?.id || "目标群聊"}」的主 Agent 接管`
+      : `全局主 Agent 判断该需求适合由项目「${targetProject}」直接执行`,
+    workDir: runtime.workDir,
+    agentType: runtime.agentType,
+    traceId: input.traceId,
+    analysis: {
+      summary: userGoal,
+      documentFindings: [
+        input.kind === "group" ? `目标群聊：${groupLabel || input.group?.id || "未指定"}` : `目标项目：${targetProject}`,
+        `接收方：${kindLabel}`,
+      ],
+      constraints: [
+        "用户可见回复保持自然友好，技术排障信息默认放入技术详情。",
+        "完成后必须说明完成内容、验证结果、风险和下一步。",
+      ],
+    },
+    verificationHints: input.kind === "group"
+      ? ["群聊任务卡持续展示计划、执行、验收和最终总结。"]
+      : ["运行与本次指令匹配的最小必要验证；未运行必须说明原因。"],
+    acceptance: [
+      "用户能看懂主 Agent 当前计划、执行进度和最终结论。",
+      "涉及代码时必须说明实际文件变更和验证结果。",
+      "如被阻塞，明确还需要用户或其他 Agent 补充什么。",
+    ],
+    requiresCodeChanges: inferGlobalDirectDispatchRequiresCodeChanges(input.message),
+  });
+  return { handoff, summary: summarizeWorkerHandoffForUser(handoff), runtime };
+}
+
+function renderGlobalDirectGroupWorkOrder(input: {
+  group: any;
+  targetProject: string;
+  message: string;
+  originalText?: string;
+  handoff: any;
+}) {
+  const summary = summarizeWorkerHandoffForUser(input.handoff);
+  const members = (input.group?.members || []).map((item: any) => item.project).filter(Boolean).slice(0, 8);
+  return [
+    "【全局主 Agent 指令工作单】",
+    `目标群聊：${input.group?.name || input.group?.id || "未命名群聊"}`,
+    `接收方：${input.targetProject || "群聊主 Agent"}`,
+    members.length ? `可协作成员：${members.join("、")}` : "",
+    `工作单状态：${summary.label}，目标、范围、验收和总结要求已整理好。`,
+    "",
+    "用户目标：",
+    compactPetText(input.originalText || input.message, 900),
+    "",
+    "请按这个链路接管：",
+    "1. 先理解目标和影响范围，必要时只读检查项目上下文。",
+    "2. 形成用户能看懂的计划；如果风险高，先等用户确认。",
+    "3. 需要写代码时再派发给合适的子 Agent，并持续跟踪执行和回执。",
+    "4. 主 Agent 负责验收；验收不通过就返工，不能把未完成写成完成。",
+    "5. 完成后给用户一份最终总结：完成了什么、改了哪里、怎么验证、还有什么风险。",
+    "",
+    "展示要求：普通回复只写用户能看懂的话；内部排障字段和详细记录放进技术详情。",
+  ].filter(Boolean).join("\n");
+}
+
+function renderGlobalDirectProjectWorkOrder(input: {
+  project: string;
+  message: string;
+  originalText?: string;
+  handoff: any;
+}) {
+  return [
+    "【全局主 Agent 指令工作单】",
+    `目标项目：${input.project}`,
+    "",
+    "面向用户的回复要求：",
+    "- 用自然中文说明你理解的目标、实际动作、验证结果和风险。",
+    "- 技术协议、执行细节和排障字段放在结构化回执或技术详情里，普通总结不要堆内部字段。",
+    "- 如果不能完成，明确说明卡在哪里、需要谁补什么。",
+    "",
+    renderSelfContainedWorkerHandoff(input.handoff),
+  ].join("\n");
+}
+
+function renderGlobalDirectGroupDispatchAcceptedSummary(input: {
+  group?: any;
+  groupId?: string;
+  taskId?: string;
+  queueText?: string;
+  reply?: string;
+}) {
+  return [
+    "群聊主 Agent 已收到全局工作单，并按任务链路接管。",
+    `- 群聊：${input.group?.name || input.groupId || "目标群聊"}`,
+    input.taskId ? `- 任务 ID：${input.taskId}` : "",
+    `- 状态：${input.queueText || "已保存到群聊任务链路"}`,
+    "- 说明：这只是已派发并进入任务链路，不代表需求已经完成；最终结果以任务卡验收和最终总结为准。",
+    "- 进度展示：计划、执行、验收和最终总结会显示在群聊任务卡中。",
+    input.reply ? `\n主 Agent 说明：\n${sanitizeGlobalDirectAgentOutput(input.reply, "主 Agent 已接管，后续进度在任务卡中更新。", 900)}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function isGlobalProgressStatusRequest(message: string) {
+  const text = normalizeText(message);
+  if (!text) return false;
+  if (/^(?:\/status|status|progress|任务状态|查看任务状态|全局任务|最近任务)$/i.test(text)) return true;
+  if (/(设置|修改|标记|改成|更新|创建|新建|删除|移除)/.test(text) && /(任务状态|状态)/.test(text)) return false;
+  return /(进展|进度|做到哪|处理到哪|现在怎么样|怎么样了|完成了吗|有结果了吗|还在(?:执行|处理|跑)|任务状态|最近任务|全局任务|how'?s it going|how is it going|what'?s the status)/i.test(text);
+}
+
+function globalStatusLabel(status: any) {
+  const value = String(status || "").toLowerCase();
+  if (["done", "completed", "success"].includes(value)) return "已完成";
+  if (["failed", "error"].includes(value)) return "未完成";
+  if (["cancelled", "canceled"].includes(value)) return "已取消";
+  if (["blocked", "needs_user", "waiting_confirmation", "waiting_clarification"].includes(value)) return "需要处理";
+  if (["pending", "queued", "planned"].includes(value)) return "排队中";
+  if (["in_progress", "running", "reviewing", "reworking"].includes(value)) return "处理中";
+  return value || "状态未记录";
+}
+
+function latestReadableTimeline(task: any) {
+  const timeline = Array.isArray(task?.workflow_timeline) ? task.workflow_timeline : [];
+  const latest = [...timeline].reverse().find((item: any) => item?.title || item?.detail || item?.message);
+  return sanitizeGlobalDirectAgentOutput(
+    latest?.detail || latest?.message || latest?.title || task?.status_detail || "",
+    "最近进展已更新，详细记录在任务卡技术详情里。",
+    220,
+  );
+}
+
+const GLOBAL_STATUS_PROGRESS_REFRESH_STALE_MS = 15 * 60 * 1000;
+
+function globalStatusTimeMs(...values: any[]) {
+  const times = values
+    .map(value => Date.parse(String(value || "")))
+    .filter(value => Number.isFinite(value) && value > 0);
+  return times.length ? Math.max(...times) : 0;
+}
+
+function globalStatusAgeLabel(ageMs: number) {
+  if (!Number.isFinite(ageMs) || ageMs <= 0) return "";
+  const minutes = Math.max(1, Math.round(ageMs / 60_000));
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.max(1, Math.round(minutes / 60));
+  if (hours < 24) return `${hours} 小时`;
+  return `${Math.max(1, Math.round(hours / 24))} 天`;
+}
+
+function getGlobalStatusPickupSummary(source: any) {
+  const report = source?.delivery_summary?.delivery_report
+    || source?.deliverySummary?.deliveryReport
+    || source?.final_delivery_report
+    || source?.finalDeliveryReport
+    || source?.delivery_report
+    || source?.deliveryReport
+    || source?.display_stream?.delivery_report
+    || source?.displayStream?.deliveryReport
+    || null;
+  const pickup = source?.pickup_summary
+    || source?.pickupSummary
+    || source?.delivery_summary?.pickup_summary
+    || source?.deliverySummary?.pickupSummary
+    || report?.pickup_summary
+    || report?.pickupSummary
+    || null;
+  if (!pickup && !report) return null;
+  const title = sanitizeGlobalDirectAgentOutput(pickup?.title || "回来继续看这里", "回来继续看这里", 80);
+  const headline = sanitizeGlobalDirectAgentOutput(
+    pickup?.current_state || pickup?.currentState || pickup?.headline || report?.headline || source?.status_detail || "",
+    "全局主 Agent 已整理当前任务状态。",
+    220,
+  );
+  const reviewItems = Array.isArray(pickup?.review_items || pickup?.reviewItems)
+    ? (pickup.review_items || pickup.reviewItems)
+      .map((item: any) => sanitizeGlobalDirectAgentOutput(item, "", 120))
+      .filter(Boolean)
+      .slice(0, 4)
+    : [];
+  const resumeAction = sanitizeGlobalDirectAgentOutput(
+    pickup?.resume_action || pickup?.resumeAction || (Array.isArray(report?.next_action) ? report.next_action[0] : report?.next_action) || "",
+    "",
+    180,
+  );
+  return { title, headline, reviewItems, resumeAction };
+}
+
+function getGlobalStatusProgressRefreshSummary(source: any, childTasks: any[] = [], nowMs = Date.now()) {
+  const statusValue = String(source?.status || "").toLowerCase();
+  if (["done", "completed", "success", "cancelled", "canceled"].includes(statusValue)) return null;
+  const staleMs = Math.max(60_000, Number(source?.progress_refresh_stale_ms || source?.progressRefreshStaleMs || GLOBAL_STATUS_PROGRESS_REFRESH_STALE_MS));
+  const rows = (Array.isArray(childTasks) && childTasks.length ? childTasks : [source]).filter(Boolean);
+  const ageRows = rows.map((task: any) => {
+    const lastMs = globalStatusTimeMs(
+      task?.updated_at,
+      task?.updatedAt,
+      task?.started_at,
+      task?.startedAt,
+      task?.created_at,
+      task?.createdAt,
+      source?.updated_at,
+      source?.updatedAt,
+    );
+    const ageMs = lastMs ? Math.max(0, nowMs - lastMs) : 0;
+    return { task, ageMs };
+  });
+  const stalled = ageRows.filter(({ task, ageMs }) => {
+    const value = String(task?.status || "").toLowerCase();
+    return ["in_progress", "running", "reviewing", "reworking"].includes(value) && ageMs >= staleMs;
+  });
+  const staleQueued = ageRows.filter(({ task, ageMs }) => {
+    const value = String(task?.status || "").toLowerCase();
+    return ["pending", "queued", "planned"].includes(value) && ageMs >= staleMs;
+  });
+  const sourceAgeMs = Math.max(...ageRows.map(row => row.ageMs), 0);
+  const sourceLong = sourceAgeMs >= staleMs;
+  const supervisorWaiting = Array.isArray(source?.workflow_timeline)
+    ? source.workflow_timeline.some((item: any) => /stalled|timeout|超时|长时间|等待|卡住|恢复/i.test(`${item?.type || ""} ${item?.title || ""} ${item?.detail || ""} ${item?.message || ""}`))
+    : false;
+  if (!stalled.length && !staleQueued.length && !sourceLong && !supervisorWaiting) return null;
+  const first = stalled[0]?.task || staleQueued[0]?.task || rows[0] || source;
+  const target = targetNameForTask(first);
+  const ageLabel = globalStatusAgeLabel(stalled[0]?.ageMs || staleQueued[0]?.ageMs || sourceAgeMs);
+  const headline = stalled.length
+    ? `${stalled.length} 个下游 Agent 已经 ${ageLabel || "一段时间"} 没有新的可展示进展，全局主 Agent 会先刷新状态，再决定继续等待、重派或请你确认。`
+    : staleQueued.length
+      ? `${staleQueued.length} 个下游任务排队较久，全局主 Agent 会检查执行通道并接上下一步。`
+      : `这项全局任务已经 ${ageLabel || "一段时间"} 没有新的可展示进展，全局主 Agent 会主动刷新状态。`;
+  const reviewItems = [
+    target ? `关注对象：${target}` : "",
+    first?.status_detail ? `当前说明：${sanitizeGlobalDirectAgentOutput(first.status_detail, "进展已整理。", 120)}` : "",
+    source?.workflow_timeline?.length ? `最近节点：${sanitizeGlobalDirectAgentOutput(source.workflow_timeline[source.workflow_timeline.length - 1]?.title || source.workflow_timeline[source.workflow_timeline.length - 1]?.detail || "", "", 120)}` : "",
+  ].filter(Boolean).slice(0, 4);
+  const nextAction = stalled.length
+    ? "先刷新下游任务卡；如果仍没有新结果，就重新派发或定向补充。"
+    : staleQueued.length
+      ? "检查执行通道和队列状态，能恢复就继续推进；不能恢复会提示你处理。"
+      : "刷新全局任务状态，并继续等待下游 Agent 的可验收结果。";
+  return {
+    title: "进度刷新提醒",
+    headline: sanitizeGlobalDirectAgentOutput(headline, "全局主 Agent 已整理进度刷新状态。", 240),
+    reviewItems: reviewItems.map(item => sanitizeGlobalDirectAgentOutput(item, "", 140)).filter(Boolean),
+    nextAction,
+  };
+}
+
+function getGlobalStatusDirectDispatchMeta(task: any) {
+  const meta = task?.workflow_meta?.global_direct_dispatch
+    || task?.workflowMeta?.global_direct_dispatch
+    || task?.global_direct_dispatch
+    || null;
+  if (!meta || typeof meta !== "object") return null;
+  return String(meta.schema || "") === "ccm-global-direct-dispatch-v1" ? meta : null;
+}
+
+function targetNameForTask(task: any) {
+  return sanitizeGlobalDirectAgentOutput(
+    task?.mission_target?.name || task?.mission_target?.project || task?.target_project || task?.group_id || task?.project || "执行目标",
+    "执行目标",
+    80,
+  );
+}
+
+function summarizeDirectDispatchContinuationForStatus(task: any) {
+  const state = task?.collaboration_state || {};
+  const last = state.last_continuation || task?.last_continuation || null;
+  const interruption = state.goal_revision_interruption || {};
+  const kind = String(last?.kind || last?.rework_kind || "").toLowerCase();
+  const replanRequired = kind === "revise_goal"
+    || last?.replan_required === true
+    || task?.plan_revision_required === true
+    || interruption.requested === true;
+  if (!last?.at && !interruption.requested_at && !replanRequired) return "";
+  const reason = sanitizeGlobalDirectAgentOutput(
+    last?.reason || interruption.reason || task?.status_detail || "用户补充了新的要求",
+    "用户补充了新的要求",
+    140,
+  );
+  const route = interruption.requested && !interruption.resolved_at
+    ? "正在停止旧执行轮，再按新目标重核计划"
+    : replanRequired
+      ? "正在按最新要求重核计划和验收标准"
+      : "补充要求已接到同一任务里继续处理";
+  return `接续状态：${reason ? `${reason}；` : ""}${route}`;
+}
+
+function summarizeMissionChildren(mission: any, tasks: any[]) {
+  const ids = Array.isArray(mission?.child_task_ids) ? mission.child_task_ids : [];
+  const byId = new Map(tasks.map((task: any) => [String(task?.id || ""), task]));
+  return ids
+    .map((id: any) => byId.get(String(id)))
+    .filter(Boolean)
+    .slice(0, 4)
+    .map((task: any) => `${targetNameForTask(task)} ${globalStatusLabel(task.status)}${task.status_detail ? `：${sanitizeGlobalDirectAgentOutput(task.status_detail, "进展已整理。", 90)}` : ""}`);
+}
+
+function summarizeGlobalChildAgentWaiting(mission: any, tasks: any[]) {
+  const ids = Array.isArray(mission?.child_task_ids) ? mission.child_task_ids : [];
+  const byId = new Map(tasks.map((task: any) => [String(task?.id || ""), task]));
+  const rows = ids
+    .map((id: any) => byId.get(String(id)))
+    .filter(Boolean)
+    .slice(0, 8)
+    .map((task: any) => {
+      const value = String(task.status || "").toLowerCase();
+      const agent = targetNameForTask(task);
+      if (["done", "completed", "success", "ok"].includes(value)) return { agent, status: "completed" };
+      if (["failed", "error", "blocked", "needs_user", "waiting_confirmation", "waiting_clarification"].includes(value)) return { agent, status: "attention" };
+      if (["pending", "queued", "planned"].includes(value)) return { agent, status: "waiting" };
+      return { agent, status: "running" };
+    });
+  if (!rows.length) return "";
+  const namesFor = (status: string) => rows.filter(row => row.status === status).map(row => row.agent).slice(0, 5);
+  const completed = namesFor("completed");
+  const running = namesFor("running");
+  const waiting = namesFor("waiting");
+  const attention = namesFor("attention");
+  return [
+    completed.length ? `已完成：${completed.join("、")}` : "",
+    running.length ? `处理中：${running.join("、")}` : "",
+    waiting.length ? `等待中：${waiting.join("、")}` : "",
+    attention.length ? `待处理：${attention.join("、")}` : "",
+  ].filter(Boolean).join("；");
+}
+
+function formatMissionStatus(input: { missions?: any[]; tasks?: any[] } = {}): string {
+  const tasks = Array.isArray(input.tasks) ? input.tasks : loadTasks();
+  const missions = Array.isArray(input.missions) ? input.missions : refreshGlobalDevelopmentMissions();
+  const directDispatchTasks = tasks
+    .filter((task: any) => getGlobalStatusDirectDispatchMeta(task))
+    .sort((a: any, b: any) => String(b.updated_at || b.completed_at || b.created_at || "").localeCompare(String(a.updated_at || a.completed_at || a.created_at || "")))
+    .slice(0, 4);
+  if (!missions.length && !directDispatchTasks.length) return "当前还没有全局开发任务或全局直派任务。";
+
+  const missionRows = missions.slice(-6).reverse().map((mission: any) => {
     const summary = mission.mission_summary || {};
     const total = Number(summary.total || mission.child_task_ids?.length || 0);
-    const completed = Number(summary.completed || 0);
+    const completed = Number(summary.completed || summary.passed || 0);
     const failed = Number(summary.failed || 0);
     const blocked = Number(summary.blocked || 0);
-    const details = [`${completed}/${total} 已完成`];
+    const details = [`${completed}/${total || "?"} 已完成`];
     if (failed > 0) details.push(`${failed} 失败`);
     if (blocked > 0) details.push(`${blocked} 阻塞`);
-    return `- ${mission.title || mission.id}：${mission.status || "unknown"}（${details.join("，")}）\n  ID: ${mission.id}`;
+    const title = sanitizeGlobalDirectAgentOutput(mission.title || mission.business_goal || mission.id, "全局开发任务", 120);
+    const current = latestReadableTimeline(mission);
+    const children = summarizeMissionChildren(mission, tasks);
+    const childWaiting = summarizeGlobalChildAgentWaiting(mission, tasks);
+    const pickup = getGlobalStatusPickupSummary(mission);
+    const childIds = new Set((Array.isArray(mission?.child_task_ids) ? mission.child_task_ids : []).map((id: any) => String(id)));
+    const progressRefresh = getGlobalStatusProgressRefreshSummary(mission, tasks.filter((task: any) => childIds.has(String(task?.id || ""))));
+    const next = failed || blocked
+      ? "下一步：需要主 Agent 处理失败/阻塞项，不能直接宣称完成。"
+      : completed >= total && total > 0
+        ? `下一步：${pickup?.resumeAction || "等待或查看最终交付总结。"}`
+        : `下一步：${progressRefresh?.nextAction || "继续等待子 Agent 更新结果，主 Agent 会汇总验收。"}`;
+    return [
+      `- ${title}：${globalStatusLabel(mission.status)}（${details.join("，")}）`,
+      current ? `  当前进展：${current}` : "",
+      pickup?.headline ? `  ${pickup.title}：${pickup.headline}` : "",
+      pickup?.reviewItems?.length ? `  回看要点：${pickup.reviewItems.join("；")}。` : "",
+      progressRefresh?.headline ? `  ${progressRefresh.title}：${progressRefresh.headline}` : "",
+      progressRefresh?.reviewItems?.length ? `  接续要点：${progressRefresh.reviewItems.join("；")}。` : "",
+      children.length ? `  子目标：${children.join("；")}` : "",
+      childWaiting ? `  子 Agent 等待情况：${childWaiting}` : "",
+      `  ${next}`,
+    ].filter(Boolean).join("\n");
   });
-  return `最近的全局开发任务：\n${rows.join("\n")}`;
+
+  const directRows = directDispatchTasks.map((task: any) => {
+    const meta = getGlobalStatusDirectDispatchMeta(task) || {};
+    const title = sanitizeGlobalDirectAgentOutput(meta.user_goal || task.business_goal || task.title || "全局直派任务", "全局直派任务", 120);
+    const target = targetNameForTask(task);
+    const current = latestReadableTimeline(task);
+    const acceptance = task.delivery_summary?.acceptance_gate_passed === true ? "已通过验收" : "等待任务卡验收";
+    const continuation = summarizeDirectDispatchContinuationForStatus(task);
+    const pickup = getGlobalStatusPickupSummary(task);
+    const progressRefresh = getGlobalStatusProgressRefreshSummary(task);
+    return [
+      `- ${title}：${globalStatusLabel(task.status)}（${target}，${acceptance}）`,
+      continuation ? `  ${continuation}` : "",
+      current ? `  当前进展：${current}` : "",
+      pickup?.headline ? `  ${pickup.title}：${pickup.headline}` : "",
+      pickup?.reviewItems?.length ? `  回看要点：${pickup.reviewItems.join("；")}。` : "",
+      progressRefresh?.headline ? `  ${progressRefresh.title}：${progressRefresh.headline}` : "",
+      progressRefresh?.reviewItems?.length ? `  接续要点：${progressRefresh.reviewItems.join("；")}。` : "",
+      `  下一步：${pickup?.resumeAction || progressRefresh?.nextAction || "以群聊任务卡的计划、执行、验收和最终总结为准。"}`,
+    ].filter(Boolean).join("\n");
+  });
+
+  return [
+    missionRows.length ? `最近全局任务进展：\n${missionRows.join("\n")}` : "",
+    directRows.length ? `最近全局直派任务：\n${directRows.join("\n")}` : "",
+    "我不会猜测还没返回的子 Agent 结果；未完成的部分会继续等下游 Agent 更新，技术记录默认在任务卡技术详情里。",
+  ].filter(Boolean).join("\n\n");
 }
 
 function formatSystemStatus(): string {
@@ -1319,7 +2183,7 @@ async function executeFeishuManagementAction(baseUrl: string, action: any, origi
   return count === undefined ? `操作已完成：${action.type}/${operation}` : `查询完成：${count} 条记录。`;
 }
 
-async function executeFeishuAction(baseUrl: string, action: any, originalText = "", traceId = ""): Promise<string> {
+async function executeFeishuAction(baseUrl: string, action: any, originalText = "", traceId = "", options: { globalRunId?: string; sessionId?: string; source?: string } = {}): Promise<string> {
   if (!action?.type) return "";
   if (GLOBAL_MANAGEMENT_ACTIONS[action.type]) return executeFeishuManagementAction(baseUrl, { ...action, params: { ...(action.params || {}), idempotency_key: traceId || action.params?.idempotency_key } }, originalText);
   const params = action.params || {};
@@ -1361,7 +2225,7 @@ async function executeFeishuAction(baseUrl: string, action: any, originalText = 
       business_goal: params.business_goal || params.businessGoal || params.title,
       scope: params.scope || "",
       documents: params.documents || "",
-      acceptance: params.acceptance || "子 Agent 提供回执；主 Agent 输出最终报告",
+      acceptance: params.acceptance || "子 Agent 提供结果说明；主 Agent 输出最终报告",
       persist_documents: true,
       auto_execute: true,
       trace_id: traceId,
@@ -1370,18 +2234,88 @@ async function executeFeishuAction(baseUrl: string, action: any, originalText = 
     return `协作任务已派发并进入自动执行队列。\n- 任务 ID：${result.task?.id || result.id || "已创建"}`;
   }
   if (action.type === "send_group_cmd") {
-    const result = await postLocalApi(baseUrl, "/api/groups/send", {
-      group_id: params.group_id || params.groupId,
-      target_project: params.target_project || params.targetProject || "coordinator",
-      message: params.message || params.prompt || params.command,
+    const groupId = params.group_id || params.groupId;
+    const targetProject = params.target_project || params.targetProject || "coordinator";
+    const rawMessage = String(params.message || params.prompt || params.command || originalText || "").trim();
+    const group = loadGroups().find((item: any) => item.id === groupId) || null;
+    const dispatch = buildGlobalDirectDispatchHandoff({
+      kind: "group",
+      group,
+      targetProject,
+      message: rawMessage,
+      originalText,
+      traceId,
+    });
+    const workOrderMessage = renderGlobalDirectGroupWorkOrder({
+      group,
+      targetProject,
+      message: rawMessage,
+      originalText,
+      handoff: dispatch.handoff,
+    });
+    const result = await postLocalSseOrJsonApi(baseUrl, "/api/groups/send", {
+      group_id: groupId,
+      target_project: targetProject,
+      message: workOrderMessage,
+      message_mode: "project_task",
+      force_task: true,
+      auto_execute: true,
+      requires_code_changes: inferGlobalDirectDispatchRequiresCodeChanges(rawMessage),
+      global_handoff: dispatch.summary,
+      global_direct_dispatch: {
+        schema: "ccm-global-direct-dispatch-v1",
+        source: "global-agent-direct-dispatch",
+        global_run_id: options.globalRunId || "",
+        session_id: options.sessionId || "",
+        trace_id: traceId,
+        handoff: dispatch.summary,
+        original_text: originalText || rawMessage,
+        user_goal: rawMessage,
+      },
       trace_id: traceId,
       client_message_id: traceId ? `feishu-${traceId}` : undefined,
     });
-    return `群聊主 Agent 已收到指令。${result.reply ? `\n\n主 Agent 回执：\n${String(result.reply).slice(0, 1200)}` : ""}`;
+    const taskId = result.task?.id || result.taskId || "";
+    const queueText = result.queue?.queued
+      ? `已进入执行队列（位置 ${result.queue.position || 1}）`
+      : (result.queue?.message || "已保存到群聊任务链路");
+    return renderGlobalDirectGroupDispatchAcceptedSummary({
+      group,
+      groupId,
+      taskId,
+      queueText,
+      reply: result.reply,
+    });
   }
   if (action.type === "send_project_cmd") {
-    const result = await postLocalApi(baseUrl, "/api/send", { project: params.project || params.projectName, message: params.message || params.prompt || params.command });
-    return `项目 Agent 已执行指令。\n${String(result.output || "已完成").slice(0, 1500)}`;
+    const project = params.project || params.projectName;
+    const rawMessage = String(params.message || params.prompt || params.command || originalText || "").trim();
+    const dispatch = buildGlobalDirectDispatchHandoff({
+      kind: "project",
+      project,
+      message: rawMessage,
+      originalText,
+      traceId,
+    });
+    const agentMessage = renderGlobalDirectProjectWorkOrder({
+      project,
+      message: rawMessage,
+      originalText,
+      handoff: dispatch.handoff,
+    });
+    const result = await postLocalApi(baseUrl, "/api/send", {
+      project,
+      message: agentMessage,
+      global_handoff: dispatch.summary,
+      trace_id: traceId,
+      source: "global-agent-direct-dispatch",
+    });
+    return [
+      "项目 Agent 已按全局工作单执行。",
+      `- 项目：${project}`,
+      "- 工作单：已补齐目标、范围、验收和完成后总结要求。",
+      `- 执行结果：${sanitizeGlobalDirectAgentOutput(result.output || "已完成", "项目 Agent 已提交执行结果，详细输出在项目技术详情中。", 900)}`,
+    ].join("\n");
   }
   if (action.type === "create_cron_task") {
     const result = await postLocalApi(baseUrl, "/api/cron/create", params);
@@ -1429,6 +2363,25 @@ function compactTask(task: any) {
   };
 }
 
+function summarizeGlobalToolObservationForUser(observation: any, fallback = "操作已完成。") {
+  if (!observation) return fallback;
+  if (observation.success === false || observation.error) {
+    return sanitizeGlobalDirectAgentOutput(observation.error || observation.summary || observation.message, "操作未完成；错误详情已放入技术详情。", 700);
+  }
+  const explicit = sanitizeGlobalDirectAgentOutput(observation.summary || observation.message || observation.reply || "", "", 700);
+  if (explicit) return explicit;
+  const count = observation.jobs?.length
+    ?? observation.tasks?.length
+    ?? observation.projects?.length
+    ?? observation.groups?.length
+    ?? observation.missions?.length
+    ?? observation.children?.length;
+  if (count !== undefined) return `操作已完成，返回 ${count} 条结果；详细记录已放入技术详情。`;
+  if (observation.accepted === true && observation.completed === false) return "任务已受理并进入持续跟进；这不代表最终完成，完成后会再给出交付总结。";
+  if (observation.client_effect) return "操作已完成，界面会同步执行对应动作。";
+  return "操作已完成；详细记录已放入技术详情。";
+}
+
 function buildAgenticContext(query = "", sessionId = "") {
   const tasks = loadTasks();
   const groups = loadGroups();
@@ -1446,15 +2399,17 @@ function buildAgenticContext(query = "", sessionId = "") {
       skills: loadSkills().map((skill: any) => skill.name),
     },
     global_memory: query ? buildGlobalAgentMemoryPacket(query, { sessionId, limit: 7 }) : "",
+    group_memory_context: buildGlobalGroupMemoryContext(query, { sessionId, groups, maxGroups: 6, maxTypedMemory: 3 }),
   };
 }
 
 function localActionToAgenticDecision(localIntent: LocalIntentResult | null, run: GlobalAgentRun): GlobalAgentDecision | null {
   if (run.steps.length > 0) {
     const last = run.steps[run.steps.length - 1];
+    const observationText = summarizeGlobalToolObservationForUser(last.observation, localIntent?.reply || "操作已完成。");
     return {
       state: "complete",
-      message: last.error ? `操作未完成：${last.error}` : `${localIntent?.reply || "操作已完成。"}\n\n执行观察：${JSON.stringify(last.observation || {}).slice(0, 1800)}`,
+      message: last.error ? `操作未完成：${last.error}` : `${localIntent?.reply || "操作已完成。"}\n\n${observationText}`,
       tool: null,
       completion: { evidence: last.error ? [] : [`工具 ${last.tool?.name || "unknown"} 已返回执行结果`], risks: last.error ? [last.error] : [] },
     };
@@ -1556,6 +2511,16 @@ async function executeAgenticTool(baseUrl: string, ctx: CollabCtx, name: string,
       observation = { success: true, query: args.query, content: queryKnowledgeBase(String(args.query || "")) || "未检索到相关知识" };
     } else if (name === "query_global_memory") {
       observation = { success: true, query: args.query, ...recallGlobalAgentMemory(String(args.query || ""), { sessionId: run.session_id, limit: Number(args.limit || 8) }) };
+    } else if (name === "query_group_memory") {
+      observation = {
+        success: true,
+        query: args.query,
+        group_memory_context: buildGlobalGroupMemoryContext(String(args.query || run.user_message || ""), {
+          sessionId: run.session_id,
+          maxGroups: Number(args.max_groups || args.maxGroups || args.limit || 8),
+          maxTypedMemory: Number(args.max_typed_memory || args.maxTypedMemory || 4),
+        }),
+      };
     } else if (name === "manage_global_memory") {
       const operation = String(args.operation || "").toLowerCase();
       if (operation !== "status" && !String(args.reason || "").trim()) throw new Error("全局记忆变更操作必须说明原因");
@@ -1627,7 +2592,7 @@ async function executeAgenticTool(baseUrl: string, ctx: CollabCtx, name: string,
         if (action.validated === false) throw new Error(`缺少参数：${(action.missing_params || []).join("、")}`);
         action.confirmed = true;
       }
-      const summary = await executeFeishuAction(baseUrl, action, run.user_message, run.trace_id);
+      const summary = await executeFeishuAction(baseUrl, action, run.user_message, run.trace_id, { globalRunId: run.id, sessionId: run.session_id, source: run.source });
       observation = { success: true, summary };
     }
     completeIdempotency("global-agent-tool", operationKey, { observation });
@@ -1692,7 +2657,7 @@ async function runAgenticGlobalRequest(baseUrl: string, ctx: CollabCtx, input: {
     try {
       ingestGlobalAgentConversation({ sessionId, source: input.source || "web", messages: [{ role: "assistant", content: run.final_reply || "", timestamp: new Date().toISOString(), trace_id: run.trace_id, mission_id: run.mission_id }] });
     } catch (error: any) {
-      console.warn(`[全局记忆] Agentic 回执写入失败：${error?.message || error}`);
+      console.warn(`[全局记忆] Agentic 结果写入失败：${error?.message || error}`);
     }
   }
   return run;
@@ -1766,12 +2731,75 @@ function publicGlobalAgentRun(run: GlobalAgentRun | null, includeObservations = 
     supervisor_id: run.supervisor_id,
     supervision_state: run.supervision_state,
     final_delivery_report: run.final_delivery_report,
+    final_report: run.final_report,
+    display_stream: run.display_stream,
+    displayStream: run.display_stream,
+    workchain: run.workchain,
     decision_summary: run.decision_summary,
     clarification_question: run.clarification_question,
+    clarification_summary: (run as any).clarification_summary || (run as any).clarificationSummary || null,
+    clarificationSummary: (run as any).clarification_summary || (run as any).clarificationSummary || null,
+    confirmation_summary: (run as any).confirmation_summary || (run as any).confirmationSummary || null,
+    confirmationSummary: (run as any).confirmation_summary || (run as any).confirmationSummary || null,
+    plan_mode: (run as any).plan_mode || (run as any).planMode || null,
+    planMode: (run as any).plan_mode || (run as any).planMode || null,
     shadow_mode: run.shadow_mode,
     original_user_message: run.original_user_message,
     reasoning_loop: run.reasoning_loop,
     runtime_debug: buildGlobalAgentSessionDebug(run),
+  };
+}
+
+function buildPublicGlobalStatusRun(input: { message: string; reply: string; sessionId: string; source: string; traceId?: string }) {
+  const now = new Date().toISOString();
+  const displayStream = {
+    schema: "ccm-global-status-summary-v1",
+    user_visible_text: input.reply,
+    technical_details: [],
+    display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: true },
+  };
+  return {
+    id: `global-status-${crypto.randomBytes(5).toString("hex")}`,
+    trace_id: ensureTraceId(input.traceId, "global-status"),
+    session_id: input.sessionId,
+    source: input.source,
+    status: "completed",
+    phase: "complete",
+    explicit_write_authorization: false,
+    created_at: now,
+    updated_at: now,
+    completed_at: now,
+    deadline_at: now,
+    max_steps: 1,
+    steps: [{
+      index: 1,
+      at: now,
+      state: "answer",
+      message: input.reply,
+      plan: [],
+      decision: { intent: { category: "question", action_required: false, reason: "用户询问当前任务进展，直接读取已有状态摘要。" } },
+    }],
+    pending_tool: null,
+    final_reply: input.reply,
+    error: "",
+    resume_count: 0,
+    model_calls: 0,
+    tool_calls: 0,
+    client_effects: [],
+    mission_id: "",
+    supervisor_id: "",
+    supervision_state: "",
+    final_delivery_report: null,
+    final_report: null,
+    display_stream: displayStream,
+    displayStream,
+    workchain: null,
+    decision_summary: { intent: { category: "question", action_required: false, confidence: 0.99, reason: "用户询问当前任务进展。" } },
+    clarification_question: "",
+    shadow_mode: false,
+    original_user_message: input.message,
+    reasoning_loop: null,
+    runtime_debug: { technical_details: [] },
   };
 }
 
@@ -1795,7 +2823,7 @@ async function processFeishuGlobalAgentMessage(baseUrl: string, ctx: CollabCtx, 
       appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
       return markdown;
     }
-    if (/^(任务状态|查看任务状态|全局任务|最近任务|\/status)$/i.test(text)) {
+    if (isGlobalProgressStatusRequest(text)) {
       const markdown = formatMissionStatus();
       appendGlobalActionAudit({ ...auditBase, action: { type: "mission_status", params: { message: text } }, status: "success", result: { summary: markdown } });
       if (sendReport) await sendFeishuReportMessage({ title: "全局任务状态", markdown });
@@ -1832,7 +2860,7 @@ async function processFeishuGlobalAgentMessage(baseUrl: string, ctx: CollabCtx, 
     const markdown = `${run.final_reply || "已处理。"}${confirmationHint}`;
     appendGlobalActionAudit({ ...auditBase, action: { type: "agentic_loop", params: { run_id: run.id } }, status: run.status, result: { summary: markdown, trace_id: run.trace_id, steps: run.steps.length } });
     appendGlobalAgentConversationMessage(conversationId, "assistant", markdown, "feishu");
-    if (sendReport) await sendFeishuReportMessage({ title: run.status === "waiting_confirmation" ? "全局 Agent 等待确认" : "全局 Agent 执行回执", markdown });
+    if (sendReport) await sendFeishuReportMessage({ title: run.status === "waiting_confirmation" ? "全局 Agent 等待确认" : "全局 Agent 执行结果", markdown });
     return markdown;
   } catch (error: any) {
     const markdown = `指令：${text}\n\n错误：${error?.message || String(error)}`;
@@ -2152,6 +3180,25 @@ export function handleGlobalAgentApi(
     return true;
   }
 
+  if (pathname === "/api/global-agent/group-memory" && req.method === "GET") {
+    const query = String(parsed.query.query || parsed.query.q || "").trim();
+    sendJson(res, {
+      success: true,
+      group_memory_context: buildGlobalGroupMemoryContext(query, {
+        sessionId: String(parsed.query.session_id || parsed.query.sessionId || ""),
+        maxGroups: Number(parsed.query.max_groups || parsed.query.maxGroups || 8),
+        maxTypedMemory: Number(parsed.query.max_typed_memory || parsed.query.maxTypedMemory || 4),
+      }),
+    });
+    return true;
+  }
+
+  if (pathname === "/api/global-agent/group-memory/self-test" && req.method === "GET") {
+    const result = runGlobalGroupMemoryContextSelfTest();
+    sendJson(res, { success: result.pass, result }, result.pass ? 200 : 500);
+    return true;
+  }
+
   if (pathname === "/api/global-agent/control-center/self-test" && req.method === "GET") {
     const result = runGlobalControlCenterSelfTest();
     sendJson(res, { success: result.pass, result }, result.pass ? 200 : 500);
@@ -2397,13 +3444,38 @@ export function handleGlobalAgentApi(
         if (operation && !operation.acquired) {
           const settled = operation.inProgress ? await waitForIdempotencyResult("global-agent-request", operationKey, 13 * 60 * 1000) : operation.record;
           const replayRun = settled?.result?.run_id ? getGlobalAgentRun(settled.result.run_id) : null;
-          if (!replayRun) throw new Error(settled?.error || "重复请求仍在处理中");
-          const result = publicGlobalAgentRun(replayRun);
+          const result = settled?.result?.run || (replayRun ? publicGlobalAgentRun(replayRun) : null);
+          if (!result) throw new Error(settled?.error || "重复请求仍在处理中");
           if (isStream) {
             emit({ type: "result", run: result, duplicate: true });
             emit({ type: "done" });
             res.end();
           } else sendJson(res, { success: true, run: result, duplicate: true });
+          return;
+        }
+        if (isGlobalProgressStatusRequest(message)) {
+          const reply = formatMissionStatus();
+          const result = buildPublicGlobalStatusRun({ message, reply, sessionId, source: "web", traceId: operation?.traceId });
+          try {
+            ingestGlobalAgentConversation({
+              sessionId,
+              source: "web",
+              messages: [
+                ...history,
+                { role: "user", content: message, timestamp: new Date().toISOString(), trace_id: operation?.traceId },
+                { role: "assistant", content: reply, timestamp: new Date().toISOString(), trace_id: result.trace_id },
+              ],
+            });
+          } catch (error: any) {
+            console.warn(`[全局记忆] 状态追问写入失败：${error?.message || error}`);
+          }
+          appendGlobalActionAudit({ source: "web", action: { type: "mission_status", params: { message } }, status: "success", result: { summary: reply, trace_id: result.trace_id } });
+          if (operationKey) completeIdempotency("global-agent-request", operationKey, { run: result, status: result.status });
+          if (isStream) {
+            emit({ type: "result", run: result, files: files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath })) });
+            emit({ type: "done" });
+            res.end();
+          } else sendJson(res, { success: true, run: result, files: files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath })) });
           return;
         }
         let finalPetEventRelayed = false;
@@ -2487,6 +3559,31 @@ export function handleGlobalAgentApi(
         let history: any[] = [];
         try { history = Array.isArray(payload.history) ? payload.history : JSON.parse(String(payload.history || "[]")); } catch {}
         const sessionId = String(payload.session_id || payload.sessionId || "legacy:web");
+        if (isGlobalProgressStatusRequest(message)) {
+          const reply = formatMissionStatus();
+          const result = buildPublicGlobalStatusRun({ message, reply, sessionId, source: "legacy-chat-proxy" });
+          try {
+            ingestGlobalAgentConversation({
+              sessionId,
+              source: "legacy-chat-proxy",
+              messages: [
+                ...history,
+                { role: "user", content: message, timestamp: new Date().toISOString() },
+                { role: "assistant", content: reply, timestamp: new Date().toISOString(), trace_id: result.trace_id },
+              ],
+            });
+          } catch (error: any) {
+            console.warn(`[全局记忆] 状态追问写入失败：${error?.message || error}`);
+          }
+          if (isStream) {
+            emit({ type: "result", run: result, files: files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath })) });
+            emit({ type: "done" });
+            res.end();
+          } else {
+            sendJson(res, { success: true, reply, run: result, files: files.map(file => ({ name: file.filename, size: file.size, savedPath: file.savedPath })), agentic: true });
+          }
+          return;
+        }
         const run = await runAgenticGlobalRequest(getRequestBaseUrl(req), ctx, {
           message,
           history,

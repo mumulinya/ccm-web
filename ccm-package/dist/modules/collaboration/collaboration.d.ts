@@ -16,14 +16,44 @@ export declare function runCollaborationUxSelfTest(): {
         revertedPhase: boolean;
         technicalIdsStayCollapsed: boolean;
         userWorkflowTimelineVisible: any;
+        workerHandoffTimelineVisible: boolean;
+        progressCheckpointsVisible: boolean;
+        progressCheckpointsHideProtocol: boolean;
+        liveCheckpointStageEventsVisible: boolean;
+        liveCheckpointSupervisorCompletionVisible: boolean;
+        liveCheckpointStageEventsHideProtocol: boolean;
+        globalMissionHandoffComplete: boolean;
+        globalMissionQueuedMessageHasContext: boolean;
+        globalDirectDispatchCompletionSyncReady: boolean;
+        globalDirectDispatchCompletionMessageFriendly: boolean;
+        globalDirectDispatchContinuationSyncReady: boolean;
+        globalDirectDispatchContinuationMessageFriendly: boolean;
+        globalDirectDispatchRollbackSyncReady: boolean;
+        globalDirectDispatchRollbackMessageFriendly: boolean;
+        teamShutdownGateBlocksOpenSession: boolean;
+        teamShutdownGatePassesAfterClose: boolean;
+        independentReviewGateBlocksComplexChange: any;
+        independentReviewGatePassesWithEvidence: boolean;
+        independentReviewGapDraftGuidesReviewer: boolean;
         liveTodoPlanVisible: boolean;
+        workItemsVisible: boolean;
+        workItemSelfTestPasses: boolean;
+        workerHandoffSelfTestPasses: boolean;
+        workerContinuationHandoffBuildsRuntime: any;
+        workerContinuationHandoffRenderedForDispatch: boolean;
         liveTodoReviewing: any;
         liveTodoReworking: any;
+        continuationStatusVisible: any;
+        goalRevisionContinuationStatusVisible: any;
+        continuationStatusHidesProtocol: boolean;
         liveTodoFailedNeedsConfirmation: any;
         liveTodoCancelled: any;
+        liveTodoRestoresRecoveryContext: any;
         liveTodoEvidenceTraceable: any;
         liveTodoFailureHasActions: any;
         agentQaVisible: boolean;
+        agentQaUserPreviewVisible: any;
+        agentQaUserPreviewHidesProtocol: boolean;
         conflictWarningsVisible: any;
         greetingDoesNotCreateTaskCard: boolean;
         ordinaryQuestionDoesNotCreateTaskCard: boolean;
@@ -42,32 +72,80 @@ export declare function runCollaborationUxSelfTest(): {
         planModeLowRiskAutoContinues: boolean;
         awaitingPlanCardNeedsUser: boolean;
         awaitingPlanCardShowsPlan: boolean;
+        planModeStepsVisible: any;
+        awaitingPlanCardShowsSteps: any;
+        awaitingPlanCardShowsClarificationQuestions: any;
+        awaitingPlanCardCanRevise: boolean;
+        revisedPlanCardStaysInPlanMode: boolean;
+        revisedPlanFeedbackVisible: any;
+        revisedPlanAnswersClarificationQuestions: any;
+        confirmedPlanFeedbackCarried: any;
+        confirmedPlanExecutionFollowupVisible: any;
+        confirmedPlanFeedbackVisible: boolean;
         workOrderPreviewVisible: any;
         executionStoryShowsCodingFlow: boolean;
         acceptanceReviewHardGateVisible: boolean;
         missingEvidenceAcceptanceReviewBlocksCompletion: boolean;
+        memoryGateAcceptanceReviewVisible: boolean;
+        reinjectionGateAcceptanceReviewVisible: boolean;
+        planAlignmentVisible: boolean;
+        missingEvidencePlanAlignmentShowsDeviation: boolean;
+        userHandoffVisible: boolean;
+        ordinaryQuestionHasNoUserHandoff: boolean;
+        userHandoffHidesProtocol: boolean;
         agentCoordinationProtocolVisible: any;
         agentCoordinationHeartbeatVisible: boolean;
         agentCoordinationContractSyncVisible: boolean;
         agentCoordinationReceiptQualityScores: boolean;
+        childAgentPlanReviewVisible: any;
+        childAgentPlanReviewNeedsRevisionVisible: any;
+        agentCoordinationMemoryGateVisible: boolean;
+        agentCoordinationReinjectionGateVisible: boolean;
+        agentCoordinationReinjectionUsageGateVisible: boolean;
+        childAgentHandoffQualityGateBlocksAdvisoryResult: boolean;
+        childAgentHandoffQualityCreatesTargetedRework: boolean;
+        childAgentHandoffQualityVisibleTextFriendly: boolean;
         agentCoordinationTargetedReworkForMissingEvidence: boolean;
-        agentCoordinationAckReviewApproved: boolean;
+        agentProgressSummaryVisible: boolean;
+        agentProgressSummaryHidesProtocol: boolean;
+        agentProgressSummaryTracksWaitingAgent: boolean;
+        agentProgressSummaryUsesSessionProgress: boolean;
+        agentProgressSummarySessionProgressHidesProtocol: boolean;
+        changeSummaryVisible: boolean;
+        changeSummaryActionDataReady: boolean;
+        receiptReworkSummaryVisible: boolean;
+        receiptReworkMemoryGateGapVisible: boolean;
+        receiptReworkReinjectionGateGapVisible: boolean;
+        receiptReworkReinjectionUsageGapVisible: boolean;
+        receiptReworkResolvedVisible: boolean;
+        receiptReworkVisibleTextHidesProtocol: boolean;
+        agentCoordinationVisibleTextHidesProtocol: boolean;
+        agentCoordinationAckReviewApproved: any;
         agentCoordinationContractTransferReady: any;
         ackGapBlocksCompletion: boolean;
         ackGapCreatesRewriteDraft: boolean;
         contractGapCreatesInjectionDraft: boolean;
+        targetedReworkIncludesWorkItemContext: boolean;
+        watchdogSeesStalledWorkItem: boolean;
         contractInjectionGateRequiresConsumerReceipt: boolean;
         contractInjectionGateRecognizesConsumerRerun: boolean;
         contractInjectionGateRequiresConsumptionQuality: boolean;
         contractInjectionGateRejectsGenericApiAssignment: boolean;
         taskCardShowsRuntimeKernel: any;
+        runtimeKernelShowsMemoryGate: any;
+        runtimeKernelShowsReinjectionGate: any;
+        runtimeKernelShowsReinjectionUsageGate: any;
         agentCoordinationEventStreamVisible: boolean;
+        agentCoordinationMemoryGateEventVisible: boolean;
+        agentCoordinationReinjectionGateEventVisible: boolean;
         acceptanceReviewIncludesAckGate: boolean;
         agentCoordinationContractInjectAction: boolean;
         reportHasFourUserSections: boolean;
         reportHidesProtocol: boolean;
         groupReportFormatsObjects: boolean;
         acknowledgementHasCleanPunctuation: boolean;
+        dispatchLaunchSummaryVisible: boolean;
+        dispatchLaunchSummaryHidesProtocol: boolean;
         followupClassification: boolean;
         followupDetection: boolean;
     };
@@ -100,7 +178,54 @@ export declare function runCollaborationUxSelfTest(): {
             phase: string;
             task_id: any;
             updated_at: any;
+            verification_nudge: boolean;
+            verification_reminder: {
+                schema: string;
+                status: string;
+                title: string;
+                headline: string;
+                reason: string;
+                next_action: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    show_for_ordinary_conversation: boolean;
+                };
+            };
             steps: any[];
+        };
+        work_items: import("../../agents/work-items").MainAgentWorkItem[];
+        work_item_summary: {
+            total: number;
+            counts: any;
+            active: string[];
+            blocked: {
+                id: string;
+                target: string;
+                blockers: string[];
+            }[];
+            next_claimable: {
+                id: string;
+                target: string;
+                subject: string;
+            }[];
+            verification_nudge: boolean;
+            verification_reminder: {
+                schema: string;
+                status: string;
+                title: string;
+                headline: string;
+                reason: string;
+                next_action: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    show_for_ordinary_conversation: boolean;
+                };
+            };
+            all_completed: boolean;
         };
         display_stream: {
             schema: string;
@@ -124,6 +249,112 @@ export declare function runCollaborationUxSelfTest(): {
                 };
                 hidden_tool_uses: number;
             };
+            workchain: {
+                schema: string;
+                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                mode: string;
+                status: string;
+                phase: string;
+                user_visible_text: string;
+                stages: {
+                    id: string;
+                    label: string;
+                    status: string;
+                    summary: string;
+                }[];
+                progress_checkpoints: {
+                    schema: string;
+                    title: string;
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        raw_events_default_collapsed: boolean;
+                    };
+                    items: any[];
+                };
+                completion_summary: {
+                    headline: string;
+                    evidence: string[];
+                    files: any[];
+                    verification: string[];
+                    risks: string[];
+                    next_action: any;
+                    verification_status: string;
+                    risk_status: string;
+                    final_summary_quality: {
+                        schema: string;
+                        required: boolean;
+                        passed: boolean;
+                        checks: {
+                            id: string;
+                            label: string;
+                            passed: boolean;
+                            detail: string;
+                        }[];
+                        missing: string[];
+                        verification_status: string;
+                        risk_status: string;
+                        source: string;
+                    };
+                    terminal: boolean;
+                };
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    final_summary_required: boolean;
+                };
+                technical_details: {
+                    id: string;
+                    title: string;
+                    items: any[];
+                }[];
+            };
+            completion_summary: {
+                headline: string;
+                evidence: string[];
+                files: any[];
+                verification: string[];
+                risks: string[];
+                next_action: any;
+                verification_status: string;
+                risk_status: string;
+                final_summary_quality: {
+                    schema: string;
+                    required: boolean;
+                    passed: boolean;
+                    checks: {
+                        id: string;
+                        label: string;
+                        passed: boolean;
+                        detail: string;
+                    }[];
+                    missing: string[];
+                    verification_status: string;
+                    risk_status: string;
+                    source: string;
+                };
+                terminal: boolean;
+            };
+            progress_checkpoints: {
+                schema: string;
+                title: string;
+                display_policy: {
+                    user_visible: boolean;
+                    hide_for_ordinary_conversation: boolean;
+                    raw_events_default_collapsed: boolean;
+                };
+                items: any[];
+            };
+            dispatch_launch_summary: any;
+            dispatchLaunchSummary: any;
+            delivery_report: any;
+            workchain_stages: {
+                id: string;
+                label: string;
+                status: string;
+                summary: string;
+            }[];
             technical_details: {
                 id: string;
                 title: string;
@@ -163,6 +394,112 @@ export declare function runCollaborationUxSelfTest(): {
                 };
                 hidden_tool_uses: number;
             };
+            workchain: {
+                schema: string;
+                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                mode: string;
+                status: string;
+                phase: string;
+                user_visible_text: string;
+                stages: {
+                    id: string;
+                    label: string;
+                    status: string;
+                    summary: string;
+                }[];
+                progress_checkpoints: {
+                    schema: string;
+                    title: string;
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        raw_events_default_collapsed: boolean;
+                    };
+                    items: any[];
+                };
+                completion_summary: {
+                    headline: string;
+                    evidence: string[];
+                    files: any[];
+                    verification: string[];
+                    risks: string[];
+                    next_action: any;
+                    verification_status: string;
+                    risk_status: string;
+                    final_summary_quality: {
+                        schema: string;
+                        required: boolean;
+                        passed: boolean;
+                        checks: {
+                            id: string;
+                            label: string;
+                            passed: boolean;
+                            detail: string;
+                        }[];
+                        missing: string[];
+                        verification_status: string;
+                        risk_status: string;
+                        source: string;
+                    };
+                    terminal: boolean;
+                };
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    final_summary_required: boolean;
+                };
+                technical_details: {
+                    id: string;
+                    title: string;
+                    items: any[];
+                }[];
+            };
+            completion_summary: {
+                headline: string;
+                evidence: string[];
+                files: any[];
+                verification: string[];
+                risks: string[];
+                next_action: any;
+                verification_status: string;
+                risk_status: string;
+                final_summary_quality: {
+                    schema: string;
+                    required: boolean;
+                    passed: boolean;
+                    checks: {
+                        id: string;
+                        label: string;
+                        passed: boolean;
+                        detail: string;
+                    }[];
+                    missing: string[];
+                    verification_status: string;
+                    risk_status: string;
+                    source: string;
+                };
+                terminal: boolean;
+            };
+            progress_checkpoints: {
+                schema: string;
+                title: string;
+                display_policy: {
+                    user_visible: boolean;
+                    hide_for_ordinary_conversation: boolean;
+                    raw_events_default_collapsed: boolean;
+                };
+                items: any[];
+            };
+            dispatch_launch_summary: any;
+            dispatchLaunchSummary: any;
+            delivery_report: any;
+            workchain_stages: {
+                id: string;
+                label: string;
+                status: string;
+                summary: string;
+            }[];
             technical_details: {
                 id: string;
                 title: string;
@@ -179,6 +516,26 @@ export declare function runCollaborationUxSelfTest(): {
                 sanitized: boolean;
                 blocked_terms: string[];
             };
+        };
+        progress_checkpoints: {
+            schema: string;
+            title: string;
+            display_policy: {
+                user_visible: boolean;
+                hide_for_ordinary_conversation: boolean;
+                raw_events_default_collapsed: boolean;
+            };
+            items: any[];
+        };
+        progressCheckpoints: {
+            schema: string;
+            title: string;
+            display_policy: {
+                user_visible: boolean;
+                hide_for_ordinary_conversation: boolean;
+                raw_events_default_collapsed: boolean;
+            };
+            items: any[];
         };
         mainAgentDecision: {
             version: number;
@@ -242,6 +599,58 @@ export declare function runCollaborationUxSelfTest(): {
                 next_action: string;
             };
             user_plan_steps: any;
+            dispatch_launch_summary: {
+                schema: string;
+                title: string;
+                mode: string;
+                task_id: any;
+                headline: string;
+                rows: {
+                    id: any;
+                    agent: string;
+                    role: string;
+                    task: string;
+                    reason: string;
+                    depends_on: any;
+                    status: string;
+                    status_label: string;
+                }[];
+                acceptance: string[];
+                next_action: string;
+                technical_hint: string;
+                display_policy: {
+                    user_visible: boolean;
+                    hide_for_ordinary_conversation: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                };
+            };
+            dispatchLaunchSummary: {
+                schema: string;
+                title: string;
+                mode: string;
+                task_id: any;
+                headline: string;
+                rows: {
+                    id: any;
+                    agent: string;
+                    role: string;
+                    task: string;
+                    reason: string;
+                    depends_on: any;
+                    status: string;
+                    status_label: string;
+                }[];
+                acceptance: string[];
+                next_action: string;
+                technical_hint: string;
+                display_policy: {
+                    user_visible: boolean;
+                    hide_for_ordinary_conversation: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                };
+            };
             display_stream: {
                 schema: string;
                 type: string;
@@ -264,6 +673,112 @@ export declare function runCollaborationUxSelfTest(): {
                     };
                     hidden_tool_uses: number;
                 };
+                workchain: {
+                    schema: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    status: string;
+                    phase: string;
+                    user_visible_text: string;
+                    stages: {
+                        id: string;
+                        label: string;
+                        status: string;
+                        summary: string;
+                    }[];
+                    progress_checkpoints: {
+                        schema: string;
+                        title: string;
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            raw_events_default_collapsed: boolean;
+                        };
+                        items: any[];
+                    };
+                    completion_summary: {
+                        headline: string;
+                        evidence: string[];
+                        files: any[];
+                        verification: string[];
+                        risks: string[];
+                        next_action: any;
+                        verification_status: string;
+                        risk_status: string;
+                        final_summary_quality: {
+                            schema: string;
+                            required: boolean;
+                            passed: boolean;
+                            checks: {
+                                id: string;
+                                label: string;
+                                passed: boolean;
+                                detail: string;
+                            }[];
+                            missing: string[];
+                            verification_status: string;
+                            risk_status: string;
+                            source: string;
+                        };
+                        terminal: boolean;
+                    };
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        final_summary_required: boolean;
+                    };
+                    technical_details: {
+                        id: string;
+                        title: string;
+                        items: any[];
+                    }[];
+                };
+                completion_summary: {
+                    headline: string;
+                    evidence: string[];
+                    files: any[];
+                    verification: string[];
+                    risks: string[];
+                    next_action: any;
+                    verification_status: string;
+                    risk_status: string;
+                    final_summary_quality: {
+                        schema: string;
+                        required: boolean;
+                        passed: boolean;
+                        checks: {
+                            id: string;
+                            label: string;
+                            passed: boolean;
+                            detail: string;
+                        }[];
+                        missing: string[];
+                        verification_status: string;
+                        risk_status: string;
+                        source: string;
+                    };
+                    terminal: boolean;
+                };
+                progress_checkpoints: {
+                    schema: string;
+                    title: string;
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        raw_events_default_collapsed: boolean;
+                    };
+                    items: any[];
+                };
+                dispatch_launch_summary: any;
+                dispatchLaunchSummary: any;
+                delivery_report: any;
+                workchain_stages: {
+                    id: string;
+                    label: string;
+                    status: string;
+                    summary: string;
+                }[];
                 technical_details: {
                     id: string;
                     title: string;
@@ -303,6 +818,112 @@ export declare function runCollaborationUxSelfTest(): {
                     };
                     hidden_tool_uses: number;
                 };
+                workchain: {
+                    schema: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    status: string;
+                    phase: string;
+                    user_visible_text: string;
+                    stages: {
+                        id: string;
+                        label: string;
+                        status: string;
+                        summary: string;
+                    }[];
+                    progress_checkpoints: {
+                        schema: string;
+                        title: string;
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            raw_events_default_collapsed: boolean;
+                        };
+                        items: any[];
+                    };
+                    completion_summary: {
+                        headline: string;
+                        evidence: string[];
+                        files: any[];
+                        verification: string[];
+                        risks: string[];
+                        next_action: any;
+                        verification_status: string;
+                        risk_status: string;
+                        final_summary_quality: {
+                            schema: string;
+                            required: boolean;
+                            passed: boolean;
+                            checks: {
+                                id: string;
+                                label: string;
+                                passed: boolean;
+                                detail: string;
+                            }[];
+                            missing: string[];
+                            verification_status: string;
+                            risk_status: string;
+                            source: string;
+                        };
+                        terminal: boolean;
+                    };
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        final_summary_required: boolean;
+                    };
+                    technical_details: {
+                        id: string;
+                        title: string;
+                        items: any[];
+                    }[];
+                };
+                completion_summary: {
+                    headline: string;
+                    evidence: string[];
+                    files: any[];
+                    verification: string[];
+                    risks: string[];
+                    next_action: any;
+                    verification_status: string;
+                    risk_status: string;
+                    final_summary_quality: {
+                        schema: string;
+                        required: boolean;
+                        passed: boolean;
+                        checks: {
+                            id: string;
+                            label: string;
+                            passed: boolean;
+                            detail: string;
+                        }[];
+                        missing: string[];
+                        verification_status: string;
+                        risk_status: string;
+                        source: string;
+                    };
+                    terminal: boolean;
+                };
+                progress_checkpoints: {
+                    schema: string;
+                    title: string;
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        raw_events_default_collapsed: boolean;
+                    };
+                    items: any[];
+                };
+                dispatch_launch_summary: any;
+                dispatchLaunchSummary: any;
+                delivery_report: any;
+                workchain_stages: {
+                    id: string;
+                    label: string;
+                    status: string;
+                    summary: string;
+                }[];
                 technical_details: {
                     id: string;
                     title: string;
@@ -321,6 +942,8 @@ export declare function runCollaborationUxSelfTest(): {
                 };
             };
             todo_plan: any;
+            verification_reminder: any;
+            verificationReminder: any;
             permissions: {
                 action_id: string;
                 risk: string;
@@ -407,6 +1030,58 @@ export declare function runCollaborationUxSelfTest(): {
                 next_action: string;
             };
             user_plan_steps: any;
+            dispatch_launch_summary: {
+                schema: string;
+                title: string;
+                mode: string;
+                task_id: any;
+                headline: string;
+                rows: {
+                    id: any;
+                    agent: string;
+                    role: string;
+                    task: string;
+                    reason: string;
+                    depends_on: any;
+                    status: string;
+                    status_label: string;
+                }[];
+                acceptance: string[];
+                next_action: string;
+                technical_hint: string;
+                display_policy: {
+                    user_visible: boolean;
+                    hide_for_ordinary_conversation: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                };
+            };
+            dispatchLaunchSummary: {
+                schema: string;
+                title: string;
+                mode: string;
+                task_id: any;
+                headline: string;
+                rows: {
+                    id: any;
+                    agent: string;
+                    role: string;
+                    task: string;
+                    reason: string;
+                    depends_on: any;
+                    status: string;
+                    status_label: string;
+                }[];
+                acceptance: string[];
+                next_action: string;
+                technical_hint: string;
+                display_policy: {
+                    user_visible: boolean;
+                    hide_for_ordinary_conversation: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                };
+            };
             display_stream: {
                 schema: string;
                 type: string;
@@ -429,6 +1104,112 @@ export declare function runCollaborationUxSelfTest(): {
                     };
                     hidden_tool_uses: number;
                 };
+                workchain: {
+                    schema: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    status: string;
+                    phase: string;
+                    user_visible_text: string;
+                    stages: {
+                        id: string;
+                        label: string;
+                        status: string;
+                        summary: string;
+                    }[];
+                    progress_checkpoints: {
+                        schema: string;
+                        title: string;
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            raw_events_default_collapsed: boolean;
+                        };
+                        items: any[];
+                    };
+                    completion_summary: {
+                        headline: string;
+                        evidence: string[];
+                        files: any[];
+                        verification: string[];
+                        risks: string[];
+                        next_action: any;
+                        verification_status: string;
+                        risk_status: string;
+                        final_summary_quality: {
+                            schema: string;
+                            required: boolean;
+                            passed: boolean;
+                            checks: {
+                                id: string;
+                                label: string;
+                                passed: boolean;
+                                detail: string;
+                            }[];
+                            missing: string[];
+                            verification_status: string;
+                            risk_status: string;
+                            source: string;
+                        };
+                        terminal: boolean;
+                    };
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        final_summary_required: boolean;
+                    };
+                    technical_details: {
+                        id: string;
+                        title: string;
+                        items: any[];
+                    }[];
+                };
+                completion_summary: {
+                    headline: string;
+                    evidence: string[];
+                    files: any[];
+                    verification: string[];
+                    risks: string[];
+                    next_action: any;
+                    verification_status: string;
+                    risk_status: string;
+                    final_summary_quality: {
+                        schema: string;
+                        required: boolean;
+                        passed: boolean;
+                        checks: {
+                            id: string;
+                            label: string;
+                            passed: boolean;
+                            detail: string;
+                        }[];
+                        missing: string[];
+                        verification_status: string;
+                        risk_status: string;
+                        source: string;
+                    };
+                    terminal: boolean;
+                };
+                progress_checkpoints: {
+                    schema: string;
+                    title: string;
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        raw_events_default_collapsed: boolean;
+                    };
+                    items: any[];
+                };
+                dispatch_launch_summary: any;
+                dispatchLaunchSummary: any;
+                delivery_report: any;
+                workchain_stages: {
+                    id: string;
+                    label: string;
+                    status: string;
+                    summary: string;
+                }[];
                 technical_details: {
                     id: string;
                     title: string;
@@ -468,6 +1249,112 @@ export declare function runCollaborationUxSelfTest(): {
                     };
                     hidden_tool_uses: number;
                 };
+                workchain: {
+                    schema: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    status: string;
+                    phase: string;
+                    user_visible_text: string;
+                    stages: {
+                        id: string;
+                        label: string;
+                        status: string;
+                        summary: string;
+                    }[];
+                    progress_checkpoints: {
+                        schema: string;
+                        title: string;
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            raw_events_default_collapsed: boolean;
+                        };
+                        items: any[];
+                    };
+                    completion_summary: {
+                        headline: string;
+                        evidence: string[];
+                        files: any[];
+                        verification: string[];
+                        risks: string[];
+                        next_action: any;
+                        verification_status: string;
+                        risk_status: string;
+                        final_summary_quality: {
+                            schema: string;
+                            required: boolean;
+                            passed: boolean;
+                            checks: {
+                                id: string;
+                                label: string;
+                                passed: boolean;
+                                detail: string;
+                            }[];
+                            missing: string[];
+                            verification_status: string;
+                            risk_status: string;
+                            source: string;
+                        };
+                        terminal: boolean;
+                    };
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        final_summary_required: boolean;
+                    };
+                    technical_details: {
+                        id: string;
+                        title: string;
+                        items: any[];
+                    }[];
+                };
+                completion_summary: {
+                    headline: string;
+                    evidence: string[];
+                    files: any[];
+                    verification: string[];
+                    risks: string[];
+                    next_action: any;
+                    verification_status: string;
+                    risk_status: string;
+                    final_summary_quality: {
+                        schema: string;
+                        required: boolean;
+                        passed: boolean;
+                        checks: {
+                            id: string;
+                            label: string;
+                            passed: boolean;
+                            detail: string;
+                        }[];
+                        missing: string[];
+                        verification_status: string;
+                        risk_status: string;
+                        source: string;
+                    };
+                    terminal: boolean;
+                };
+                progress_checkpoints: {
+                    schema: string;
+                    title: string;
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        raw_events_default_collapsed: boolean;
+                    };
+                    items: any[];
+                };
+                dispatch_launch_summary: any;
+                dispatchLaunchSummary: any;
+                delivery_report: any;
+                workchain_stages: {
+                    id: string;
+                    label: string;
+                    status: string;
+                    summary: string;
+                }[];
                 technical_details: {
                     id: string;
                     title: string;
@@ -486,6 +1373,8 @@ export declare function runCollaborationUxSelfTest(): {
                 };
             };
             todo_plan: any;
+            verification_reminder: any;
+            verificationReminder: any;
             permissions: {
                 action_id: string;
                 risk: string;
@@ -547,35 +1436,68 @@ export declare function runCollaborationUxSelfTest(): {
             missing: string[];
             next_action: string;
         };
+        plan_alignment: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            headline: string;
+            checks: any[];
+            deviations: {
+                id: any;
+                label: any;
+                reason: any;
+            }[];
+            next_action: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+            };
+        };
+        planAlignment: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            headline: string;
+            checks: any[];
+            deviations: {
+                id: any;
+                label: any;
+                reason: any;
+            }[];
+            next_action: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+            };
+        };
         agent_coordination: {
             version: number;
             source: string;
             title: string;
             health: number;
             status: string;
-            ack_review: {
+            ack_review: any;
+            child_plan_review: {
+                schema: string;
+                title: string;
                 status: string;
-                rows: {
-                    agent: any;
-                    status: string;
-                    reason: string;
-                    understood_goal: string;
-                    planned_scope: any[];
-                    forbidden_scope: any[];
-                    verification_plan: any[];
-                    unclear: any[];
-                }[];
-                rejected: {
-                    agent: any;
-                    status: string;
-                    reason: string;
-                    understood_goal: string;
-                    planned_scope: any[];
-                    forbidden_scope: any[];
-                    verification_plan: any[];
-                    unclear: any[];
-                }[];
+                status_label: string;
+                headline: string;
+                approved_count: any;
+                waiting_count: any;
+                needs_revision_count: any;
+                rows: any;
                 next_action: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    show_for_ordinary_conversation: boolean;
+                };
             };
             handoff: any;
             heartbeat: {
@@ -605,6 +1527,68 @@ export declare function runCollaborationUxSelfTest(): {
                 status: string;
                 summary: string;
             };
+            memory_gate_summary: {
+                schema: string;
+                required: any;
+                pass: any;
+                status: string;
+                status_label: string;
+                summary: string;
+                gate_count: number;
+                gate_ids: string[];
+                missing_gate_ids: string[];
+                missing_count: number;
+                rows: any;
+            };
+            read_plan_revalidation_gate_summary: {
+                schema: string;
+                required: any;
+                pass: any;
+                status: string;
+                status_label: string;
+                summary: string;
+                gate_count: number;
+                gate_ids: string[];
+                missing_gate_ids: string[];
+                missing_read_plan_ids: string[];
+                session_mismatch_gate_ids: string[];
+                session_mismatch_count: number;
+                session_required: any;
+                session_matched: any;
+                missing_count: any;
+                rows: any;
+            };
+            post_compact_reinjection_gate_summary: {
+                schema: string;
+                required: any;
+                pass: any;
+                status: string;
+                status_label: string;
+                summary: string;
+                gate_count: number;
+                candidate_count: any;
+                candidate_usage_counts: any;
+                gate_ids: string[];
+                missing_gate_ids: string[];
+                missing_candidate_reference_gate_ids: string[];
+                missing_candidate_usage_gate_ids: string[];
+                missing_candidate_usage_candidate_ids: string[];
+                missing_count: number;
+                rows: any;
+            };
+            post_compact_dispatch_marker_summary: {
+                schema: string;
+                required: boolean;
+                pass: boolean;
+                status: string;
+                status_label: string;
+                summary: string;
+                marker_count: number;
+                first_dispatch_count: any;
+                marker_ids: string[];
+                boundary_ids: string[];
+                rows: any;
+            };
             runtime_kernel: any;
             coordination_events: any[];
             receipt_quality: {
@@ -615,11 +1599,107 @@ export declare function runCollaborationUxSelfTest(): {
                     score: number;
                     grade: string;
                     pass: boolean;
-                    checks: {
+                    checks: ({
                         id: string;
                         label: string;
                         ok: boolean;
-                    }[];
+                        detail?: undefined;
+                    } | {
+                        id: string;
+                        label: string;
+                        ok: any;
+                        detail: string;
+                    })[];
+                    memory_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    read_plan_revalidation_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        missing_read_plan_ids: string[];
+                        session_required: any;
+                        session_matched: any;
+                        session_mismatch_gate_ids: any;
+                        current_source_verified: any;
+                        ignored_with_reason: any;
+                        rows: any;
+                        declared: boolean;
+                        structured_usage_rows: any;
+                        used: any;
+                        ignored: any;
+                    };
+                    post_compact_reinjection_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        candidate_count: any;
+                        candidate_reference_required: any;
+                        candidate_reference_passed: any;
+                        candidate_usage_required: any;
+                        candidate_usage_declared_passed: any;
+                        candidate_usage_strict_required: any;
+                        candidate_usage_strict_passed: any;
+                        referenced_candidate_ids: string[];
+                        all_candidates_declared: any;
+                        missing_candidate_reference_gate_ids: any;
+                        missing_candidate_usage_gate_ids: any;
+                        missing_candidate_usage_candidate_ids: string[];
+                        candidate_usage_rows: any;
+                        candidate_usage_counts: {
+                            used: any;
+                            ignored: any;
+                            verified: any;
+                            mentioned: any;
+                            unreferenced: any;
+                        };
+                        used_candidate_ids: string[];
+                        ignored_candidate_ids: string[];
+                        verified_candidate_ids: string[];
+                        mentioned_only_candidate_ids: string[];
+                        unreferenced_candidate_ids: string[];
+                        structured_candidate_usage_rows: {
+                            gate_id: string;
+                            candidate_id: string;
+                            kind: string;
+                            value: string;
+                            usage_state: string;
+                            reason: string;
+                            raw: any;
+                        }[];
+                        candidate_rows: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    handoff_quality: {
+                        schema: string;
+                        pass: boolean;
+                        status: string;
+                        status_label: string;
+                        reason: string;
+                        evidence: {
+                            has_handoff_hint: boolean;
+                            has_no_execution_hint: boolean;
+                            has_concrete_files: boolean;
+                            has_concrete_actions: boolean;
+                            has_executed_verification: boolean;
+                            missing_required_files: boolean;
+                            missing_required_verification: boolean;
+                            hints: string[];
+                        };
+                    };
                     missing: string[];
                 };
             }[];
@@ -631,11 +1711,107 @@ export declare function runCollaborationUxSelfTest(): {
                     score: number;
                     grade: string;
                     pass: boolean;
-                    checks: {
+                    checks: ({
                         id: string;
                         label: string;
                         ok: boolean;
-                    }[];
+                        detail?: undefined;
+                    } | {
+                        id: string;
+                        label: string;
+                        ok: any;
+                        detail: string;
+                    })[];
+                    memory_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    read_plan_revalidation_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        missing_read_plan_ids: string[];
+                        session_required: any;
+                        session_matched: any;
+                        session_mismatch_gate_ids: any;
+                        current_source_verified: any;
+                        ignored_with_reason: any;
+                        rows: any;
+                        declared: boolean;
+                        structured_usage_rows: any;
+                        used: any;
+                        ignored: any;
+                    };
+                    post_compact_reinjection_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        candidate_count: any;
+                        candidate_reference_required: any;
+                        candidate_reference_passed: any;
+                        candidate_usage_required: any;
+                        candidate_usage_declared_passed: any;
+                        candidate_usage_strict_required: any;
+                        candidate_usage_strict_passed: any;
+                        referenced_candidate_ids: string[];
+                        all_candidates_declared: any;
+                        missing_candidate_reference_gate_ids: any;
+                        missing_candidate_usage_gate_ids: any;
+                        missing_candidate_usage_candidate_ids: string[];
+                        candidate_usage_rows: any;
+                        candidate_usage_counts: {
+                            used: any;
+                            ignored: any;
+                            verified: any;
+                            mentioned: any;
+                            unreferenced: any;
+                        };
+                        used_candidate_ids: string[];
+                        ignored_candidate_ids: string[];
+                        verified_candidate_ids: string[];
+                        mentioned_only_candidate_ids: string[];
+                        unreferenced_candidate_ids: string[];
+                        structured_candidate_usage_rows: {
+                            gate_id: string;
+                            candidate_id: string;
+                            kind: string;
+                            value: string;
+                            usage_state: string;
+                            reason: string;
+                            raw: any;
+                        }[];
+                        candidate_rows: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    handoff_quality: {
+                        schema: string;
+                        pass: boolean;
+                        status: string;
+                        status_label: string;
+                        reason: string;
+                        evidence: {
+                            has_handoff_hint: boolean;
+                            has_no_execution_hint: boolean;
+                            has_concrete_files: boolean;
+                            has_concrete_actions: boolean;
+                            has_executed_verification: boolean;
+                            missing_required_files: boolean;
+                            missing_required_verification: boolean;
+                            hints: string[];
+                        };
+                    };
                     missing: string[];
                 };
             }[];
@@ -648,29 +1824,24 @@ export declare function runCollaborationUxSelfTest(): {
             title: string;
             health: number;
             status: string;
-            ack_review: {
+            ack_review: any;
+            child_plan_review: {
+                schema: string;
+                title: string;
                 status: string;
-                rows: {
-                    agent: any;
-                    status: string;
-                    reason: string;
-                    understood_goal: string;
-                    planned_scope: any[];
-                    forbidden_scope: any[];
-                    verification_plan: any[];
-                    unclear: any[];
-                }[];
-                rejected: {
-                    agent: any;
-                    status: string;
-                    reason: string;
-                    understood_goal: string;
-                    planned_scope: any[];
-                    forbidden_scope: any[];
-                    verification_plan: any[];
-                    unclear: any[];
-                }[];
+                status_label: string;
+                headline: string;
+                approved_count: any;
+                waiting_count: any;
+                needs_revision_count: any;
+                rows: any;
                 next_action: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    show_for_ordinary_conversation: boolean;
+                };
             };
             handoff: any;
             heartbeat: {
@@ -700,6 +1871,68 @@ export declare function runCollaborationUxSelfTest(): {
                 status: string;
                 summary: string;
             };
+            memory_gate_summary: {
+                schema: string;
+                required: any;
+                pass: any;
+                status: string;
+                status_label: string;
+                summary: string;
+                gate_count: number;
+                gate_ids: string[];
+                missing_gate_ids: string[];
+                missing_count: number;
+                rows: any;
+            };
+            read_plan_revalidation_gate_summary: {
+                schema: string;
+                required: any;
+                pass: any;
+                status: string;
+                status_label: string;
+                summary: string;
+                gate_count: number;
+                gate_ids: string[];
+                missing_gate_ids: string[];
+                missing_read_plan_ids: string[];
+                session_mismatch_gate_ids: string[];
+                session_mismatch_count: number;
+                session_required: any;
+                session_matched: any;
+                missing_count: any;
+                rows: any;
+            };
+            post_compact_reinjection_gate_summary: {
+                schema: string;
+                required: any;
+                pass: any;
+                status: string;
+                status_label: string;
+                summary: string;
+                gate_count: number;
+                candidate_count: any;
+                candidate_usage_counts: any;
+                gate_ids: string[];
+                missing_gate_ids: string[];
+                missing_candidate_reference_gate_ids: string[];
+                missing_candidate_usage_gate_ids: string[];
+                missing_candidate_usage_candidate_ids: string[];
+                missing_count: number;
+                rows: any;
+            };
+            post_compact_dispatch_marker_summary: {
+                schema: string;
+                required: boolean;
+                pass: boolean;
+                status: string;
+                status_label: string;
+                summary: string;
+                marker_count: number;
+                first_dispatch_count: any;
+                marker_ids: string[];
+                boundary_ids: string[];
+                rows: any;
+            };
             runtime_kernel: any;
             coordination_events: any[];
             receipt_quality: {
@@ -710,11 +1943,107 @@ export declare function runCollaborationUxSelfTest(): {
                     score: number;
                     grade: string;
                     pass: boolean;
-                    checks: {
+                    checks: ({
                         id: string;
                         label: string;
                         ok: boolean;
-                    }[];
+                        detail?: undefined;
+                    } | {
+                        id: string;
+                        label: string;
+                        ok: any;
+                        detail: string;
+                    })[];
+                    memory_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    read_plan_revalidation_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        missing_read_plan_ids: string[];
+                        session_required: any;
+                        session_matched: any;
+                        session_mismatch_gate_ids: any;
+                        current_source_verified: any;
+                        ignored_with_reason: any;
+                        rows: any;
+                        declared: boolean;
+                        structured_usage_rows: any;
+                        used: any;
+                        ignored: any;
+                    };
+                    post_compact_reinjection_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        candidate_count: any;
+                        candidate_reference_required: any;
+                        candidate_reference_passed: any;
+                        candidate_usage_required: any;
+                        candidate_usage_declared_passed: any;
+                        candidate_usage_strict_required: any;
+                        candidate_usage_strict_passed: any;
+                        referenced_candidate_ids: string[];
+                        all_candidates_declared: any;
+                        missing_candidate_reference_gate_ids: any;
+                        missing_candidate_usage_gate_ids: any;
+                        missing_candidate_usage_candidate_ids: string[];
+                        candidate_usage_rows: any;
+                        candidate_usage_counts: {
+                            used: any;
+                            ignored: any;
+                            verified: any;
+                            mentioned: any;
+                            unreferenced: any;
+                        };
+                        used_candidate_ids: string[];
+                        ignored_candidate_ids: string[];
+                        verified_candidate_ids: string[];
+                        mentioned_only_candidate_ids: string[];
+                        unreferenced_candidate_ids: string[];
+                        structured_candidate_usage_rows: {
+                            gate_id: string;
+                            candidate_id: string;
+                            kind: string;
+                            value: string;
+                            usage_state: string;
+                            reason: string;
+                            raw: any;
+                        }[];
+                        candidate_rows: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    handoff_quality: {
+                        schema: string;
+                        pass: boolean;
+                        status: string;
+                        status_label: string;
+                        reason: string;
+                        evidence: {
+                            has_handoff_hint: boolean;
+                            has_no_execution_hint: boolean;
+                            has_concrete_files: boolean;
+                            has_concrete_actions: boolean;
+                            has_executed_verification: boolean;
+                            missing_required_files: boolean;
+                            missing_required_verification: boolean;
+                            hints: string[];
+                        };
+                    };
                     missing: string[];
                 };
             }[];
@@ -726,25 +2055,417 @@ export declare function runCollaborationUxSelfTest(): {
                     score: number;
                     grade: string;
                     pass: boolean;
-                    checks: {
+                    checks: ({
                         id: string;
                         label: string;
                         ok: boolean;
-                    }[];
+                        detail?: undefined;
+                    } | {
+                        id: string;
+                        label: string;
+                        ok: any;
+                        detail: string;
+                    })[];
+                    memory_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    read_plan_revalidation_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        missing_read_plan_ids: string[];
+                        session_required: any;
+                        session_matched: any;
+                        session_mismatch_gate_ids: any;
+                        current_source_verified: any;
+                        ignored_with_reason: any;
+                        rows: any;
+                        declared: boolean;
+                        structured_usage_rows: any;
+                        used: any;
+                        ignored: any;
+                    };
+                    post_compact_reinjection_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        candidate_count: any;
+                        candidate_reference_required: any;
+                        candidate_reference_passed: any;
+                        candidate_usage_required: any;
+                        candidate_usage_declared_passed: any;
+                        candidate_usage_strict_required: any;
+                        candidate_usage_strict_passed: any;
+                        referenced_candidate_ids: string[];
+                        all_candidates_declared: any;
+                        missing_candidate_reference_gate_ids: any;
+                        missing_candidate_usage_gate_ids: any;
+                        missing_candidate_usage_candidate_ids: string[];
+                        candidate_usage_rows: any;
+                        candidate_usage_counts: {
+                            used: any;
+                            ignored: any;
+                            verified: any;
+                            mentioned: any;
+                            unreferenced: any;
+                        };
+                        used_candidate_ids: string[];
+                        ignored_candidate_ids: string[];
+                        verified_candidate_ids: string[];
+                        mentioned_only_candidate_ids: string[];
+                        unreferenced_candidate_ids: string[];
+                        structured_candidate_usage_rows: {
+                            gate_id: string;
+                            candidate_id: string;
+                            kind: string;
+                            value: string;
+                            usage_state: string;
+                            reason: string;
+                            raw: any;
+                        }[];
+                        candidate_rows: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    handoff_quality: {
+                        schema: string;
+                        pass: boolean;
+                        status: string;
+                        status_label: string;
+                        reason: string;
+                        evidence: {
+                            has_handoff_hint: boolean;
+                            has_no_execution_hint: boolean;
+                            has_concrete_files: boolean;
+                            has_concrete_actions: boolean;
+                            has_executed_verification: boolean;
+                            missing_required_files: boolean;
+                            missing_required_verification: boolean;
+                            hints: string[];
+                        };
+                    };
                     missing: string[];
                 };
             }[];
             targeted_rework: any[];
             next_action: string;
         };
+        agent_progress_summary: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            headline: string;
+            rows: {
+                agent: string;
+                role: string;
+                status: string;
+                status_label: string;
+                summary: string;
+                current_focus: string;
+                evidence: any[];
+                files_changed_count: number;
+                verification_count: number;
+                blockers: string[];
+                next_action: string;
+            }[];
+            next_action: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+            };
+        };
+        agentProgressSummary: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            headline: string;
+            rows: {
+                agent: string;
+                role: string;
+                status: string;
+                status_label: string;
+                summary: string;
+                current_focus: string;
+                evidence: any[];
+                files_changed_count: number;
+                verification_count: number;
+                blockers: string[];
+                next_action: string;
+            }[];
+            next_action: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+            };
+        };
+        change_summary: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            headline: string;
+            file_count: number;
+            additions: any;
+            deletions: any;
+            files: any[];
+            agents: {
+                agent: string;
+                role: string;
+                file_count: number;
+                additions: any;
+                deletions: any;
+                files: any[];
+            }[];
+            next_action: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+            };
+        };
+        changeSummary: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            headline: string;
+            file_count: number;
+            additions: any;
+            deletions: any;
+            files: any[];
+            agents: {
+                agent: string;
+                role: string;
+                file_count: number;
+                additions: any;
+                deletions: any;
+                files: any[];
+            }[];
+            next_action: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+            };
+        };
+        receipt_rework_summary: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            headline: string;
+            gaps: any[];
+            active_rework: {
+                target: string;
+                title: any;
+                reason: string;
+                at: any;
+                status: any;
+            }[];
+            resolved: {
+                target: any;
+                title: string;
+                reason: string;
+                at: any;
+                status: string;
+            }[];
+            next_action: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+            };
+        };
+        receiptReworkSummary: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            headline: string;
+            gaps: any[];
+            active_rework: {
+                target: string;
+                title: any;
+                reason: string;
+                at: any;
+                status: any;
+            }[];
+            resolved: {
+                target: any;
+                title: string;
+                reason: string;
+                at: any;
+                status: string;
+            }[];
+            next_action: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+            };
+        };
+        user_handoff: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            headline: string;
+            primary_action: any;
+            secondary_actions: any[];
+            evidence: string[];
+            unresolved: string[];
+            next_action: any;
+            technical_hint: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+        };
+        userHandoff: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            headline: string;
+            primary_action: any;
+            secondary_actions: any[];
+            evidence: string[];
+            unresolved: string[];
+            next_action: any;
+            technical_hint: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+        };
         runtime_kernel: any;
         runtimeKernel: any;
+        recovery_summary: {
+            schema: string;
+            title: string;
+            status: string;
+            mode: any;
+            headline: string;
+            revalidated: {
+                goal: boolean;
+                state: boolean;
+                acceptance: boolean;
+            };
+            preserved: string[];
+            remaining_gaps: string[];
+            next_action: string;
+            technical: {
+                recovery_checks: any;
+                lease_recovery_count: number;
+                previous_status: any;
+                recovered_at: any;
+            };
+        };
+        recoverySummary: {
+            schema: string;
+            title: string;
+            status: string;
+            mode: any;
+            headline: string;
+            revalidated: {
+                goal: boolean;
+                state: boolean;
+                acceptance: boolean;
+            };
+            preserved: string[];
+            remaining_gaps: string[];
+            next_action: string;
+            technical: {
+                recovery_checks: any;
+                lease_recovery_count: number;
+                previous_status: any;
+                recovered_at: any;
+            };
+        };
+        continuation_status: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: any;
+            headline: string;
+            kind: string;
+            kind_label: any;
+            strategy: string;
+            route_label: string;
+            replan_required: boolean;
+            interrupt_current_run: boolean;
+            target: string;
+            reason: string;
+            handoff_steps: {
+                id: string;
+                label: string;
+                detail: string;
+            }[];
+            next_action: string;
+            at: any;
+            technical: {
+                source: string;
+                kind: string;
+                work_item_id: string;
+            };
+        };
+        continuationStatus: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: any;
+            headline: string;
+            kind: string;
+            kind_label: any;
+            strategy: string;
+            route_label: string;
+            replan_required: boolean;
+            interrupt_current_run: boolean;
+            target: string;
+            reason: string;
+            handoff_steps: {
+                id: string;
+                label: string;
+                detail: string;
+            }[];
+            next_action: string;
+            at: any;
+            technical: {
+                source: string;
+                kind: string;
+                work_item_id: string;
+            };
+        };
         plan_mode: {
             title: any;
             mode: any;
             requires_confirmation: boolean;
             auto_continue: boolean;
+            confirmation_status: any;
+            accepted_at: any;
+            accepted_feedback: string;
             next_step: any;
+            steps: any;
             risk: {
                 level: any;
                 summary: any;
@@ -762,12 +2483,27 @@ export declare function runCollaborationUxSelfTest(): {
                 code_snapshot_used: boolean;
             };
             acceptance: any;
+            clarification_questions: any;
+            needs_clarification: boolean;
             permission_boundaries: any;
             session_strategy: any;
+            revision: {
+                status: any;
+                count: number;
+                feedback: string;
+                revised_at: any;
+                next_step: any;
+            };
         };
         completed: string[];
         blockers: string[];
         next_action: string;
+        delivery_report: any;
+        deliveryReport: any;
+        completion_card: any;
+        completionCard: any;
+        pickup_summary: any;
+        pickupSummary: any;
         delivery: {
             headline: any;
             files: string[];
@@ -781,6 +2517,177 @@ export declare function runCollaborationUxSelfTest(): {
             trace_id: any;
             execution_ids: any[];
             session_ids: any[];
+            work_item_ids: any[];
+            work_item_summary: {
+                total: number;
+                counts: any;
+                active: string[];
+                blocked: {
+                    id: string;
+                    target: string;
+                    blockers: string[];
+                }[];
+                next_claimable: {
+                    id: string;
+                    target: string;
+                    subject: string;
+                }[];
+                verification_nudge: boolean;
+                verification_reminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                all_completed: boolean;
+            };
+            recovery_summary: {
+                schema: string;
+                title: string;
+                status: string;
+                mode: any;
+                headline: string;
+                revalidated: {
+                    goal: boolean;
+                    state: boolean;
+                    acceptance: boolean;
+                };
+                preserved: string[];
+                remaining_gaps: string[];
+                next_action: string;
+                technical: {
+                    recovery_checks: any;
+                    lease_recovery_count: number;
+                    previous_status: any;
+                    recovered_at: any;
+                };
+            };
+            continuation_state: any;
+            receipt_rework_summary: {
+                schema: string;
+                title: string;
+                status: string;
+                status_label: string;
+                headline: string;
+                gaps: any[];
+                active_rework: {
+                    target: string;
+                    title: any;
+                    reason: string;
+                    at: any;
+                    status: any;
+                }[];
+                resolved: {
+                    target: any;
+                    title: string;
+                    reason: string;
+                    at: any;
+                    status: string;
+                }[];
+                next_action: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                };
+            };
+            agent_progress_summary: {
+                schema: string;
+                title: string;
+                status: string;
+                status_label: string;
+                headline: string;
+                rows: {
+                    agent: string;
+                    role: string;
+                    status: string;
+                    status_label: string;
+                    summary: string;
+                    current_focus: string;
+                    evidence: any[];
+                    files_changed_count: number;
+                    verification_count: number;
+                    blockers: string[];
+                    next_action: string;
+                }[];
+                next_action: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                };
+            };
+            change_summary: {
+                schema: string;
+                title: string;
+                status: string;
+                status_label: string;
+                headline: string;
+                file_count: number;
+                additions: any;
+                deletions: any;
+                files: any[];
+                agents: {
+                    agent: string;
+                    role: string;
+                    file_count: number;
+                    additions: any;
+                    deletions: any;
+                    files: any[];
+                }[];
+                next_action: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                };
+            };
+            plan_alignment: {
+                schema: string;
+                title: string;
+                status: string;
+                status_label: string;
+                headline: string;
+                checks: any[];
+                deviations: {
+                    id: any;
+                    label: any;
+                    reason: any;
+                }[];
+                next_action: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                };
+            };
+            user_handoff: {
+                schema: string;
+                title: string;
+                status: string;
+                status_label: string;
+                headline: string;
+                primary_action: any;
+                secondary_actions: any[];
+                evidence: string[];
+                unresolved: string[];
+                next_action: any;
+                technical_hint: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    show_for_ordinary_conversation: boolean;
+                };
+            };
             gap_fingerprint: string;
             entity_chain_endpoint: string;
             mainAgentDecision: {
@@ -845,6 +2752,58 @@ export declare function runCollaborationUxSelfTest(): {
                     next_action: string;
                 };
                 user_plan_steps: any;
+                dispatch_launch_summary: {
+                    schema: string;
+                    title: string;
+                    mode: string;
+                    task_id: any;
+                    headline: string;
+                    rows: {
+                        id: any;
+                        agent: string;
+                        role: string;
+                        task: string;
+                        reason: string;
+                        depends_on: any;
+                        status: string;
+                        status_label: string;
+                    }[];
+                    acceptance: string[];
+                    next_action: string;
+                    technical_hint: string;
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                    };
+                };
+                dispatchLaunchSummary: {
+                    schema: string;
+                    title: string;
+                    mode: string;
+                    task_id: any;
+                    headline: string;
+                    rows: {
+                        id: any;
+                        agent: string;
+                        role: string;
+                        task: string;
+                        reason: string;
+                        depends_on: any;
+                        status: string;
+                        status_label: string;
+                    }[];
+                    acceptance: string[];
+                    next_action: string;
+                    technical_hint: string;
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                    };
+                };
                 display_stream: {
                     schema: string;
                     type: string;
@@ -867,6 +2826,112 @@ export declare function runCollaborationUxSelfTest(): {
                         };
                         hidden_tool_uses: number;
                     };
+                    workchain: {
+                        schema: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        status: string;
+                        phase: string;
+                        user_visible_text: string;
+                        stages: {
+                            id: string;
+                            label: string;
+                            status: string;
+                            summary: string;
+                        }[];
+                        progress_checkpoints: {
+                            schema: string;
+                            title: string;
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                raw_events_default_collapsed: boolean;
+                            };
+                            items: any[];
+                        };
+                        completion_summary: {
+                            headline: string;
+                            evidence: string[];
+                            files: any[];
+                            verification: string[];
+                            risks: string[];
+                            next_action: any;
+                            verification_status: string;
+                            risk_status: string;
+                            final_summary_quality: {
+                                schema: string;
+                                required: boolean;
+                                passed: boolean;
+                                checks: {
+                                    id: string;
+                                    label: string;
+                                    passed: boolean;
+                                    detail: string;
+                                }[];
+                                missing: string[];
+                                verification_status: string;
+                                risk_status: string;
+                                source: string;
+                            };
+                            terminal: boolean;
+                        };
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            final_summary_required: boolean;
+                        };
+                        technical_details: {
+                            id: string;
+                            title: string;
+                            items: any[];
+                        }[];
+                    };
+                    completion_summary: {
+                        headline: string;
+                        evidence: string[];
+                        files: any[];
+                        verification: string[];
+                        risks: string[];
+                        next_action: any;
+                        verification_status: string;
+                        risk_status: string;
+                        final_summary_quality: {
+                            schema: string;
+                            required: boolean;
+                            passed: boolean;
+                            checks: {
+                                id: string;
+                                label: string;
+                                passed: boolean;
+                                detail: string;
+                            }[];
+                            missing: string[];
+                            verification_status: string;
+                            risk_status: string;
+                            source: string;
+                        };
+                        terminal: boolean;
+                    };
+                    progress_checkpoints: {
+                        schema: string;
+                        title: string;
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            raw_events_default_collapsed: boolean;
+                        };
+                        items: any[];
+                    };
+                    dispatch_launch_summary: any;
+                    dispatchLaunchSummary: any;
+                    delivery_report: any;
+                    workchain_stages: {
+                        id: string;
+                        label: string;
+                        status: string;
+                        summary: string;
+                    }[];
                     technical_details: {
                         id: string;
                         title: string;
@@ -906,6 +2971,112 @@ export declare function runCollaborationUxSelfTest(): {
                         };
                         hidden_tool_uses: number;
                     };
+                    workchain: {
+                        schema: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        status: string;
+                        phase: string;
+                        user_visible_text: string;
+                        stages: {
+                            id: string;
+                            label: string;
+                            status: string;
+                            summary: string;
+                        }[];
+                        progress_checkpoints: {
+                            schema: string;
+                            title: string;
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                raw_events_default_collapsed: boolean;
+                            };
+                            items: any[];
+                        };
+                        completion_summary: {
+                            headline: string;
+                            evidence: string[];
+                            files: any[];
+                            verification: string[];
+                            risks: string[];
+                            next_action: any;
+                            verification_status: string;
+                            risk_status: string;
+                            final_summary_quality: {
+                                schema: string;
+                                required: boolean;
+                                passed: boolean;
+                                checks: {
+                                    id: string;
+                                    label: string;
+                                    passed: boolean;
+                                    detail: string;
+                                }[];
+                                missing: string[];
+                                verification_status: string;
+                                risk_status: string;
+                                source: string;
+                            };
+                            terminal: boolean;
+                        };
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            final_summary_required: boolean;
+                        };
+                        technical_details: {
+                            id: string;
+                            title: string;
+                            items: any[];
+                        }[];
+                    };
+                    completion_summary: {
+                        headline: string;
+                        evidence: string[];
+                        files: any[];
+                        verification: string[];
+                        risks: string[];
+                        next_action: any;
+                        verification_status: string;
+                        risk_status: string;
+                        final_summary_quality: {
+                            schema: string;
+                            required: boolean;
+                            passed: boolean;
+                            checks: {
+                                id: string;
+                                label: string;
+                                passed: boolean;
+                                detail: string;
+                            }[];
+                            missing: string[];
+                            verification_status: string;
+                            risk_status: string;
+                            source: string;
+                        };
+                        terminal: boolean;
+                    };
+                    progress_checkpoints: {
+                        schema: string;
+                        title: string;
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            raw_events_default_collapsed: boolean;
+                        };
+                        items: any[];
+                    };
+                    dispatch_launch_summary: any;
+                    dispatchLaunchSummary: any;
+                    delivery_report: any;
+                    workchain_stages: {
+                        id: string;
+                        label: string;
+                        status: string;
+                        summary: string;
+                    }[];
                     technical_details: {
                         id: string;
                         title: string;
@@ -924,6 +3095,8 @@ export declare function runCollaborationUxSelfTest(): {
                     };
                 };
                 todo_plan: any;
+                verification_reminder: any;
+                verificationReminder: any;
                 permissions: {
                     action_id: string;
                     risk: string;
@@ -1010,6 +3183,58 @@ export declare function runCollaborationUxSelfTest(): {
                     next_action: string;
                 };
                 user_plan_steps: any;
+                dispatch_launch_summary: {
+                    schema: string;
+                    title: string;
+                    mode: string;
+                    task_id: any;
+                    headline: string;
+                    rows: {
+                        id: any;
+                        agent: string;
+                        role: string;
+                        task: string;
+                        reason: string;
+                        depends_on: any;
+                        status: string;
+                        status_label: string;
+                    }[];
+                    acceptance: string[];
+                    next_action: string;
+                    technical_hint: string;
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                    };
+                };
+                dispatchLaunchSummary: {
+                    schema: string;
+                    title: string;
+                    mode: string;
+                    task_id: any;
+                    headline: string;
+                    rows: {
+                        id: any;
+                        agent: string;
+                        role: string;
+                        task: string;
+                        reason: string;
+                        depends_on: any;
+                        status: string;
+                        status_label: string;
+                    }[];
+                    acceptance: string[];
+                    next_action: string;
+                    technical_hint: string;
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                    };
+                };
                 display_stream: {
                     schema: string;
                     type: string;
@@ -1032,6 +3257,112 @@ export declare function runCollaborationUxSelfTest(): {
                         };
                         hidden_tool_uses: number;
                     };
+                    workchain: {
+                        schema: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        status: string;
+                        phase: string;
+                        user_visible_text: string;
+                        stages: {
+                            id: string;
+                            label: string;
+                            status: string;
+                            summary: string;
+                        }[];
+                        progress_checkpoints: {
+                            schema: string;
+                            title: string;
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                raw_events_default_collapsed: boolean;
+                            };
+                            items: any[];
+                        };
+                        completion_summary: {
+                            headline: string;
+                            evidence: string[];
+                            files: any[];
+                            verification: string[];
+                            risks: string[];
+                            next_action: any;
+                            verification_status: string;
+                            risk_status: string;
+                            final_summary_quality: {
+                                schema: string;
+                                required: boolean;
+                                passed: boolean;
+                                checks: {
+                                    id: string;
+                                    label: string;
+                                    passed: boolean;
+                                    detail: string;
+                                }[];
+                                missing: string[];
+                                verification_status: string;
+                                risk_status: string;
+                                source: string;
+                            };
+                            terminal: boolean;
+                        };
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            final_summary_required: boolean;
+                        };
+                        technical_details: {
+                            id: string;
+                            title: string;
+                            items: any[];
+                        }[];
+                    };
+                    completion_summary: {
+                        headline: string;
+                        evidence: string[];
+                        files: any[];
+                        verification: string[];
+                        risks: string[];
+                        next_action: any;
+                        verification_status: string;
+                        risk_status: string;
+                        final_summary_quality: {
+                            schema: string;
+                            required: boolean;
+                            passed: boolean;
+                            checks: {
+                                id: string;
+                                label: string;
+                                passed: boolean;
+                                detail: string;
+                            }[];
+                            missing: string[];
+                            verification_status: string;
+                            risk_status: string;
+                            source: string;
+                        };
+                        terminal: boolean;
+                    };
+                    progress_checkpoints: {
+                        schema: string;
+                        title: string;
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            raw_events_default_collapsed: boolean;
+                        };
+                        items: any[];
+                    };
+                    dispatch_launch_summary: any;
+                    dispatchLaunchSummary: any;
+                    delivery_report: any;
+                    workchain_stages: {
+                        id: string;
+                        label: string;
+                        status: string;
+                        summary: string;
+                    }[];
                     technical_details: {
                         id: string;
                         title: string;
@@ -1071,6 +3402,112 @@ export declare function runCollaborationUxSelfTest(): {
                         };
                         hidden_tool_uses: number;
                     };
+                    workchain: {
+                        schema: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        status: string;
+                        phase: string;
+                        user_visible_text: string;
+                        stages: {
+                            id: string;
+                            label: string;
+                            status: string;
+                            summary: string;
+                        }[];
+                        progress_checkpoints: {
+                            schema: string;
+                            title: string;
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                raw_events_default_collapsed: boolean;
+                            };
+                            items: any[];
+                        };
+                        completion_summary: {
+                            headline: string;
+                            evidence: string[];
+                            files: any[];
+                            verification: string[];
+                            risks: string[];
+                            next_action: any;
+                            verification_status: string;
+                            risk_status: string;
+                            final_summary_quality: {
+                                schema: string;
+                                required: boolean;
+                                passed: boolean;
+                                checks: {
+                                    id: string;
+                                    label: string;
+                                    passed: boolean;
+                                    detail: string;
+                                }[];
+                                missing: string[];
+                                verification_status: string;
+                                risk_status: string;
+                                source: string;
+                            };
+                            terminal: boolean;
+                        };
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            final_summary_required: boolean;
+                        };
+                        technical_details: {
+                            id: string;
+                            title: string;
+                            items: any[];
+                        }[];
+                    };
+                    completion_summary: {
+                        headline: string;
+                        evidence: string[];
+                        files: any[];
+                        verification: string[];
+                        risks: string[];
+                        next_action: any;
+                        verification_status: string;
+                        risk_status: string;
+                        final_summary_quality: {
+                            schema: string;
+                            required: boolean;
+                            passed: boolean;
+                            checks: {
+                                id: string;
+                                label: string;
+                                passed: boolean;
+                                detail: string;
+                            }[];
+                            missing: string[];
+                            verification_status: string;
+                            risk_status: string;
+                            source: string;
+                        };
+                        terminal: boolean;
+                    };
+                    progress_checkpoints: {
+                        schema: string;
+                        title: string;
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            raw_events_default_collapsed: boolean;
+                        };
+                        items: any[];
+                    };
+                    dispatch_launch_summary: any;
+                    dispatchLaunchSummary: any;
+                    delivery_report: any;
+                    workchain_stages: {
+                        id: string;
+                        label: string;
+                        status: string;
+                        summary: string;
+                    }[];
                     technical_details: {
                         id: string;
                         title: string;
@@ -1089,6 +3526,8 @@ export declare function runCollaborationUxSelfTest(): {
                     };
                 };
                 todo_plan: any;
+                verification_reminder: any;
+                verificationReminder: any;
                 permissions: {
                     action_id: string;
                     risk: string;
@@ -1136,6 +3575,112 @@ export declare function runCollaborationUxSelfTest(): {
                     };
                     hidden_tool_uses: number;
                 };
+                workchain: {
+                    schema: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    status: string;
+                    phase: string;
+                    user_visible_text: string;
+                    stages: {
+                        id: string;
+                        label: string;
+                        status: string;
+                        summary: string;
+                    }[];
+                    progress_checkpoints: {
+                        schema: string;
+                        title: string;
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            raw_events_default_collapsed: boolean;
+                        };
+                        items: any[];
+                    };
+                    completion_summary: {
+                        headline: string;
+                        evidence: string[];
+                        files: any[];
+                        verification: string[];
+                        risks: string[];
+                        next_action: any;
+                        verification_status: string;
+                        risk_status: string;
+                        final_summary_quality: {
+                            schema: string;
+                            required: boolean;
+                            passed: boolean;
+                            checks: {
+                                id: string;
+                                label: string;
+                                passed: boolean;
+                                detail: string;
+                            }[];
+                            missing: string[];
+                            verification_status: string;
+                            risk_status: string;
+                            source: string;
+                        };
+                        terminal: boolean;
+                    };
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        final_summary_required: boolean;
+                    };
+                    technical_details: {
+                        id: string;
+                        title: string;
+                        items: any[];
+                    }[];
+                };
+                completion_summary: {
+                    headline: string;
+                    evidence: string[];
+                    files: any[];
+                    verification: string[];
+                    risks: string[];
+                    next_action: any;
+                    verification_status: string;
+                    risk_status: string;
+                    final_summary_quality: {
+                        schema: string;
+                        required: boolean;
+                        passed: boolean;
+                        checks: {
+                            id: string;
+                            label: string;
+                            passed: boolean;
+                            detail: string;
+                        }[];
+                        missing: string[];
+                        verification_status: string;
+                        risk_status: string;
+                        source: string;
+                    };
+                    terminal: boolean;
+                };
+                progress_checkpoints: {
+                    schema: string;
+                    title: string;
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        raw_events_default_collapsed: boolean;
+                    };
+                    items: any[];
+                };
+                dispatch_launch_summary: any;
+                dispatchLaunchSummary: any;
+                delivery_report: any;
+                workchain_stages: {
+                    id: string;
+                    label: string;
+                    status: string;
+                    summary: string;
+                }[];
                 technical_details: {
                     id: string;
                     title: string;
@@ -1157,6 +3702,444 @@ export declare function runCollaborationUxSelfTest(): {
         updated_at: any;
     };
     report: string;
+};
+export declare function runMemoryDispatchGateReceiptValidationSelfTest(): {
+    pass: boolean;
+    checks: {
+        goodReceiptPassesGate: boolean;
+        ignoredReceiptCanSatisfyGate: boolean;
+        missingGateHardFailsQuality: boolean;
+        deliverySummaryRecordsGate: any;
+        acceptanceGateBlocksMissingGate: any;
+        goodDeliverySummaryPassesGate: boolean;
+    };
+    good: {
+        score: number;
+        grade: string;
+        memoryGate: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            gate_ids: any;
+            missing_gate_ids: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+    missing: {
+        score: number;
+        grade: string;
+        memoryGate: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            gate_ids: any;
+            missing_gate_ids: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+};
+export declare function runReadPlanRevalidationGateReceiptValidationSelfTest(): {
+    pass: boolean;
+    checks: {
+        goodReceiptPassesGate: boolean;
+        wrongSessionHardFailsQuality: boolean;
+        missingCurrentSourceHardFailsQuality: boolean;
+        deliverySummaryRecordsGate: boolean;
+        acceptanceGateBlocksWrongSession: any;
+        runtimeKernelShowsWrongSession: boolean;
+        goodDeliverySummaryPassesGate: boolean;
+    };
+    good: {
+        score: number;
+        grade: string;
+        readPlanRevalidationGate: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            gate_ids: any;
+            missing_gate_ids: any;
+            missing_read_plan_ids: string[];
+            session_required: any;
+            session_matched: any;
+            session_mismatch_gate_ids: any;
+            current_source_verified: any;
+            ignored_with_reason: any;
+            rows: any;
+            declared: boolean;
+            structured_usage_rows: any;
+            used: any;
+            ignored: any;
+        };
+    };
+    wrongSession: {
+        score: number;
+        grade: string;
+        readPlanRevalidationGate: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            gate_ids: any;
+            missing_gate_ids: any;
+            missing_read_plan_ids: string[];
+            session_required: any;
+            session_matched: any;
+            session_mismatch_gate_ids: any;
+            current_source_verified: any;
+            ignored_with_reason: any;
+            rows: any;
+            declared: boolean;
+            structured_usage_rows: any;
+            used: any;
+            ignored: any;
+        };
+    };
+    missingCurrentSource: {
+        score: number;
+        grade: string;
+        readPlanRevalidationGate: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            gate_ids: any;
+            missing_gate_ids: any;
+            missing_read_plan_ids: string[];
+            session_required: any;
+            session_matched: any;
+            session_mismatch_gate_ids: any;
+            current_source_verified: any;
+            ignored_with_reason: any;
+            rows: any;
+            declared: boolean;
+            structured_usage_rows: any;
+            used: any;
+            ignored: any;
+        };
+    };
+};
+export declare function runPostCompactReinjectionGateReceiptValidationSelfTest(): {
+    pass: boolean;
+    checks: {
+        goodReceiptPassesGate: boolean;
+        ignoredReceiptCanSatisfyGate: boolean;
+        structuredCandidateUsagePassesGate: boolean;
+        partialCandidateUsageHardFailsStrictGate: boolean;
+        missingGateHardFailsQuality: boolean;
+        missingCandidateHardFailsQuality: boolean;
+        missingUsageHardFailsQuality: boolean;
+        deliverySummaryRecordsGate: any;
+        acceptanceGateBlocksMissingGate: any;
+        visibleSummaryRecordsCandidateCount: boolean;
+        visibleSummaryRecordsMissingUsage: boolean;
+        goodDeliverySummaryPassesGate: boolean;
+    };
+    good: {
+        score: number;
+        grade: string;
+        reinjectionGate: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            gate_ids: any;
+            missing_gate_ids: any;
+            candidate_count: any;
+            candidate_reference_required: any;
+            candidate_reference_passed: any;
+            candidate_usage_required: any;
+            candidate_usage_declared_passed: any;
+            candidate_usage_strict_required: any;
+            candidate_usage_strict_passed: any;
+            referenced_candidate_ids: string[];
+            all_candidates_declared: any;
+            missing_candidate_reference_gate_ids: any;
+            missing_candidate_usage_gate_ids: any;
+            missing_candidate_usage_candidate_ids: string[];
+            candidate_usage_rows: any;
+            candidate_usage_counts: {
+                used: any;
+                ignored: any;
+                verified: any;
+                mentioned: any;
+                unreferenced: any;
+            };
+            used_candidate_ids: string[];
+            ignored_candidate_ids: string[];
+            verified_candidate_ids: string[];
+            mentioned_only_candidate_ids: string[];
+            unreferenced_candidate_ids: string[];
+            structured_candidate_usage_rows: {
+                gate_id: string;
+                candidate_id: string;
+                kind: string;
+                value: string;
+                usage_state: string;
+                reason: string;
+                raw: any;
+            }[];
+            candidate_rows: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+    structuredGood: {
+        score: number;
+        grade: string;
+        reinjectionGate: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            gate_ids: any;
+            missing_gate_ids: any;
+            candidate_count: any;
+            candidate_reference_required: any;
+            candidate_reference_passed: any;
+            candidate_usage_required: any;
+            candidate_usage_declared_passed: any;
+            candidate_usage_strict_required: any;
+            candidate_usage_strict_passed: any;
+            referenced_candidate_ids: string[];
+            all_candidates_declared: any;
+            missing_candidate_reference_gate_ids: any;
+            missing_candidate_usage_gate_ids: any;
+            missing_candidate_usage_candidate_ids: string[];
+            candidate_usage_rows: any;
+            candidate_usage_counts: {
+                used: any;
+                ignored: any;
+                verified: any;
+                mentioned: any;
+                unreferenced: any;
+            };
+            used_candidate_ids: string[];
+            ignored_candidate_ids: string[];
+            verified_candidate_ids: string[];
+            mentioned_only_candidate_ids: string[];
+            unreferenced_candidate_ids: string[];
+            structured_candidate_usage_rows: {
+                gate_id: string;
+                candidate_id: string;
+                kind: string;
+                value: string;
+                usage_state: string;
+                reason: string;
+                raw: any;
+            }[];
+            candidate_rows: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+    missing: {
+        score: number;
+        grade: string;
+        reinjectionGate: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            gate_ids: any;
+            missing_gate_ids: any;
+            candidate_count: any;
+            candidate_reference_required: any;
+            candidate_reference_passed: any;
+            candidate_usage_required: any;
+            candidate_usage_declared_passed: any;
+            candidate_usage_strict_required: any;
+            candidate_usage_strict_passed: any;
+            referenced_candidate_ids: string[];
+            all_candidates_declared: any;
+            missing_candidate_reference_gate_ids: any;
+            missing_candidate_usage_gate_ids: any;
+            missing_candidate_usage_candidate_ids: string[];
+            candidate_usage_rows: any;
+            candidate_usage_counts: {
+                used: any;
+                ignored: any;
+                verified: any;
+                mentioned: any;
+                unreferenced: any;
+            };
+            used_candidate_ids: string[];
+            ignored_candidate_ids: string[];
+            verified_candidate_ids: string[];
+            mentioned_only_candidate_ids: string[];
+            unreferenced_candidate_ids: string[];
+            structured_candidate_usage_rows: {
+                gate_id: string;
+                candidate_id: string;
+                kind: string;
+                value: string;
+                usage_state: string;
+                reason: string;
+                raw: any;
+            }[];
+            candidate_rows: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+    missingCandidate: {
+        score: number;
+        grade: string;
+        reinjectionGate: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            gate_ids: any;
+            missing_gate_ids: any;
+            candidate_count: any;
+            candidate_reference_required: any;
+            candidate_reference_passed: any;
+            candidate_usage_required: any;
+            candidate_usage_declared_passed: any;
+            candidate_usage_strict_required: any;
+            candidate_usage_strict_passed: any;
+            referenced_candidate_ids: string[];
+            all_candidates_declared: any;
+            missing_candidate_reference_gate_ids: any;
+            missing_candidate_usage_gate_ids: any;
+            missing_candidate_usage_candidate_ids: string[];
+            candidate_usage_rows: any;
+            candidate_usage_counts: {
+                used: any;
+                ignored: any;
+                verified: any;
+                mentioned: any;
+                unreferenced: any;
+            };
+            used_candidate_ids: string[];
+            ignored_candidate_ids: string[];
+            verified_candidate_ids: string[];
+            mentioned_only_candidate_ids: string[];
+            unreferenced_candidate_ids: string[];
+            structured_candidate_usage_rows: {
+                gate_id: string;
+                candidate_id: string;
+                kind: string;
+                value: string;
+                usage_state: string;
+                reason: string;
+                raw: any;
+            }[];
+            candidate_rows: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+    missingUsage: {
+        score: number;
+        grade: string;
+        reinjectionGate: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            gate_ids: any;
+            missing_gate_ids: any;
+            candidate_count: any;
+            candidate_reference_required: any;
+            candidate_reference_passed: any;
+            candidate_usage_required: any;
+            candidate_usage_declared_passed: any;
+            candidate_usage_strict_required: any;
+            candidate_usage_strict_passed: any;
+            referenced_candidate_ids: string[];
+            all_candidates_declared: any;
+            missing_candidate_reference_gate_ids: any;
+            missing_candidate_usage_gate_ids: any;
+            missing_candidate_usage_candidate_ids: string[];
+            candidate_usage_rows: any;
+            candidate_usage_counts: {
+                used: any;
+                ignored: any;
+                verified: any;
+                mentioned: any;
+                unreferenced: any;
+            };
+            used_candidate_ids: string[];
+            ignored_candidate_ids: string[];
+            verified_candidate_ids: string[];
+            mentioned_only_candidate_ids: string[];
+            unreferenced_candidate_ids: string[];
+            structured_candidate_usage_rows: {
+                gate_id: string;
+                candidate_id: string;
+                kind: string;
+                value: string;
+                usage_state: string;
+                reason: string;
+                raw: any;
+            }[];
+            candidate_rows: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+    partialUsage: {
+        score: number;
+        grade: string;
+        reinjectionGate: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            gate_ids: any;
+            missing_gate_ids: any;
+            candidate_count: any;
+            candidate_reference_required: any;
+            candidate_reference_passed: any;
+            candidate_usage_required: any;
+            candidate_usage_declared_passed: any;
+            candidate_usage_strict_required: any;
+            candidate_usage_strict_passed: any;
+            referenced_candidate_ids: string[];
+            all_candidates_declared: any;
+            missing_candidate_reference_gate_ids: any;
+            missing_candidate_usage_gate_ids: any;
+            missing_candidate_usage_candidate_ids: string[];
+            candidate_usage_rows: any;
+            candidate_usage_counts: {
+                used: any;
+                ignored: any;
+                verified: any;
+                mentioned: any;
+                unreferenced: any;
+            };
+            used_candidate_ids: string[];
+            ignored_candidate_ids: string[];
+            verified_candidate_ids: string[];
+            mentioned_only_candidate_ids: string[];
+            unreferenced_candidate_ids: string[];
+            structured_candidate_usage_rows: {
+                gate_id: string;
+                candidate_id: string;
+                kind: string;
+                value: string;
+                usage_state: string;
+                reason: string;
+                raw: any;
+            }[];
+            candidate_rows: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+};
+export declare function runPostCompactDispatchMarkerVisibleSelfTest(): {
+    pass: boolean;
+    checks: {
+        summaryRecordsMarker: boolean;
+        runtimeKernelRecordsMarker: boolean;
+        agentCoordinationRecordsMarker: boolean;
+        taskCardRuntimeRecordsMarker: boolean;
+    };
+    markerSummary: any;
 };
 export declare function buildEvidenceGateFollowUps(group: any, outputs: string[]): any[];
 export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
@@ -1227,6 +4210,9 @@ export declare function runTaskWatchdog(ctx: CollabCtx, options?: any): {
     total_recoverable: number;
     stale_recovered: number;
     stale_recoverable: number;
+    work_item_stalled_total: number;
+    work_item_requeued: any;
+    work_item_results: any[];
     blocked_recovery: any;
     runtime_failed_total: number;
     runtime_retried: any;
@@ -1329,6 +4315,7 @@ export declare function runTaskWatchdog(ctx: CollabCtx, options?: any): {
         running_long: any[];
         runtime_failed: any[];
         gap_rework: any[];
+        work_item_stalled: any[];
         queue_status: {
             total_queued: number;
             running_targets: number;
@@ -1444,7 +4431,9 @@ export declare function runCollaborationProtocolSelfTest(): {
         pass: boolean;
         checks: {
             hasReworkPacket: boolean;
+            hasVisibleSummary: boolean;
             hasRound: boolean;
+            hasRoutePacket: boolean;
             hasContinuationSemantics: boolean;
             hasScratchpadContext: boolean;
             hasOriginalRequirement: boolean;
@@ -1452,6 +4441,107 @@ export declare function runCollaborationProtocolSelfTest(): {
             hasReason: boolean;
             hasVerification: boolean;
             hasReceipt: boolean;
+            failedRouteKeepsSameWorker: boolean;
+            independentRouteUsesFreshVerifier: boolean;
+            independentVerifierSelectsTestAgent: boolean;
+            independentVerifierExcludesOriginalTarget: any;
+            independentVerifierReportsMissingCandidate: boolean;
+            independentReworkDispatchesToVerifier: boolean;
+            independentReworkTaskNamesReviewSubject: any;
+            independentReviewGateCreatesFollowUp: boolean;
+            independentReviewGateRoutesToTestAgent: any;
+            independentReworkBlocksWithoutVerifier: any;
+            wrongDirectionRequestsStop: boolean;
+            wrongDirectionContinuationInterruptsOldRun: boolean;
+            routeLabelsAreUserFriendly: boolean;
+        };
+        routes: {
+            failedRoute: {
+                schema: string;
+                project: string;
+                strategy: string;
+                continuationStrategy: string;
+                continuation_strategy: string;
+                user_label: string;
+                reason: string;
+                context_overlap: any;
+                requires_stop: boolean;
+                requires_fresh_verifier: boolean;
+                signals: string[];
+            };
+            independentRoute: {
+                schema: string;
+                project: string;
+                strategy: string;
+                continuationStrategy: string;
+                continuation_strategy: string;
+                user_label: string;
+                reason: string;
+                context_overlap: any;
+                requires_stop: boolean;
+                requires_fresh_verifier: boolean;
+                signals: string[];
+            };
+            wrongDirectionRoute: {
+                schema: string;
+                project: string;
+                strategy: string;
+                continuationStrategy: string;
+                continuation_strategy: string;
+                user_label: string;
+                reason: string;
+                context_overlap: any;
+                requires_stop: boolean;
+                requires_fresh_verifier: boolean;
+                signals: string[];
+            };
+        };
+        independent_verifier: {
+            verifierSelection: {
+                schema: string;
+                available: boolean;
+                originalTarget: string;
+                targetName: any;
+                reason: string;
+                candidates: any;
+            };
+            noVerifierSelection: {
+                schema: string;
+                available: boolean;
+                originalTarget: string;
+                targetName: any;
+                reason: string;
+                candidates: any;
+            };
+            independentFollowUp: any;
+            independentGateFollowUps: {
+                mention: string;
+                targetName: string;
+                project: string;
+                summary: string;
+                message: string;
+                reason: string;
+                rework_kind: string;
+                independentReviewGate: {
+                    required: boolean;
+                    pass: boolean;
+                    status: string;
+                    reason: string;
+                    file_change_count: number;
+                    high_risk_files: {
+                        project: any;
+                        path: any;
+                    }[];
+                    evidence_count: number;
+                    passed_count: number;
+                    failed_count: number;
+                    evidence: any[];
+                    failed_evidence: any[];
+                };
+                userTaskPreview: string;
+            }[];
+            independentGateRoutedFollowUp: any;
+            blockedIndependentFollowUp: any;
         };
     };
     agentCollaborationProtocol: {
@@ -1596,6 +4686,24 @@ export declare function runCollaborationProtocolSelfTest(): {
         hasTaskId: boolean;
         hasCompletedStatus: boolean;
         detectsMissingReceipt: boolean;
+        missingReceiptFollowUpHasUserPreview: boolean;
+        missingReceiptSummaryFriendly: boolean;
+        missingReceiptSummaryHidesProtocol: boolean;
+        displaySelfTestPasses: boolean;
+    };
+    taskNotificationDisplay: {
+        pass: boolean;
+        checks: {
+            keepsInternalEnvelopeForCoordinator: boolean;
+            missingReceiptSummaryFriendly: boolean;
+            missingReceiptResultKeepsUsefulText: boolean;
+            completedSummaryPreserved: boolean;
+            visibleNotificationTextHidesProtocol: boolean;
+        };
+        samples: {
+            missing: any;
+            completed: any;
+        };
     };
     dependencyGateChecks: {
         doneDependencyPasses: boolean;
@@ -1627,6 +4735,11 @@ export declare function runCollaborationProtocolSelfTest(): {
         storesWorkerLedger: boolean;
         contextIncludesScratchpad: boolean;
         contextIncludesWorkerSummary: boolean;
+    };
+    coordinatorVisibleMessageSelfTest: {
+        pass: boolean;
+        visible: string;
+        friendly: string;
     };
     agentQaRequirementChecks: {
         infersExplicitAskAgentRequirement: boolean;

@@ -1,4 +1,5 @@
 import { compactMemoryText } from "./memory";
+import { buildMainAgentDeliveryReport, formatDeliveryFileItem as formatUnifiedDeliveryFileItem } from "../../agents/delivery-report";
 
 type DeliveryStatus = "done" | "waiting" | "failed";
 
@@ -31,13 +32,7 @@ function formatListForGroupReport(items: any, empty = "无", formatter: (item: a
 }
 
 function formatDeliveryFileItem(item: any) {
-  if (!item || typeof item === "string") return String(item || "").trim();
-  const pathText = item.path || item.file || "";
-  if (!pathText) return "";
-  const agent = item.agent ? `${item.agent} · ` : "";
-  const status = item.status ? ` (${item.status})` : "";
-  const diff = Number(item.additions || item.deletions || 0) > 0 ? ` +${Number(item.additions || 0)}/-${Number(item.deletions || 0)}` : "";
-  return `${agent}${pathText}${status}${diff}`.trim();
+  return formatUnifiedDeliveryFileItem(item);
 }
 
 export function formatDeliveryMissingVerification(item: any) {
@@ -71,48 +66,23 @@ function formatReportLines(items: any, formatter: (item: any) => string = (item)
 }
 
 export function buildUserDeliveryReport(task: any, summary: any, status: DeliveryStatus, detail = "") {
-  const statusText = status === "done" ? "已完成" : status === "waiting" ? "等待补充/返工" : "失败";
-  const risks = uniqueReportStrings([...(summary?.blockers || []), ...(summary?.blocking_needs || []), ...(summary?.advisory_needs || []), ...(summary?.risks || [])]);
-  const lines = [
-    `# ${task?.title || "任务交付"}`,
-    "",
-    `状态：${statusText}`,
-    `完成内容：${compactMemoryText(summary?.headline || detail || task?.status_detail || "任务已处理", 500)}`,
-    "",
-    `变更文件：${Number(summary?.actual_file_change_count || 0)} 个`,
-    formatReportLines(summary?.actual_file_changes || summary?.files_changed, formatDeliveryFileItem, 12),
-    "",
-    `验证结果：${Array.isArray(summary?.verification_executed) ? summary.verification_executed.length : 0} 项已执行`,
-    formatReportLines(summary?.verification_executed, (item) => item, 12),
-    risks.length ? "" : "",
-    risks.length ? "风险与待确认：" : "风险与待确认：无",
-    risks.length ? formatReportLines(risks, (item) => item, 8) : "",
-  ];
-  return lines.filter(line => line !== "").join("\n");
+  return buildTaskDeliveryReport(task, summary, status, detail).markdown;
+}
+
+export function buildTaskDeliveryReport(task: any, summary: any, status: DeliveryStatus, detail = "") {
+  return buildMainAgentDeliveryReport({
+    surface: "group",
+    status,
+    title: task?.title || "任务交付",
+    goal: task?.business_goal || task?.description || "",
+    detail: compactMemoryText(summary?.headline || detail || task?.status_detail || "任务已处理", 500),
+    task,
+    summary,
+    report: summary,
+    executed: true,
+  });
 }
 
 export function buildTaskGroupReportMessage(task: any, status: DeliveryStatus, detail = "") {
-  const summary = task?.delivery_summary || {};
-  const title = status === "done"
-    ? "任务交付完成"
-    : status === "waiting"
-      ? "任务需要继续处理"
-      : "任务执行失败";
-  const statusText = status === "done" ? "已完成" : status === "waiting" ? "等待补充/返工" : "失败";
-  const fileChanges = summary.actual_file_changes || summary.files_changed || task?.file_changes?.files || [];
-  const verification = summary.verification || task?.receipt?.verification || [];
-  const blockers = summary.blockers || task?.receipt?.blockers || [];
-  const needs = summary.needs || task?.receipt?.needs || [];
-
-  return [
-    `【${title}】`,
-    `任务：${task?.title || "未命名任务"}`,
-    `状态：${statusText}`,
-    summary.headline ? `完成内容：${summary.headline}` : "",
-    `变更文件：${Number(summary.actual_file_change_count ?? fileChanges.length ?? 0)} 个`,
-    formatListForGroupReport(fileChanges, "无", formatDeliveryFileItem),
-    `验证结果：${Array.isArray(verification) ? verification.length : 0} 项`,
-    formatListForGroupReport(verification, "无", (item) => typeof item === "string" ? item : (item?.command && item?.result ? `${item.command} — ${item.result}` : item?.command || item?.summary || "")),
-    blockers.length || needs.length ? `风险与待确认：\n${formatListForGroupReport([...blockers, ...needs])}` : "风险与待确认：无",
-  ].filter(Boolean).join("\n");
+  return buildTaskDeliveryReport(task, task?.delivery_summary || {}, status, detail).user_text;
 }

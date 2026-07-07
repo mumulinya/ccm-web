@@ -85,7 +85,7 @@ export declare function recordToWorkerLedger(record: DispatchRecord): {
 };
 export declare function recordToTaskNotification(record: DispatchRecord): {
     task_id: string;
-    status: "pending" | "failed" | "blocked" | "completed" | "running" | "skipped" | "partial" | "needs_info" | "missing_receipt";
+    status: "pending" | "failed" | "completed" | "blocked" | "running" | "skipped" | "partial" | "needs_info" | "missing_receipt";
     receipt_status: ReceiptStatus;
     assignment_id: string;
     dispatch_key: string;

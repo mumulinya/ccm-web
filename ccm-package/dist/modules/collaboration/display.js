@@ -4,13 +4,36 @@ exports.sanitizeMainAgentUserText = sanitizeMainAgentUserText;
 exports.buildStreamlinedToolUseSummary = buildStreamlinedToolUseSummary;
 exports.buildTechnicalDetailSections = buildTechnicalDetailSections;
 exports.buildMainAgentDisplayStream = buildMainAgentDisplayStream;
+const workchain_1 = require("../../agents/workchain");
 function compactDisplayText(value, max = 220) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
     if (text.length <= max)
         return text;
     return `${text.slice(0, max)}...`;
 }
-const USER_DISPLAY_INTERNAL_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|scratchpad|trace_id|session_ids|native_session|task_agent_session|shouldDelegate|Runtime Kernel|Coordinator|Pipeline|Trace Replay|回执要求|任务级原生会话/i;
+const USER_DISPLAY_INTERNAL_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|<\s*\/?\s*task-notification|task-notification|receipt[-_\s]*status|scratchpad|trace_id|session_id|session_ids|native_session|task_agent_session|WorkerContextPacket|raw\s+receipt|raw\s+payload|raw_report|shouldDelegate|Runtime Kernel|Coordinator|Pipeline|Trace Replay|回执要求|任务级原生会话/i;
+function sanitizeUserVisibleTerminology(value) {
+    return String(value || "")
+        .replace(/最终\s*收尾\s*门禁/g, "最终收尾检查")
+        .replace(/交付\s*门禁/g, "交付验收")
+        .replace(/验收\s*门禁/g, "验收检查")
+        .replace(/完成\s*门禁/g, "完成检查")
+        .replace(/合并\s*门禁/g, "合并前检查")
+        .replace(/测试\s*和\s*合并\s*门禁/g, "测试和合并检查")
+        .replace(/路径\s*门禁/g, "路径范围检查")
+        .replace(/权限\s*门禁/g, "权限检查")
+        .replace(/记忆\s*派发\s*门禁/g, "记忆派发检查")
+        .replace(/压缩后\s*重注入\s*门禁/g, "压缩后重注入检查")
+        .replace(/门禁\s*通过/g, "验收通过")
+        .replace(/门禁\s*未通过/g, "验收未通过")
+        .replace(/未过\s*门禁/g, "未通过验收")
+        .replace(/记忆\s*gate\s*引用/gi, "记忆使用声明")
+        .replace(/重注入\s*gate\s*引用/gi, "重注入声明")
+        .replace(/gate\/候选引用\/使用状态/gi, "声明/候选使用状态")
+        .replace(/\bgate\b/gi, "检查项")
+        .replace(/门禁/g, "检查")
+        .replace(/回执/g, "结果说明");
+}
 function sanitizeMainAgentUserText(value, fallback = "Agent 正在处理当前请求。", max = 260) {
     let text = String(value || "").replace(/\s+/g, " ").trim();
     if (!text)
@@ -28,6 +51,7 @@ function sanitizeMainAgentUserText(value, fallback = "Agent 正在处理当前�
         .replace(/\bPipeline\b/g, "协作看板")
         .replace(/\bRuntime Kernel\b/g, "技术运行信息")
         .replace(/\bTrace Replay\b/g, "技术回放");
+    text = sanitizeUserVisibleTerminology(text);
     return compactDisplayText(text, max);
 }
 function buildStreamlinedToolUseSummary(input) {
@@ -52,7 +76,7 @@ function buildStreamlinedToolUseSummary(input) {
     if (counts.dispatches)
         parts.push(`协作通道 ${counts.dispatches} 个`);
     if (counts.receipts)
-        parts.push(`回执 ${counts.receipts} 条`);
+        parts.push(`结果说明 ${counts.receipts} 条`);
     if (counts.verifications)
         parts.push(`验证 ${counts.verifications} 项`);
     if (counts.executions)
@@ -76,7 +100,7 @@ function buildTechnicalDetailSections(input) {
     if (blocked.length)
         troubleshooting.push({ label: "待确认动作", value: blocked.map((item) => item.action_id).join("、") });
     if (technical.failed_gates?.length)
-        troubleshooting.push({ label: "未过门禁", value: technical.failed_gates.map((item) => item.label || item.id || item).join("、") });
+        troubleshooting.push({ label: "未通过验收", value: sanitizeMainAgentUserText(technical.failed_gates.map((item) => item.label || item.id || item).join("、"), "仍有验收检查未通过。", 240) });
     if (technical.blockers?.length)
         troubleshooting.push({ label: "阻塞", value: technical.blockers.slice(0, 5).join("；") });
     if (input.traceId)
@@ -97,6 +121,7 @@ function buildTechnicalDetailSections(input) {
     ].filter(section => section.items.length > 0);
 }
 function buildMainAgentDisplayStream(input) {
+    const actionIds = Array.isArray(input.actionIds) ? input.actionIds : [];
     const toolUseSummary = buildStreamlinedToolUseSummary(input);
     const modeLabels = {
         conversation: "普通回复",
@@ -112,15 +137,62 @@ function buildMainAgentDisplayStream(input) {
     const fallback = currentStep
         ? `${modeLabels[input.mode] || "主 Agent"}：${currentStep.activeForm || currentStep.active_form || currentStep.summary || currentStep.content}`
         : `${modeLabels[input.mode] || "主 Agent"}正在处理当前请求。`;
-    const text = sanitizeMainAgentUserText(input.userText, fallback);
+    const workchain = (0, workchain_1.buildMainAgentWorkchain)({
+        surface: input.surface || "group",
+        mode: input.mode,
+        status: input.status,
+        phase: input.phase,
+        userText: input.userText,
+        goal: input.goal,
+        actionIds,
+        steps: input.steps || [],
+        workers: input.workers || [],
+        executions: input.executions || [],
+        summary: input.summary || {},
+        technical: input.technical || {},
+        traceId: input.traceId,
+        taskId: input.taskId,
+        runId: input.runId,
+        missionId: input.missionId,
+        supervisorId: input.supervisorId,
+        rawEvents: input.rawEvents || [],
+    });
+    const deliveryReport = input.summary?.delivery_report
+        || input.summary?.deliveryReport
+        || input.technical?.delivery_report
+        || input.technical?.deliveryReport
+        || null;
+    const dispatchLaunchSummary = input.summary?.dispatch_launch_summary
+        || input.summary?.dispatchLaunchSummary
+        || input.technical?.dispatch_launch_summary
+        || input.technical?.dispatchLaunchSummary
+        || null;
+    if (deliveryReport) {
+        workchain.delivery_report = deliveryReport;
+        if (workchain.completion_summary)
+            workchain.completion_summary.delivery_report = deliveryReport;
+    }
+    const text = workchain.user_visible_text || sanitizeMainAgentUserText(input.userText, fallback);
+    const baseTechnicalDetails = buildTechnicalDetailSections(input);
+    const technicalDetails = [
+        ...baseTechnicalDetails,
+        ...workchain.technical_details.filter((section) => !baseTechnicalDetails.some(existing => existing.id === section.id)),
+    ];
     return {
-        schema: "ccm-streamlined-display-v1",
+        schema: "ccm-streamlined-display-v2",
         type: "streamlined_agent_display",
         user_visible: true,
         user_visible_text: text,
         text_message: { type: "streamlined_text", text },
         tool_use_summary: toolUseSummary,
-        technical_details: buildTechnicalDetailSections(input),
+        workchain,
+        completion_summary: workchain.completion_summary,
+        progress_checkpoints: workchain.progress_checkpoints,
+        dispatch_launch_summary: dispatchLaunchSummary,
+        dispatchLaunchSummary,
+        delivery_report: deliveryReport,
+        workchain_stages: workchain.stages,
+        technical_details: technicalDetails,
         raw_events: Array.isArray(input.rawEvents) ? input.rawEvents.slice(-20) : [],
         todo: {
             visible: true,

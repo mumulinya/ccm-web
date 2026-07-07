@@ -1,8 +1,12 @@
 <script setup>
+import { computed } from 'vue'
+
 const props = defineProps({
   projectName: { type: String, default: '' },
   allTools: { type: Object, required: true },
   projectTools: { type: Object, required: true },
+  toolAudit: { type: Object, default: null },
+  authorizationReadiness: { type: Object, default: null },
   responsibility: { type: String, default: '' },
   capabilities: { type: String, default: '' },
   writablePaths: { type: String, default: '' },
@@ -15,7 +19,55 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'save', 'toggle-tool', 'apply-inferred', 'update-field'])
 
-const isToolSelected = (type, name) => props.projectTools[type]?.includes(name) || false
+const selectedMcp = computed(() => Array.isArray(props.projectTools.mcp) ? props.projectTools.mcp : [])
+const selectedSkills = computed(() => Array.isArray(props.projectTools.skill) ? props.projectTools.skill : [])
+const availableMcpNames = computed(() => new Set((props.allTools.mcp || []).map(tool => tool.name)))
+const availableSkillNames = computed(() => new Set((props.allTools.skill || []).map(tool => tool.name)))
+const selectedToolCount = computed(() => selectedMcp.value.length + selectedSkills.value.length)
+
+const isToolSelected = (type, name) => {
+  const selected = type === 'mcp' ? selectedMcp.value : selectedSkills.value
+  return selected.includes(name)
+}
+
+const grantName = (serverName, toolName) => `${serverName}/${toolName}`
+const isMcpToolSelected = (serverName, toolName) => {
+  return selectedMcp.value.includes(serverName) || selectedMcp.value.includes(grantName(serverName, toolName))
+}
+
+const missingMcp = computed(() => selectedMcp.value.filter(name => {
+  const server = String(name).split('/')[0]
+  return server && !availableMcpNames.value.has(server)
+}))
+
+const missingSkills = computed(() => selectedSkills.value.filter(name => !availableSkillNames.value.has(name)))
+const readinessLabel = computed(() => {
+  const readiness = props.authorizationReadiness || {}
+  if (!readiness.schema) return ''
+  return readiness.dispatchReady ? '当前授权可派发' : '当前授权需处理缺失项'
+})
+const readinessDetail = computed(() => {
+  const readiness = props.authorizationReadiness || {}
+  const missing = readiness.missing || {}
+  const total = Number(missing.missing_mcp_servers || 0) + Number(missing.missing_mcp_tools || 0) + Number(missing.missing_skills || 0)
+  return readiness.dispatchReady
+    ? `MCP ${readiness.available?.mcp || 0}/${readiness.requested?.mcp || 0}，Skill ${readiness.available?.skill || 0}/${readiness.requested?.skill || 0}`
+    : `缺失 ${total} 项，保存后任务派发会提示工具不可用`
+})
+const auditRows = computed(() => {
+  const audit = props.toolAudit || {}
+  const rows = []
+  for (const item of audit.missing_mcp_servers || []) {
+    rows.push({ key: `mcp-server:${item.raw || item.server}`, type: 'MCP 服务', value: item.raw || item.server, detail: item.state || 'missing' })
+  }
+  for (const item of audit.missing_mcp_tools || []) {
+    rows.push({ key: `mcp-tool:${item.raw || item.server}:${item.tool}`, type: 'MCP 子工具', value: item.raw || `${item.server}/${item.tool}`, detail: item.state || 'missing_tool' })
+  }
+  for (const item of audit.missing_skills || []) {
+    rows.push({ key: `skill:${item.name}`, type: 'Skill', value: item.name, detail: item.state || 'missing' })
+  }
+  return rows
+})
 const splitCount = (value) => String(value || '').split(/\r?\n|[；;]/).filter(Boolean).length
 const updateField = (field, event) => emit('update-field', { field, value: event.target.value })
 </script>
@@ -31,19 +83,39 @@ const updateField = (field, event) => emit('update-field', { field, value: event
         <div class="tool-section">
           <div class="tool-section-title">🔌 MCP 服务器</div>
           <div v-if="allTools.mcp.length === 0" class="empty-row">暂无 MCP 服务器，请先在工具配置页面添加</div>
-          <label
+          <div
             v-for="tool in allTools.mcp"
             :key="tool.name"
-            class="tool-row"
+            class="tool-card"
             :class="{ selected: isToolSelected('mcp', tool.name) }"
           >
-            <input type="checkbox" :checked="isToolSelected('mcp', tool.name)" @change="emit('toggle-tool', 'mcp', tool.name)">
-            <span>🔌</span>
-            <div>
-              <strong>{{ tool.name }}</strong>
-              <small>{{ tool.description || '' }}</small>
+            <label class="tool-row">
+              <input type="checkbox" :checked="isToolSelected('mcp', tool.name)" @change="emit('toggle-tool', 'mcp', tool.name)">
+              <span>🔌</span>
+              <div>
+                <strong>{{ tool.name }}</strong>
+                <small>{{ tool.description || '' }}</small>
+              </div>
+            </label>
+            <div v-if="tool.tools?.length" class="subtool-list">
+              <label v-for="subtool in tool.tools" :key="subtool.name" class="subtool-row" :class="{ selected: isMcpToolSelected(tool.name, subtool.name), disabled: isToolSelected('mcp', tool.name) }">
+                <input
+                  type="checkbox"
+                  :disabled="isToolSelected('mcp', tool.name)"
+                  :checked="isMcpToolSelected(tool.name, subtool.name)"
+                  @change="emit('toggle-tool', 'mcp', grantName(tool.name, subtool.name))"
+                >
+                <div>
+                  <strong>{{ subtool.name }}</strong>
+                  <small>{{ subtool.description || 'MCP tool' }}</small>
+                </div>
+              </label>
             </div>
-          </label>
+          </div>
+          <div v-if="missingMcp.length" class="stale-grants">
+            <strong>缺失 MCP 授权</strong>
+            <span v-for="name in missingMcp" :key="name">{{ name }}</span>
+          </div>
         </div>
 
         <div class="tool-section">
@@ -62,6 +134,28 @@ const updateField = (field, event) => emit('update-field', { field, value: event
               <small>{{ tool.description || '' }}</small>
             </div>
           </label>
+          <div v-if="missingSkills.length" class="stale-grants">
+            <strong>缺失 Skill 授权</strong>
+            <span v-for="name in missingSkills" :key="name">{{ name }}</span>
+          </div>
+        </div>
+
+        <div v-if="readinessLabel" class="audit-box readiness-box" :class="{ warning: authorizationReadiness && !authorizationReadiness.dispatchReady }">
+          <strong>{{ readinessLabel }}</strong>
+          <div class="audit-row">
+            <span>状态</span>
+            <code>{{ authorizationReadiness?.status || '-' }}</code>
+            <small>{{ readinessDetail }}</small>
+          </div>
+        </div>
+
+        <div v-if="auditRows.length" class="audit-box">
+          <strong>服务端授权审计</strong>
+          <div v-for="row in auditRows" :key="row.key" class="audit-row">
+            <span>{{ row.type }}</span>
+            <code>{{ row.value }}</code>
+            <small>{{ row.detail }}</small>
+          </div>
         </div>
 
         <div class="tool-section">
@@ -86,7 +180,7 @@ const updateField = (field, event) => emit('update-field', { field, value: event
           </div>
           <label class="delivery-contract">
             <span>交付规范</span>
-            <textarea :value="deliveryContract" rows="3" placeholder="说明这个 Agent 回执里必须包含的业务证据、截图、接口验证或风险说明" @input="updateField('deliveryContract', $event)"></textarea>
+            <textarea :value="deliveryContract" rows="3" placeholder="说明这个 Agent 结果说明里必须包含的业务证据、截图、接口验证或风险说明" @input="updateField('deliveryContract', $event)"></textarea>
           </label>
           <div class="helper-text">主 Agent 派发任务时会把这些配置写入子 Agent 工作单；如果配置了路径边界，交付验收会检查实际文件变更是否越界。</div>
         </div>
@@ -115,7 +209,7 @@ const updateField = (field, event) => emit('update-field', { field, value: event
       </div>
 
       <div class="tools-footer">
-        <div>已选择 {{ (projectTools.mcp?.length || 0) + (projectTools.skill?.length || 0) }} 个工具 · {{ splitCount(capabilities) }} 个能力 · {{ splitCount(verificationCommands) }} 条验证命令</div>
+        <div>已选择 {{ selectedToolCount }} 个工具授权 · {{ splitCount(capabilities) }} 个能力 · {{ splitCount(verificationCommands) }} 条验证命令</div>
         <div>
           <button class="btn btn-cancel" @click="emit('close')">取消</button>
           <button class="btn btn-primary" @click="emit('save')">保存配置</button>
@@ -173,6 +267,25 @@ const updateField = (field, event) => emit('update-field', { field, value: event
   transition: all 0.2s;
 }
 
+.tool-card {
+  margin-bottom: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: all 0.2s;
+}
+
+.tool-card.selected {
+  border-color: var(--accent-blue);
+  background: rgba(56, 189, 248, 0.05);
+}
+
+.tool-card .tool-row {
+  margin-bottom: 0;
+  border: 0;
+  border-radius: 0;
+}
+
 .tool-row.selected {
   border-color: var(--accent-blue);
   background: rgba(56, 189, 248, 0.05);
@@ -184,18 +297,156 @@ const updateField = (field, event) => emit('update-field', { field, value: event
 
 .tool-row div {
   flex: 1;
+  min-width: 0;
 }
 
 .tool-row strong {
   display: block;
   color: var(--text-primary);
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .tool-row small {
   display: block;
   color: var(--text-muted);
   font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.subtool-list {
+  display: grid;
+  gap: 4px;
+  padding: 0 10px 10px 38px;
+}
+
+.subtool-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.52);
+  cursor: pointer;
+}
+
+.subtool-row.selected {
+  border-color: rgba(59, 130, 246, 0.28);
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.subtool-row.disabled {
+  opacity: 0.72;
+  cursor: default;
+}
+
+.subtool-row input {
+  margin-top: 2px;
+  accent-color: var(--accent-blue);
+}
+
+.subtool-row div {
+  min-width: 0;
+}
+
+.subtool-row strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.subtool-row small {
+  display: block;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.stale-grants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 12px;
+  padding: 8px;
+  border: 1px solid rgba(234, 179, 8, 0.2);
+  border-radius: 8px;
+  background: rgba(234, 179, 8, 0.06);
+  color: #92400e;
+  font-size: 11px;
+}
+
+.stale-grants strong {
+  width: 100%;
+}
+
+.stale-grants span {
+  max-width: 100%;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.6);
+  overflow-wrap: anywhere;
+}
+
+.audit-box {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 20px;
+  padding: 10px;
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  border-radius: 8px;
+  background: rgba(254, 242, 242, 0.72);
+}
+
+.audit-box > strong {
+  color: #991b1b;
+  font-size: 12px;
+}
+
+.readiness-box {
+  border-color: rgba(16, 185, 129, 0.24);
+  background: rgba(236, 253, 245, 0.78);
+}
+
+.readiness-box > strong,
+.readiness-box .audit-row span,
+.readiness-box .audit-row small,
+.readiness-box .audit-row code {
+  color: #047857;
+}
+
+.readiness-box.warning {
+  border-color: rgba(239, 68, 68, 0.18);
+  background: rgba(254, 242, 242, 0.72);
+}
+
+.readiness-box.warning > strong,
+.readiness-box.warning .audit-row span,
+.readiness-box.warning .audit-row small,
+.readiness-box.warning .audit-row code {
+  color: #991b1b;
+}
+
+.audit-row {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  font-size: 11px;
+}
+
+.audit-row span,
+.audit-row small {
+  color: #991b1b;
+}
+
+.audit-row code {
+  color: #7f1d1d;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .boundary-grid {

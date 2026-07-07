@@ -100,6 +100,7 @@ function normalizeRecord(value) {
         last_snapshot: value?.last_snapshot || null,
         actions: Array.isArray(value?.actions) ? value.actions.slice(-100) : [],
         incidents: Array.isArray(value?.incidents) ? value.incidents.slice(-100) : [],
+        last_continuation: value?.last_continuation || null,
         final_report: value?.final_report || null,
         final_notification_sent_at: value?.final_notification_sent_at,
         error: String(value?.error || ""),
@@ -358,6 +359,20 @@ async function controlGlobalMissionSupervisor(id, operation, runtime, payload = 
     if (op === "update_goal") {
         record.business_goal = String(payload.business_goal || payload.businessGoal || payload.goal || record.business_goal);
         record.acceptance = String(payload.acceptance || payload.acceptance_criteria || record.acceptance);
+        if (payload.continuation && typeof payload.continuation === "object") {
+            record.last_continuation = {
+                source: payload.continuation.source || "mission_supervisor_goal_update",
+                at: now,
+                automatic: false,
+                kind: "revise_goal",
+                status: "accepted",
+                rework_kind: payload.continuation.rework_kind || payload.continuation.reworkKind || "",
+                target: payload.continuation.target || payload.continuation.agent || payload.continuation.project || "",
+                reason: payload.continuation.reason || payload.continuation.detail || "",
+                title: payload.continuation.title || payload.continuation.label || "",
+                work_item_id: payload.continuation.work_item_id || payload.continuation.workItemId || "",
+            };
+        }
         if (["waiting_user", "paused"].includes(record.status))
             record.status = "monitoring";
         record.phase = "supervising";

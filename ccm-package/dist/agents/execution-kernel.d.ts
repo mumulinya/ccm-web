@@ -129,6 +129,7 @@ export declare function cancelActiveAgentRun(input?: any): {
         externalRunnerRequests: number;
         executions: string[];
     };
+    targeted: boolean;
     runs: {
         id: any;
         taskId: any;
@@ -265,6 +266,7 @@ export declare function runExecutionKernelSelfTest(): {
         evaluatesMergeReadyGreenContract: boolean;
         persistsDeliveryEvidence: boolean;
         sanitizesEnvironment: boolean;
+        supportsTargetedAgentRunCancel: boolean;
     };
 };
 export declare function runExecutionKernelCancellationSelfTest(): Promise<{

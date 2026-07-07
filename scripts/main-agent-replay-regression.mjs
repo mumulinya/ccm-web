@@ -81,7 +81,7 @@ async function run() {
     await expectVisible(task.locator('.decision-plan'), 'replayed task todo plan')
     await expectVisible(task.locator('.plan-focus'), 'replayed task current focus')
     await expectVisible(task.locator('.task-card-streamlined'), 'replayed task card streamlined summary')
-    await expectVisible(task.getByText('工具摘要：读取/检查 2 项，协作通道 1 个，回执 1 条').first(), 'replayed tool summary')
+    await expectVisible(task.getByText('工具摘要：读取/检查 2 项，协作通道 1 个，结果说明 1 条').first(), 'replayed tool summary')
     await expectHidden(task.locator('.decision-technical pre'), 'replayed raw decision json while folded')
     const taskTechnicalFolded = await task.locator('details.task-card-technical').evaluate(el => !el.open)
     if (!taskTechnicalFolded) throw new Error('replayed task technical details should be folded by default')

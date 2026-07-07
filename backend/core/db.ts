@@ -22,10 +22,12 @@ const RAG_METADATA_FILE = path.join(CCM_DIR, "knowledge-metadata.json");
 // === 本地工具和技能目录 ===
 export const MCP_DIR = path.join(CCM_DIR, "mcp");
 export const SKILLS_DIR = path.join(CCM_DIR, "skills");
+export const SKILL_PACKAGES_DIR = path.join(CCM_DIR, "skill-packages");
 
 // 确保基础目录存在
 if (!fs.existsSync(MCP_DIR)) fs.mkdirSync(MCP_DIR, { recursive: true });
 if (!fs.existsSync(SKILLS_DIR)) fs.mkdirSync(SKILLS_DIR, { recursive: true });
+if (!fs.existsSync(SKILL_PACKAGES_DIR)) fs.mkdirSync(SKILL_PACKAGES_DIR, { recursive: true });
 
 function writeJsonAtomic(file: string, value: any) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -129,7 +131,7 @@ export function loadMcpTools(): any[] {
     const files = fs.readdirSync(MCP_DIR).filter(f => f.endsWith('.json'));
     return files.map(f => {
       try {
-        const content = JSON.parse(fs.readFileSync(path.join(MCP_DIR, f), 'utf-8'));
+        const content = resolveObjectSecrets(JSON.parse(fs.readFileSync(path.join(MCP_DIR, f), 'utf-8')));
         return { ...content, filename: f };
       } catch { return null; }
     }).filter(Boolean) as any[];
@@ -138,7 +140,8 @@ export function loadMcpTools(): any[] {
 
 export function saveMcpTool(tool: any) {
   const filename = tool.name.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
-  fs.writeFileSync(path.join(MCP_DIR, filename), JSON.stringify(tool, null, 2));
+  const protectedTool = protectObjectSecrets(tool, `mcp-${filename.replace(/\.json$/i, "")}`);
+  writeJsonAtomic(path.join(MCP_DIR, filename), protectedTool);
 }
 
 export function deleteMcpTool(name: string) {
@@ -162,12 +165,22 @@ export function loadSkills(): any[] {
 
 export function saveSkill(skill: any) {
   const filename = skill.name.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
-  fs.writeFileSync(path.join(SKILLS_DIR, filename), JSON.stringify(skill, null, 2));
+  writeJsonAtomic(path.join(SKILLS_DIR, filename), skill);
 }
 
 export function deleteSkill(name: string) {
   const filename = name.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
   const filePath = path.join(SKILLS_DIR, filename);
+  try {
+    if (fs.existsSync(filePath)) {
+      const skill = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+      const packagePath = String(skill?.packagePath || "");
+      const relative = packagePath ? path.relative(path.resolve(SKILL_PACKAGES_DIR), path.resolve(packagePath)) : "";
+      if (packagePath && relative && !relative.startsWith("..") && !path.isAbsolute(relative) && fs.existsSync(packagePath)) {
+        fs.rmSync(packagePath, { recursive: true, force: true });
+      }
+    }
+  } catch {}
   if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 }
 

@@ -5,6 +5,7 @@ import AgentWorkEventDetails from './AgentWorkEventDetails.vue'
 
 const props = defineProps({
   msg: { type: Object, required: true },
+  displayContent: { type: String, default: '' },
   accentStyle: { type: Object, default: () => ({}) },
   status: { type: Object, default: () => ({ tone: 'idle', label: '回复' }) },
   agentInitials: { type: String, default: 'A' },
@@ -34,6 +35,7 @@ const props = defineProps({
 const emit = defineEmits(['step-action', 'task-action', 'open-pipeline', 'open-file-diff'])
 
 const deliverySummary = () => props.msg.delivery_summary || props.msg.deliverySummary || null
+const clarificationSummary = () => props.msg.clarification_summary || props.msg.clarificationSummary || null
 </script>
 
 <template>
@@ -51,7 +53,23 @@ const deliverySummary = () => props.msg.delivery_summary || props.msg.deliverySu
         {{ status.label }}
       </span>
     </div>
-    <div v-if="msg.content" class="agent-message-content" v-html="highlightMentions(msg.content)"></div>
+    <div v-if="displayContent || msg.content" class="agent-message-content" v-html="highlightMentions(displayContent || msg.content)"></div>
+    <div v-if="clarificationSummary()" class="clarification-summary" :class="clarificationSummary().status">
+      <div class="clarification-head">
+        <strong>{{ clarificationSummary().title || '需要你补充信息' }}</strong>
+        <span>{{ clarificationSummary().status_label || '等待你回复' }}</span>
+      </div>
+      <p v-if="clarificationSummary().headline">{{ clarificationSummary().headline }}</p>
+      <div class="clarification-question">
+        <small>需要确认</small>
+        <strong>{{ clarificationSummary().question }}</strong>
+      </div>
+      <p v-if="clarificationSummary().reason" class="clarification-reason">{{ clarificationSummary().reason }}</p>
+      <ul v-if="clarificationSummary().answer_suggestions?.length" class="clarification-suggestions">
+        <li v-for="item in clarificationSummary().answer_suggestions" :key="item">{{ item }}</li>
+      </ul>
+      <small v-if="clarificationSummary().next_action" class="clarification-next">下一步：{{ clarificationSummary().next_action }}</small>
+    </div>
     <MainAgentDecisionCard
       v-if="mainAgentDecision"
       :decision="mainAgentDecision"
@@ -66,7 +84,7 @@ const deliverySummary = () => props.msg.delivery_summary || props.msg.deliverySu
     />
     <div v-if="deliverySummary() && !taskCard" class="delivery-summary-actions">
       <button class="btn btn-sm btn-outline" @click="emit('open-pipeline')">查看交付协作看板</button>
-      <span v-if="deliverySummary()?.acceptance_gate_passed === false" class="delivery-gate-warning">验收门禁未通过</span>
+      <span v-if="deliverySummary()?.acceptance_gate_passed === false" class="delivery-gate-warning">验收检查未通过</span>
     </div>
     <div v-if="showOrchestrationPlan" class="orchestration-plan">
       <div class="plan-header">
@@ -114,7 +132,7 @@ const deliverySummary = () => props.msg.delivery_summary || props.msg.deliverySu
             查看协作看板
           </button>
         </div>
-        <div class="plan-task">{{ compactPlanText(item.task) }}</div>
+        <div class="plan-task">{{ compactPlanText(item.userTaskPreview || item.user_task_preview || item.task) }}</div>
         <div v-if="item.reason" class="plan-reason">{{ compactPlanText(item.reason, 120) }}</div>
       </div>
     </div>
@@ -231,9 +249,90 @@ const deliverySummary = () => props.msg.delivery_summary || props.msg.deliverySu
   position: relative;
   z-index: 1;
 }
+.clarification-summary {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 11px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.24);
+  border-radius: 9px;
+  background: #fffbeb;
+}
+.clarification-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.clarification-head strong {
+  color: #92400e;
+  font-size: 12px;
+}
+.clarification-head span {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 10.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.clarification-summary p,
+.clarification-summary small,
+.clarification-summary li {
+  color: #475569;
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.clarification-summary p {
+  margin: 0;
+}
+.clarification-question {
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px;
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+}
+.clarification-question small {
+  color: #92400e;
+  font-weight: 800;
+}
+.clarification-question strong {
+  color: #1f2937;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.clarification-suggestions {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 16px;
+}
+.clarification-next {
+  color: #92400e !important;
+  font-weight: 800;
+}
 :global([data-theme="dark"]) .agent-avatar {
   background: color-mix(in srgb, var(--agent-accent) 20%, rgba(15, 23, 42, 0.9));
   border-color: color-mix(in srgb, var(--agent-accent) 32%, rgba(255, 255, 255, 0.08));
+}
+:global([data-theme="dark"]) .clarification-summary {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(69, 49, 17, 0.42);
+}
+:global([data-theme="dark"]) .clarification-question {
+  background: rgba(15, 23, 42, 0.48);
+  border-color: rgba(245, 158, 11, 0.24);
+}
+:global([data-theme="dark"]) .clarification-question strong {
+  color: #f8fafc;
 }
 .delivery-summary-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 .delivery-gate-warning { font-size: 11px; font-weight: 800; color: #d97706; }

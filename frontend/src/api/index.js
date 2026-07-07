@@ -64,6 +64,35 @@ export const tasksApi = {
 
 // 工具相关 API
 export const toolsApi = {
+  authorizationInventory: () => api('/api/tools/authorization-inventory'),
+  chainVerification: (input = {}) => {
+    const params = new URLSearchParams()
+    ;['scope', 'scopeId', 'groupId', 'project', 'projectName', 'status'].forEach((key) => {
+      if (input[key]) params.set(key, String(input[key]))
+    })
+    const query = params.toString()
+    return api(`/api/tools/chain-verification${query ? `?${query}` : ''}`)
+  },
+  invocationAudit: (input = 80) => {
+    const params = new URLSearchParams()
+    if (typeof input === 'number') {
+      params.set('limit', String(input))
+    } else {
+      const payload = input || {}
+      params.set('limit', String(payload.limit || 80))
+      ;['runtime', 'project', 'projectName', 'projectAlias', 'groupId', 'taskId', 'category', 'source'].forEach((key) => {
+        if (payload[key]) params.set(key, String(payload[key]))
+      })
+      if (Array.isArray(payload.projectAliases) && payload.projectAliases.length) {
+        params.set('projectAliases', payload.projectAliases.join(','))
+      } else if (payload.projectAliases) {
+        params.set('projectAliases', String(payload.projectAliases))
+      }
+    }
+    return api(`/api/tools/invocation-audit?${params.toString()}`)
+  },
+  runtimeReadiness: (deep = false) => api(`/api/tools/runtime-readiness?deep=${deep ? '1' : '0'}`),
+  runtimeResync: (data = {}) => api('/api/tools/runtime-resync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   mcp: {
     list: () => api('/api/mcp'),
     create: (data) => api('/api/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
@@ -76,8 +105,17 @@ export const toolsApi = {
     delete: (name) => api('/api/skills/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }),
   },
   marketplace: {
-    list: (source = 'local', url = '') => api(`/api/marketplace/list?source=${source}&url=${encodeURIComponent(url)}`),
+    list: (source = 'local', url = '') => api(`/api/marketplace/list?source=${encodeURIComponent(source)}&url=${encodeURIComponent(url)}`),
+    installations: () => api('/api/marketplace/installations'),
+    operations: (limit = 20) => api(`/api/marketplace/operations?limit=${encodeURIComponent(limit)}`),
+    sources: () => api('/api/marketplace/sources'),
+    saveSource: (data) => api('/api/marketplace/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+    deleteSource: (id) => api('/api/marketplace/sources/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }),
+    preview: (data) => api('/api/marketplace/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+    authorizationImpact: (data) => api('/api/marketplace/authorization-impact', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
     install: (data) => api('/api/marketplace/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+    update: (data) => api('/api/marketplace/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
+    uninstall: (data) => api('/api/marketplace/uninstall', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }),
   },
   smithery: {
     getKey: () => api('/api/smithery/config'),

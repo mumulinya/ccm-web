@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { sanitizeUserFacingAgentText } from '../../utils/agentDisplay.js'
 
 const props = defineProps({
   assignments: {
@@ -75,11 +76,7 @@ const receiptRows = computed(() => {
 })
 
 const notificationRows = computed(() => asArray(summary.value.worker_notifications))
-const agentQaRows = computed(() => asArray(summary.value.agent_qa).map((item) => ({
-  ...item,
-  statusLabel: qaStatusText(item.status),
-  tone: qaStatusTone(item.status)
-})))
+const agentQaRows = computed(() => asArray(summary.value.agent_qa).map((item) => normalizeAgentQaRow(item)))
 const changedFiles = computed(() => asArray(summary.value.actual_file_changes).length
   ? asArray(summary.value.actual_file_changes)
   : asArray(props.fileChanges?.files))
@@ -102,7 +99,7 @@ const overviewItems = computed(() => [
   { key: 'sandbox', label: '沙盘', value: sandboxRehearsal.value ? 1 : 0 },
   { key: 'notify', label: '子 Agent', value: notificationRows.value.length || assignmentRows.value.length || 0 },
   { key: 'qa', label: '问答', value: agentQaRows.value.length || summary.value.agent_qa_count || 0 },
-  { key: 'receipt', label: '回执', value: receiptRows.value.length || summary.value.receipt_count || 0 },
+  { key: 'receipt', label: '结果说明', value: receiptRows.value.length || summary.value.receipt_count || 0 },
   { key: 'verify', label: '已验证', value: executedVerification.value.length },
   { key: 'session', label: '任务会话', value: sessionRows.value.length }
 ])
@@ -169,9 +166,11 @@ function normalizePhase(item, index) {
 }
 
 function normalizeAssignment(item, index) {
+  const reworkRoute = item.reworkRoute || item.rework_route || item.routing || null
   return {
     project: item.project || item.agent || item.target_project || `子 Agent ${index + 1}`,
     task: item.task || item.summary || item.description || '',
+    userTaskPreview: item.userTaskPreview || item.user_task_preview || '',
     reason: item.reason || '',
     status: item.status || '',
     statusText: item.statusText || item.status_text || '',
@@ -182,8 +181,20 @@ function normalizeAssignment(item, index) {
     dispatchKey: item.dispatchKey || item.dispatch_key || '',
     taskFingerprint: item.taskFingerprint || item.task_fingerprint || '',
     continuationOf: item.continuationOf || item.continuation_of || '',
-    continuationStrategy: item.continuationStrategy || item.continuation_strategy || ''
+    continuationStrategy: item.continuationStrategy || item.continuation_strategy || '',
+    reworkRoute
   }
+}
+
+function reworkRouteLabel(item = {}) {
+  const route = item.reworkRoute || item.rework_route || item.routing || {}
+  const strategy = String(route.user_label || route.userLabel || item.continuationStrategy || item.continuation_strategy || '').trim()
+  if (!strategy) return ''
+  if (strategy === 'same_worker_scratchpad' || strategy === 'continue_same_worker') return '继续同一子 Agent'
+  if (strategy === 'fresh_verification_worker' || strategy === 'independent_verification') return '独立验证复核'
+  if (strategy === 'spawn_fresh_worker') return '重新派发'
+  if (strategy === 'stop_wrong_direction_then_continue') return '停止旧方向后继续'
+  return sanitizeUserFacingAgentText(strategy, '继续处理缺口。', 80)
 }
 
 function normalizeReceipt(item) {
@@ -288,7 +299,7 @@ function timelineLabel(type) {
     dispatch: '派发',
     child_agent_start: '执行',
     child_agent_rework: '返工',
-    child_agent_receipt: '回执',
+    child_agent_receipt: '结果说明',
     agent_qa_question: '问答',
     agent_qa_resume: '续跑',
     coordinator_review: '验收',
@@ -302,6 +313,34 @@ function compactText(text, max = 140) {
   if (!text) return ''
   const value = String(text).trim()
   return value.length > max ? `${value.slice(0, max)}...` : value
+}
+
+function normalizeAgentQaRow(item = {}) {
+  const preview = item.user_preview || item.userPreview || {}
+  const status = preview.status || item.status
+  const questionPreview = preview.question || (item.question ? sanitizeUserFacingAgentText(item.question, '问题原文已放入技术详情。', 180) : '')
+  const answerPreview = preview.answer || (item.answer ? sanitizeUserFacingAgentText(item.answer, '回答详情已放入技术详情。', 220) : '')
+  const evidenceText = asArray(item.answer_evidence).slice(0, 4).join(' · ')
+  const technicalRows = [
+    { label: '问题 ID', value: item.id },
+    { label: '执行', value: item.execution_id },
+    { label: '路由', value: item.routing?.strategy },
+    { label: '证据评分', value: item.acceptance?.score },
+    { label: '权限模式', value: item.permission_contract?.mode },
+    { label: '证据', value: evidenceText },
+  ].filter(row => row.value !== undefined && row.value !== null && String(row.value).trim())
+  return {
+    ...item,
+    preview,
+    statusLabel: preview.label || qaStatusText(status),
+    tone: qaStatusTone(status),
+    summary: preview.summary || sanitizeUserFacingAgentText(item.content || item.summary || item.question || '', 'Agent 协作问答进展已更新。', 220),
+    questionPreview,
+    answerPreview,
+    nextAction: preview.next_action || preview.nextAction || '',
+    badges: asArray(preview.badges).slice(0, 6),
+    technicalRows,
+  }
 }
 
 function formatListItem(item) {
@@ -394,12 +433,13 @@ function formatListItem(item) {
                 {{ assignment.statusText || statusText(assignment.status || inferPendingStatus()) }}
               </span>
             </div>
-            <p v-if="assignment.task">{{ compactText(assignment.task, 180) }}</p>
+            <p v-if="assignment.userTaskPreview || assignment.task">{{ compactText(assignment.userTaskPreview || assignment.task, 180) }}</p>
             <p v-if="assignment.reason" class="muted-line">派发依据：{{ compactText(assignment.reason, 160) }}</p>
-            <div v-if="assignment.dependsOn.length || assignment.rework || assignment.attempt > 1" class="assignment-meta">
+            <div v-if="assignment.dependsOn.length || assignment.rework || assignment.attempt > 1 || reworkRouteLabel(assignment)" class="assignment-meta">
               <span v-if="assignment.dependsOn.length">依赖 {{ assignment.dependsOn.join(', ') }}</span>
               <span v-if="assignment.rework">返工</span>
               <span v-if="assignment.attempt > 1">第 {{ assignment.attempt }} 次</span>
+              <span v-if="reworkRouteLabel(assignment)">{{ reworkRouteLabel(assignment) }}</span>
             </div>
           </div>
         </div>
@@ -410,7 +450,7 @@ function formatListItem(item) {
     <section class="panel">
       <div class="panel-head">
         <h5>子 Agent 执行状态</h5>
-        <span class="subtle">按回执和通知合并</span>
+        <span class="subtle">按结果说明和通知合并</span>
       </div>
       <div v-if="workerRows.length" class="worker-list">
         <div v-for="worker in workerRows" :key="worker.assignmentId || worker.dispatchKey || worker.project" class="worker-row">
@@ -419,8 +459,8 @@ function formatListItem(item) {
               <strong>{{ worker.project }}</strong>
               <span :class="['status-pill', worker.tone]">{{ worker.statusLabel }}</span>
             </div>
-            <p v-if="worker.task">{{ compactText(worker.task, 180) }}</p>
-            <p v-if="worker.summary" class="muted-line">回执：{{ compactText(worker.summary, 220) }}</p>
+            <p v-if="worker.userTaskPreview || worker.task">{{ compactText(worker.userTaskPreview || worker.task, 180) }}</p>
+            <p v-if="worker.summary" class="muted-line">结果说明：{{ compactText(worker.summary, 220) }}</p>
           </div>
           <div class="worker-facts">
             <span>动作 {{ worker.actions.length }}</span>
@@ -432,7 +472,7 @@ function formatListItem(item) {
           </div>
         </div>
       </div>
-      <p v-else class="empty-note">暂未收到子 Agent 通知或回执。</p>
+      <p v-else class="empty-note">暂未收到子 Agent 通知或结果说明。</p>
     </section>
 
     <section class="panel agent-qa-panel">
@@ -446,22 +486,23 @@ function formatListItem(item) {
             <strong>{{ qa.from_agent }} → {{ qa.to_agent }}</strong>
             <span :class="['status-pill', qa.tone]">{{ qa.statusLabel }}</span>
           </div>
-          <p class="muted-line">{{ qa.type === 'request_review' ? '评审' : '询问' }}：{{ compactText(qa.question, 180) }}</p>
-          <p v-if="qa.answer" class="muted-line">回答：{{ compactText(qa.answer, 220) }}</p>
-          <p v-if="qa.acceptance?.reason" class="muted-line">主 Agent 仲裁：{{ compactText(qa.acceptance.reason, 180) }}</p>
-          <p v-if="qa.answer_evidence?.length" class="muted-line">证据：{{ qa.answer_evidence.slice(0, 4).join(' · ') }}</p>
-          <div v-if="qa.injected_at || qa.resumed_at || qa.retry_count || qa.manual_takeover" class="assignment-meta">
-            <span v-if="qa.injected_at">已注入</span>
-            <span v-if="qa.resumed_at">已续跑</span>
-            <span v-if="qa.retry_count">重试 {{ qa.retry_count }} 次</span>
-            <span v-if="qa.manual_takeover">人工接管</span>
+          <p class="muted-line">{{ qa.summary }}</p>
+          <p v-if="qa.questionPreview" class="muted-line">问：{{ compactText(qa.questionPreview, 180) }}</p>
+          <p v-if="qa.answerPreview" class="muted-line">答：{{ compactText(qa.answerPreview, 220) }}</p>
+          <p v-if="qa.acceptance?.reason" class="muted-line">主 Agent 结论：{{ compactText(sanitizeUserFacingAgentText(qa.acceptance.reason, '主 Agent 已完成问答仲裁。', 180), 180) }}</p>
+          <p v-if="qa.nextAction" class="muted-line">下一步：{{ qa.nextAction }}</p>
+          <div v-if="qa.badges?.length" class="assignment-meta">
+            <span v-for="badge in qa.badges" :key="badge">{{ badge }}</span>
           </div>
-          <div class="assignment-meta">
-            <span v-if="qa.routing?.strategy === 'capability_and_load'">能力路由</span>
-            <span v-if="qa.execution_id">Execution {{ qa.execution_id }}</span>
-            <span v-if="qa.acceptance?.score != null">证据评分 {{ qa.acceptance.score }}</span>
-            <span v-if="qa.permission_contract?.mode === 'advisory_read_only'">只读问答</span>
-          </div>
+          <details v-if="qa.technicalRows?.length" class="qa-technical-details">
+            <summary>技术详情</summary>
+            <dl>
+              <template v-for="row in qa.technicalRows" :key="row.label">
+                <dt>{{ row.label }}</dt>
+                <dd>{{ row.value }}</dd>
+              </template>
+            </dl>
+          </details>
         </div>
       </div>
       <p v-else class="empty-note">本次任务暂无子 Agent 工作中问答。</p>
@@ -837,6 +878,37 @@ function formatListItem(item) {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+}
+
+.qa-technical-details {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.qa-technical-details summary {
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.qa-technical-details dl {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 5px 8px;
+  margin: 8px 0 0;
+  padding: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+.qa-technical-details dt {
+  font-weight: 800;
+}
+
+.qa-technical-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .assignment-meta span {

@@ -81,8 +81,14 @@ export interface GlobalAgentRun {
     supervisor_id?: string;
     supervision_state?: string;
     final_delivery_report?: any;
+    final_report?: any;
+    display_stream?: any;
+    workchain?: any;
     decision_summary?: any;
     clarification_question?: string;
+    clarification_summary?: any;
+    confirmation_summary?: any;
+    plan_mode?: any;
     shadow_mode?: boolean;
     original_user_message?: string;
     reasoning_loop: AgentReasoningState;
@@ -101,6 +107,79 @@ export interface GlobalAgentLoopRuntime {
     qualityPolicyOverride?: any;
 }
 export declare const GLOBAL_AGENT_TOOL_SPECS: GlobalAgentToolSpec[];
+export declare function buildGlobalClarificationSummary(input: {
+    run: GlobalAgentRun;
+    question?: string;
+    decision?: any;
+    reason?: string;
+}): {
+    schema: string;
+    surface: string;
+    title: string;
+    status: string;
+    status_label: string;
+    headline: string;
+    question: string;
+    reason: string;
+    answer_suggestions: string[];
+    next_action: string;
+    display_policy: {
+        user_text_first: boolean;
+        technical_default_collapsed: boolean;
+        hide_internal_protocols: boolean;
+        show_todo: boolean;
+        show_for_ordinary_conversation: boolean;
+    };
+    technical: {
+        run_id: string;
+        trace_id: string;
+        phase: GlobalAgentDecisionState;
+        source: string;
+    };
+};
+export declare function buildGlobalConfirmationSummary(input: {
+    run: GlobalAgentRun;
+    pendingTool?: {
+        name: string;
+        arguments: any;
+        risk: GlobalAgentToolRisk;
+        signature: string;
+    } | null;
+    reply?: string;
+    decision?: any;
+    permission?: any;
+}): {
+    schema: string;
+    surface: string;
+    title: string;
+    status: string;
+    status_label: string;
+    headline: string;
+    action: string;
+    risk: GlobalAgentToolRisk;
+    risk_label: string;
+    target: string;
+    question: string;
+    reason: string;
+    answer_suggestions: string[];
+    next_action: string;
+    display_policy: {
+        user_text_first: boolean;
+        technical_default_collapsed: boolean;
+        hide_internal_protocols: boolean;
+        show_todo: boolean;
+        show_for_ordinary_conversation: boolean;
+    };
+    technical: {
+        run_id: string;
+        trace_id: string;
+        tool: string;
+        risk: string;
+        signature: string;
+        permission_decision: any;
+        source: string;
+    };
+};
 export declare function getGlobalAgentRun(id: string): GlobalAgentRun;
 export declare function attachGlobalAgentRunSupervision(run: GlobalAgentRun, link: {
     mission_id: string;
@@ -144,6 +223,41 @@ export declare function recoverInterruptedGlobalAgentRuns(runtime: GlobalAgentLo
     results: any[];
 }>;
 export declare function runGlobalAgentLoopSelfTest(): Promise<{
+    workchain: {
+        simpleHasSummary: boolean;
+        groupEvidenceVisible: boolean;
+        finalSummaryQualityRequired: boolean;
+        technicalCollapsedPolicy: boolean;
+        noInternalLeakInUserText: boolean;
+        replyHasSummary: boolean;
+        shapedReplyAddsRequiredSections: boolean;
+        ordinaryReplyStaysPlain: boolean;
+        traceInTechnical: boolean;
+        progressCheckpointsVisible: boolean;
+        progressCheckpointsHideRawProtocol: boolean;
+    };
+    deliveryReport: {
+        groupHasFriendlySections: boolean;
+        groupKeepsFilesReadable: boolean;
+        groupHasPlanReview: boolean;
+        groupHasAcceptanceConclusion: boolean;
+        groupHasVerificationEvidenceQuality: boolean;
+        groupHasCompletionCard: boolean;
+        groupHasFinalSummaryQualityGate: boolean;
+        formattedDeliveryReplyHasRequiredSections: any;
+        groupHasPickupSummary: boolean;
+        groupHasUserHandoff: boolean;
+        globalShowsRiskAndNextAction: boolean;
+        globalCompletionCardShowsRisk: boolean;
+        globalPickupShowsRisk: boolean;
+        globalHasIndependentReviewConclusion: boolean;
+        globalHandoffPrioritizesRisk: boolean;
+        ordinaryConversationHiddenByPolicy: boolean;
+        failedReportHasRisk: boolean;
+        cancelledReportHasStopSummary: boolean;
+        legacyProtocolTextSanitized: boolean;
+        noInternalLeak: boolean;
+    };
     multiStepCompletes: boolean;
     dispatchIsNotDeliveryCompletion: boolean;
     finalGateCompletesOriginalRun: boolean;
@@ -156,11 +270,37 @@ export declare function runGlobalAgentLoopSelfTest(): Promise<{
     clarificationCanRevokeAuthorization: boolean;
     toolFailureTriggersAuditedReplan: boolean;
     destructiveAlwaysNeedsConfirmation: boolean;
+    globalPlanModeVisible: any;
+    globalPlanModeCompletesAfterConfirmation: any;
+    globalConfirmedPlanHasExecutionFollowup: any;
+    globalOrdinaryAnswerHasNoPlanMode: boolean;
     confirmationExecutesExactPendingToolOnce: boolean;
     invalidToolsConvergeToFailure: boolean;
     duplicateLoopIsStopped: boolean;
     pauseAndResumeWorks: boolean;
     fencedJsonParses: boolean;
     shadowModeHasNoSideEffect: boolean;
+    completedRunsHaveWorkchain: boolean;
+    completedRunsHaveProgressCheckpoints: boolean;
+    workchainSelfTestPasses: boolean;
+    deliveryReportSelfTestPasses: boolean;
+    executionRunsHaveUnifiedDeliveryReport: boolean;
+    executionRunsHaveCompletionCard: boolean;
+    ordinaryAnswerDoesNotShowDeliveryReport: boolean;
+    globalDispatchLaunchSummaryVisible: boolean;
+    globalDispatchLaunchSummaryStreamsLive: boolean;
+    globalAutoPlanModeStreamsLive: boolean;
+    globalAutoPlanModeHasExecutionFollowup: boolean;
+    globalOrdinaryAnswerHasNoPlanModeEvent: boolean;
+    globalProjectDispatchLaunchSummaryVisible: any;
+    globalProjectDispatchLaunchSummaryStreamsLive: any;
+    globalOrdinaryAnswerHasNoDispatchLaunchSummary: boolean;
+    globalOrdinaryAnswerHasNoDispatchLaunchEvent: boolean;
+    globalDispatchLaunchSummaryHidesProtocol: boolean;
+    globalClarificationSummaryVisible: boolean;
+    globalQualityClarificationSummaryStreamsLive: boolean;
+    globalConfirmationSummaryVisible: boolean;
+    globalPlanModeStreamsLive: boolean;
+    globalWaitingSummariesHideProtocol: boolean;
     pass: boolean;
 }>;

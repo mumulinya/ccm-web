@@ -67,6 +67,33 @@ function hash(value: any, len = 12) {
   return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value || {})).digest("hex").slice(0, len);
 }
 
+function renderWorkerPacketMemory(memory: any) {
+  if (!memory) return "";
+  const compactMemory = (value: any, max = 5000) => {
+    const text = typeof value === "string" ? value : JSON.stringify(value || {});
+    return text.length <= max ? text : `${text.slice(0, Math.ceil(max * 0.68))}\n...[memory truncated ${text.length - max} chars]...\n${text.slice(-Math.floor(max * 0.2))}`;
+  };
+  if (typeof memory === "string") return compactMemory(memory);
+  const schema = String(memory.schema || "ccm-memory-context");
+  const rendered = memory.rendered_text || memory.renderedText || memory.summary || "";
+  if (rendered) {
+    return [
+      `平台记忆：${schema}`,
+      memory.group_id ? `group_id: ${memory.group_id}` : "",
+      memory.target_project ? `target_project: ${memory.target_project}` : "",
+      compactMemory(rendered),
+    ].filter(Boolean).join("\n");
+  }
+  if (memory.group_memory) {
+    return [
+      `平台记忆：${schema}`,
+      renderWorkerPacketMemory(memory.group_memory),
+      memory.global_mission_memory ? compactMemory(memory.global_mission_memory, 1800) : "",
+    ].filter(Boolean).join("\n");
+  }
+  return [`平台记忆：${schema}`, compactMemory(memory)].join("\n");
+}
+
 function matchesRule(rule: AgentPermissionRule, input: AgentRuntimeLifecycleInput) {
   const scope = input.scope || "global";
   const action = String(input.action || "");
@@ -206,6 +233,7 @@ export function renderWorkerContextPacket(packet: any) {
       "- 回执必须引用 injection_id，并说明是否已适配、已验证或无需适配的证据。",
     ]
     : [];
+  const memoryText = renderWorkerPacketMemory(packet?.memory || null);
   return [
     `WorkerContextPacket: ${packet?.packet_id || ""}`,
     `trace_id: ${packet?.trace_id || ""}`,
@@ -218,6 +246,7 @@ export function renderWorkerContextPacket(packet: any) {
     "",
     Array.isArray(packet?.document_findings) && packet.document_findings.length ? `文档/验收依据：\n- ${packet.document_findings.slice(0, 8).join("\n- ")}` : "",
     Array.isArray(packet?.constraints) && packet.constraints.length ? `用户约束：\n- ${packet.constraints.join("\n- ")}` : "",
+    memoryText,
     contractLines.join("\n"),
     "",
     "ACK gate：实现前先给接单 ACK，必须包含 understoodGoal、plannedScope、forbiddenScope、verificationPlan、unclear；ACK 不合格时只重写 ACK，不得继续实现。",
@@ -291,6 +320,7 @@ export function runAgentRuntimeKernelSelfTest() {
     task: "适配接口字段",
     analysis: { summary: "前后端契约变更", documentFindings: ["POST /api/demo 新增 name"], constraints: ["不改后端"] },
     contractInjections: [{ source_agent: "backend", target_agent: "frontend", endpoint: "POST /api/demo", summary: "新增 name 字段" }],
+    memory: { schema: "ccm-group-memory-context-v1", group_id: "g1", target_project: "frontend", rendered_text: "群聊记忆：必须兼容旧字段。" },
   });
   const rendered = renderWorkerContextPacket(packet);
   const replay = buildTraceReplaySuite(3);
@@ -299,6 +329,7 @@ export function runAgentRuntimeKernelSelfTest() {
     highRiskAsks: high.permission.needs_confirmation === true,
     contextBudgetComputed: packet.context_budget.estimated_tokens > 0,
     workerPacketHasAckGate: rendered.includes("ACK gate"),
+    workerPacketRendersMemory: rendered.includes("平台记忆") && rendered.includes("必须兼容旧字段"),
     contractInjectionHasId: packet.contract_injections[0]?.injection_id,
     replaySuiteShape: Array.isArray(replay.replays),
   };

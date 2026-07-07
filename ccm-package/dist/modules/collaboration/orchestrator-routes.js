@@ -76,6 +76,11 @@ function handleOrchestratorRoutes(req, res, parsed, ctx, deps) {
         (0, utils_1.sendJson)(res, { success: result.pass, result }, result.pass ? 200 : 500);
         return true;
     }
+    if (pathname === "/api/orchestrator/worker-handoff/self-test" && req.method === "GET") {
+        const result = deps.runWorkerHandoffSelfTest();
+        (0, utils_1.sendJson)(res, { success: result.pass, result }, result.pass ? 200 : 500);
+        return true;
+    }
     if (pathname === "/api/orchestrator/main-agent-actions" && req.method === "GET") {
         try {
             const selfTest = deps.runGroupMainAgentActionRegistrySelfTest();

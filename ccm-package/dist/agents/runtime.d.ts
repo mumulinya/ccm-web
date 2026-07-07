@@ -65,7 +65,8 @@ export declare function runAgentRuntimeSessionSelfTest(): {
         codexResumesSameSession: boolean;
         codexCapturesNativeSession: boolean;
         cursorInitialCapturesSession: boolean;
-        cursorResumesSameSession: boolean;
+        cursorTrustsHeadlessWorkspace: any;
+        cursorResumesSameSession: any;
         cursorParsesNativeSession: boolean;
         codexJsonFailureDetected: boolean;
         cursorJsonFailureDetected: boolean;

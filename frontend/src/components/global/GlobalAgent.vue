@@ -13,7 +13,7 @@ import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
 import { usePinnedScroll } from '../../composables/usePinnedScroll.js'
 import { globalAgentRunTaskCard, globalMissionTaskCard } from '../../utils/taskExperience.js'
 import { buildGlobalConversationKnowledgePayload, buildGlobalTaskKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
-import { getTechnicalDetailSections, sanitizeUserFacingAgentText } from '../../utils/agentDisplay.js'
+import { getDeliveryReport, getTechnicalDetailSections, sanitizeUserFacingAgentText, sanitizeUserFacingLegacyTerminology, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
 
 const emit = defineEmits(['switch-tab', 'set-navigation'])
 
@@ -39,6 +39,7 @@ const {
   messages,
   loadHistory,
   saveHistory,
+  syncHistoryFromServer,
   createNewSession,
   selectSession,
   deleteSession,
@@ -67,7 +68,7 @@ const {
   },
 })
 
-const { navMessages } = useMessageNavigation(messages)
+const { navMessages } = useMessageNavigation(messages, { getAssistantContent: (message) => getVisibleGlobalMessageContent(message, '全局主 Agent 回复已整理，技术细节已放入技术详情。') })
 
 const scrollToMessage = (originalIndex) => {
   const el = document.getElementById(`msg-${originalIndex}`)
@@ -128,8 +129,35 @@ const {
   })
 })
 
+const SYSTEM_RESULT_MARKER = '[处理结果]'
+const LEGACY_SYSTEM_RECEIPT_MARKER = '[系统回执]'
+const SYSTEM_RESULT_MARKERS = [SYSTEM_RESULT_MARKER, LEGACY_SYSTEM_RECEIPT_MARKER]
+
+const systemResultMessage = (icon, text) => `${icon ? `${icon} ` : ''}${SYSTEM_RESULT_MARKER} ${text}`
+
 const isSystemReceipt = (content) => {
-  return content && content.includes('[系统回执]')
+  const text = String(content || '')
+  return SYSTEM_RESULT_MARKERS.some(marker => text.includes(marker))
+}
+
+const hasSystemResult = (content, icon = '') => {
+  const text = String(content || '')
+  return SYSTEM_RESULT_MARKERS.some(marker => text.includes(icon ? `${icon} ${marker}` : marker))
+}
+
+const visibleGlobalText = (value, fallback = '信息已整理。', max = 420) => (
+  sanitizeUserFacingAgentText(value, fallback, max)
+)
+
+const GLOBAL_VISIBLE_INTERNAL_TEXT_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|<\s*\/?\s*task-notification|task-notification|receipt[-_\s]*status|trace_id|session_id|WorkerContextPacket|raw\s+receipt|raw\s+payload|raw_report|scratchpad|Runtime Kernel|workflow_timeline|native_session|task_agent_session/i
+const sanitizeGlobalVisibleStreamText = (value, fallback = '全局主 Agent 正在处理当前请求。', max = 8000) => {
+  const raw = String(value || '')
+  if (!raw) return ''
+  if (GLOBAL_VISIBLE_INTERNAL_TEXT_PATTERN.test(raw)) {
+    return sanitizeUserFacingAgentText(raw, fallback, Math.min(max, 1200))
+  }
+  const text = sanitizeUserFacingLegacyTerminology(raw)
+  return text.length > max ? `${text.slice(0, max)}...` : text
 }
 
 const isProjectReport = (content) => {
@@ -138,14 +166,14 @@ const isProjectReport = (content) => {
 
 const parseReceipt = (content) => {
   const result = {
-    title: '系统回执',
+    title: '处理结果',
     type: 'default',
     icon: '⚙️',
     details: []
   }
   if (!content) return result
   
-  if (content.includes('📋 [系统回执]')) {
+  if (hasSystemResult(content, '📋')) {
     result.title = '协作开发任务已派发'
     result.type = 'task'
     result.icon = '📋'
@@ -157,7 +185,7 @@ const parseReceipt = (content) => {
     if (goalMatch) result.details.push({ label: '业务目标', value: goalMatch[1] })
     if (groupMatch) result.details.push({ label: '目标群聊', value: groupMatch[1] })
     if (acceptMatch) result.details.push({ label: '验收标准', value: acceptMatch[1] })
-  } else if (content.includes('⏰ [系统回执]')) {
+  } else if (hasSystemResult(content, '⏰')) {
     result.title = '定时开发任务已配置'
     result.type = 'cron'
     result.icon = '⏰'
@@ -169,7 +197,7 @@ const parseReceipt = (content) => {
     if (scheduleMatch) result.details.push({ label: 'Cron周期', value: scheduleMatch[1] })
     if (targetMatch) result.details.push({ label: '执行目标', value: targetMatch[1] })
     if (promptMatch) result.details.push({ label: '提示词', value: promptMatch[1] })
-  } else if (content.includes('🎵 [系统回执]')) {
+  } else if (hasSystemResult(content, '🎵')) {
     result.title = '音乐点歌成功'
     result.type = 'music'
     result.icon = '🎵'
@@ -179,13 +207,13 @@ const parseReceipt = (content) => {
     if (songMatch) result.details.push({ label: '音乐名称', value: songMatch[1] })
     if (sourceMatch) result.details.push({ label: '来源平台', value: sourceMatch[1] })
     if (statusMatch) result.details.push({ label: '播放状态', value: statusMatch[1] })
-  } else if (content.includes('🐾 [系统回执]')) {
+  } else if (hasSystemResult(content, '🐾')) {
     result.title = '桌面宠物状态已变更'
     result.type = 'pet'
     result.icon = '🐾'
     const status = content.includes('唤醒') ? '已拉起在桌面显示' : '已在桌面隐藏'
     result.details.push({ label: '动作状态', value: status })
-  } else if (content.includes('📂 [系统回执]')) {
+  } else if (hasSystemResult(content, '📂')) {
     result.title = '项目绑定已完成'
     result.type = 'project'
     result.icon = '📂'
@@ -195,7 +223,7 @@ const parseReceipt = (content) => {
     if (nameMatch) result.details.push({ label: '项目名称', value: nameMatch[1] })
     if (dirMatch) result.details.push({ label: '本地工作目录', value: dirMatch[1] })
     if (agentMatch) result.details.push({ label: '运行内核', value: agentMatch[1] })
-  } else if (content.includes('📚 [系统回执]')) {
+  } else if (hasSystemResult(content, '📚')) {
     result.title = '模版保存成功'
     result.type = 'template'
     result.icon = '📚'
@@ -205,7 +233,7 @@ const parseReceipt = (content) => {
     if (nameMatch) result.details.push({ label: '模板名称', value: nameMatch[1] })
     if (catMatch) result.details.push({ label: '模版分类', value: catMatch[1] })
     if (contentMatch) result.details.push({ label: '模版详情', value: contentMatch[1].trim() })
-  } else if (content.includes('⚙️ [系统回执]')) {
+  } else if (hasSystemResult(content, '⚙️')) {
     result.title = '正在派发指令...'
     result.type = 'dispatch'
     result.icon = '⚙️'
@@ -213,12 +241,16 @@ const parseReceipt = (content) => {
     const cmdMatch = content.match(/>\s*["“]([^"”]+)["”]/)
     if (projMatch) result.details.push({ label: '下发项目', value: projMatch[1] })
     if (cmdMatch) result.details.push({ label: '修改指令', value: cmdMatch[1] })
-  } else if (content.includes('💬 [系统回执]')) {
+  } else if (hasSystemResult(content, '💬')) {
     result.title = '群聊协作指令已下达'
     result.type = 'group'
     result.icon = '💬'
     result.details.push({ label: '状态说明', value: '协作指令派发成功，项目群组 Agent 已开始协同工作。' })
   }
+  result.details = result.details.map(detail => ({
+    ...detail,
+    value: visibleGlobalText(detail.value, '处理结果已整理。', 260)
+  }))
   return result
 }
 
@@ -238,10 +270,11 @@ const parseProjectReport = (content) => {
     result.body = match ? match[1].trim() : content
   } else {
     const nameMatch = content.match(/📂 \[项目 Agent -\s*([^\s\]]+)\s*的运行报告\]:/)
-    result.projectName = nameMatch ? nameMatch[1] : '项目 Agent'
+    result.projectName = nameMatch ? visibleGlobalText(nameMatch[1], '项目 Agent', 80) : '项目 Agent'
     const bodyMatch = content.match(/📂 \[项目 Agent - [^\s\]]+ 的运行报告\]:\s*([\s\S]*)/)
     result.body = bodyMatch ? bodyMatch[1].trim() : content
   }
+  result.body = visibleGlobalText(result.body, result.success ? '项目 Agent 已提交运行报告，技术细节已放入详情。' : '项目 Agent 执行遇到问题，排障信息已放入技术详情。', 1200)
   return result
 }
 
@@ -267,13 +300,32 @@ const stopMissionTracking = (missionId) => {
 
 const formatMissionDeliveryReport = (report, fallback) => {
   if (!report) return fallback
-  const section = (label, values, empty) => `\n\n${label}：${values?.length ? `\n- ${values.join('\n- ')}` : empty}`
-  return (report.summary || fallback)
+  const deliveryReport = getDeliveryReport({ final_report: report, ...report })
+  if (deliveryReport?.markdown || deliveryReport?.user_text) return deliveryReport.markdown || deliveryReport.user_text
+  const visibleList = (values, empty) => {
+    const rows = Array.isArray(values) ? values : values ? [values] : []
+    return rows.length ? `\n- ${rows.map(item => visibleGlobalText(item, '信息已整理。', 260)).join('\n- ')}` : empty
+  }
+  const section = (label, values, empty) => `\n\n${label}：${visibleList(values, empty)}`
+  return visibleGlobalText(report.summary || fallback, fallback, 420)
     + section('修改文件', report.files_modified, '无')
     + section('验证结果', report.verification_results, '无已执行验证证据')
     + section('合并结果', report.merge_commits, '无需独立 worktree 合并')
     + section('风险', report.risks, '未发现已知风险')
     + section('遗留项', report.remaining_items, '无')
+}
+
+const formatGlobalRunVisibleReply = (run = {}, fallback = '已处理。') => {
+  const deliveryReport = getDeliveryReport(run)
+  if (deliveryReport?.markdown || deliveryReport?.user_text) return deliveryReport.markdown || deliveryReport.user_text
+  return sanitizeGlobalVisibleStreamText(run.final_reply || run.finalReply || fallback, fallback, 8000)
+}
+
+function getVisibleGlobalMessageContent(msg, fallback = '全局主 Agent 已整理这条消息。') {
+  if (!msg) return ''
+  if (msg.role === 'user') return String(msg.content || '')
+  const structured = msg.agenticRun ? formatGlobalRunVisibleReply(msg.agenticRun, '') : ''
+  return sanitizeGlobalVisibleStreamText(structured || msg.content || fallback, fallback, 8000)
 }
 
 const trackGlobalMission = (missionId, sessionId) => {
@@ -298,7 +350,9 @@ const trackGlobalMission = (missionId, sessionId) => {
           const runData = await runRes.json()
           if (runRes.ok && runData.run) {
             message.agenticRun = runData.run
-            if (runData.run.status === 'completed' && runData.run.final_reply) message.content = runData.run.final_reply
+            if (runData.run.status === 'completed' && runData.run.final_reply) {
+              message.content = formatGlobalRunVisibleReply(runData.run, '全局任务已完成，交付总结已整理。')
+            }
           }
         } catch {}
       }
@@ -309,7 +363,9 @@ const trackGlobalMission = (missionId, sessionId) => {
         session.messages.push({
           role: 'assistant',
           type: 'global_mission_complete',
-          content: message.agenticRun?.final_reply || formatMissionDeliveryReport(data.supervisor?.final_report, '全局任务已通过全部交付门禁：' + (data.mission.title || missionId)),
+          content: message.agenticRun
+            ? formatGlobalRunVisibleReply(message.agenticRun, '全局任务已通过全部交付验收：' + (data.mission.title || missionId))
+            : formatMissionDeliveryReport(data.supervisor?.final_report, '全局任务已通过全部交付验收：' + (data.mission.title || missionId)),
           globalMission: data.mission,
           globalMissionChildren: (data.children || []).map(task => ({ task, target: task.mission_target || null })),
           timestamp: new Date().toISOString()
@@ -333,7 +389,7 @@ const missionStatusLabel = (mission) => {
 }
 
 const childStatusLabel = (child) => {
-  if (child?.status === 'done' && child?.delivery_summary?.acceptance_gate_passed === true) return '门禁通过'
+  if (child?.status === 'done' && child?.delivery_summary?.acceptance_gate_passed === true) return '验收通过'
   if (child?.status === 'done') return '等待总验收'
   if (child?.status === 'failed') return '执行失败'
   if (child?.status === 'in_progress') return '执行中'
@@ -369,6 +425,319 @@ const compactStreamText = (value, max = 220) => {
   return text.length > max ? text.slice(0, max) + '...' : text
 }
 
+const compactVisibleStreamText = (value, fallback = '状态已更新。', max = 220) => visibleGlobalText(value, fallback, max)
+
+const globalDispatchLaunchSummary = (msg = {}) => {
+  const displayStream = msg.display_stream
+    || msg.displayStream
+    || msg.agenticRun?.display_stream
+    || msg.agenticRun?.displayStream
+    || msg.agenticRun?.final_report?.display_stream
+    || msg.agenticRun?.finalReport?.displayStream
+    || null
+  const summary = msg.dispatch_launch_summary
+    || msg.dispatchLaunchSummary
+    || displayStream?.dispatch_launch_summary
+    || displayStream?.dispatchLaunchSummary
+    || null
+  return sanitizeUserFacingStructure(summary, {
+    fallback: '派发进度已整理，技术细节已放入技术详情。',
+    max: 260,
+  })
+}
+
+const globalDispatchLaunchRows = (msg = {}) => {
+  const rows = globalDispatchLaunchSummary(msg)?.rows
+  return Array.isArray(rows) ? rows.filter(row => row && typeof row === 'object') : []
+}
+
+const globalDispatchRowClass = (row = {}) => {
+  const status = String(row.status || row.state || row.status_label || '').toLowerCase()
+  if (/fail|error|blocked|失败|阻塞|异常/.test(status)) return 'error'
+  if (/done|complete|completed|ok|success|通过|完成/.test(status)) return 'ok'
+  if (/wait|pending|queue|等待|排队/.test(status)) return 'waiting'
+  return 'running'
+}
+
+const GLOBAL_TODO_DONE_STATUSES = new Set(['done', 'completed', 'complete', 'success', 'ok'])
+const GLOBAL_TODO_ACTIVE_STATUSES = new Set([
+  'in_progress',
+  'active',
+  'running',
+  'reviewing',
+  'reworking',
+  'needs_confirmation',
+  'waiting_confirmation',
+  'needs_user',
+  'waiting_clarification',
+  'blocked',
+  'failed',
+  'error',
+])
+
+const globalTodoStatusLabel = (status) => {
+  const normalized = String(status || '').toLowerCase()
+  if (['failed', 'error'].includes(normalized)) return '失败'
+  if (['blocked', 'needs_user', 'waiting_clarification'].includes(normalized)) return '需处理'
+  if (['needs_confirmation', 'waiting_confirmation'].includes(normalized)) return '等待确认'
+  if (normalized === 'reviewing') return '验收中'
+  if (normalized === 'reworking') return '返工中'
+  if (GLOBAL_TODO_DONE_STATUSES.has(normalized)) return '完成'
+  if (['pending', 'queued', 'waiting'].includes(normalized)) return '等待'
+  return '进行中'
+}
+
+const globalStreamTodoTone = (status) => {
+  const normalized = String(status || '').toLowerCase()
+  if (['failed', 'error'].includes(normalized)) return 'failed'
+  if (['blocked', 'needs_confirmation', 'waiting_confirmation', 'needs_user', 'waiting_clarification'].includes(normalized)) return 'waiting'
+  if (GLOBAL_TODO_DONE_STATUSES.has(normalized)) return 'done'
+  return 'active'
+}
+
+const globalStreamCurrentTodoTone = (summary = {}) => globalStreamTodoTone(summary.status)
+
+const getGlobalDisplayStream = (msg = {}) => msg.display_stream
+  || msg.displayStream
+  || msg.agenticRun?.display_stream
+  || msg.agenticRun?.displayStream
+  || msg.agenticRun?.final_report?.display_stream
+  || msg.agenticRun?.finalReport?.displayStream
+  || null
+
+const getGlobalPlanMode = (msg = {}) => msg.plan_mode
+  || msg.planMode
+  || msg.agenticRun?.plan_mode
+  || msg.agenticRun?.planMode
+  || getGlobalDisplayStream(msg)?.plan_mode
+  || getGlobalDisplayStream(msg)?.planMode
+  || null
+
+const getGlobalTodoPlan = (msg = {}) => {
+  const displayStream = getGlobalDisplayStream(msg)
+  const mainDecision = msg.main_agent_decision
+    || msg.mainAgentDecision
+    || msg.agenticRun?.main_agent_decision
+    || msg.agenticRun?.mainAgentDecision
+    || displayStream?.main_agent_decision
+    || displayStream?.mainAgentDecision
+    || displayStream?.workchain?.main_agent_decision
+    || displayStream?.workchain?.mainAgentDecision
+    || msg.agenticRun?.workchain?.main_agent_decision
+    || msg.agenticRun?.workchain?.mainAgentDecision
+    || null
+  return mainDecision?.todo_plan
+    || mainDecision?.todoPlan
+    || msg.todo_plan
+    || msg.todoPlan
+    || msg.agenticRun?.todo_plan
+    || msg.agenticRun?.todoPlan
+    || displayStream?.todo_plan
+    || displayStream?.todoPlan
+    || displayStream?.workchain?.todo_plan
+    || displayStream?.workchain?.todoPlan
+    || null
+}
+
+const normalizeGlobalTodoStep = (step = {}, index = 0) => {
+  if (!step || typeof step !== 'object') return null
+  const fallbackLabel = `步骤 ${index + 1}`
+  const label = visibleGlobalText(
+    step.label || step.title || step.text || step.content || step.name || fallbackLabel,
+    fallbackLabel,
+    140
+  )
+  const activeForm = visibleGlobalText(step.active_form || step.activeForm || label, label, 140)
+  const detailSource = step.detail || step.description || step.summary || step.reason || ''
+  return {
+    id: step.id || step.key || `global-todo-step-${index}`,
+    label,
+    active_form: activeForm,
+    detail: detailSource ? visibleGlobalText(detailSource, '当前步骤详情已整理。', 260) : '',
+    status: String(step.status || step.state || (index === 0 ? 'in_progress' : 'pending')).toLowerCase(),
+  }
+}
+
+const buildGlobalDispatchTodoSteps = (msg = {}) => {
+  const summary = globalDispatchLaunchSummary(msg)
+  const rows = globalDispatchLaunchRows(msg)
+  if (!rows.length) return null
+  const targets = rows
+    .map(row => [row.role || '执行 Agent', row.agent].filter(Boolean).join(' · '))
+    .filter(Boolean)
+    .slice(0, 4)
+    .join('、')
+  const terminalStatus = String(summary?.status || summary?.phase || '').toLowerCase()
+  const trackStatus = ['failed', 'error', 'cancelled', 'canceled'].includes(terminalStatus)
+    ? 'failed'
+    : GLOBAL_TODO_DONE_STATUSES.has(terminalStatus)
+      ? 'completed'
+      : 'in_progress'
+  return {
+    title: summary?.title || '全局派发进度',
+    next_action: summary?.next_action || '等待下游 Agent 更新结果，主 Agent 会继续验收并总结。',
+    steps: [
+      {
+        id: 'global-dispatch-understand',
+        label: '理解并整理需求',
+        detail: summary?.headline || '已明确这次需求需要交给下游 Agent 执行。',
+        status: 'completed',
+      },
+      {
+        id: 'global-dispatch-launch',
+        label: '派发执行目标',
+        detail: targets ? `已派发给：${targets}。` : '已把执行目标交给下游 Agent。',
+        status: 'completed',
+      },
+      {
+        id: 'global-dispatch-track',
+        label: '跟踪执行、验收和最终总结',
+        active_form: '正在跟踪下游执行和验收结果',
+        detail: summary?.next_action || '等待下游 Agent 更新任务卡，主 Agent 会汇总最终结果。',
+        status: trackStatus,
+      },
+    ],
+  }
+}
+
+const GLOBAL_TODO_VERIFICATION_PATTERN = /验证|测试|运行检查|执行检查|检查(?:命令|结果|通过|失败)|verify|verification|test|qa|typecheck|lint|build|check/i
+const globalTodoHasVerificationStep = (step = {}) => GLOBAL_TODO_VERIFICATION_PATTERN.test([
+  step.label,
+  step.title,
+  step.detail,
+  step.active_form,
+  step.activeForm,
+  step.content,
+].filter(Boolean).join(' '))
+const buildGlobalTodoVerificationReminder = (source = {}, steps = [], msg = {}) => {
+  const raw = source.verification_reminder
+    || source.verificationReminder
+    || msg.verification_reminder
+    || msg.verificationReminder
+    || msg.agenticRun?.verification_reminder
+    || msg.agenticRun?.verificationReminder
+    || null
+  const legacyNudge = source.verification_nudge === true || source.verificationNudge === true
+  const terminalStatus = String(msg.agenticRun?.status || msg.status || '').toLowerCase()
+  const fallback = steps.length >= 3
+    && !steps.some(globalTodoHasVerificationStep)
+    && !GLOBAL_TODO_DONE_STATUSES.has(terminalStatus)
+    ? {
+        schema: 'ccm-main-agent-plan-verification-reminder-v1',
+        status: 'needs_verification_step',
+        title: '还缺验收步骤',
+        headline: '完成前需要补一项真实验证，或者说明为什么当前不能验证。',
+        next_action: '全局主 Agent 会把验收补进计划，再继续跟踪和总结。',
+      }
+    : null
+  const reminder = raw || (legacyNudge ? fallback || {
+    schema: 'ccm-main-agent-plan-verification-reminder-v1',
+    status: 'needs_verification_step',
+    title: '还缺验收步骤',
+    headline: '完成前需要补一项真实验证，或者说明为什么当前不能验证。',
+    next_action: '全局主 Agent 会把验收补进计划，再继续跟踪和总结。',
+  } : fallback)
+  const policy = reminder?.display_policy || reminder?.displayPolicy || {}
+  if (!reminder || policy.user_visible === false) return null
+  return sanitizeUserFacingStructure(reminder, {
+    fallback: '完成前需要补一项真实验证，或者说明为什么当前不能验证。',
+    max: 260,
+  })
+}
+
+const buildGlobalStreamCurrentTodoSummary = (msg = {}) => {
+  if (!msg || msg.role !== 'assistant' || msg.type !== 'global_stream') return null
+  const todoPlan = getGlobalTodoPlan(msg)
+  const planMode = getGlobalPlanMode(msg)
+  const dispatchTodo = buildGlobalDispatchTodoSteps(msg)
+  const planModeWaitingConfirmation = planMode
+    && planMode.requires_confirmation !== false
+    && /await|waiting|pending|confirm|确认|授权/i.test(String(planMode.confirmation_status || planMode.confirmationStatus || ''))
+  const planModeSteps = Array.isArray(planMode?.steps)
+    ? planMode.steps.map(step => {
+        const stepStatus = String(step?.status || step?.state || '').toLowerCase()
+        if (GLOBAL_TODO_DONE_STATUSES.has(stepStatus)) return step
+        const stepText = `${step?.label || ''} ${step?.title || ''} ${step?.detail || ''}`
+        if (planModeWaitingConfirmation && /等待|确认|授权/.test(stepText)) return { ...step, status: 'needs_confirmation' }
+        return step
+      })
+    : []
+  const source = Array.isArray(todoPlan?.steps) && todoPlan.steps.length
+    ? todoPlan
+    : planModeSteps.length
+      ? {
+          title: planMode.title || '执行前计划',
+          next_action: planMode.next_step || planMode.nextAction || planMode.next_action || '',
+          steps: planModeSteps,
+        }
+      : dispatchTodo
+  if (!source?.steps?.length) return null
+  const steps = source.steps.map(normalizeGlobalTodoStep).filter(Boolean)
+  if (!steps.length) return null
+  const activeStep = steps.find(step => GLOBAL_TODO_ACTIVE_STATUSES.has(step.status))
+    || steps.find(step => !GLOBAL_TODO_DONE_STATUSES.has(step.status))
+    || steps[steps.length - 1]
+  const completedCount = steps.filter(step => GLOBAL_TODO_DONE_STATUSES.has(step.status)).length
+  const nextAction = source.next_action || source.nextAction || source.next_step || source.nextStep || ''
+  const verificationReminder = buildGlobalTodoVerificationReminder(source, steps, msg)
+  return {
+    schema: 'ccm-global-main-agent-current-todo-v1',
+    title: visibleGlobalText(source.title || '主 Agent 当前步骤', '主 Agent 当前步骤', 120),
+    task_id: msg.agenticRun?.id || msg.agenticRun?.mission_id || '',
+    step_id: activeStep.id,
+    label: activeStep.label,
+    active_form: activeStep.active_form || activeStep.label,
+    detail: activeStep.detail,
+    status: activeStep.status,
+    status_label: globalTodoStatusLabel(activeStep.status),
+    progress_label: `${completedCount}/${steps.length}`,
+    completed_count: completedCount,
+    total_count: steps.length,
+    next_action: nextAction ? visibleGlobalText(nextAction, '主 Agent 会继续执行并在完成后总结。', 260) : '',
+    verification_reminder: verificationReminder,
+    verificationReminder,
+    display_policy: {
+      user_text_first: true,
+      technical_default_collapsed: true,
+      hide_internal_protocols: true,
+      show_for_ordinary_conversation: false,
+    },
+  }
+}
+
+const globalStreamProgressRefreshSummary = (msg = {}) => {
+  const displayStream = getGlobalDisplayStream(msg)
+  const summary = msg.progress_refresh_summary
+    || msg.progressRefreshSummary
+    || displayStream?.progress_refresh_summary
+    || displayStream?.progressRefreshSummary
+    || msg.agenticRun?.progress_refresh_summary
+    || msg.agenticRun?.progressRefreshSummary
+    || msg.agenticRun?.final_report?.progress_refresh_summary
+    || msg.agenticRun?.finalReport?.progressRefreshSummary
+    || null
+  const policy = summary?.display_policy || summary?.displayPolicy || {}
+  if (!summary || policy.user_visible === false) return null
+  return sanitizeUserFacingStructure(summary, {
+    fallback: '进度刷新提醒已整理，技术细节已放入技术详情。',
+    max: 260,
+  })
+}
+
+const globalStreamProgressRefreshTone = (summary = {}) => {
+  const status = String(summary.status || '').toLowerCase()
+  if (['failed', 'error'].includes(status)) return 'failed'
+  if (['needs_refresh', 'stalled', 'blocked', 'waiting'].includes(status)) return 'waiting'
+  return 'active'
+}
+
+const globalStreamProgressRefreshItems = (summary = {}) => {
+  const items = summary.review_items || summary.reviewItems || []
+  return Array.isArray(items)
+    ? items.map(item => visibleGlobalText(item, '接续要点已整理。', 180)).filter(Boolean).slice(0, 5)
+    : []
+}
+
 const globalToolLabels = {
   inspect_system: '读取系统状态',
   list_projects: '读取项目列表',
@@ -401,6 +770,151 @@ const globalToolLabels = {
 
 const getGlobalToolLabel = (name) => globalToolLabels[String(name || '').trim()] || String(name || '工具操作')
 
+const globalToolStatusLabel = (status) => {
+  const normalized = String(status || '').toLowerCase()
+  if (['done', 'completed', 'ok', 'success'].includes(normalized)) return '已完成'
+  if (['failed', 'error', 'blocked'].includes(normalized)) return '需处理'
+  return '进行中'
+}
+
+const compactGlobalToolLabel = (value, fallback = '工具动作') => {
+  const text = visibleGlobalText(value, fallback, 120)
+    .replace(/^正在/, '')
+    .replace(/已完成.*$/, '')
+    .replace(/执行遇到问题.*$/, '')
+    .replace(/[。.]$/, '')
+    .trim()
+  return text || fallback
+}
+
+const buildGlobalStreamToolUseSummary = (rows = []) => {
+  const normalizedRows = rows
+    .filter(row => row && typeof row === 'object')
+    .map((row, index) => ({
+      id: row.id || `global-tool-row-${index}`,
+      label: compactGlobalToolLabel(row.label || row.text || row.detail || '', '工具动作'),
+      status: String(row.status || 'running').toLowerCase(),
+      detail: row.detail ? visibleGlobalText(row.detail, '工具动作已更新。', 180) : '',
+    }))
+    .filter(row => row.label)
+  const visibleRows = [...normalizedRows.reduce((map, row) => map.set(row.label, row), new Map()).values()]
+  if (!visibleRows.length) return null
+  const runningCount = visibleRows.filter(row => ['running', 'in_progress', 'active'].includes(row.status)).length
+  const completedCount = visibleRows.filter(row => ['done', 'completed', 'ok', 'success'].includes(row.status)).length
+  const failedCount = visibleRows.filter(row => ['failed', 'error', 'blocked'].includes(row.status)).length
+  const latest = visibleRows[visibleRows.length - 1]
+  const headline = failedCount
+    ? `${failedCount} 项动作需要处理`
+    : runningCount
+      ? `正在执行 ${runningCount} 项动作`
+      : `已完成 ${completedCount || visibleRows.length} 项动作`
+  const latestLabel = latest.status === 'done' || latest.status === 'completed'
+    ? `${latest.label}已完成`
+    : ['failed', 'error', 'blocked'].includes(latest.status)
+      ? `${latest.label}需要处理`
+      : `正在${latest.label}`
+  return {
+    schema: 'ccm-global-main-agent-tool-summary-v1',
+    title: '动作摘要',
+    headline,
+    latest_label: latestLabel,
+    running_count: runningCount,
+    completed_count: completedCount,
+    failed_count: failedCount,
+    total_count: visibleRows.length,
+    rows: visibleRows.slice(-4).map(row => ({
+      ...row,
+      status_label: globalToolStatusLabel(row.status),
+    })),
+    display_policy: {
+      user_text_first: true,
+      technical_default_collapsed: true,
+      hide_internal_protocols: true,
+      show_for_ordinary_conversation: false,
+    },
+  }
+}
+
+const globalToolSummaryRowsFromEvents = (streamEvents = []) => {
+  const rows = []
+  for (const event of Array.isArray(streamEvents) ? streamEvents : []) {
+    const title = String(event?.title || '')
+    if (!/执行工具|工具完成|执行遇到问题/.test(title)) continue
+    const text = visibleGlobalText(event.text || '', '工具动作已更新。', 180)
+    const status = title.includes('完成')
+      ? 'done'
+      : title.includes('问题')
+        ? 'failed'
+        : 'running'
+    rows.push({
+      id: `${title}:${text}`,
+      label: compactGlobalToolLabel(text, title.includes('完成') ? '已完成动作' : '工具动作'),
+      status,
+      detail: text,
+    })
+  }
+  return rows
+}
+
+const globalStreamToolUseSummary = (msg = {}) => {
+  const existing = msg.global_tool_use_summary
+    || msg.globalToolUseSummary
+    || msg.tool_use_summary
+    || msg.toolUseSummary
+    || null
+  const normalizedExisting = existing?.tool_summary && !existing?.headline
+    ? {
+        schema: 'ccm-global-main-agent-tool-summary-v1',
+        title: '动作摘要',
+        headline: existing.tool_summary,
+        latest_label: existing.tool_summary,
+        running_count: 0,
+        completed_count: 0,
+        failed_count: 0,
+        total_count: 0,
+        display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+      }
+    : existing
+  const summary = normalizedExisting || buildGlobalStreamToolUseSummary(globalToolSummaryRowsFromEvents(msg.streamEvents))
+  return sanitizeUserFacingStructure(summary, {
+    fallback: '动作摘要已整理，技术细节已放入技术详情。',
+    max: 260,
+  })
+}
+
+const updateGlobalStreamToolUseSummary = (agentMsg, event = {}) => {
+  const type = String(event.type || '')
+  if (!['tool_started', 'tool_completed', 'tool_failed', 'tool_validation_failed'].includes(type)) return
+  const tool = event.tool || event.pending_tool || event.step?.tool || {}
+  const toolName = tool.name || event.toolName || event.step?.toolName || ''
+  const label = getGlobalToolLabel(toolName)
+  const status = type === 'tool_completed'
+    ? 'done'
+    : (type === 'tool_failed' || type === 'tool_validation_failed')
+      ? 'failed'
+      : 'running'
+  const key = tool.signature || tool.id || event.tool_call_id || event.toolUseId || toolName || label
+  const previous = agentMsg.global_tool_use_summary || agentMsg.globalToolUseSummary || {}
+  const rows = Array.isArray(previous.rows) ? previous.rows : []
+  const nextRows = [
+    ...rows.filter(row => (row.id || row.label) !== key),
+    {
+      id: key,
+      label,
+      status,
+      detail: type === 'tool_completed'
+        ? `${label}已完成，正在检查结果。`
+        : status === 'failed'
+          ? `${label}执行遇到问题，主 Agent 正在重新判断下一步。`
+          : `正在${label}。`,
+    },
+  ].slice(-8)
+  const summary = buildGlobalStreamToolUseSummary(nextRows)
+  if (!summary) return
+  agentMsg.global_tool_use_summary = summary
+  agentMsg.globalToolUseSummary = summary
+}
+
 const globalEventToVisibleLine = (event = {}) => {
   if (event.ui?.title || event.ui?.text) {
     const icons = {
@@ -408,6 +922,7 @@ const globalEventToVisibleLine = (event = {}) => {
       planning: '🧭',
       answering: '✍️',
       executing: '🛠️',
+      dispatching: '📨',
       reviewing: '✅',
       debugging: '⚠️',
       waiting: '⏳',
@@ -421,16 +936,35 @@ const globalEventToVisibleLine = (event = {}) => {
       tone: event.ui.tone || 'running',
       icon: event.ui.icon || icons[event.ui.phase] || '•',
       title: event.ui.title || '状态更新',
-      text: compactStreamText(event.ui.text || '')
+      text: compactVisibleStreamText(event.ui.text || '', '状态已更新。')
     }
   }
   const type = String(event.type || '')
   const toolName = event.tool?.name || event.pending_tool?.name || event.step?.tool?.name || ''
   const toolLabel = getGlobalToolLabel(toolName)
+  if (type === 'dispatch_launch_summary') {
+    const summary = event.dispatch_launch_summary || event.dispatchLaunchSummary || {}
+    const rows = Array.isArray(summary.rows) ? summary.rows : []
+    const targets = rows.map(row => [row.role || '执行 Agent', row.agent].filter(Boolean).join(' · ')).filter(Boolean).slice(0, 4).join('、')
+    const text = compactVisibleStreamText(
+      [summary.headline || (targets ? `全局主 Agent 已把这次需求交给：${targets}。` : ''), summary.next_action ? `下一步：${summary.next_action}` : ''].filter(Boolean).join(' '),
+      '已完成派发，正在等待下游 Agent 更新结果。'
+    )
+    return { tone: 'ok', icon: '📨', title: summary.title || '已派发的工作', text }
+  }
+  if (type === 'plan_mode_ready') {
+    const planMode = event.plan_mode || event.planMode || {}
+    return {
+      tone: 'running',
+      icon: '🧭',
+      title: planMode.title || '执行前计划已整理',
+      text: compactVisibleStreamText(planMode.next_step || planMode.risk?.summary || event.message, '主 Agent 已整理计划，会继续执行并在完成后总结。')
+    }
+  }
   if (type === 'started') return { tone: 'running', icon: '🧠', title: '理解需求', text: '正在理解你的消息，判断是普通对话还是需要执行操作。' }
   if (type === 'decision') {
     const state = event.step?.state || ''
-    const message = compactStreamText(event.step?.message || event.step?.decision?.intent?.reason || '')
+    const message = compactVisibleStreamText(event.step?.message || event.step?.decision?.intent?.reason || '', '正在规划下一步。')
     if (toolName) return { tone: 'running', icon: '🧭', title: '形成行动计划', text: message || `准备执行：${toolLabel}` }
     if (state === 'answer' || state === 'complete') return { tone: 'running', icon: '✍️', title: '组织回复', text: message || '已经形成回答，正在整理给你。' }
     if (state === 'needs_confirmation') return { tone: 'waiting', icon: '⏳', title: '需要确认', text: message || '需要你确认目标或授权范围。' }
@@ -439,15 +973,15 @@ const globalEventToVisibleLine = (event = {}) => {
   if (type === 'tool_started') return { tone: 'running', icon: '🛠️', title: '执行工具', text: `正在${toolLabel}。` }
   if (type === 'tool_completed') return { tone: 'ok', icon: '✅', title: '工具完成', text: `${toolLabel}已完成，正在检查结果。` }
   if (type === 'tool_failed' || type === 'tool_validation_failed') {
-    return { tone: 'error', icon: '⚠️', title: '执行遇到问题', text: compactStreamText(event.error || event.step?.error || `${toolLabel}失败`) }
+    return { tone: 'error', icon: '⚠️', title: '执行遇到问题', text: compactVisibleStreamText(event.reply || event.step?.message, `${toolLabel}执行遇到问题，主 Agent 正在重新判断下一步。`) }
   }
-  if (type === 'clarification_required') return { tone: 'waiting', icon: '❓', title: '需要补充信息', text: compactStreamText(event.reply || '需要你补充目标、范围或验收标准。') }
-  if (type === 'confirmation_required') return { tone: 'waiting', icon: '🔐', title: '等待授权确认', text: compactStreamText(event.reply || '这个操作需要你确认后才会继续。') }
-  if (type === 'paused') return { tone: 'waiting', icon: '⏸️', title: '已暂停', text: compactStreamText(event.reply || '全局 Agent 已暂停。') }
-  if (type === 'supervising') return { tone: 'running', icon: '📡', title: '监工中', text: compactStreamText(event.reply || '已经创建长期任务，正在监督群聊/项目 Agent 交付。') }
-  if (type === 'completed') return { tone: 'ok', icon: '✨', title: '完成', text: compactStreamText(event.reply || '本轮处理完成。') }
-  if (type === 'failed') return { tone: 'error', icon: '❌', title: '失败', text: compactStreamText(event.error || event.reply || '本轮处理失败。') }
-  if (type === 'cancelled') return { tone: 'waiting', icon: '🛑', title: '已取消', text: compactStreamText(event.reply || '本轮处理已取消。') }
+  if (type === 'clarification_required') return { tone: 'waiting', icon: '❓', title: '需要补充信息', text: compactVisibleStreamText(event.reply, '需要你补充目标、范围或验收标准。') }
+  if (type === 'confirmation_required') return { tone: 'waiting', icon: '🔐', title: '等待授权确认', text: compactVisibleStreamText(event.reply, '这个操作需要你确认后才会继续。') }
+  if (type === 'paused') return { tone: 'waiting', icon: '⏸️', title: '已暂停', text: compactVisibleStreamText(event.reply, '全局 Agent 已暂停。') }
+  if (type === 'supervising') return { tone: 'running', icon: '📡', title: '监工中', text: compactVisibleStreamText(event.reply, '已经创建长期任务，正在监督群聊/项目 Agent 交付。') }
+  if (type === 'completed') return { tone: 'ok', icon: '✨', title: '完成', text: compactVisibleStreamText(event.reply, '本轮处理完成。') }
+  if (type === 'failed') return { tone: 'error', icon: '❌', title: '失败', text: compactVisibleStreamText(event.reply, '任务没有完成，主 Agent 已整理未完成原因和下一步。') }
+  if (type === 'cancelled') return { tone: 'waiting', icon: '🛑', title: '已取消', text: compactVisibleStreamText(event.reply, '本轮处理已取消。') }
   return null
 }
 
@@ -462,6 +996,64 @@ const appendGlobalStreamEvent = (agentMsg, event) => {
   const visible = globalEventToVisibleLine(event)
   if (!visible) return false
   if (!Array.isArray(agentMsg.streamEvents)) agentMsg.streamEvents = []
+  updateGlobalStreamToolUseSummary(agentMsg, event)
+  const dispatchLaunchSummary = event.dispatch_launch_summary || event.dispatchLaunchSummary || null
+  if (dispatchLaunchSummary?.rows?.length) {
+    agentMsg.dispatch_launch_summary = dispatchLaunchSummary
+    agentMsg.dispatchLaunchSummary = dispatchLaunchSummary
+  }
+  const clarificationSummary = event.clarification_summary || event.clarificationSummary || null
+  if (clarificationSummary) {
+    agentMsg.clarification_summary = clarificationSummary
+    agentMsg.clarificationSummary = clarificationSummary
+  }
+  const confirmationSummary = event.confirmation_summary || event.confirmationSummary || null
+  if (confirmationSummary) {
+    agentMsg.confirmation_summary = confirmationSummary
+    agentMsg.confirmationSummary = confirmationSummary
+  }
+  const planMode = event.plan_mode || event.planMode || null
+  if (planMode) {
+    agentMsg.plan_mode = planMode
+    agentMsg.planMode = planMode
+  }
+  if ((planMode || confirmationSummary || clarificationSummary) && event.run_id) {
+    const previousRun = agentMsg.agenticRun || {}
+    const userMessage = previousRun.user_message || agentMsg.user_message || agentMsg.userMessage || planMode?.requirement || ''
+    agentMsg.agenticRun = {
+      ...previousRun,
+      id: previousRun.id || event.run_id,
+      trace_id: previousRun.trace_id || event.trace_id || '',
+      status: event.status || previousRun.status || (confirmationSummary ? 'waiting_confirmation' : clarificationSummary ? 'waiting_clarification' : 'running'),
+      phase: event.phase || previousRun.phase || 'needs_confirmation',
+      user_message: userMessage,
+      original_user_message: previousRun.original_user_message || userMessage,
+      pending_tool: event.pending_tool || previousRun.pending_tool || null,
+      final_reply: event.reply || previousRun.final_reply || '',
+      clarification_summary: clarificationSummary || previousRun.clarification_summary || null,
+      clarificationSummary: clarificationSummary || previousRun.clarificationSummary || null,
+      confirmation_summary: confirmationSummary || previousRun.confirmation_summary || null,
+      confirmationSummary: confirmationSummary || previousRun.confirmationSummary || null,
+      plan_mode: planMode || previousRun.plan_mode || null,
+      planMode: planMode || previousRun.planMode || null,
+      tool_calls: Number(previousRun.tool_calls || 0),
+      model_calls: Number(previousRun.model_calls || 0),
+      resume_count: Number(previousRun.resume_count || 0),
+    }
+  }
+  const checkpoint = event.ui?.checkpoint || event.progress_checkpoint || event.progressCheckpoint || null
+  if (checkpoint?.label) {
+    if (!Array.isArray(agentMsg.progressCheckpoints)) agentMsg.progressCheckpoints = []
+    const checkpointKey = checkpoint.id || `${checkpoint.label}:${checkpoint.detail || ''}:${checkpoint.phase || ''}`
+    agentMsg.progressCheckpoints = [
+      ...agentMsg.progressCheckpoints.filter(item => (item.id || `${item.label}:${item.detail || ''}:${item.phase || ''}`) !== checkpointKey),
+      checkpoint,
+    ].slice(-12)
+    agentMsg.progress_checkpoints = {
+      schema: 'ccm-main-agent-live-checkpoints-v1',
+      items: agentMsg.progressCheckpoints,
+    }
+  }
   const key = `${visible.title}:${visible.text}`
   const previous = agentMsg.streamEvents[agentMsg.streamEvents.length - 1]
   if (previous && `${previous.title}:${previous.text}` === key) return false
@@ -532,7 +1124,9 @@ const sendMessage = async () => {
       files: [],
       type: 'global_stream',
       streaming: true,
-      streamEvents: []
+      streamEvents: [],
+      user_message: userText,
+      userMessage: userText
     }
     const agentMsgAdded = { value: false }
     const requestId = `web-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
@@ -568,6 +1162,8 @@ const sendMessage = async () => {
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let sseBuffer = ''
+    let globalStreamRawBuffer = ''
+    let globalStreamHiddenBuffer = false
 
     const handleGlobalSseEvent = (rawEvent) => {
       const dataText = rawEvent
@@ -580,15 +1176,23 @@ const sendMessage = async () => {
         const data = JSON.parse(dataText)
         if (data.type === 'text') {
           ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
-          agentMsg.content += data.text
+          const chunkText = String(data.text || '')
+          globalStreamRawBuffer += chunkText
+          if (globalStreamHiddenBuffer || GLOBAL_VISIBLE_INTERNAL_TEXT_PATTERN.test(globalStreamRawBuffer)) {
+            globalStreamHiddenBuffer = true
+            agentMsg.content = sanitizeGlobalVisibleStreamText(globalStreamRawBuffer, '全局主 Agent 已收到技术执行信息，正在整理用户可读结论。', 1200)
+          } else {
+            agentMsg.content += sanitizeGlobalVisibleStreamText(chunkText)
+          }
           scrollToBottom()
         } else if (data.type === 'result') {
           ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
           const run = data.run || {}
+          const pendingToolName = sanitizeGlobalVisibleStreamText(run.pending_tool?.name || '写入操作', '写入操作', 80)
           const confirmationHint = run.status === 'waiting_confirmation'
-            ? `\n\n⚠️ 等待确认：${run.pending_tool?.name || '写入操作'}。请使用下方按钮决定是否继续。`
+            ? `\n\n⚠️ 等待确认：${pendingToolName}。请使用下方按钮决定是否继续。`
             : ''
-          agentMsg.content = (run.final_reply || '已处理。') + confirmationHint
+          agentMsg.content = sanitizeGlobalVisibleStreamText(run.final_reply || '已处理。', '全局主 Agent 已整理处理结果，技术细节已放入技术详情。', 8000) + confirmationHint
           agentMsg.files = data.files || []
           agentMsg.agenticRun = run
           agentMsg.streaming = false
@@ -599,7 +1203,7 @@ const sendMessage = async () => {
           }
         } else if (data.type === 'error') {
           ensureGlobalStreamMessage(agentMsg, agentMsgAdded)
-          agentMsg.content = `❌ 出错啦: ${data.text}`
+          agentMsg.content = `出错啦：${sanitizeGlobalVisibleStreamText(data.text, '这次处理没有完成，排障信息已放入技术详情。', 1200)}`
           agentMsg.streaming = false
           agentMsg.type = 'global_agent_error'
         } else if (data.type !== 'done') {
@@ -676,7 +1280,7 @@ const processBridgeRequest = async (request) => {
     const run = data.run || {}
     currentSession.value.messages.push({
       role: 'assistant',
-      content: run.final_reply || '已处理。',
+      content: formatGlobalRunVisibleReply(run, '已处理。'),
       timestamp: new Date().toISOString(),
       files: data.files || [],
       source: 'feishu-control-bot',
@@ -687,11 +1291,11 @@ const processBridgeRequest = async (request) => {
     await postJson('/api/global-agent/bridge/result', {
       id: request.id,
       success: true,
-      reply: assistantReplies.join('\n\n') || run.final_reply || '已完成'
+      reply: sanitizeGlobalVisibleStreamText(assistantReplies.join('\n\n') || run.final_reply || '已完成', '已完成。', 8000)
     })
   } catch (err) {
-    const message = err?.message || '全局 Agent 控制台处理飞书消息失败'
-    currentSession.value.messages.push({ role: 'assistant', content: `❌ ${message}`, timestamp: new Date().toISOString(), source: 'feishu-control-bot' })
+    const message = sanitizeGlobalVisibleStreamText(err?.message, '全局 Agent 控制台处理飞书消息失败', 1200)
+    currentSession.value.messages.push({ role: 'assistant', content: `处理失败：${message}`, timestamp: new Date().toISOString(), source: 'feishu-control-bot' })
     saveHistory()
     await postJson('/api/global-agent/bridge/result', { id: request.id, success: false, error: message }).catch(() => {})
   } finally {
@@ -702,6 +1306,8 @@ const processBridgeRequest = async (request) => {
 
 let bridgePollTimer = null
 let bridgeProcessing = false
+let globalHistorySyncTimer = null
+let globalHistorySyncing = false
 const pollBridgeRequests = async () => {
   if (bridgeProcessing || !currentSession.value) return
   try {
@@ -713,6 +1319,23 @@ const pollBridgeRequests = async () => {
   } catch {
   } finally {
     bridgeProcessing = false
+  }
+}
+
+const syncGlobalHistoryFromServer = async () => {
+  if (globalHistorySyncing || isSending.value) return false
+  globalHistorySyncing = true
+  try {
+    const changed = await syncHistoryFromServer()
+    if (changed) {
+      scrollToBottom()
+      setTimeout(() => scrollToBottom(), 80)
+    }
+    return changed
+  } catch {
+    return false
+  } finally {
+    globalHistorySyncing = false
   }
 }
 
@@ -742,9 +1365,10 @@ const controlAgenticRun = async (msg, operation, approved = true) => {
     const data = await postJson(endpoint, { id: runId, approved })
     const run = data.run || {}
     msg.agenticRun = run
-    msg.content = run.final_reply || (run.status === 'paused' ? '全局 Agent 运行已暂停。' : '全局 Agent 运行状态已更新。')
+    msg.content = formatGlobalRunVisibleReply(run, run.status === 'paused' ? '全局 Agent 运行已暂停。' : '全局 Agent 运行状态已更新。')
     if (run.status === 'waiting_confirmation') {
-      msg.content += `\n\n⚠️ 等待确认：${run.pending_tool?.name || '写入操作'}。请使用下方按钮决定是否继续。`
+      const pendingToolName = sanitizeGlobalVisibleStreamText(run.pending_tool?.name || '写入操作', '写入操作', 80)
+      msg.content += `\n\n⚠️ 等待确认：${pendingToolName}。请使用下方按钮决定是否继续。`
     }
     for (const effect of (run.client_effects || [])) {
       if (effect?.type === 'navigate' && effect.params?.tab) emit('switch-tab', effect.params.tab)
@@ -833,9 +1457,18 @@ const inferGlobalChangeProject = (msg) => {
   return projects.length === 1 ? projects[0] : ''
 }
 
-const openGlobalCodeChangeDrawer = (msg, card) => {
-  const project = inferGlobalChangeProject(msg)
-  const files = (card?.delivery?.changes?.length ? card.delivery.changes : card?.delivery?.files || []).map(item => {
+const openGlobalCodeChangeDrawer = (msg, card, action = {}) => {
+  const project = action.project || inferGlobalChangeProject(msg)
+  const sourceFiles = action.files?.length
+    ? action.files
+    : card?.change_summary?.files?.length
+      ? card.change_summary.files
+      : card?.changeSummary?.files?.length
+        ? card.changeSummary.files
+        : card?.delivery?.changes?.length
+          ? card.delivery.changes
+          : card?.delivery?.files || []
+  const files = sourceFiles.map(item => {
     if (typeof item === 'string') return { path: item, project, statusText: '变更', statusColor: '#64748b' }
     return { ...item, project: item.project || project, statusText: item.statusText || item.status || '变更', statusColor: item.statusColor || '#64748b' }
   }).filter(item => item.path)
@@ -846,7 +1479,7 @@ const openGlobalCodeChangeDrawer = (msg, card) => {
       subtitle: card?.goal || '',
       project,
       files,
-      selectedPath: files[0]?.path || '',
+      selectedPath: action.selectedPath || files[0]?.path || '',
     }
   )
 }
@@ -859,7 +1492,7 @@ const handleGlobalTaskAction = async (msg, action) => {
   const card = getGlobalTaskCard(msg)
   try {
     if (action.kind === 'view_changes') {
-      openGlobalCodeChangeDrawer(msg, card)
+      openGlobalCodeChangeDrawer(msg, card, action)
       return
     }
     if (action.kind === 'save_knowledge') {
@@ -877,7 +1510,44 @@ const handleGlobalTaskAction = async (msg, action) => {
       window.dispatchEvent(new CustomEvent('trace-replay-target', { detail: { scope: 'global', trace_id: action.trace_id || card?.technical?.trace_id || '' } }))
       return
     }
+    if (action.kind === 'continue_work_item') {
+      const targetLine = `${action.target || '已解锁工作项'}：${action.reason || '继续处理已解锁工作项'}`
+      const missionId = msg?.globalMission?.id || card?.task_id || msg?.agenticRun?.mission_id
+      const supervisorId = msg?.globalMissionSupervisor?.id || msg?.agenticRun?.supervisor_id || missionId
+      if (missionId || supervisorId) {
+        const data = await postJson('/api/global-agent/supervisors/control', {
+          id: supervisorId || missionId,
+          mission_id: missionId,
+          operation: 'update_goal',
+          business_goal: `${card?.goal || msg?.globalMission?.business_goal || msg?.globalMission?.title || ''}\n继续派发已解锁工作项：${targetLine}`.trim(),
+          reason: '用户从全局任务卡继续派发已解锁工作项',
+          continuation: {
+            rework_kind: 'next_claimable_work_item',
+            target: action.target || '',
+            reason: action.reason || '',
+            title: action.label || '继续派发',
+            work_item_id: action.work_item_id || '',
+            source: 'user_next_work_item',
+          },
+          actor: 'global-agent-task-card',
+        })
+        applyGlobalMissionPayload(msg, data)
+        saveHistory()
+        scrollToBottom()
+        toast.success('已提交给全局主 Agent 继续派发')
+        return
+      }
+      chatInput.value = `继续处理这个全局任务的已解锁工作项：${targetLine}`
+      await nextTick()
+      return sendMessage()
+    }
     if (msg?.agenticRun?.id) {
+      if (action.kind === 'provide_clarification') {
+        chatInput.value = ''
+        await nextTick()
+        toast.info('请直接在输入框补充目标、范围或验收标准，我会接着同一个运行继续。')
+        return
+      }
       if (action.kind === 'confirm') return controlAgenticRun(msg, 'confirm', true)
       if (action.kind === 'reject_confirmation') return controlAgenticRun(msg, 'confirm', false)
       if (action.kind === 'cancel') return controlAgenticRun(msg, 'cancel')
@@ -1108,7 +1778,7 @@ const executeAction = async (action, actionFiles = []) => {
           if (result.success) {
             const playedTitle = result.title ? `《${result.title}》` : requestLabel
             toast.success(`${isRandom ? '已随机播放' : '找到音乐'}${playedTitle}(${result.source})，已开始播放！`)
-            addAssistantMessage(`🎵 [系统回执] ${isRandom ? '随机播放成功' : '成功点歌'}${playedTitle}！\n- **来源**: ${result.source}\n- **状态**: 正在后台播放中...`)
+            addAssistantMessage(systemResultMessage('🎵', `${isRandom ? '随机播放成功' : '成功点歌'}${playedTitle}！\n- **来源**: ${result.source}\n- **状态**: 正在后台播放中...`))
           } else {
             toast.error(`播放失败: ${result.error}`)
             addAssistantMessage(`❌ [音乐播放失败]: ${result.error || '未找到可播放的音乐'}`)
@@ -1127,7 +1797,7 @@ const executeAction = async (action, actionFiles = []) => {
           const data = await res.json()
           if (!res.ok || data.success === false) throw new Error(data.error || '创建音乐播放指令失败')
           toast.success('已发送给音乐播放器，打开音乐页后会自动播放')
-          addAssistantMessage(`🎵 [系统回执] 已把${requestLabel}发送给音乐播放器。\n- **状态**: 等待音乐播放器消费指令\n- **指令ID**: ${data.command?.id || '已创建'}`)
+          addAssistantMessage(systemResultMessage('🎵', `已把${requestLabel}发送给音乐播放器。\n- **状态**: 等待音乐播放器消费指令\n- **指令ID**: ${data.command?.id || '已创建'}`))
           emit('switch-tab', 'music')
         } catch (err) {
           toast.error(`播放出错: ${err.message || err}`)
@@ -1144,7 +1814,7 @@ const executeAction = async (action, actionFiles = []) => {
       const petData = await petRes.json()
       if (petData.success) {
         toast.success(isLaunch ? '桌面宠物已成功在桌面唤醒！🐾' : '桌面宠物已成功隐藏。')
-        addAssistantMessage(`🐾 [系统回执] 桌面宠物已成功${isLaunch ? '在您的桌面唤醒且可见' : '从桌面隐藏关闭'}。`)
+        addAssistantMessage(systemResultMessage('🐾', `桌面宠物已成功${isLaunch ? '在您的桌面唤醒且可见' : '从桌面隐藏关闭'}。`))
       } else {
         toast.error(`宠物控制失败: ${petData.error || '未知原因'}`)
         addAssistantMessage(`❌ [宠物控制失败]: ${petData.error || '未知原因'}`)
@@ -1152,7 +1822,7 @@ const executeAction = async (action, actionFiles = []) => {
     } else if (action.type === 'navigate') {
       const tab = getActionParam(action, 'tab')
       toast.success('正在为您跳转页面...')
-      addAssistantMessage(`🧭 [系统回执] 已为您切换到「${tab}」页面。`)
+      addAssistantMessage(systemResultMessage('🧭', `已为您切换到「${tab}」页面。`))
       setTimeout(() => {
         emit('switch-tab', tab)
       }, 300)
@@ -1184,10 +1854,10 @@ const executeAction = async (action, actionFiles = []) => {
         queue_result: item.queue_result
       }))
       addAssistantMessage(
-        '[系统回执] 全局开发任务已创建并完成跨项目派发。\n- 任务编号: ' + missionData.mission.id +
+        `${SYSTEM_RESULT_MARKER} 全局开发任务已创建并完成跨项目派发。\n- 任务编号: ` + missionData.mission.id +
         '\n- 任务标题: ' + missionData.mission.title +
         '\n- 执行目标: ' + childRows.length +
-        '\n- 完成条件: 所有子任务通过交付门禁',
+        '\n- 完成条件: 所有子任务通过交付验收',
         {
           type: 'global_mission',
           globalMission: missionData.mission,
@@ -1201,7 +1871,7 @@ const executeAction = async (action, actionFiles = []) => {
       const title = getActionParam(action, 'title', 'name') || '全局助手派发任务'
       const groupId = getActionParam(action, 'group_id', 'groupId') || 'gmps7ha15'
       const businessGoal = getActionParam(action, 'business_goal', 'businessGoal') || title
-      const acceptance = getActionParam(action, 'acceptance', 'acceptance_criteria', 'acceptanceCriteria') || '子 Agent 提供回执；主 Agent 输出最终报告'
+      const acceptance = getActionParam(action, 'acceptance', 'acceptance_criteria', 'acceptanceCriteria') || '子 Agent 提供结果说明；主 Agent 输出最终报告'
       toast.info(`正在为您派发协作任务: ${title}...`)
       const taskRes = await fetch('/api/tasks/create-daily-dev', {
         method: 'POST',
@@ -1220,7 +1890,7 @@ const executeAction = async (action, actionFiles = []) => {
       const taskData = await taskRes.json()
       if (taskData.success) {
         toast.success('任务派发成功！')
-        addAssistantMessage(`📋 [系统回执] 协作开发任务已成功派发并进入后台自动执行队列！\n- **任务标题**: ${title}\n- **业务目标**: ${businessGoal}\n- **分发群聊**: ${groupId}\n- **验收标准**: ${acceptance}`)
+        addAssistantMessage(systemResultMessage('📋', `协作开发任务已成功派发并进入后台自动执行队列！\n- **任务标题**: ${title}\n- **业务目标**: ${businessGoal}\n- **分发群聊**: ${groupId}\n- **验收标准**: ${acceptance}`))
       } else {
         toast.error(`任务派发失败: ${taskData.error || '未知错误'}`)
         addAssistantMessage(`❌ [任务派发失败]: ${taskData.error || '未知错误'}`)
@@ -1229,7 +1899,7 @@ const executeAction = async (action, actionFiles = []) => {
       const project = getActionParam(action, 'project', 'projectName')
       const message = getActionParam(action, 'message', 'prompt', 'command')
       toast.info(`正在向项目 Agent [${project}] 下发指令...`)
-      addAssistantMessage(`⚙️ [系统回执] 正在向项目 Agent [${project}] 下发指令：\n> "${message}"\n\n项目 Agent 正在启动并执行指令。由于需要运行代码分析及构建链验证，此过程通常需要 1 到 2 分钟，请稍候...`)
+      addAssistantMessage(systemResultMessage('⚙️', `正在向项目 Agent [${project}] 下发指令：\n> "${message}"\n\n项目 Agent 正在启动并执行指令。由于需要运行代码分析及构建链验证，此过程通常需要 1 到 2 分钟，请稍候...`))
 
       isSending.value = true
       try {
@@ -1254,7 +1924,7 @@ const executeAction = async (action, actionFiles = []) => {
       const message = getActionParam(action, 'message', 'prompt', 'command')
       const targetProject = getActionParam(action, 'target_project', 'targetProject') || 'coordinator'
       toast.info(`正在向群聊协调者 [${groupId}] 派发指令...`)
-      addAssistantMessage(`⚙️ [系统回执] 正在向群聊协作组 [ID: ${groupId}] 派发协作指令：\n> "${message}"`)
+      addAssistantMessage(systemResultMessage('⚙️', `正在向群聊协作组 [ID: ${groupId}] 派发协作指令：\n> "${message}"`))
 
       try {
         const groupRes = await fetch('/api/groups/send', {
@@ -1268,8 +1938,8 @@ const executeAction = async (action, actionFiles = []) => {
         })
         const groupData = await groupRes.json()
         if (groupData.success) {
-          const reply = groupData.reply ? `\n\n主 Agent 回执：\n${groupData.reply}` : ''
-          addAssistantMessage(`💬 [系统回执] 协作指令派发成功！群聊主 Agent 已收到指令并开始处理。${reply}`)
+          const reply = groupData.reply ? `\n\n主 Agent 说明：\n${groupData.reply}` : ''
+          addAssistantMessage(systemResultMessage('💬', `协作指令派发成功！群聊主 Agent 已收到指令并开始处理。${reply}`))
         } else {
           addAssistantMessage(`❌ [派发协作指令失败]: ${groupData.error || '未知原因'}`)
         }
@@ -1301,7 +1971,7 @@ const executeAction = async (action, actionFiles = []) => {
       const cronData = await cronRes.json()
       if (cronData.success) {
         toast.success(`定时任务「${name}」创建成功！`)
-        addAssistantMessage(`⏰ [系统回执] 定时任务「${name}」已成功配置并创建！\n- **周期表达式**: \`${schedule}\`\n- **目标类型**: ${targetType === 'group' ? '群聊' : '项目'}\n- **执行提示词**: "${prompt}"`)
+        addAssistantMessage(systemResultMessage('⏰', `定时任务「${name}」已成功配置并创建！\n- **周期表达式**: \`${schedule}\`\n- **目标类型**: ${targetType === 'group' ? '群聊' : '项目'}\n- **执行提示词**: "${prompt}"`))
       } else {
         toast.error(`创建定时任务失败: ${cronData.error || '未知错误'}`)
         addAssistantMessage(`❌ [定时任务创建失败]: ${cronData.error || '未知错误'}`)
@@ -1321,7 +1991,7 @@ const executeAction = async (action, actionFiles = []) => {
       if (projectData.success) {
         const detail = isStart && projectData.pid ? `\n- **进程 PID**: ${projectData.pid}` : ''
         toast.success(isStart ? `项目「${project}」已启动` : `项目「${project}」已停止`)
-        addAssistantMessage(`🚀 [系统回执] 项目「${project}」已${isStart ? '启动' : '停止'}。\n- **动作**: ${isStart ? '启动项目' : '停止项目'}\n- **运行时**: ${agent}${detail}`)
+        addAssistantMessage(systemResultMessage('🚀', `项目「${project}」已${isStart ? '启动' : '停止'}。\n- **动作**: ${isStart ? '启动项目' : '停止项目'}\n- **运行时**: ${agent}${detail}`))
       } else {
         const reason = projectData.error || '未知错误'
         toast.error(isStart ? `启动项目失败: ${reason}` : `停止项目失败: ${reason}`)
@@ -1343,7 +2013,7 @@ const executeAction = async (action, actionFiles = []) => {
       const projData = await projRes.json()
       if (projData.success) {
         toast.success(`项目「${action.params.name}」创建成功！`)
-        addAssistantMessage(`📂 [系统回执] 项目「${action.params.name}」已成功创建并绑定！\n- **物理路径**: \`${action.params.work_dir}\`\n- **内置 Agent 运行时**: \`${action.params.agent || 'claudecode'}\``)
+        addAssistantMessage(systemResultMessage('📂', `项目「${action.params.name}」已成功创建并绑定！\n- **物理路径**: \`${action.params.work_dir}\`\n- **内置 Agent 运行时**: \`${action.params.agent || 'claudecode'}\``))
       } else {
         toast.error(`创建项目失败: ${projData.error || '未知错误'}`)
         addAssistantMessage(`❌ [项目创建失败]: ${projData.error || '未知错误'}`)
@@ -1363,7 +2033,7 @@ const executeAction = async (action, actionFiles = []) => {
       const tplData = await tplRes.json()
       if (tplData.success) {
         toast.success(`对话模板「${action.params.name}」创建成功！`)
-        addAssistantMessage(`📚 [系统回执] 对话模板「${action.params.name}」已成功创建并保存！\n- **分类**: ${action.params.category || 'custom'}\n- **模板内容**:\n> ${templateContent}`)
+        addAssistantMessage(systemResultMessage('📚', `对话模板「${action.params.name}」已成功创建并保存！\n- **分类**: ${action.params.category || 'custom'}\n- **模板内容**:\n> ${templateContent}`))
       } else {
         toast.error(`创建对话模板失败: ${tplData.error || '未知错误'}`)
         addAssistantMessage(`❌ [对话模板创建失败]: ${tplData.error || '未知错误'}`)
@@ -1464,7 +2134,7 @@ const executeAction = async (action, actionFiles = []) => {
 onMounted(() => {
   loadHistory()
   loadQualitySnapshot()
-  saveHistory()
+  syncGlobalHistoryFromServer()
   for (const session of sessions.value) {
     for (const message of session.messages || []) {
       if (message.type === 'global_mission' && message.globalMission?.id && message.globalMission?.status !== 'done') {
@@ -1482,10 +2152,12 @@ onMounted(() => {
   setTimeout(() => scrollToBottom({ force: true }), 250)
   pollBridgeRequests()
   bridgePollTimer = setInterval(pollBridgeRequests, 1500)
+  globalHistorySyncTimer = setInterval(syncGlobalHistoryFromServer, 5000)
 })
 
 onUnmounted(() => {
   if (bridgePollTimer) clearInterval(bridgePollTimer)
+  if (globalHistorySyncTimer) clearInterval(globalHistorySyncTimer)
   for (const timer of missionPollTimers.values()) clearInterval(timer)
   missionPollTimers.clear()
   detachGlobalResizeObserver()
@@ -1769,6 +2441,78 @@ const handleGitCommitCardSubmit = async (msg) => {
                       <p>{{ msg.streaming ? '正在实时更新理解、规划和工具执行状态' : '本轮过程已结束' }}</p>
                     </div>
                   </div>
+                  <div
+                    v-for="currentTodo in [buildGlobalStreamCurrentTodoSummary(msg)].filter(Boolean)"
+                    :key="currentTodo.step_id || currentTodo.label"
+                    class="global-stream-current-todo"
+                    :class="globalStreamCurrentTodoTone(currentTodo)"
+                  >
+                    <span class="stream-todo-label">当前步骤</span>
+                    <strong>{{ currentTodo.active_form || currentTodo.label }}</strong>
+                    <p v-if="currentTodo.detail">{{ currentTodo.detail }}</p>
+                    <small v-if="currentTodo.verification_reminder" class="stream-todo-verification">
+                      {{ currentTodo.verification_reminder.title || '还缺验收步骤' }}：{{ currentTodo.verification_reminder.headline || '完成前需要补一项真实验证，或者说明为什么当前不能验证。' }}
+                    </small>
+                    <small v-if="currentTodo.next_action" class="stream-todo-next">下一步：{{ currentTodo.next_action }}</small>
+                    <em class="stream-todo-progress">
+                      <span>{{ currentTodo.status_label || '进行中' }}</span>
+                      <b>{{ currentTodo.progress_label || `${currentTodo.completed_count || 0}/${currentTodo.total_count || 0}` }}</b>
+                    </em>
+                  </div>
+                  <div
+                    v-for="refreshSummary in [globalStreamProgressRefreshSummary(msg)].filter(Boolean)"
+                    :key="refreshSummary.schema || refreshSummary.title || 'global-progress-refresh'"
+                    class="global-stream-progress-refresh"
+                    :class="globalStreamProgressRefreshTone(refreshSummary)"
+                  >
+                    <span class="stream-refresh-label">{{ refreshSummary.title || '进度刷新提醒' }}</span>
+                    <strong>{{ refreshSummary.current_state || refreshSummary.currentState || refreshSummary.headline || '全局主 Agent 已整理当前进度刷新状态。' }}</strong>
+                    <div v-if="globalStreamProgressRefreshItems(refreshSummary).length" class="stream-refresh-items">
+                      <span v-for="item in globalStreamProgressRefreshItems(refreshSummary)" :key="item">{{ item }}</span>
+                    </div>
+                    <small v-if="refreshSummary.next_action || refreshSummary.nextAction" class="stream-refresh-next">下一步：{{ refreshSummary.next_action || refreshSummary.nextAction }}</small>
+                    <em>{{ refreshSummary.status_label || refreshSummary.statusLabel || '已整理' }}</em>
+                  </div>
+                  <div
+                    v-for="toolSummary in [globalStreamToolUseSummary(msg)].filter(Boolean)"
+                    :key="toolSummary.schema || toolSummary.title"
+                    class="global-stream-tool-summary"
+                  >
+                    <span class="stream-tool-label">动作摘要</span>
+                    <strong>{{ toolSummary.headline || toolSummary.title }}</strong>
+                    <small v-if="toolSummary.latest_label">最近：{{ toolSummary.latest_label }}</small>
+                    <div class="stream-tool-counts">
+                      <span v-if="toolSummary.running_count">进行中 {{ toolSummary.running_count }}</span>
+                      <span v-if="toolSummary.completed_count">完成 {{ toolSummary.completed_count }}</span>
+                      <span v-if="toolSummary.failed_count" class="failed">需处理 {{ toolSummary.failed_count }}</span>
+                    </div>
+                  </div>
+                  <details v-if="globalDispatchLaunchRows(msg).length" class="global-stream-dispatch" open>
+                    <summary>
+                      <div>
+                        <strong>{{ globalDispatchLaunchSummary(msg)?.title || '已派发的工作' }}</strong>
+                        <span>{{ globalDispatchLaunchSummary(msg)?.count_label || `${globalDispatchLaunchRows(msg).length} 个执行目标` }}</span>
+                      </div>
+                      <small>展开查看每个目标</small>
+                    </summary>
+                    <p v-if="globalDispatchLaunchSummary(msg)?.headline">{{ globalDispatchLaunchSummary(msg).headline }}</p>
+                    <div class="global-stream-dispatch-list">
+                      <article
+                        v-for="row in globalDispatchLaunchRows(msg)"
+                        :key="row.id || row.agent || row.task"
+                        :class="globalDispatchRowClass(row)"
+                      >
+                        <header>
+                          <strong>{{ row.role || '执行 Agent' }} · {{ row.agent || '待确认目标' }}</strong>
+                          <em>{{ row.status_label || '已派发' }}</em>
+                        </header>
+                        <span>{{ row.task || '已进入执行链路。' }}</span>
+                        <small v-if="row.reason">{{ row.reason }}</small>
+                        <small v-if="row.depends_on?.length">依赖：{{ row.depends_on.join('、') }}</small>
+                      </article>
+                    </div>
+                    <small v-if="globalDispatchLaunchSummary(msg)?.next_action" class="global-stream-dispatch-next">下一步：{{ globalDispatchLaunchSummary(msg).next_action }}</small>
+                  </details>
                   <div class="global-stream-events">
                     <div
                       v-for="(event, eventIndex) in msg.streamEvents || []"
@@ -1790,9 +2534,17 @@ const handleGitCommitCardSubmit = async (msg) => {
                       </div>
                     </div>
                   </div>
+                  <TaskExperienceCard
+                    v-if="getGlobalTaskCard(msg)"
+                    class="global-stream-plan-card"
+                    :card="getGlobalTaskCard(msg)"
+                    context="global"
+                    :busy="!!msg.agenticRunLoading"
+                    @action="handleGlobalTaskAction(msg, $event)"
+                  />
                 </div>
 
-                <!-- CCM 系统管理回执 -->
+                <!-- CCM 系统管理处理结果 -->
                 <div v-else-if="msg.type === 'management_action'" class="management-action-card" :class="{ failed: !msg.managementReceipt?.success, cancelled: msg.managementReceipt?.cancelled }">
                   <div class="management-action-head">
                     <div>
@@ -1834,7 +2586,7 @@ const handleGitCommitCardSubmit = async (msg) => {
                   <div v-else-if="msg.error" style="color: #f44336; font-size: 14px; background: rgba(244,67,54,0.1); padding: 10px; border-radius: 6px;">
                     ❌ 审查失败: {{ msg.error }}
                   </div>
-                  <div v-else class="review-body" v-html="renderMarkdown(msg.content)" style="font-size: 14px; line-height: 1.6; color: #ddd; max-height: 450px; overflow-y: auto; background: rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05); padding: 16px; border-radius: 8px;"></div>
+                  <div v-else class="review-body" v-html="renderMarkdown(getVisibleGlobalMessageContent(msg, '代码审查报告已整理，技术细节已放入技术详情。'))" style="font-size: 14px; line-height: 1.6; color: #ddd; max-height: 450px; overflow-y: auto; background: rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.05); padding: 16px; border-radius: 8px;"></div>
                 </div>
 
                 <!-- RAG/Git 新增 2: Git 一键提交确认卡片 -->
@@ -1899,7 +2651,7 @@ const handleGitCommitCardSubmit = async (msg) => {
                     :busy="!!msg.agenticRunLoading"
                     @action="handleGlobalTaskAction(msg, $event)"
                   />
-                  <div v-else class="bubble-content">{{ msg.content }}</div>
+                  <div v-else class="bubble-content">{{ getVisibleGlobalMessageContent(msg) }}</div>
                   <details v-if="runtimeDebugSections(msg).length" class="global-runtime-debug">
                     <summary class="runtime-debug-head">
                       <strong>技术详情</strong>
@@ -1917,7 +2669,7 @@ const handleGitCommitCardSubmit = async (msg) => {
                   </details>
                 </template>
 
-                <!-- 1. 系统回执高阶卡片 -->
+                <!-- 1. 处理结果高阶卡片 -->
                 <div v-else-if="isSystemReceipt(msg.content)" class="system-receipt-card" :class="parseReceipt(msg.content).type">
                   <div class="receipt-header">
                     <span class="receipt-icon">{{ parseReceipt(msg.content).icon }}</span>
@@ -1947,7 +2699,7 @@ const handleGitCommitCardSubmit = async (msg) => {
                 </div>
   
                 <!-- 3. 普通文本 -->
-                <div v-else class="bubble-content">{{ msg.content }}</div>
+                <div v-else class="bubble-content">{{ getVisibleGlobalMessageContent(msg) }}</div>
               </template>
   
               <!-- 用户消息普通渲染 -->
@@ -2322,6 +3074,406 @@ const handleGitCommitCardSubmit = async (msg) => {
   font-size: 11px;
 }
 
+.global-stream-current-todo {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 12px;
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 10px;
+  background: rgba(239, 246, 255, 0.72);
+}
+
+.global-stream-current-todo.done {
+  border-color: rgba(34, 197, 94, 0.2);
+  background: rgba(240, 253, 244, 0.74);
+}
+
+.global-stream-current-todo.waiting {
+  border-color: rgba(245, 158, 11, 0.24);
+  background: rgba(255, 251, 235, 0.78);
+}
+
+.global-stream-current-todo.failed {
+  border-color: rgba(239, 68, 68, 0.22);
+  background: rgba(254, 242, 242, 0.78);
+}
+
+.stream-todo-label,
+.global-stream-current-todo strong,
+.global-stream-current-todo p,
+.stream-todo-verification,
+.stream-todo-next {
+  grid-column: 1;
+  min-width: 0;
+}
+
+.stream-todo-label {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.global-stream-current-todo strong {
+  color: var(--text-primary);
+  font-size: 12.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.global-stream-current-todo p,
+.stream-todo-next {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.stream-todo-next {
+  color: var(--accent-blue);
+  font-weight: 800;
+}
+
+.stream-todo-verification {
+  display: block;
+  padding: 5px 7px;
+  border-radius: 7px;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  background: rgba(255, 251, 235, 0.82);
+  color: #92400e;
+  font-size: 10.5px;
+  line-height: 1.35;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.stream-todo-progress {
+  grid-column: 2;
+  grid-row: 1 / span 5;
+  align-self: start;
+  justify-self: end;
+  display: grid;
+  gap: 3px;
+  justify-items: end;
+  font-style: normal;
+}
+
+.stream-todo-progress span {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.stream-todo-progress b {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.global-stream-progress-refresh {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.24);
+  border-radius: 10px;
+  background: rgba(255, 251, 235, 0.78);
+}
+
+.global-stream-progress-refresh.active {
+  border-color: rgba(37, 99, 235, 0.22);
+  background: rgba(239, 246, 255, 0.76);
+}
+
+.global-stream-progress-refresh.failed {
+  border-color: rgba(239, 68, 68, 0.22);
+  background: rgba(254, 242, 242, 0.78);
+}
+
+.stream-refresh-label,
+.global-stream-progress-refresh strong,
+.stream-refresh-next {
+  grid-column: 1;
+  min-width: 0;
+}
+
+.stream-refresh-label {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.global-stream-progress-refresh strong {
+  color: var(--text-primary);
+  font-size: 12.5px;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
+.stream-refresh-items {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.stream-refresh-items span {
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.stream-refresh-next {
+  color: var(--accent-blue);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.global-stream-progress-refresh em {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: start;
+  justify-self: end;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.global-stream-tool-summary {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(20, 184, 166, 0.18);
+  border-radius: 10px;
+  background: rgba(240, 253, 250, 0.7);
+}
+
+.stream-tool-label,
+.global-stream-tool-summary strong,
+.global-stream-tool-summary small {
+  grid-column: 1;
+  min-width: 0;
+}
+
+.stream-tool-label {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.global-stream-tool-summary strong {
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.global-stream-tool-summary small {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.stream-tool-counts {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: start;
+  justify-self: end;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: 160px;
+}
+
+.stream-tool-counts span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #0f766e;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.stream-tool-counts span.failed {
+  color: #dc2626;
+}
+
+.global-stream-dispatch {
+  margin-top: 10px;
+  border: 1px solid rgba(14, 165, 233, 0.18);
+  border-radius: 10px;
+  background: rgba(240, 249, 255, 0.72);
+  overflow: hidden;
+}
+
+.global-stream-dispatch > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.global-stream-dispatch > summary::-webkit-details-marker {
+  display: none;
+}
+
+.global-stream-dispatch > summary::after {
+  content: '⌄';
+  flex: 0 0 auto;
+  color: #0284c7;
+  font-size: 13px;
+  font-weight: 900;
+  transform: rotate(-90deg);
+  transition: transform 0.18s ease;
+}
+
+.global-stream-dispatch[open] > summary::after {
+  transform: rotate(0deg);
+}
+
+.global-stream-dispatch summary div {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.global-stream-dispatch summary strong {
+  color: #0f172a;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.global-stream-dispatch summary span {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(14, 165, 233, 0.12);
+  color: #0369a1;
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.global-stream-dispatch summary small {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 10.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.global-stream-dispatch p {
+  margin: 0;
+  padding: 0 10px 8px;
+  color: #334155;
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.global-stream-dispatch-list {
+  display: grid;
+  gap: 7px;
+  padding: 0 10px 10px;
+}
+
+.global-stream-dispatch article {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 8px 9px;
+  border: 1px solid rgba(14, 165, 233, 0.14);
+  border-left: 3px solid #0ea5e9;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.global-stream-dispatch article.ok {
+  border-left-color: #22c55e;
+}
+
+.global-stream-dispatch article.waiting {
+  border-left-color: #f59e0b;
+}
+
+.global-stream-dispatch article.error {
+  border-left-color: #ef4444;
+}
+
+.global-stream-dispatch header {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.global-stream-dispatch article strong {
+  color: #075985;
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.global-stream-dispatch article em {
+  flex: 0 0 auto;
+  color: #0f766e;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.global-stream-dispatch article span,
+.global-stream-dispatch article small,
+.global-stream-dispatch-next {
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
+.global-stream-dispatch-next {
+  display: block;
+  padding: 0 10px 10px;
+  color: #1d4ed8;
+  font-weight: 800;
+}
+
 .stream-dot {
   width: 9px;
   height: 9px;
@@ -2370,6 +3522,95 @@ const handleGitCommitCardSubmit = async (msg) => {
 .global-stream-event.waiting { border-color: rgba(245, 158, 11, 0.24); background: rgba(245, 158, 11, 0.08); }
 .global-stream-event.error { border-color: rgba(239, 68, 68, 0.24); background: rgba(239, 68, 68, 0.08); }
 
+.global-stream-plan-card {
+  margin-top: 10px;
+}
+
+:global([data-theme="dark"]) .global-stream-dispatch {
+  border-color: rgba(56, 189, 248, 0.24);
+  background: rgba(15, 23, 42, 0.72);
+}
+
+:global([data-theme="dark"]) .global-stream-current-todo {
+  border-color: rgba(96, 165, 250, 0.24);
+  background: rgba(30, 41, 59, 0.72);
+}
+
+:global([data-theme="dark"]) .global-stream-current-todo.done {
+  border-color: rgba(34, 197, 94, 0.26);
+  background: rgba(20, 83, 45, 0.28);
+}
+
+:global([data-theme="dark"]) .global-stream-current-todo.waiting {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(120, 53, 15, 0.28);
+}
+
+:global([data-theme="dark"]) .global-stream-current-todo.failed {
+  border-color: rgba(248, 113, 113, 0.28);
+  background: rgba(127, 29, 29, 0.28);
+}
+
+:global([data-theme="dark"]) .stream-todo-progress b {
+  background: rgba(15, 23, 42, 0.72);
+}
+
+:global([data-theme="dark"]) .stream-todo-verification {
+  border-color: rgba(245, 158, 11, 0.32);
+  background: rgba(120, 53, 15, 0.34);
+  color: #fde68a;
+}
+
+:global([data-theme="dark"]) .global-stream-progress-refresh {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(120, 53, 15, 0.28);
+}
+
+:global([data-theme="dark"]) .global-stream-progress-refresh.active {
+  border-color: rgba(96, 165, 250, 0.24);
+  background: rgba(30, 41, 59, 0.72);
+}
+
+:global([data-theme="dark"]) .global-stream-progress-refresh.failed {
+  border-color: rgba(248, 113, 113, 0.28);
+  background: rgba(127, 29, 29, 0.28);
+}
+
+:global([data-theme="dark"]) .global-stream-progress-refresh :is(strong, .stream-refresh-next) {
+  color: #93c5fd;
+}
+
+:global([data-theme="dark"]) .global-stream-progress-refresh :is(.stream-refresh-label, em, .stream-refresh-items span) {
+  color: #cbd5e1;
+}
+
+:global([data-theme="dark"]) .global-stream-tool-summary {
+  border-color: rgba(45, 212, 191, 0.24);
+  background: rgba(20, 83, 45, 0.18);
+}
+
+:global([data-theme="dark"]) .stream-tool-counts span {
+  background: rgba(15, 23, 42, 0.72);
+  color: #5eead4;
+}
+
+:global([data-theme="dark"]) .stream-tool-counts span.failed {
+  color: #fca5a5;
+}
+
+:global([data-theme="dark"]) .global-stream-dispatch article {
+  border-color: rgba(56, 189, 248, 0.18);
+  background: rgba(2, 6, 23, 0.62);
+}
+
+:global([data-theme="dark"]) .global-stream-dispatch :is(summary strong, article strong, .global-stream-dispatch-next) {
+  color: #93c5fd;
+}
+
+:global([data-theme="dark"]) .global-stream-dispatch :is(summary small, p, article span, article small, article em) {
+  color: #cbd5e1;
+}
+
 .event-icon {
   width: 24px;
   height: 24px;
@@ -2382,6 +3623,45 @@ const handleGitCommitCardSubmit = async (msg) => {
 @keyframes streamPulse {
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.35); opacity: 0.68; }
+}
+
+@media (max-width: 620px) {
+  .global-stream-card {
+    min-width: 0;
+  }
+
+  .global-stream-current-todo {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .global-stream-progress-refresh {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .global-stream-progress-refresh em {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+  }
+
+  .global-stream-tool-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stream-todo-progress {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+    grid-auto-flow: column;
+    align-items: center;
+  }
+
+  .stream-tool-counts {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+    max-width: none;
+  }
 }
 
 .bubble-time {
@@ -2472,7 +3752,7 @@ const handleGitCommitCardSubmit = async (msg) => {
   color: rgba(255, 255, 255, 0.7);
 }
 
-/* === 系统高阶回执卡片 (System Receipt Card) === */
+/* === 处理结果卡片 (System Result Card) === */
 .system-receipt-card {
   border-left: 4px solid #6366f1;
   background: rgba(99, 102, 241, 0.03);

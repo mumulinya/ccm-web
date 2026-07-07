@@ -1,4 +1,14 @@
 import { type CollabCtx } from "../collaboration/collaboration";
+export declare function runGlobalAgentHistorySyncSelfTest(): {
+    pass: boolean;
+    checks: {
+        preservesType: boolean;
+        preservesRun: boolean;
+        preservesDeliveryReport: boolean;
+        mergesRicherMetadata: any;
+        preservesProgressCheckpoints: boolean;
+    };
+};
 export declare function runGlobalAgentIntentSelfTest(): {
     passed: boolean;
     results: ({
@@ -34,6 +44,30 @@ export declare function runGlobalAgentIntentSelfTest(): {
     localGroupDispatchUsesSchema: boolean;
     fallbackCronCannotWrite: boolean;
     ambiguousFallbackCannotWrite: boolean;
+    fallbackObservationFriendly: boolean;
+    globalHistoryMergePreservesBackendCompletion: boolean;
+    statusChecks: {
+        globalStatusFollowupRecognized: boolean;
+        globalStatusFollowupAvoidsManagementMutation: boolean;
+        globalStatusSummaryFriendly: boolean;
+        globalStatusShowsChildAgentWaitingState: boolean;
+        globalStatusIncludesDirectDispatch: boolean;
+        globalStatusShowsDirectDispatchContinuation: boolean;
+        globalStatusShowsPickupSummary: boolean;
+        globalStatusShowsProgressRefreshSummary: boolean;
+        globalStatusHidesProtocol: boolean;
+    };
+    directDispatchChecks: {
+        groupVisibleWorkOrderFriendly: boolean;
+        groupVisibleWorkOrderNoProtocolLeak: boolean;
+        groupDirectDispatchSaysAcceptedNotDone: boolean;
+        groupDirectDispatchUsesFriendlyReplyLabel: boolean;
+        projectInternalWorkOrderSelfContained: boolean;
+        directDispatchHandoffSummary: boolean;
+        verificationOnlyCanAvoidCodeChanges: boolean;
+        dispatchLaunchUiFriendly: boolean;
+        dispatchLaunchUiHidesProtocol: boolean;
+    };
     visibleReply: string;
 };
 export declare function resumeGlobalAgentLoopsForServer(ctx: CollabCtx, port: number): Promise<{

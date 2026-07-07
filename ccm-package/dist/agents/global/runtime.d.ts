@@ -92,7 +92,7 @@ export declare function runGlobalAgentHooks(phase: HookPhase, input: {
         id: string;
         phase: HookPhase;
         tool: string;
-        effect: "annotate" | "block";
+        effect: "block" | "annotate";
         message: string;
         at: string;
     }[];

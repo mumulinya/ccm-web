@@ -956,7 +956,7 @@ onUnmounted(() => {
               <div v-if="dailyDevSmokeStatus?.evidence" class="rehearsal-steps mt-2">
                 <span :class="dailyDevSmokeStatus.evidence.task_done ? 'ok' : 'fail'">{{ dailyDevSmokeStatus.evidence.task_done ? '通过' : '缺失' }} · 任务完成</span>
                 <span :class="dailyDevSmokeStatus.evidence.file_exists ? 'ok' : 'fail'">{{ dailyDevSmokeStatus.evidence.file_exists ? '通过' : '缺失' }} · smoke 文件</span>
-                <span :class="dailyDevSmokeStatus.evidence.has_done_receipt ? 'ok' : 'fail'">{{ dailyDevSmokeStatus.evidence.has_done_receipt ? '通过' : '缺失' }} · 子 Agent 回执</span>
+                <span :class="dailyDevSmokeStatus.evidence.has_done_receipt ? 'ok' : 'fail'">{{ dailyDevSmokeStatus.evidence.has_done_receipt ? '通过' : '缺失' }} · 子 Agent 结果说明</span>
               </div>
             </div>
           </div>

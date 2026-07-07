@@ -90,13 +90,13 @@
         "task_id": "task-replay-login",
         "decision": {
           "selected_actions": ["read_group_context", "create_project_task", "dispatch_child_agent", "read_child_agent_receipts", "generate_final_reply"],
-          "dispatch_policy": { "action": "delegate", "reason": "明确修复请求", "nextStep": "等待子 Agent 回执" },
+          "dispatch_policy": { "action": "delegate", "reason": "明确修复请求", "nextStep": "等待子 Agent 结果说明" },
           "reason": "明确修复请求"
         },
         "display_stream": {
           "schema": "ccm-streamlined-display-v1",
           "user_visible_text": "已把明确需求转成项目任务，并进入执行队列。",
-          "tool_use_summary": { "type": "streamlined_tool_use_summary", "tool_summary": "读取/检查 2 项，协作通道 1 个，回执 1 条" },
+          "tool_use_summary": { "type": "streamlined_tool_use_summary", "tool_summary": "读取/检查 2 项，协作通道 1 个，结果说明 1 条" },
           "technical_details": [
             { "id": "troubleshooting", "title": "排障摘要", "items": [] },
             { "id": "records", "title": "完整记录", "items": [{ "label": "Trace", "value": "trace-replay-task" }, { "label": "动作", "value": "read_group_context, create_project_task, dispatch_child_agent" }] }
@@ -114,7 +114,7 @@
             { "id": "understand_intent", "content": "确认需求目标和涉及范围", "activeForm": "正在确认需求目标", "status": "completed" },
             { "id": "create_project_task", "content": "创建可跟踪的项目任务卡", "activeForm": "正在创建项目任务卡", "status": "completed" },
             { "id": "dispatch_child_agent", "content": "派发给 1 个子 Agent 执行", "activeForm": "正在派发子 Agent", "status": "in_progress", "actions": [{ "id": "cancel", "label": "取消任务", "kind": "cancel", "tone": "danger" }] },
-            { "id": "read_child_agent_receipts", "content": "等待子 Agent 回执，再由主 Agent 验收", "activeForm": "正在等待子 Agent 回执", "status": "pending" },
+            { "id": "read_child_agent_receipts", "content": "等待子 Agent 结果说明，再由主 Agent 验收", "activeForm": "正在等待子 Agent 结果说明", "status": "pending" },
             { "id": "verify_and_reply", "content": "汇总修改、验证结果和风险，生成最终回复", "activeForm": "正在验收并生成最终回复", "status": "pending" }
           ]
         },
@@ -141,7 +141,7 @@
           "display_stream": {
             "schema": "ccm-streamlined-display-v1",
             "user_visible_text": "项目任务正在执行，完成修改后会自动运行检查。",
-            "tool_use_summary": { "type": "streamlined_tool_use_summary", "tool_summary": "读取/检查 2 项，协作通道 1 个，回执 1 条" },
+            "tool_use_summary": { "type": "streamlined_tool_use_summary", "tool_summary": "读取/检查 2 项，协作通道 1 个，结果说明 1 条" },
             "technical_details": [
               { "id": "troubleshooting", "title": "排障摘要", "items": [] },
               { "id": "records", "title": "完整记录", "items": [{ "label": "Trace", "value": "trace-replay-task" }, { "label": "执行", "value": "exec-replay-1" }, { "label": "会话", "value": "session-replay-1" }] }
@@ -159,7 +159,7 @@
             "display_stream": {
               "schema": "ccm-streamlined-display-v1",
               "user_visible_text": "项目任务正在执行，完成修改后会自动运行检查。",
-              "tool_use_summary": { "type": "streamlined_tool_use_summary", "tool_summary": "读取/检查 2 项，协作通道 1 个，回执 1 条" }
+              "tool_use_summary": { "type": "streamlined_tool_use_summary", "tool_summary": "读取/检查 2 项，协作通道 1 个，结果说明 1 条" }
             }
           }
         }

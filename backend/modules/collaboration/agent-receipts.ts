@@ -5,6 +5,36 @@ function normalizeReceiptStringArray(value: any) {
   return value.map((item: any) => String(item || "").trim()).filter(Boolean);
 }
 
+function normalizeIndependentReviewEntries(value: any) {
+  const rawItems = Array.isArray(value) ? value : (value ? [value] : []);
+  return rawItems.map((raw: any) => {
+    const item = typeof raw === "string" ? { summary: raw } : raw;
+    if (!item || typeof item !== "object") return null;
+    return {
+      reviewer: String(item.reviewer || item.agent || item.by || item.reviewedBy || item.reviewed_by || "").trim(),
+      verdict: String(item.verdict || item.status || item.result || "").trim().toLowerCase(),
+      summary: compactMemoryText(item.summary || item.note || item.comment || item.message || "", 800),
+      evidence: normalizeReceiptStringArray(item.evidence || item.checks || item.findings || item.filesReviewed || item.files_reviewed),
+    };
+  }).filter((item: any) => item && (item.reviewer || item.verdict || item.summary || item.evidence.length)).slice(0, 8);
+}
+
+function normalizePostCompactCandidateUsageEntries(value: any) {
+  const rawItems = Array.isArray(value) ? value : (value ? [value] : []);
+  return rawItems.map((raw: any) => {
+    const item = typeof raw === "string" ? { value: raw } : raw;
+    if (!item || typeof item !== "object") return null;
+    return {
+      gateId: String(item.gateId || item.gate_id || item.reinjectionGateId || item.reinjection_gate_id || "").trim(),
+      candidateId: String(item.candidateId || item.candidate_id || item.id || "").trim(),
+      kind: String(item.kind || item.type || "").trim(),
+      value: compactMemoryText(item.value || item.text || item.summary || "", 600),
+      usageState: String(item.usageState || item.usage_state || item.status || item.state || "").trim().toLowerCase(),
+      reason: compactMemoryText(item.reason || item.note || item.evidence || "", 500),
+    };
+  }).filter((item: any) => item && (item.gateId || item.candidateId || item.value || item.usageState)).slice(0, 80);
+}
+
 function uniqueReceiptStrings(...lists: any[]) {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -74,6 +104,14 @@ function normalizeAgentReceipt(raw: any, agent: string) {
   if (!raw.ccm_receipt && !allowed.has(status)) return null;
   const memoryUsed = normalizeReceiptStringArray(raw.memoryUsed || raw.memory_used || raw.memoryReferences || raw.memory_references);
   const memoryIgnored = normalizeReceiptStringArray(raw.memoryIgnored || raw.memory_ignored);
+  const postCompactCandidateUsage = normalizePostCompactCandidateUsageEntries(
+    raw.postCompactCandidateUsage
+      || raw.post_compact_candidate_usage
+      || raw.postCompactCandidateUsageRows
+      || raw.post_compact_candidate_usage_rows
+      || raw.candidateUsage
+      || raw.candidate_usage
+  );
   const ackRaw = raw.ack || raw.ACK || raw.acknowledgement || raw.acknowledgment || null;
   const ack = ackRaw && typeof ackRaw === "object" ? {
     understoodGoal: String(ackRaw.understoodGoal || ackRaw.goal || ackRaw.summary || "").trim(),
@@ -94,6 +132,16 @@ function normalizeAgentReceipt(raw: any, agent: string) {
       note: compactMemoryText(item.note || item.summary || "", 300),
     })).slice(0, 12)
     : [];
+  const independentReview = normalizeIndependentReviewEntries(
+    raw.independentReview
+      || raw.independent_review
+      || raw.codeReview
+      || raw.code_review
+      || raw.adversarialReview
+      || raw.adversarial_review
+      || raw.verifierReview
+      || raw.verifier_review
+  );
   return {
     agent,
     status: allowed.has(status) ? status : "partial",
@@ -105,10 +153,14 @@ function normalizeAgentReceipt(raw: any, agent: string) {
     needs: normalizeReceiptStringArray(raw.needs || raw.followUps || raw.follow_ups),
     ack,
     contractChanges,
+    independentReview,
+    reviewer: String(raw.reviewer || raw.reviewed_by || raw.reviewedBy || raw.verifier || "").trim(),
+    role: String(raw.role || raw.agent_role || raw.type || "").trim(),
     consumedInjectionIds: normalizeReceiptStringArray(raw.consumedInjectionIds || raw.consumed_injection_ids || raw.contractInjectionConsumed || raw.contract_injection_consumed),
     contractConsumption: Array.isArray(raw.contractConsumption || raw.contract_consumption) ? (raw.contractConsumption || raw.contract_consumption).filter((item: any) => item && typeof item === "object").slice(0, 20) : [],
     memoryUsed,
     memoryIgnored,
+    postCompactCandidateUsage,
   };
 }
 
@@ -144,6 +196,14 @@ export function getReceiptAssignmentStatus(response: string, receipt: any) {
 
 export function formatAgentReceiptForReview(receipt: any) {
   if (!receipt) return "结构化回执：缺失";
+  const independentReview = normalizeIndependentReviewEntries(receipt.independentReview || receipt.independent_review || receipt.codeReview || receipt.code_review);
+  const independentReviewLine = independentReview.length
+    ? independentReview.map((item: any) => [
+      item.reviewer || "reviewer",
+      item.verdict || "reviewed",
+      item.summary || item.evidence.join("；"),
+    ].filter(Boolean).join(" - ")).join("；")
+    : "无";
   return [
     "结构化回执：",
     `- 状态：${receipt.status}`,
@@ -151,8 +211,10 @@ export function formatAgentReceiptForReview(receipt: any) {
     `- 动作：${receipt.actions.length ? receipt.actions.join("；") : "未填写"}`,
     `- 文件：${receipt.filesChanged.length ? receipt.filesChanged.join("；") : "无"}`,
     `- 验证：${receipt.verification.length ? receipt.verification.join("；") : "未提供"}`,
+    `- 独立复核：${independentReviewLine}`,
     `- 使用记忆：${receipt.memoryUsed?.length ? receipt.memoryUsed.join("；") : "未声明"}`,
     `- 未用记忆：${receipt.memoryIgnored?.length ? receipt.memoryIgnored.join("；") : "无"}`,
+    `- 压缩候选：${receipt.postCompactCandidateUsage?.length ? receipt.postCompactCandidateUsage.map((item: any) => `${item.candidateId || item.value || "candidate"}=${item.usageState || "unknown"}`).join("；") : "未声明"}`,
     `- 阻塞：${receipt.blockers.length ? receipt.blockers.join("；") : "无"}`,
     `- 需要补充：${receipt.needs.length ? receipt.needs.join("；") : "无"}`,
   ].join("\n");

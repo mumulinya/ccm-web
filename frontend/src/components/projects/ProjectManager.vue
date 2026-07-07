@@ -920,9 +920,16 @@ const selectFolder = () => {
 // 项目工具配置
 const projectTools = ref({ mcp: [], skill: [] })
 const allTools = ref({ mcp: [], skill: [] })
+const projectToolAudit = ref(null)
+const projectAuthorizationReadiness = ref(null)
 const projectVerificationCommands = ref('')
 const inferredProjectVerificationCommands = ref([])
 const projectVerificationSource = ref('missing')
+
+const normalizeProjectTools = (tools = {}) => ({
+  mcp: Array.from(new Set((Array.isArray(tools.mcp) ? tools.mcp : []).map(item => String(item || '').trim()).filter(Boolean))),
+  skill: Array.from(new Set((Array.isArray(tools.skill) ? tools.skill : []).map(item => String(item || '').trim()).filter(Boolean)))
+})
 
 const loadProjectTools = async () => {
   if (!currentProject.value) return
@@ -930,7 +937,9 @@ const loadProjectTools = async () => {
   // 加载项目工具配置
   const projRes = await fetch(`/api/projects/tools?project=${encodeURIComponent(currentProject.value)}`)
   const projData = await projRes.json()
-  projectTools.value = projData.tools || { mcp: [], skill: [] }
+  projectTools.value = normalizeProjectTools(projData.tools)
+  projectToolAudit.value = projData.tool_audit || null
+  projectAuthorizationReadiness.value = projData.authorization_readiness || null
   projectVerificationCommands.value = Array.isArray(projData.verification_commands)
     ? projData.verification_commands.join('\n')
     : ''
@@ -944,19 +953,15 @@ const loadProjectTools = async () => {
   projectForbiddenPaths.value = Array.isArray(projData.forbidden_paths) ? projData.forbidden_paths.join('\n') : ''
   projectDeliveryContract.value = projData.delivery_contract || ''
 
-  // 加载所有可用工具
-  const mcpRes = await fetch('/api/mcp')
-  const mcpData = await mcpRes.json()
-  allTools.value.mcp = mcpData.tools || []
-
-  const skillRes = await fetch('/api/skills')
-  const skillData = await skillRes.json()
-  allTools.value.skill = skillData.skills || []
+  const options = await fetch('/api/tools/authorization-options').then(r => r.json()).catch(() => ({ mcp: [], skill: [] }))
+  allTools.value.mcp = options.mcp || []
+  allTools.value.skill = options.skill || []
 
   showTools.value = true
 }
 
 const saveProjectTools = async () => {
+  projectTools.value = normalizeProjectTools(projectTools.value)
   const verificationCommands = projectVerificationCommands.value
     .split(/\r?\n|[；;]/)
     .map(item => item.trim())
@@ -981,8 +986,15 @@ const saveProjectTools = async () => {
   })
   const data = await res.json()
   if (data.success) {
+    projectTools.value = normalizeProjectTools(data.tools)
+    projectToolAudit.value = data.tool_audit || null
+    projectAuthorizationReadiness.value = data.authorization_readiness || null
     showTools.value = false
-    toast.success('工具配置已保存')
+    if (data.authorization_readiness && data.authorization_readiness.dispatchReady === false) {
+      toast.warning('工具配置已保存，但有授权项当前不可用')
+    } else {
+      toast.success('工具配置已保存')
+    }
   } else {
     toast.error('保存失败: ' + (data.error || '未知错误'))
   }
@@ -1007,13 +1019,18 @@ const updateProjectToolField = ({ field, value }) => {
 }
 
 const toggleProjectTool = (type, name) => {
-  if (!projectTools.value[type]) projectTools.value[type] = []
-  const idx = projectTools.value[type].indexOf(name)
-  if (idx >= 0) {
-    projectTools.value[type].splice(idx, 1)
+  const normalized = normalizeProjectTools(projectTools.value)
+  const list = normalized[type] || []
+  const index = list.indexOf(name)
+  if (index >= 0) {
+    list.splice(index, 1)
   } else {
-    projectTools.value[type].push(name)
+    list.push(name)
+    if (type === 'mcp' && !String(name).includes('/')) {
+      normalized.mcp = normalized.mcp.filter(item => item === name || !item.startsWith(`${name}/`))
+    }
   }
+  projectTools.value = normalized
 }
 
 // 项目共享文件
@@ -1353,6 +1370,8 @@ const handleKeydown = async (e) => {
       :project-name="currentProject"
       :all-tools="allTools"
       :project-tools="projectTools"
+      :tool-audit="projectToolAudit"
+      :authorization-readiness="projectAuthorizationReadiness"
       :responsibility="projectResponsibility"
       :capabilities="projectCapabilities"
       :writable-paths="projectWritablePaths"

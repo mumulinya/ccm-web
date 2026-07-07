@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AGENTS = exports.SKILLS_DIR = exports.MCP_DIR = void 0;
+exports.AGENTS = exports.SKILL_PACKAGES_DIR = exports.SKILLS_DIR = exports.MCP_DIR = void 0;
 exports.getConfigs = getConfigs;
 exports.getConfigInfo = getConfigInfo;
 exports.isRunning = isRunning;
@@ -91,11 +91,14 @@ const RAG_METADATA_FILE = path.join(CCM_DIR, "knowledge-metadata.json");
 // === 本地工具和技能目录 ===
 exports.MCP_DIR = path.join(CCM_DIR, "mcp");
 exports.SKILLS_DIR = path.join(CCM_DIR, "skills");
+exports.SKILL_PACKAGES_DIR = path.join(CCM_DIR, "skill-packages");
 // 确保基础目录存在
 if (!fs.existsSync(exports.MCP_DIR))
     fs.mkdirSync(exports.MCP_DIR, { recursive: true });
 if (!fs.existsSync(exports.SKILLS_DIR))
     fs.mkdirSync(exports.SKILLS_DIR, { recursive: true });
+if (!fs.existsSync(exports.SKILL_PACKAGES_DIR))
+    fs.mkdirSync(exports.SKILL_PACKAGES_DIR, { recursive: true });
 function writeJsonAtomic(file, value) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const temp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 7)}.tmp`;
@@ -206,7 +209,7 @@ function loadMcpTools() {
         const files = fs.readdirSync(exports.MCP_DIR).filter(f => f.endsWith('.json'));
         return files.map(f => {
             try {
-                const content = JSON.parse(fs.readFileSync(path.join(exports.MCP_DIR, f), 'utf-8'));
+                const content = (0, credential_store_1.resolveObjectSecrets)(JSON.parse(fs.readFileSync(path.join(exports.MCP_DIR, f), 'utf-8')));
                 return { ...content, filename: f };
             }
             catch {
@@ -220,7 +223,8 @@ function loadMcpTools() {
 }
 function saveMcpTool(tool) {
     const filename = tool.name.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
-    fs.writeFileSync(path.join(exports.MCP_DIR, filename), JSON.stringify(tool, null, 2));
+    const protectedTool = (0, credential_store_1.protectObjectSecrets)(tool, `mcp-${filename.replace(/\.json$/i, "")}`);
+    writeJsonAtomic(path.join(exports.MCP_DIR, filename), protectedTool);
 }
 function deleteMcpTool(name) {
     const filename = name.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
@@ -248,11 +252,22 @@ function loadSkills() {
 }
 function saveSkill(skill) {
     const filename = skill.name.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
-    fs.writeFileSync(path.join(exports.SKILLS_DIR, filename), JSON.stringify(skill, null, 2));
+    writeJsonAtomic(path.join(exports.SKILLS_DIR, filename), skill);
 }
 function deleteSkill(name) {
     const filename = name.replace(/[^a-zA-Z0-9-_]/g, '_') + '.json';
     const filePath = path.join(exports.SKILLS_DIR, filename);
+    try {
+        if (fs.existsSync(filePath)) {
+            const skill = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+            const packagePath = String(skill?.packagePath || "");
+            const relative = packagePath ? path.relative(path.resolve(exports.SKILL_PACKAGES_DIR), path.resolve(packagePath)) : "";
+            if (packagePath && relative && !relative.startsWith("..") && !path.isAbsolute(relative) && fs.existsSync(packagePath)) {
+                fs.rmSync(packagePath, { recursive: true, force: true });
+            }
+        }
+    }
+    catch { }
     if (fs.existsSync(filePath))
         fs.unlinkSync(filePath);
 }

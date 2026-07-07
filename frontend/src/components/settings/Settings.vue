@@ -960,7 +960,7 @@ onUnmounted(() => {
                     <li>飞书应用需要开启“机器人”能力；</li>
                     <li>在“事件与回调”中添加 <code>im.message.receive_v1</code>，并选择 WebSocket 长连接模式；</li>
                     <li>把机器人加入目标群，在群里 @ 控制机器人发送需求；</li>
-                    <li>执行回执仍由上方通知机器人 Webhook 统一推送。</li>
+                    <li>执行结果通知仍由上方通知机器人 Webhook 统一推送。</li>
                   </ul>
                 </div>
               </section>

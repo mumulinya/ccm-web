@@ -1,6 +1,9 @@
 import { compactMemoryText } from "./memory";
 import { checkTaskFailure, formatAgentReceiptForReview } from "./agent-receipts";
 
+const TASK_NOTIFICATION_INTERNAL_TEXT_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|<\s*\/?\s*task-notification|receipt-status|task-id|WorkerContextPacket|trace_id|session_id|native_session|scratchpad|raw\s+receipt|raw\s+payload|Worker\s+completed/i;
+const TASK_NOTIFICATION_XML_TAG_PATTERN = /<\/?(?:task-notification|task-id|status|receipt-status|summary|result|usage|duration_ms|total_tokens|tool_uses)>/gi;
+
 function escapeTaskNotificationText(value: any) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -25,16 +28,72 @@ function normalizeTaskNotificationStatus(text: string, receipt: any = null) {
   return "completed";
 }
 
+function buildTaskNotificationStatusSummary(agent: string, status: string, receiptStatus = "") {
+  const name = String(agent || "子 Agent").trim() || "子 Agent";
+  const normalizedStatus = String(status || "").trim();
+  const normalizedReceiptStatus = String(receiptStatus || "").trim();
+  if (normalizedStatus === "missing_receipt" || normalizedReceiptStatus === "missing") {
+    return `${name} 已返回结果，但缺少可验收的结构化结果说明。`;
+  }
+  if (normalizedStatus === "failed" || normalizedReceiptStatus === "failed") {
+    return `${name} 的执行没有通过，主 Agent 会根据缺口继续处理。`;
+  }
+  if (normalizedStatus === "blocked" || ["blocked", "needs_info"].includes(normalizedReceiptStatus)) {
+    return `${name} 遇到阻塞，需要补充信息或调整后继续。`;
+  }
+  if (normalizedStatus === "partial" || normalizedReceiptStatus === "partial") {
+    return `${name} 只完成了部分工作，主 Agent 会继续跟进剩余缺口。`;
+  }
+  return `${name} 已提交结果说明，主 Agent 正在汇总验收。`;
+}
+
+export function sanitizeTaskNotificationUserText(value: any, fallback = "", max = 600) {
+  const fallbackText = compactMemoryText(fallback || "子 Agent 已返回结果，主 Agent 正在汇总验收。", max);
+  const raw = String(value || "").trim();
+  if (!raw) return fallbackText;
+  const normalizedRaw = raw
+    .replace(/Worker completed without\s+CCM_AGENT_RECEIPT/gi, "子 Agent 已返回结果，但缺少可验收的结构化结果说明");
+  const beforeReceipt = normalizedRaw.split(/CCM_AGENT_RECEIPT/i)[0].trim();
+  const source = beforeReceipt && beforeReceipt.length >= 8 ? beforeReceipt : normalizedRaw;
+  const text = compactMemoryText(source, max)
+    .replace(TASK_NOTIFICATION_XML_TAG_PATTERN, " ")
+    .replace(/Worker completed without\s+CCM_AGENT_RECEIPT/gi, "子 Agent 已返回结果，但缺少可验收的结构化结果说明")
+    .replace(/CCM_AGENT_RECEIPT/gi, "结构化结果说明")
+    .replace(/CCM_AGENT_REQUESTS/gi, "内部协作请求")
+    .replace(/task-notification/gi, "子 Agent 完成通知")
+    .replace(/receipt-status/gi, "结果说明状态")
+    .replace(/task-id/gi, "子 Agent")
+    .replace(/\bWorker\b/g, "子 Agent")
+    .replace(/WorkerContextPacket/gi, "任务上下文包")
+    .replace(/\b(?:trace_id|session_id|native_session|scratchpad|runtime kernel|workflow_timeline)\s*[:=]\s*[\w.-]+/gi, " ")
+    .replace(/trace_id|session_id|native_session|scratchpad/gi, "技术详情")
+    .replace(/raw\s+receipt|raw\s+payload/gi, "底层执行数据")
+    .replace(/回执/g, "结果说明")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([。！？；，、,.!?;:])/g, "$1")
+    .replace(/([。！？])\s*([。！？])+/g, "$1")
+    .trim();
+  if (!text) return fallbackText;
+  return TASK_NOTIFICATION_INTERNAL_TEXT_PATTERN.test(text) ? fallbackText : compactMemoryText(text, max);
+}
+
+function buildTaskNotificationSummary(agent: string, text: string, receipt: any, status: string) {
+  const fallback = buildTaskNotificationStatusSummary(agent, status, receipt?.status || "missing");
+  if (!receipt) return fallback;
+  return sanitizeTaskNotificationUserText(receipt.summary || text, fallback, 240);
+}
+
 function buildTaskNotification(agent: string, text: string, receipt: any = null) {
   const status = normalizeTaskNotificationStatus(text, receipt);
-  const summary = receipt?.summary || (status === "missing_receipt" ? "Worker completed without CCM_AGENT_RECEIPT" : compactMemoryText(text, 240));
+  const summary = buildTaskNotificationSummary(agent, text, receipt, status);
+  const result = sanitizeTaskNotificationUserText(text, summary, 1800);
   return [
     "<task-notification>",
     `<task-id>${escapeTaskNotificationText(agent)}</task-id>`,
     `<status>${escapeTaskNotificationText(status)}</status>`,
     `<receipt-status>${escapeTaskNotificationText(receipt?.status || "missing")}</receipt-status>`,
     `<summary>${escapeTaskNotificationText(summary)}</summary>`,
-    `<result>${escapeTaskNotificationText(compactMemoryText(text, 1800))}</result>`,
+    `<result>${escapeTaskNotificationText(result)}</result>`,
     `<usage><duration_ms>0</duration_ms></usage>`,
     "</task-notification>",
   ].join("\n");
@@ -51,12 +110,18 @@ export function parseTaskNotificationsFromText(text: string) {
   const blocks = [...raw.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/gi)];
   return blocks.map((match) => {
     const block = `<task-notification>${match[1]}</task-notification>`;
+    const taskId = extractTaskNotificationTag(block, "task-id");
+    const status = extractTaskNotificationTag(block, "status");
+    const receiptStatus = extractTaskNotificationTag(block, "receipt-status");
+    const fallback = buildTaskNotificationStatusSummary(taskId, status, receiptStatus);
+    const summary = sanitizeTaskNotificationUserText(extractTaskNotificationTag(block, "summary"), fallback, 600);
+    const result = sanitizeTaskNotificationUserText(extractTaskNotificationTag(block, "result"), summary || fallback, 1000);
     return {
-      task_id: extractTaskNotificationTag(block, "task-id"),
-      status: extractTaskNotificationTag(block, "status"),
-      receipt_status: extractTaskNotificationTag(block, "receipt-status"),
-      summary: compactMemoryText(extractTaskNotificationTag(block, "summary"), 600),
-      result: compactMemoryText(extractTaskNotificationTag(block, "result"), 1000),
+      task_id: taskId,
+      status,
+      receipt_status: receiptStatus,
+      summary,
+      result,
     };
   }).filter((item: any) => item.task_id || item.status || item.summary);
 }
@@ -83,4 +148,39 @@ export function formatCollectedAgentOutput(agent: string, text: string, receipt:
     "",
     formatAgentReceiptForReview(receipt),
   ].join("\n");
+}
+
+export function runTaskNotificationDisplaySelfTest() {
+  const missingReceiptOutput = formatCollectedAgentOutput("web-app", "已处理页面入口，但未提交回执。", null);
+  const completedOutput = formatCollectedAgentOutput("backend-service", "已实现退款审核接口。\n\nCCM_AGENT_RECEIPT {\"status\":\"done\"}", {
+    agent: "backend-service",
+    status: "done",
+    summary: "完成退款审核接口",
+    actions: ["实现 POST /api/refunds/:id/audit"],
+    filesChanged: ["src/refunds/audit.ts"],
+    verification: ["npm test passed"],
+    blockers: [],
+    needs: [],
+  });
+  const missing: any = parseTaskNotificationsFromText(missingReceiptOutput)[0] || {};
+  const completed: any = parseTaskNotificationsFromText(completedOutput)[0] || {};
+  const visiblePayload = JSON.stringify([
+    { summary: missing.summary, result: missing.result },
+    { summary: completed.summary, result: completed.result },
+  ]);
+  const checks = {
+    keepsInternalEnvelopeForCoordinator: missingReceiptOutput.includes("<task-notification>") && missingReceiptOutput.includes("<receipt-status>"),
+    missingReceiptSummaryFriendly: String(missing.summary || "").includes("结构化结果说明") && String(missing.summary || "").includes("web-app"),
+    missingReceiptResultKeepsUsefulText: String(missing.result || "").includes("已处理页面入口"),
+    completedSummaryPreserved: completed.summary === "完成退款审核接口",
+    visibleNotificationTextHidesProtocol: !/CCM_AGENT_RECEIPT|task-notification|receipt-status|Worker completed|trace_id|session_id|raw receipt|raw payload|回执/i.test(visiblePayload),
+  };
+  return {
+    pass: Object.values(checks).every(Boolean),
+    checks,
+    samples: {
+      missing,
+      completed,
+    },
+  };
 }

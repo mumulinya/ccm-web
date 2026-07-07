@@ -1,0 +1,72 @@
+import { BrowserCheckSpec, BrowserProbeTemplateSpec, HttpCheckSpec, TestAgentOptions, TestAgentRequiredCheck, TestAgentWorkOrder } from "./types";
+export interface TestAgentHandoffProject {
+    name?: string;
+    workDir?: string;
+    work_dir?: string;
+    runCommand?: string;
+    run_command?: string;
+    devServerCommand?: string;
+    dev_server_command?: string;
+    targetUrl?: string;
+    target_url?: string;
+    startupUrl?: string;
+    startup_url?: string;
+    startupTimeoutMs?: number;
+    startup_timeout_ms?: number;
+    env?: Record<string, string | number | boolean | undefined>;
+    changedFiles?: string[];
+    changed_files?: string[];
+    completedTasks?: string[];
+    completed_tasks?: string[];
+    acceptanceCriteria?: string[];
+    acceptance_criteria?: string[];
+    requiredChecks?: TestAgentRequiredCheck[];
+    required_checks?: TestAgentRequiredCheck[];
+    verificationCommands?: string[];
+    verification_commands?: string[];
+    httpChecks?: HttpCheckSpec[];
+    http_checks?: HttpCheckSpec[];
+    apiChecks?: HttpCheckSpec[];
+    api_checks?: HttpCheckSpec[];
+    adversarialHttpChecks?: HttpCheckSpec[];
+    adversarial_http_checks?: HttpCheckSpec[];
+    adversarialApiChecks?: HttpCheckSpec[];
+    adversarial_api_checks?: HttpCheckSpec[];
+    browserChecks?: BrowserCheckSpec[];
+    browser_checks?: BrowserCheckSpec[];
+    adversarialBrowserChecks?: BrowserCheckSpec[];
+    adversarial_browser_checks?: BrowserCheckSpec[];
+    adversarialBrowserProbeTemplates?: BrowserProbeTemplateSpec[];
+    adversarial_browser_probe_templates?: BrowserProbeTemplateSpec[];
+    agentSummary?: string;
+    agent_summary?: string;
+    risks?: string[];
+}
+export interface TestAgentHandoff {
+    id?: string;
+    taskId?: string;
+    task_id?: string;
+    groupId?: string;
+    group_id?: string;
+    issuedBy?: string;
+    issued_by?: string;
+    originalUserGoal?: string;
+    original_user_goal?: string;
+    acceptanceCriteria?: string[];
+    acceptance_criteria?: string[];
+    completedTasks?: string[];
+    completed_tasks?: string[];
+    requiredChecks?: TestAgentRequiredCheck[];
+    required_checks?: TestAgentRequiredCheck[];
+    projects?: TestAgentHandoffProject[];
+    project?: TestAgentHandoffProject;
+    options?: TestAgentOptions;
+    metadata?: Record<string, any>;
+    completedByProjectAgents?: string[];
+    completed_by_project_agents?: string[];
+}
+export interface TestAgentBuiltWorkOrder {
+    workOrder: TestAgentWorkOrder;
+    warnings: string[];
+}
+export declare function buildTestAgentWorkOrderFromHandoff(input: TestAgentHandoff): TestAgentBuiltWorkOrder;

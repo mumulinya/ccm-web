@@ -80,7 +80,13 @@ export const UPLOAD_DIR = path.join(CCM_DIR, "uploads");
 export const GROUPS_FILE = path.join(CCM_DIR, "groups.json");
 export const GROUP_MESSAGES_DIR = path.join(CCM_DIR, "group-messages");
 export const GROUP_LOGS_FILE_SHARED = path.join(CCM_DIR, "group-logs.json");
-export const PUBLIC_DIR = path.resolve(__dirname, "..", "public");
+const publicDirCandidates = [
+  path.resolve(__dirname, "..", "..", "public"),
+  path.resolve(__dirname, "..", "..", "ccm-package", "public"),
+  path.resolve(__dirname, "..", "public"),
+];
+export const PUBLIC_DIR = publicDirCandidates.find(candidate => fs.existsSync(path.join(candidate, "index.html")))
+  || publicDirCandidates[0];
 
 // 业务级别配置文件路径
 export const METRICS_FILE = path.join(CCM_DIR, "metrics.json");

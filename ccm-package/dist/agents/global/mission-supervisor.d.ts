@@ -23,6 +23,7 @@ export interface GlobalMissionSupervisorRecord {
     last_snapshot?: any;
     actions: any[];
     incidents: any[];
+    last_continuation?: any;
     final_report?: any;
     final_notification_sent_at?: string;
     error?: string;

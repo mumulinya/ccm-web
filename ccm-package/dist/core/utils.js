@@ -152,7 +152,13 @@ exports.UPLOAD_DIR = path.join(exports.CCM_DIR, "uploads");
 exports.GROUPS_FILE = path.join(exports.CCM_DIR, "groups.json");
 exports.GROUP_MESSAGES_DIR = path.join(exports.CCM_DIR, "group-messages");
 exports.GROUP_LOGS_FILE_SHARED = path.join(exports.CCM_DIR, "group-logs.json");
-exports.PUBLIC_DIR = path.resolve(__dirname, "..", "public");
+const publicDirCandidates = [
+    path.resolve(__dirname, "..", "..", "public"),
+    path.resolve(__dirname, "..", "..", "ccm-package", "public"),
+    path.resolve(__dirname, "..", "public"),
+];
+exports.PUBLIC_DIR = publicDirCandidates.find(candidate => fs.existsSync(path.join(candidate, "index.html")))
+    || publicDirCandidates[0];
 // 业务级别配置文件路径
 exports.METRICS_FILE = path.join(exports.CCM_DIR, "metrics.json");
 exports.FEISHU_CONFIG_FILE = path.join(exports.CCM_DIR, "feishu-config.json");

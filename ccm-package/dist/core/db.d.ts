@@ -1,5 +1,6 @@
 export declare const MCP_DIR: string;
 export declare const SKILLS_DIR: string;
+export declare const SKILL_PACKAGES_DIR: string;
 export declare const AGENTS: {
     type: string;
     name: string;

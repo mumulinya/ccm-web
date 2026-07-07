@@ -11,12 +11,30 @@ export declare function upsertAgentQaItem(item: any): any;
 export declare function markExpiredAgentQaItems(groupId?: string): any[];
 export declare function getAgentQaItemsForGroup(groupId: string, limit?: number): any[];
 export declare function setAgentQaManualTakeover(id: string, reason?: string): any;
+export declare function buildAgentQaUserPreview(qa?: any, kind?: string): {
+    schema: string;
+    from: string;
+    to: string;
+    label: string;
+    status: string;
+    summary: string;
+    question: string;
+    answer: string;
+    next_action: string;
+    badges: string[];
+    display_policy: {
+        user_text_first: boolean;
+        technical_default_collapsed: boolean;
+        hide_internal_protocols: boolean;
+    };
+};
 export declare function buildAgentQaMessage(kind: "question" | "answer" | "resume", qa: any, content?: string): {
     id: string;
     role: string;
     agent: any;
     type: string;
-    content: any;
+    content: string;
+    display_content: string;
     timestamp: string;
     task_id: any;
     qa: any;

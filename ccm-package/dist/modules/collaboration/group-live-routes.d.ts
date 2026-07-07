@@ -30,16 +30,72 @@ type GroupLiveRoutesDeps = {
     runCoordinatorReviewLoop: (input: any) => Promise<any>;
     buildGroupContextPacket: (groupId: string, options?: any) => string;
     buildAgentToolContext: (ctx: any, group: any, project: string) => any;
-    prepareAgentRuntimeTools: (groupId: string, project: string, workDir: string, agentType: string, allowedTools: any, streamRes?: ServerResponse | null) => any;
+    prepareAgentRuntimeTools: (groupId: string, project: string, workDir: string, agentType: string, allowedTools: any, streamRes?: ServerResponse | null, options?: any) => any;
     getProjectExtraConfig: (project: string) => any;
+    buildAgentMemoryContextBundle: (groupId: string, project: string, message: string, options?: any) => any;
     buildAgentMemoryPacket: (groupId: string, project: string, message: string) => string;
     buildChildAgentDevelopmentContract: (project: string, message: string, options?: any) => string;
     buildProjectVerificationHints: (project: string, workDir: string) => any;
     buildAgentQaProtocolInstructions: (project: string, memberList: string) => string;
+    getAgentQaItemsForGroup: (groupId: string, limit?: number) => any[];
     handleAgentQaRequests: (input: any) => Promise<any>;
     runtimeToolSnapshotFromAudit: (audit: any, allowedTools: any) => any;
     extractActionableMentions: (text: string, group: any, sourceProject: string) => any[];
     extractAgentReceipt: (text: string, project: string) => any;
+};
+export declare function buildGroupClarificationSummary(input: {
+    group: any;
+    userMessage?: string;
+    responseText?: string;
+    dispatchPolicy?: any;
+    analysis?: any;
+    coordinator?: string;
+}): {
+    schema: string;
+    title: string;
+    status: string;
+    status_label: string;
+    headline: string;
+    question: string;
+    reason: string;
+    answer_suggestions: string[];
+    next_action: string;
+    coordinator: string;
+    display_policy: {
+        user_visible: boolean;
+        show_todo: boolean;
+        technical_details_default_collapsed: boolean;
+        hide_internal_protocols: boolean;
+    };
+};
+export declare function runGroupClarificationSummarySelfTest(): {
+    pass: boolean;
+    checks: {
+        schema: boolean;
+        waitsForUser: boolean;
+        questionVisible: boolean;
+        suggestionsVisible: boolean;
+        todoHidden: boolean;
+        hidesProtocol: boolean;
+    };
+    summary: {
+        schema: string;
+        title: string;
+        status: string;
+        status_label: string;
+        headline: string;
+        question: string;
+        reason: string;
+        answer_suggestions: string[];
+        next_action: string;
+        coordinator: string;
+        display_policy: {
+            user_visible: boolean;
+            show_todo: boolean;
+            technical_details_default_collapsed: boolean;
+            hide_internal_protocols: boolean;
+        };
+    };
 };
 export declare function handleGroupLiveRoutes(req: IncomingMessage, res: ServerResponse, parsed: UrlWithParsedQuery, ctx: any, deps: GroupLiveRoutesDeps): boolean;
 export {};

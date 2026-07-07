@@ -43,6 +43,8 @@ exports.ingestGlobalAgentConversation = ingestGlobalAgentConversation;
 exports.recallGlobalAgentMemory = recallGlobalAgentMemory;
 exports.buildGlobalAgentMemoryPacket = buildGlobalAgentMemoryPacket;
 exports.recordGlobalMissionMemory = recordGlobalMissionMemory;
+exports.recordGlobalDirectDispatchMemory = recordGlobalDirectDispatchMemory;
+exports.recordGlobalDirectDispatchRollbackMemory = recordGlobalDirectDispatchRollbackMemory;
 exports.getGlobalMemoryEvidence = getGlobalMemoryEvidence;
 exports.rebuildGlobalAgentMemory = rebuildGlobalAgentMemory;
 exports.getGlobalAgentMemoryPolicy = getGlobalAgentMemoryPolicy;
@@ -624,6 +626,95 @@ function recordGlobalMissionMemory(input) {
         (0, memory_control_center_1.recordMemoryOperation)({ action: "mission_writeback", scope: "global", scopeId: "global-agent", missionId: input.missionId || "", status: input.status || "", itemId: item.id, created: upsert.created, updated: upsert.updated });
     return item;
 }
+function recordGlobalDirectDispatchMemory(input) {
+    const memory = loadGlobalAgentMemory();
+    const task = input.task || {};
+    const report = input.report || task.delivery_summary || {};
+    const dispatchId = String(input.dispatchId || task.id || report.task_id || "").trim();
+    const userGoal = compact(input.userGoal || task.business_goal || task.title || report.goal || "", 900);
+    const changes = (report.files_modified || report.actual_file_changes || report.actual_file_change_paths || report.files || [])
+        .map((item) => typeof item === "string" ? item : item?.path || item?.file || "")
+        .filter(Boolean)
+        .slice(0, 20);
+    const verification = (report.verification_results || report.verification_executed || report.verification || [])
+        .map((item) => typeof item === "string" ? item : item?.command || item?.summary || JSON.stringify(item))
+        .filter(Boolean)
+        .slice(0, 20);
+    const risks = (report.risks || report.known_risks || report.remaining_risks || [])
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+        .slice(0, 10);
+    const remaining = (report.remaining_items || report.next_steps || report.blockers || [])
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+        .slice(0, 10);
+    const text = [
+        `全局直派群聊主 Agent 任务 ${dispatchId || "unknown"} 已通过验收：${report.headline || report.summary || task.status_detail || task.title || "任务已完成"}`,
+        userGoal ? `用户目标：${userGoal}` : "",
+        task.group_id || input.groupId ? `群聊：${task.group_id || input.groupId}` : "",
+        task.target_project || input.targetProject ? `主执行方：${task.target_project || input.targetProject}` : "",
+        changes.length ? `修改文件：${changes.join("、")}` : "",
+        verification.length ? `验证：${verification.join("；")}` : "",
+        risks.length ? `风险：${risks.join("；")}` : "风险：未发现已知风险",
+        remaining.length ? `遗留：${remaining.join("；")}` : "遗留：无",
+    ].filter(Boolean).join("\n");
+    const sourceMissionId = `global-direct:${dispatchId || sha(text, 12)}`;
+    const item = candidate("missions", text, {
+        id: input.messageId || `global-direct:${dispatchId || sha(text, 12)}`,
+        timestamp: input.at || now(),
+        source: input.source || "global-agent-direct-dispatch",
+        traceId: input.traceId || task.trace_id || "",
+        missionId: sourceMissionId,
+    }, input.sessionId || "global", {
+        importance: 90,
+        confidence: .98,
+        why: "全局 Agent 直接派发到群聊主 Agent 的最终交付结果",
+        howToApply: "用户追问历史任务、完成状态、验证证据或继续修改时，先用这条结论定位任务，再读取当前任务/代码状态复核。",
+    });
+    const upsert = item ? upsertItems(memory, [item]) : { created: 0, updated: 0 };
+    saveMemory(memory);
+    if (item)
+        (0, memory_control_center_1.recordMemoryOperation)({ action: "global_direct_dispatch_writeback", scope: "global", scopeId: "global-agent", sessionId: input.sessionId || "", missionId: sourceMissionId, status: "completed", itemId: item.id, created: upsert.created, updated: upsert.updated });
+    return item;
+}
+function recordGlobalDirectDispatchRollbackMemory(input) {
+    const memory = loadGlobalAgentMemory();
+    const task = input.task || {};
+    const report = input.report || task.delivery_summary || {};
+    const dispatchId = String(input.dispatchId || task.id || report.task_id || "").trim();
+    const sourceMissionId = `global-direct:${dispatchId || sha(input.messageId || input.at || now(), 12)}`;
+    const userGoal = compact(input.userGoal || task.business_goal || task.title || report.goal || "", 900);
+    const reason = compact(input.reason || task.rollback_reason || report.rollback_reason || "", 500);
+    const rollbackCount = Array.isArray(task.rollback_results || input.rollbackResults) ? (task.rollback_results || input.rollbackResults).length : Number(input.rollbackCount || 0);
+    for (const key of ["missions", "unresolved"]) {
+        memory[key] = (memory[key] || []).filter((existing) => existing.source?.missionId !== sourceMissionId);
+    }
+    const text = [
+        `全局直派群聊主 Agent 任务 ${dispatchId || "unknown"} 已安全撤销，不再视为完成或已交付。`,
+        userGoal ? `用户目标：${userGoal}` : "",
+        task.group_id || input.groupId ? `群聊：${task.group_id || input.groupId}` : "",
+        rollbackCount ? `已恢复检查点：${rollbackCount} 个` : "",
+        reason ? `撤销原因：${reason}` : "",
+        "后续处理：如用户继续这个需求，必须重新读取当前代码状态、重新规划并重新验收。",
+    ].filter(Boolean).join("\n");
+    const item = candidate("missions", text, {
+        id: input.messageId || `global-direct-rollback:${dispatchId || sha(text, 12)}`,
+        timestamp: input.at || now(),
+        source: input.source || "global-agent-direct-dispatch",
+        traceId: input.traceId || task.trace_id || "",
+        missionId: sourceMissionId,
+    }, input.sessionId || "global", {
+        importance: 92,
+        confidence: .99,
+        why: "全局直派任务的完成结论已经被安全撤销覆盖",
+        howToApply: "用户追问该任务是否完成时，先说明最近一次已撤销；继续执行前读取当前系统状态，不复用已撤销交付结论。",
+    });
+    const upsert = item ? upsertItems(memory, [item]) : { created: 0, updated: 0 };
+    saveMemory(memory);
+    if (item)
+        (0, memory_control_center_1.recordMemoryOperation)({ action: "global_direct_dispatch_rollback_writeback", scope: "global", scopeId: "global-agent", sessionId: input.sessionId || "", missionId: sourceMissionId, status: "reverted", itemId: item.id, created: upsert.created, updated: upsert.updated });
+    return item;
+}
 function getGlobalMemoryEvidence(input) {
     const sessionIds = input.sessionId ? [input.sessionId] : loadGlobalAgentMemory().sessions.map((item) => item.sessionId);
     const matches = [];
@@ -688,9 +779,27 @@ function runGlobalAgentMemorySelfTest() {
     recordGlobalMissionMemory({ missionId, sessionId: id, status: "waiting_user", report: { summary: "等待人工确认数据库迁移", remaining_items: ["确认迁移窗口"] } });
     const waitingWasStored = loadGlobalAgentMemory().unresolved.some((item) => item.source?.missionId === missionId);
     recordGlobalMissionMemory({ missionId, sessionId: id, status: "completed", report: { summary: "支付任务完成", completed_content: [{ target: "backend-api" }, { target: "frontend-app" }], files_modified: ["src/payment.ts"], verification_results: ["npm test"], risks: [], remaining_items: [] } });
+    const directDispatchId = `direct-${id}`;
+    recordGlobalDirectDispatchMemory({
+        dispatchId: directDispatchId,
+        sessionId: id,
+        source: "self-test",
+        task: { id: directDispatchId, title: "负责人筛选", business_goal: "给工单页面增加负责人筛选", group_id: "dev-group", target_project: "coordinator" },
+        report: { headline: "负责人筛选已完成", actual_file_changes: [{ path: "frontend/app.js" }], verification_executed: ["npm test"], risks: [], remaining_items: [] },
+    });
     const memory = loadGlobalAgentMemory();
     const packet = buildGlobalAgentMemoryPacket("继续之前全局 Agent 的授权边界和 Claude Code 压缩工作", { sessionId: id });
     const crossSessionPacket = buildGlobalAgentMemoryPacket("在新的会话继续之前的授权边界和 Claude Code 压缩工作", { sessionId: `${id}-new-session` });
+    const directDispatchPacket = buildGlobalAgentMemoryPacket("刚才群聊主 Agent 的负责人筛选任务完成了吗", { sessionId: `${id}-direct-dispatch` });
+    recordGlobalDirectDispatchRollbackMemory({
+        dispatchId: directDispatchId,
+        sessionId: id,
+        source: "self-test",
+        task: { id: directDispatchId, title: "负责人筛选", business_goal: "给工单页面增加负责人筛选", group_id: "dev-group", rollback_results: [{ checkpointId: "checkpoint-selftest" }], rollback_reason: "用户安全撤销" },
+        report: { headline: "负责人筛选已撤销", reverted: true },
+    });
+    const rollbackMemory = loadGlobalAgentMemory();
+    const directDispatchRollbackPacket = buildGlobalAgentMemoryPacket("刚才群聊主 Agent 的负责人筛选任务完成了吗", { sessionId: `${id}-direct-dispatch-rollback` });
     const ignoredPacket = buildGlobalAgentMemoryPacket("这次不要使用历史记忆，只按当前消息回答", { sessionId: `${id}-ignore` });
     const transcriptDisk = fs.readFileSync(transcriptFile(id), "utf-8");
     const archive = compacted.archive;
@@ -709,6 +818,11 @@ function runGlobalAgentMemorySelfTest() {
         privacyRejectsSecret: !MEMORY_ITEM_KEYS.flatMap(key => memory[key] || []).some((item) => item.text.includes("super-secret-value")),
         oneShotInstructionDoesNotPolluteLongTerm: !oneShotCandidates.some(item => item.type === "authorization" || item.type === "feedback"),
         missionWritebackTracksAndClearsUnresolved: waitingWasStored && !memory.unresolved.some((item) => item.source?.missionId === missionId) && memory.missions.some((item) => item.source?.missionId === missionId && item.text.includes("backend-api")),
+        globalDirectDispatchCompletionIsRemembered: memory.missions.some((item) => item.source?.missionId === `global-direct:${directDispatchId}` && item.text.includes("群聊主 Agent") && item.text.includes("通过验收")) && directDispatchPacket.includes("负责人筛选") && directDispatchPacket.includes("通过验收"),
+        globalDirectDispatchRollbackOverridesCompletion: rollbackMemory.missions.some((item) => item.source?.missionId === `global-direct:${directDispatchId}` && item.text.includes("安全撤销") && item.text.includes("不再视为完成"))
+            && !rollbackMemory.missions.some((item) => item.source?.missionId === `global-direct:${directDispatchId}` && item.text.includes("通过验收"))
+            && directDispatchRollbackPacket.includes("安全撤销")
+            && directDispatchRollbackPacket.includes("不再视为完成"),
         durableAuthorizationRemembered: packet.includes("没有明确授权") && packet.includes("D:\\claude-code"),
         crossSessionRecallWorks: crossSessionPacket.includes("没有明确授权") && crossSessionPacket.includes("D:\\claude-code"),
         explicitIgnoreMemoryWorks: ignoredPacket.includes("已按用户要求忽略"),

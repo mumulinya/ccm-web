@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as path from "path";
 import { spawnSync } from "child_process";
 export type AgentRuntimeId = "claudecode" | "claude" | "cursor" | "gemini" | "codex" | "qoder";
@@ -30,6 +31,10 @@ function quoteCmdArg(value: string) {
   return `"${String(value || "").replace(/"/g, "\\\"")}"`;
 }
 
+function encodeCliArgs(args: string[]) {
+  return Buffer.from(JSON.stringify(args), "utf-8").toString("base64");
+}
+
 function formatAllowedToolsArg(options: AgentCommandOptions = {}) {
   const tools = Array.isArray(options.cliAllowedTools)
     ? Array.from(new Set(options.cliAllowedTools.map(item => String(item || "").trim()).filter(Boolean)))
@@ -47,30 +52,106 @@ function formatStrictMcpConfigArg(options: AgentCommandOptions = {}) {
   return configPath ? ` --mcp-config ${quoteCmdArg(configPath)} --strict-mcp-config` : "";
 }
 
+interface RuntimeLaunchMetadata {
+  runtime?: string;
+  runtimeHomePath?: string;
+  isolatedHomePath?: string;
+  pluginDirPath?: string;
+}
+
+function readRuntimeLaunchMetadata(options: AgentCommandOptions = {}): RuntimeLaunchMetadata {
+  const configPath = String(options.mcpConfigPath || "").trim();
+  if (!configPath) return {};
+  const snapshotPath = path.join(path.dirname(configPath), "runtime-tool-snapshot.json");
+  const fallbackSnapshotPath = path.join(path.dirname(path.dirname(configPath)), "runtime-tool-snapshot.json");
+  for (const candidate of [snapshotPath, fallbackSnapshotPath]) {
+    try {
+      if (!fs.existsSync(candidate)) continue;
+      const parsed = JSON.parse(fs.readFileSync(candidate, "utf-8"));
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    } catch {}
+  }
+  return {};
+}
+
+function formatPluginDirArg(metadata: RuntimeLaunchMetadata) {
+  const pluginDir = String(metadata.pluginDirPath || "").trim();
+  return pluginDir ? ` --plugin-dir ${quoteCmdArg(pluginDir)}` : "";
+}
+
+function formatWindowsEnvPrefix(values: Record<string, string>) {
+  const assignments = Object.entries(values)
+    .filter(([, value]) => String(value || "").trim())
+    .map(([key, value]) => `set "${key}=${String(value).replace(/"/g, "")}"`);
+  return assignments.length ? `${assignments.join(" && ")} && ` : "";
+}
+
+function buildIsolatedHomeEnv(homePath: string, runtime: "cursor" | "codex") {
+  const normalized = path.resolve(homePath);
+  const root = path.parse(normalized).root.replace(/[\\/]$/, "");
+  const homePathPart = root && normalized.toLowerCase().startsWith(root.toLowerCase())
+    ? normalized.slice(root.length)
+    : normalized;
+  const env: Record<string, string> = {
+    HOME: normalized,
+    USERPROFILE: normalized,
+    HOMEDRIVE: root,
+    HOMEPATH: homePathPart || "\\",
+  };
+  if (runtime === "cursor") {
+    env.CURSOR_CONFIG_DIR = path.join(normalized, ".cursor");
+    env.CURSOR_DATA_DIR = path.join(normalized, ".cursor-data");
+  } else {
+    env.CODEX_HOME = normalized;
+  }
+  return env;
+}
+
 function buildCodexExecCommand(msgFile: string, options: AgentCommandOptions = {}) {
   const configPath = String(options.mcpConfigPath || "").trim();
-  const runtimeHome = configPath ? path.dirname(configPath) : "";
-  const homePrefix = runtimeHome ? `set "CODEX_HOME=${runtimeHome}" && ` : "";
+  const metadata = readRuntimeLaunchMetadata(options);
+  const runtimeHome = String(metadata.isolatedHomePath || metadata.runtimeHomePath || (configPath ? path.dirname(configPath) : "")).trim();
+  const homePrefix = runtimeHome ? formatWindowsEnvPrefix(buildIsolatedHomeEnv(runtimeHome, "codex")) : "";
   const sessionId = String(options.sessionId || "").trim();
+  const flags = formatCodexExecSafetyFlags();
   if (options.persistSession && options.resumeSession && sessionId) {
-    return `${homePrefix}type "${msgFile}" | codex exec resume --full-auto --sandbox workspace-write --skip-git-repo-check --json ${quoteCmdArg(sessionId)} -`;
+    return `${homePrefix}type "${msgFile}" | codex exec resume ${flags} --skip-git-repo-check --json ${quoteCmdArg(sessionId)} -`;
   }
   const persistence = options.persistSession ? " --json" : " --ephemeral";
-  return `${homePrefix}type "${msgFile}" | codex exec --full-auto --sandbox workspace-write${persistence} --skip-git-repo-check -`;
+  return `${homePrefix}type "${msgFile}" | codex exec ${flags}${persistence} --skip-git-repo-check -`;
+}
+
+function getCodexSandboxMode() {
+  const requested = String(process.env.CCM_CODEX_SANDBOX || process.env.CCM_CODEX_SANDBOX_MODE || "").trim();
+  if (["read-only", "workspace-write", "danger-full-access"].includes(requested)) return requested;
+  return process.platform === "win32" ? "danger-full-access" : "workspace-write";
+}
+
+function formatCodexExecSafetyFlags() {
+  const sandbox = getCodexSandboxMode();
+  return sandbox === "workspace-write"
+    ? "--full-auto --sandbox workspace-write"
+    : `--sandbox ${sandbox}`;
 }
 
 function buildCursorAgentCommand(msgFile: string, options: AgentCommandOptions = {}) {
+  const metadata = readRuntimeLaunchMetadata(options);
   const sessionId = String(options.sessionId || "").trim();
-  const resumeArg = options.persistSession && options.resumeSession && sessionId
-    ? ` --resume ${quoteCmdArg(sessionId)}`
-    : "";
-  const outputArg = options.persistSession ? " --output-format json" : "";
   const explicit = String(process.env.CCM_CURSOR_AGENT_COMMAND || "").trim();
   const available = (command: string) => process.platform === "win32"
     ? spawnSync("where.exe", [command], { windowsHide: true, stdio: "ignore" }).status === 0
     : spawnSync("sh", ["-lc", `command -v ${command}`], { stdio: "ignore" }).status === 0;
   const command = explicit || (available("cursor-agent") ? "cursor-agent" : available("agent") ? "agent" : "cursor-agent");
-  return `type "${msgFile}" | ${command} -p --force${outputArg}${resumeArg}`;
+  const isolatedHome = String(metadata.isolatedHomePath || "").trim();
+  const homePrefix = isolatedHome ? formatWindowsEnvPrefix(buildIsolatedHomeEnv(isolatedHome, "cursor")) : "";
+  const args = ["-p", "--force", "--trust"];
+  if (metadata.pluginDirPath) {
+    args.push("--approve-mcps", "--plugin-dir", String(metadata.pluginDirPath));
+  }
+  if (options.persistSession) args.push("--output-format", "json");
+  if (options.persistSession && options.resumeSession && sessionId) args.push("--resume", sessionId);
+  const helper = path.join(__dirname, "cli-prompt-runner.js");
+  return `${homePrefix}node ${quoteCmdArg(helper)} ${quoteCmdArg(msgFile)} ${quoteCmdArg(command)} ${encodeCliArgs(args)}`;
 }
 export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
   {
@@ -91,7 +172,8 @@ export const AGENT_RUNTIMES: AgentRuntimeDescriptor[] = [
       const sessionArg = options.persistSession && sessionId
         ? (options.resumeSession ? ` --resume ${quoteCmdArg(sessionId)}` : ` --session-id ${quoteCmdArg(sessionId)}`)
         : "";
-      return `${pipeFileToCommand(msgFile, "claude --permission-mode acceptEdits", options)}${formatStrictMcpConfigArg(options)}${sessionArg} -p`;
+      const metadata = readRuntimeLaunchMetadata(options);
+      return `${pipeFileToCommand(msgFile, "claude --permission-mode acceptEdits", options)}${formatStrictMcpConfigArg(options)}${formatPluginDirArg(metadata)}${sessionArg} -p`;
     },
   },
   {
@@ -321,6 +403,12 @@ export function runAgentRuntimeSessionSelfTest() {
   const codexResume = buildAgentCommand("codex", "prompt.txt", { persistSession: true, resumeSession: true, sessionId });
   const cursorInitial = buildAgentCommand("cursor", "prompt.txt", { persistSession: true });
   const cursorResume = buildAgentCommand("cursor", "prompt.txt", { persistSession: true, resumeSession: true, sessionId });
+  const decodePromptRunnerArgs = (command: string) => {
+    const encoded = command.trim().split(/\s+/).pop() || "";
+    try { return JSON.parse(Buffer.from(encoded, "base64").toString("utf-8")); } catch { return []; }
+  };
+  const cursorInitialArgs = decodePromptRunnerArgs(cursorInitial);
+  const cursorResumeArgs = decodePromptRunnerArgs(cursorResume);
   const parsed = normalizeAgentCommandOutput("codex", [
     JSON.stringify({ type: "thread.started", thread_id: sessionId }),
     JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "任务完成" } }),
@@ -347,8 +435,9 @@ export function runAgentRuntimeSessionSelfTest() {
     codexInitialIsPersistent: codexInitial.includes("--json") && !codexInitial.includes("--ephemeral"),
     codexResumesSameSession: codexResume.includes("codex exec resume") && codexResume.includes(sessionId),
     codexCapturesNativeSession: parsed.sessionId === sessionId && parsed.output === "任务完成",
-    cursorInitialCapturesSession: cursorInitial.includes("--output-format json") && !cursorInitial.includes("--resume"),
-    cursorResumesSameSession: cursorResume.includes("--resume") && cursorResume.includes(sessionId),
+    cursorInitialCapturesSession: cursorInitial.includes("cli-prompt-runner.js") && cursorInitialArgs.includes("--output-format") && cursorInitialArgs.includes("json") && !cursorInitialArgs.includes("--resume"),
+    cursorTrustsHeadlessWorkspace: cursorInitialArgs.includes("--trust"),
+    cursorResumesSameSession: cursorResumeArgs.includes("--resume") && cursorResumeArgs.includes(sessionId),
     cursorParsesNativeSession: cursorParsed.sessionId === sessionId && cursorParsed.output === "继续完成",
     codexJsonFailureDetected: codexFailed.failed && codexFailed.message.includes("model unavailable"),
     cursorJsonFailureDetected: cursorFailed.failed && cursorFailed.message.includes("permission denied"),

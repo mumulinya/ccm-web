@@ -90,7 +90,7 @@ function buildCommandResult(command, data, args, context, durationMs) {
     addMetric('状态', task.status)
     addMetric('目标项目', task.target_project || task.project)
     addMetric('Trace', task.trace_id)
-    addMetric('回执', task.receipt?.status || task.delivery_summary?.acceptance_gate_passed)
+    addMetric('结果说明', task.receipt?.status || task.delivery_summary?.acceptance_gate_passed)
     ;(task.logs || task.recent_logs || []).slice(-15).reverse().forEach(log => addItem(log.level || '日志', log.message || log.text, log.at || log.timestamp))
     result.rawPreview = compactJson(task)
   } else if (command.name === 'agents' || command.name === 'model') {

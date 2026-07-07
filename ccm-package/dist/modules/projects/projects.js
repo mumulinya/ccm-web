@@ -46,6 +46,7 @@ const utils_1 = require("../../core/utils");
 const db_1 = require("../../core/db");
 const sessions_1 = require("./sessions");
 const credential_store_1 = require("../../core/credential-store");
+const tool_authorization_1 = require("../../tools/tool-authorization");
 function resolveCcConnectLauncher() {
     if (process.platform === "win32") {
         for (const entry of String(process.env.PATH || "").split(path.delimiter)) {
@@ -726,8 +727,11 @@ type = "${finalPlatform}"${platformOptionsToml}
         const configuredCommands = normalizeVerificationCommands(configs[project]?.verification_commands || configs[project]?.verificationCommands || []);
         const inferredCommands = inferProjectVerificationCommands(getProjectWorkDir(project));
         const profile = normalizeProjectAgentProfile(configs[project] || {});
+        const toolAuth = (0, tool_authorization_1.buildToolAuthorizationPayload)(configs[project]?.tools || {});
         (0, utils_1.sendJson)(res, {
-            tools: configs[project]?.tools || { mcp: [], skill: [] },
+            tools: toolAuth.tools,
+            tool_audit: toolAuth.tool_audit,
+            authorization_readiness: toolAuth.authorization_readiness,
             verification_commands: configuredCommands,
             inferred_verification_commands: inferredCommands,
             verification_source: configuredCommands.length > 0 ? "configured" : (inferredCommands.length > 0 ? "inferred" : "missing"),
@@ -748,7 +752,9 @@ type = "${finalPlatform}"${platformOptionsToml}
                 const configs = (0, db_1.loadProjectConfigs)();
                 if (!configs[project])
                     configs[project] = {};
-                configs[project].tools = tools;
+                const previousTools = (0, tool_authorization_1.normalizeToolAuthorization)(configs[project].tools || {});
+                const normalizedTools = (0, tool_authorization_1.normalizeToolAuthorization)(tools);
+                configs[project].tools = normalizedTools;
                 const commands = normalizeVerificationCommands(verification_commands || verificationCommands);
                 const profile = normalizeProjectAgentProfile(payload);
                 configs[project].verification_commands = commands;
@@ -758,7 +764,18 @@ type = "${finalPlatform}"${platformOptionsToml}
                 configs[project].forbidden_paths = profile.forbidden_paths;
                 configs[project].delivery_contract = profile.delivery_contract;
                 (0, db_1.saveProjectConfigs)(configs);
-                (0, utils_1.sendJson)(res, { success: true, tools, verification_commands: commands, ...profile });
+                const toolAuth = (0, tool_authorization_1.buildToolAuthorizationPayload)(normalizedTools);
+                const authorizationChange = (0, tool_authorization_1.recordToolAuthorizationChange)({
+                    scope: "project",
+                    scopeId: project,
+                    previous: previousTools,
+                    next: normalizedTools,
+                    actor: payload.actor || payload.updated_by || "api",
+                    source: "/api/projects/tools",
+                    toolAudit: toolAuth.tool_audit,
+                    authorizationReadiness: toolAuth.authorization_readiness,
+                });
+                (0, utils_1.sendJson)(res, { success: true, tools: toolAuth.tools, tool_audit: toolAuth.tool_audit, authorization_readiness: toolAuth.authorization_readiness, authorization_change: authorizationChange, verification_commands: commands, ...profile });
             }
             catch (e) {
                 (0, utils_1.sendJson)(res, { error: e.message }, 400);

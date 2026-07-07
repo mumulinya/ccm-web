@@ -9,5 +9,234 @@ type BasicGroupRouteDeps = {
     buildInlineTaskRuntime: (task: any) => any;
     getAgentQaItemsForGroup: (groupId: string, limit?: number) => any[];
 };
+export declare function buildGroupMainAgentStatus(input: {
+    groupId: string;
+    tasks: any[];
+    agentQa: any[];
+    getRuntime: (task: any) => any;
+}): {
+    schema: string;
+    group_id: string;
+    phase: any;
+    label: any;
+    task_id: any;
+    latest_task_title: any;
+    active_task_count: number;
+    running_child_agents: any;
+    current_todo_summary: {
+        schema: string;
+        title: any;
+        task_id: any;
+        task_title: any;
+        step_id: any;
+        label: string;
+        active_form: string;
+        detail: string;
+        status: string;
+        status_label: string;
+        progress_label: string;
+        completed_count: any;
+        total_count: any;
+        next_action: string;
+        display_policy: {
+            user_visible: boolean;
+            technical_details_default_collapsed: boolean;
+        };
+    };
+    currentTodoSummary: {
+        schema: string;
+        title: any;
+        task_id: any;
+        task_title: any;
+        step_id: any;
+        label: string;
+        active_form: string;
+        detail: string;
+        status: string;
+        status_label: string;
+        progress_label: string;
+        completed_count: any;
+        total_count: any;
+        next_action: string;
+        display_policy: {
+            user_visible: boolean;
+            technical_details_default_collapsed: boolean;
+        };
+    };
+    progress_refresh_summary: {
+        schema: string;
+        title: string;
+        status: string;
+        status_label: string;
+        headline: string;
+        current_state: string;
+        review_items: string[];
+        next_action: string;
+        last_progress_age_label: string;
+        stalled_work_item_count: number;
+        display_policy: {
+            user_visible: boolean;
+            show_for_ordinary_conversation: boolean;
+            technical_details_default_collapsed: boolean;
+            hide_internal_protocols: boolean;
+        };
+    };
+    progressRefreshSummary: {
+        schema: string;
+        title: string;
+        status: string;
+        status_label: string;
+        headline: string;
+        current_state: string;
+        review_items: string[];
+        next_action: string;
+        last_progress_age_label: string;
+        stalled_work_item_count: number;
+        display_policy: {
+            user_visible: boolean;
+            show_for_ordinary_conversation: boolean;
+            technical_details_default_collapsed: boolean;
+            hide_internal_protocols: boolean;
+        };
+    };
+    child_agent_status_summary: {
+        schema: string;
+        title: string;
+        status: string;
+        status_label: string;
+        rows: any[];
+        completed_agents: any[];
+        running_agents: any[];
+        waiting_agents: any[];
+        attention_agents: any[];
+        summary_text: string;
+        next_action: string;
+        display_policy: {
+            user_visible: boolean;
+            task_card_visible: boolean;
+            todo_visible: boolean;
+            technical_details_default_collapsed: boolean;
+            hide_internal_protocols: boolean;
+        };
+    };
+    childAgentStatusSummary: {
+        schema: string;
+        title: string;
+        status: string;
+        status_label: string;
+        rows: any[];
+        completed_agents: any[];
+        running_agents: any[];
+        waiting_agents: any[];
+        attention_agents: any[];
+        summary_text: string;
+        next_action: string;
+        display_policy: {
+            user_visible: boolean;
+            task_card_visible: boolean;
+            todo_visible: boolean;
+            technical_details_default_collapsed: boolean;
+            hide_internal_protocols: boolean;
+        };
+    };
+    open_qa_count: number;
+    latest_progress_checkpoint: any;
+    recent_progress_checkpoints: any;
+    progress_checkpoints: any;
+    completion_summary: {
+        schema: string;
+        title: string;
+        status: string;
+        status_label: any;
+        headline: string;
+        file_change_count: number;
+        verification_count: number;
+        risk_count: number;
+        next_action: string;
+        display_policy: {
+            user_visible: boolean;
+            technical_details_default_collapsed: boolean;
+        };
+    };
+    pickup_summary: {
+        schema: string;
+        source_schema: any;
+        title: string;
+        status: any;
+        status_label: any;
+        headline: string;
+        current_state: string;
+        review_items: any;
+        resume_action: string;
+        technical_hint: string;
+        display_policy: {
+            user_visible: boolean;
+            technical_details_default_collapsed: boolean;
+            hide_internal_protocols: boolean;
+            show_for_ordinary_conversation: boolean;
+        };
+    };
+    pickupSummary: {
+        schema: string;
+        source_schema: any;
+        title: string;
+        status: any;
+        status_label: any;
+        headline: string;
+        current_state: string;
+        review_items: any;
+        resume_action: string;
+        technical_hint: string;
+        display_policy: {
+            user_visible: boolean;
+            technical_details_default_collapsed: boolean;
+            hide_internal_protocols: boolean;
+            show_for_ordinary_conversation: boolean;
+        };
+    };
+    latest_delivery_summary: any;
+    failed_gates: any;
+    blockers: string[];
+    needs: string[];
+    updated_at: any;
+};
+export declare function isGroupProgressStatusRequest(message: any): boolean;
+export declare function buildGroupStatusFollowupSummary(input: {
+    groupId?: string;
+    status?: any;
+    tasks?: any[];
+    agentQa?: any[];
+    getRuntime?: (task: any) => any;
+}): {
+    schema: string;
+    kind: string;
+    text: string;
+    next_action: string;
+    status: any;
+    display_policy: {
+        user_visible: boolean;
+        task_card_visible: boolean;
+        todo_visible: boolean;
+        technical_details_default_collapsed: boolean;
+        hide_internal_protocols: boolean;
+    };
+};
+export declare function runGroupStatusFollowupSelfTest(): {
+    pass: boolean;
+    checks: {
+        groupStatusFollowupRecognized: boolean;
+        groupStatusFollowupAvoidsManagementMutation: boolean;
+        groupStatusFollowupFriendly: boolean;
+        groupStatusFollowupShowsChildAgentWaitingState: boolean;
+        groupStatusDerivesChildAgentRows: boolean;
+        groupStatusDerivesPickupSummary: boolean;
+        groupStatusFollowupUsesPickupSummary: boolean;
+        groupStatusShowsProgressRefreshSummary: boolean;
+        groupStatusFollowupUsesProgressRefreshSummary: boolean;
+        groupStatusFollowupHidesProtocol: boolean;
+        groupStatusFollowupNoTodo: boolean;
+    };
+    sample: string;
+};
 export declare function handleBasicGroupRoutes(req: IncomingMessage, res: ServerResponse, parsed: UrlWithParsedQuery, ctx: any, deps: BasicGroupRouteDeps): boolean;
 export {};

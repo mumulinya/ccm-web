@@ -6,6 +6,7 @@ import { updateProjectMemoryFromReceipt } from "../../projects/memory";
 import { appendTraceEvent, ensureTraceId } from "../../system/reliability-ledger";
 import { compactMemoryText } from "./memory";
 import { appendTaskTimelineEvent, safeAddGroupLog } from "./logs";
+import { sanitizeMainAgentUserText } from "./display";
 
 export const AGENT_QA_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -99,33 +100,119 @@ export function setAgentQaManualTakeover(id: string, reason = "") {
   });
 }
 
+const AGENT_QA_USER_PREVIEW_INTERNAL_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|<\s*\/?\s*task-notification|task-notification|receipt[-_\s]*status|trace_id|session_id|native_session|task_agent_session|WorkerContextPacket|raw\s+receipt|raw\s+payload|raw_report|execution_id|permission_contract|routing|acceptance|qa_id|原始回执/i;
+
+function sanitizeAgentQaPreviewText(value: any, fallback = "", max = 220) {
+  const text = compactMemoryText(value || "", max);
+  if (!text) return fallback;
+  if (AGENT_QA_USER_PREVIEW_INTERNAL_PATTERN.test(text)) return fallback;
+  return sanitizeMainAgentUserText(text, fallback || "Agent 问答信息已整理，技术细节已放入技术详情。", max);
+}
+
+export function buildAgentQaUserPreview(qa: any = {}, kind = "") {
+  const from = sanitizeAgentQaPreviewText(qa.from_agent || "子 Agent", "子 Agent", 80);
+  const to = sanitizeAgentQaPreviewText(qa.to_agent || qa.target || "目标 Agent", "目标 Agent", 80);
+  const status = String(kind === "question" ? "waiting" : qa.status || (qa.answer ? "answered" : "waiting")).toLowerCase();
+  const accepted = qa.acceptance?.accepted === true || status === "resumed" || !!qa.resumed_at;
+  const waiting = ["waiting", "asking", "queued"].includes(status);
+  const failed = ["failed", "timeout", "rejected"].includes(status);
+  const needsUser = ["needs_user", "manual"].includes(status);
+  const question = sanitizeAgentQaPreviewText(qa.question || "", "问题原文已收进技术详情。", 180);
+  const answer = qa.answer ? sanitizeAgentQaPreviewText(qa.answer, "目标 Agent 已返回回答，详细内容已收进技术详情。", 220) : "";
+  const typeLabel = qa.type === "request_review" ? "评审请求" : "工作询问";
+  const label = accepted
+    ? "已采纳并继续"
+    : waiting
+      ? "等待回答"
+      : needsUser
+        ? "等待确认"
+        : failed
+          ? "需要处理"
+          : answer
+            ? "已回答"
+            : "已记录";
+  const summary = accepted
+    ? `${to} 的回答已被主 Agent 采纳，${from} 正带着结论继续执行。`
+    : waiting
+      ? `${from} 正在向 ${to} 确认依赖问题，回答到达后会自动继续。`
+      : needsUser
+        ? `${from} 和 ${to} 的协作问题需要人工确认，主 Agent 已暂停相关步骤。`
+        : failed
+          ? `${from} 和 ${to} 的协作问答暂时没有可用结论，主 Agent 会重试、换人或等待接管。`
+          : answer
+            ? `${to} 已回答 ${from} 的问题，主 Agent 正在核对证据后决定是否采用。`
+            : `${from} 与 ${to} 的协作问题已记录。`;
+  const nextAction = accepted
+    ? "继续原任务执行，后续由主 Agent 汇总验收。"
+    : waiting
+      ? "等待目标 Agent 回答；回答到达后会自动唤醒原 Agent。"
+      : needsUser
+        ? "需要用户或主 Agent 人工确认后再继续。"
+        : failed
+          ? "主 Agent 会根据缺口重试、换人或提示人工接管。"
+          : answer
+            ? "主 Agent 正在检查回答是否有足够证据。"
+            : "等待主 Agent 判断下一步。";
+  const badges = [
+    typeLabel,
+    qa.blocking !== false ? "影响续跑" : "",
+    qa.retry_count ? `已重试 ${qa.retry_count} 次` : "",
+    qa.injected_at ? "已注入上下文" : "",
+    qa.resumed_at ? "已续跑" : "",
+    qa.permission_contract?.mode === "advisory_read_only" ? "只读问答" : "",
+    Array.isArray(qa.answer_evidence) && qa.answer_evidence.length ? `${qa.answer_evidence.length} 条证据已收起` : "",
+  ].filter(Boolean).slice(0, 6);
+  return {
+    schema: "ccm-agent-qa-user-preview-v1",
+    from,
+    to,
+    label,
+    status,
+    summary: sanitizeAgentQaPreviewText(summary, "Agent 协作问答进展已更新。", 260),
+    question,
+    answer,
+    next_action: nextAction,
+    badges,
+    display_policy: {
+      user_text_first: true,
+      technical_default_collapsed: true,
+      hide_internal_protocols: true,
+    },
+  };
+}
+
 export function buildAgentQaMessage(kind: "question" | "answer" | "resume", qa: any, content = "") {
-  const qaContent = content || qa.answer || qa.question || "";
+  const preview = buildAgentQaUserPreview(qa, kind);
+  const qaContent = preview.summary || sanitizeAgentQaPreviewText(content || qa.answer || qa.question || "", "Agent 问答进展已更新。", 260);
   return {
     id: "m" + Date.now().toString(36) + "qa" + crypto.randomBytes(2).toString("hex"),
     role: "assistant",
     agent: kind === "answer" ? qa.to_agent : qa.from_agent,
     type: "agent_qa",
     content: qaContent,
+    display_content: qaContent,
     timestamp: new Date().toISOString(),
     task_id: qa.task_id || undefined,
     qa: {
       ...qa,
       kind,
       status: kind === "question" ? "waiting" : qa.status || "answered",
+      user_preview: preview,
     },
   };
 }
 
 export function emitAgentQaEvent(streamRes: any, kind: "question" | "answer" | "resume", qa: any, content = "") {
   if (!deps.writeSse) return;
+  const preview = buildAgentQaUserPreview(qa, kind);
   deps.writeSse(streamRes, {
     type: "agent_qa",
     kind,
     qa: {
       ...qa,
       kind,
-      content: content || qa.answer || qa.question || "",
+      content: preview.summary || content || qa.answer || qa.question || "",
+      user_preview: preview,
     },
   });
 }

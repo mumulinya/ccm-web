@@ -32,7 +32,7 @@ export const mainDecisionActionSummary = (decision) => {
     dispatch_child_agent: '派发',
     ask_user_clarification: '追问',
     govern_task_lifecycle: '治理',
-    read_child_agent_receipts: '读回执',
+    read_child_agent_receipts: '读结果',
     replan_from_observation: '重规划',
     generate_final_reply: '回复'
   }

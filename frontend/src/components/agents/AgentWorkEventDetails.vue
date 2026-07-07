@@ -14,7 +14,7 @@ const panelState = computed(() => {
   if (events.value.some(event => event.kind === 'error')) return { tone: 'fail', label: '失败' }
   if (props.msg?.streaming) return { tone: 'running', label: '执行中' }
   if (events.value.some(event => event.kind === 'done')) return { tone: 'ok', label: '完成' }
-  return { tone: 'idle', label: events.value.length ? '等待回执' : '待执行' }
+  return { tone: 'idle', label: events.value.length ? '等待结果说明' : '待执行' }
 })
 const latestEvent = computed(() => events.value[events.value.length - 1] || null)
 const compactWorkText = (value, max = 320) => {

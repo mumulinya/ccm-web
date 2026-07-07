@@ -224,7 +224,7 @@ function buildDailyDevBacklogStateCard(file: any, group: any) {
     } else if (task.status === "in_progress") {
       state = summary.has_final_review || summary.receipt_statuses?.length ? "reviewing" : "running";
       owner = state === "reviewing" ? "主 Agent" : "子 Agent";
-      nextAction = state === "reviewing" ? "等待主 Agent 汇总验收" : "等待子 Agent 执行并返回回执";
+      nextAction = state === "reviewing" ? "等待主 Agent 汇总验收" : "等待子 Agent 执行并提交结果说明";
     } else if (dep("isTaskQueuedInMemory")(task.id)) {
       state = "dispatched";
       owner = "任务队列";
@@ -906,7 +906,7 @@ export function buildDailyDevTaskDescription(payload: any) {
     requiresCodeChanges
       ? "- 这是开发交付任务；如果没有实际文件变更，不允许把任务判定为完成。"
       : "- 如无需改代码，必须在最终报告中说明原因和可验收产出。",
-    "- 主 Agent 必须等待子 Agent 回执并复盘；发现缺口时继续追问或返工，不能提前宣布完成。",
+    "- 主 Agent 必须等待子 Agent 结果说明并复盘；发现缺口时继续追问或返工，不能提前宣布完成。",
     "- 最终报告要说明完成内容、涉及项目/文件、已执行验证、风险和仍需用户确认的事项。",
     ...planLines,
   ];

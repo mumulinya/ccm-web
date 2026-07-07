@@ -231,6 +231,7 @@ function buildTaskReasoningState(task, summary = {}) {
     setReasoningAssertion(existing, { id: "goal", label: "业务目标得到满足", kind: "goal", status: summary.acceptance_gate_passed ? "passed" : "pending", evidence: summary.actions || [] });
     setReasoningAssertion(existing, { id: "files", label: "存在系统捕获的真实文件变更", kind: "delivery", status: summary.has_actual_file_changes || task?.requires_code_changes === false ? "passed" : "pending", evidence: summary.files_changed || [] });
     setReasoningAssertion(existing, { id: "verification", label: "独立 Runner 验证通过", kind: "verification", status: summary.verification_source_gate_passed ? "passed" : "pending", evidence: summary.external_runner_verification || [] });
+    setReasoningAssertion(existing, { id: "independent_review", label: "复杂变更已由独立 Agent 复核", kind: "verification", status: summary.independent_review_required === true && summary.independent_review_gate_passed !== true ? "pending" : "passed", evidence: summary.independent_review_evidence?.map((item) => item.summary || item.verdict || item.reviewer) || [] });
     setReasoningAssertion(existing, { id: "acceptance", label: "主 Agent 最终验收门禁通过", kind: "acceptance", status: summary.acceptance_gate_passed ? "passed" : "pending", evidence: summary.acceptance_gate?.checks?.filter((item) => item.ok).map((item) => item.label) || [] });
     const gaps = summary.acceptance_gate?.failed_checks?.map((item) => item.label || item.id) || [];
     if (gaps.length)
@@ -240,7 +241,7 @@ function buildTaskReasoningState(task, summary = {}) {
     explainReasoningDecision(existing, summary.acceptance_gate_passed ? "complete" : "continue_or_rework", summary.acceptance_gate_passed ? "真实文件、独立验证和最终验收断言均已通过" : `仍有 ${gaps.length || "未量化"} 项验收缺口，不能宣告完成`);
     captureReasoningFacts(existing, "delivery_summary", {
         task_status: task?.status, lifecycle: summary.lifecycle?.state, files: summary.actual_file_change_count || 0,
-        external_verification: summary.external_runner_verification_count || 0, blockers: summary.blockers || [], needs: summary.needs || [], gaps,
+        external_verification: summary.external_runner_verification_count || 0, independent_review: summary.independent_review_gate?.status || "", blockers: summary.blockers || [], needs: summary.needs || [], gaps,
     });
     return existing;
 }

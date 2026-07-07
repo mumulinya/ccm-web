@@ -138,7 +138,7 @@ function defaultEnvAllowlist() {
         "LOCALAPPDATA", "APPDATA", "PROGRAMDATA", "TERM", "COLORTERM", "LANG", "LC_ALL", "SHELL",
         "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy",
         "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_HOME",
-        "CURSOR_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "CLAUDE_CONFIG_DIR", "CCM_CODEX_GATEWAY_CONFIG", "CCM_CODEX_API_KEY",
+        "CURSOR_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "CLAUDE_CONFIG_DIR", "CCM_CODEX_GATEWAY_CONFIG", "CCM_CODEX_API_KEY", "CCM_CODEX_LOCAL_ACCESS_TOKEN",
     ];
 }
 function sanitizeExecutionEnv(extra = {}, allowlist = []) {
@@ -424,10 +424,23 @@ function listActiveAgentRuns(filters = {}) {
 function cancelActiveAgentRun(input = {}) {
     const runId = String(input.runId || input.run_id || "").trim();
     const taskId = String(input.taskId || input.task_id || "").trim();
+    const executionId = String(input.executionId || input.execution_id || "").trim();
+    const project = String(input.project || input.agent || input.target_project || "").trim();
     const reason = String(input.reason || "用户停止 Agent 运行").trim();
-    if (!runId && !taskId)
-        throw new Error("缺少 runId 或 taskId");
-    const matched = Array.from(activeAgentRuns.values()).filter(run => (runId && run.id === runId) || (taskId && run.taskId === taskId));
+    const cancelTask = input.cancelTask !== false && input.cancel_task !== false;
+    if (!runId && !taskId && !executionId && !project)
+        throw new Error("缺少 runId、taskId、executionId 或 project");
+    const matched = Array.from(activeAgentRuns.values()).filter(run => {
+        if (runId)
+            return run.id === runId;
+        if (taskId && run.taskId !== taskId)
+            return false;
+        if (executionId && run.executionId !== executionId)
+            return false;
+        if (project && run.project !== project)
+            return false;
+        return true;
+    });
     let killed = 0;
     for (const run of matched) {
         try {
@@ -435,11 +448,19 @@ function cancelActiveAgentRun(input = {}) {
                 killed++;
             run.status = "cancel_requested";
             run.updatedAt = now();
+            if (run.executionId) {
+                transitionExecution(run.executionId, "cancel_requested", reason, {
+                    cancellation: { reason, actor: String(input.actor || "local-user"), requestedAt: now(), targeted: !cancelTask },
+                    status: "warning",
+                });
+            }
         }
         catch { }
     }
-    const cancellation = taskId || matched[0]?.taskId ? requestTaskCancellation(taskId || matched[0]?.taskId, reason, "local-user") : null;
-    return { success: true, matched: matched.length, killed, cancellation, runs: matched.map(publicActiveAgentRun) };
+    const cancellation = cancelTask && (taskId || matched[0]?.taskId)
+        ? requestTaskCancellation(taskId || matched[0]?.taskId, reason, String(input.actor || "local-user"))
+        : null;
+    return { success: true, matched: matched.length, killed, cancellation, targeted: !cancelTask, runs: matched.map(publicActiveAgentRun) };
 }
 function trackManagedChildProcess(taskId, executionId, child, meta = {}) {
     const safeTaskId = String(taskId || executionId || "standalone");
@@ -943,6 +964,10 @@ function runExecutionKernelSelfTest() {
                 && reloadedExecution?.runnerVerification?.status === "passed"
                 && reloadedExecution?.outputPreview === "CCM_AGENT_RECEIPT",
             sanitizesEnvironment: sanitizeExecutionEnv({ CCM_SECRET_NOT_ALLOWED: "secret" }).CCM_SECRET_NOT_ALLOWED === undefined,
+            supportsTargetedAgentRunCancel: cancelActiveAgentRun.toString().includes("cancelTask")
+                && cancelActiveAgentRun.toString().includes("executionId")
+                && cancelActiveAgentRun.toString().includes("project")
+                && cancelActiveAgentRun.toString().includes("targeted: !cancelTask"),
         };
         return { pass: Object.values(checks).every(Boolean), checks };
     }

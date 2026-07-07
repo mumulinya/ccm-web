@@ -10,6 +10,15 @@ interface SkillDef {
 export interface ToolScope {
     mcp?: string[];
     skill?: string[];
+    auditContext?: ToolInvocationAuditContext;
+}
+export interface ToolInvocationAuditContext {
+    runtime?: string;
+    project?: string;
+    groupId?: string;
+    taskId?: string;
+    executionId?: string;
+    source?: string;
 }
 interface McpServerStatus {
     name: string;
@@ -166,23 +175,31 @@ export declare class ToolManager {
     private parseArgs;
 }
 export declare const toolManager: ToolManager;
-export declare function runToolManagerRuntimeSelfTest(): {
+export declare function runToolManagerRuntimeSelfTest(): Promise<{
     pass: boolean;
     checks: {
         detectsMissingTool: any;
+        nativeStyleMcpGrantParsesAsAvailable: boolean;
         detectsMissingSkill: boolean;
         promptOnlyShowsAuthorizedTool: boolean;
         promptShowsSkillToolProtocol: any;
         discoversAuthorizedSkillTool: boolean;
         invokesAuthorizedSkillTool: boolean;
+        skillInvocationAuditCarriesContext: boolean;
         parsesInvokeSkillToolCall: boolean;
+        executesNativeStyleMcpToolName: boolean;
+        rejectsUnauthorizedNativeStyleMcpToolName: boolean;
         rejectsUnauthorizedSkillTool: boolean;
+        emptyScopeDeniesAllTools: boolean;
         detectsMcpAuthRequired: boolean;
+        reloadDisconnectsStaleClient: boolean;
+        reloadClearsStaleMcpStatus: boolean;
+        reloadRefreshesSkillCatalog: any;
     };
     audit: any;
     discovered: any;
     invoked: any;
     denied: any;
     authStatus: any;
-};
+}>;
 export {};

@@ -112,6 +112,8 @@ export declare function buildGlobalAgentMemoryPacket(query: string, options?: {
     maxChars?: number;
 }): string;
 export declare function recordGlobalMissionMemory(input: any): GlobalMemoryItem;
+export declare function recordGlobalDirectDispatchMemory(input: any): GlobalMemoryItem;
+export declare function recordGlobalDirectDispatchRollbackMemory(input: any): GlobalMemoryItem;
 export declare function getGlobalMemoryEvidence(input: {
     sessionId?: string;
     messageId?: string;
@@ -129,6 +131,8 @@ export declare function runGlobalAgentMemorySelfTest(): {
         privacyRejectsSecret: boolean;
         oneShotInstructionDoesNotPolluteLongTerm: boolean;
         missionWritebackTracksAndClearsUnresolved: any;
+        globalDirectDispatchCompletionIsRemembered: boolean;
+        globalDirectDispatchRollbackOverridesCompletion: boolean;
         durableAuthorizationRemembered: boolean;
         crossSessionRecallWorks: boolean;
         explicitIgnoreMemoryWorks: boolean;

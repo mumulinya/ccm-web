@@ -63,6 +63,7 @@ export declare function buildMemberPrompt(input: {
     toolsContext?: string;
     sharedFilesContext?: string;
 }): string;
+export declare function sanitizeCoordinatorUserText(value: any, fallback?: any, maxLength?: number): string;
 export declare function isExplicitExecutionRequest(message: string): boolean;
 export declare function analyzeRequirement(group: any, message: string, context?: string): {
     raw: string;
@@ -223,7 +224,7 @@ export declare function runCodedGroupOrchestrator(input: {
     content: string;
 };
 export declare function runCoordinatorProtocolSelfTest(): {
-    pass: any;
+    pass: boolean;
     contentHasPlan: boolean;
     coordinationPlan: any;
     assignmentCount: number;
@@ -253,11 +254,96 @@ export declare function runCoordinatorProtocolSelfTest(): {
     reactiveCompactionPass: boolean;
     structuredFallbackPolicyPass: boolean;
     informationalBoundaryPass: boolean;
+    coordinatorUserSanitizerPass: boolean;
+    codedNotificationDigestPass: boolean;
+    followUpSpecQualityPass: boolean;
+    lazyFollowUpQuality: {
+        schema: string;
+        pass: boolean;
+        status: string;
+        status_label: string;
+        reason: string;
+        missing: string[];
+        hints: string[];
+        lazy_delegation: boolean;
+        done_criteria_present: boolean;
+    } | {
+        auto_enriched: boolean;
+        enriched_hint_count: number;
+        schema: string;
+        pass: boolean;
+        status: string;
+        status_label: string;
+        reason: string;
+        missing: string[];
+        hints: string[];
+        lazy_delegation: boolean;
+        done_criteria_present: boolean;
+    };
+    lazyFollowUpMessage: string;
+    synthesizedFollowUpQuality: {
+        schema: string;
+        pass: boolean;
+        status: string;
+        status_label: string;
+        reason: string;
+        missing: string[];
+        hints: string[];
+        lazy_delegation: boolean;
+        done_criteria_present: boolean;
+    } | {
+        auto_enriched: boolean;
+        enriched_hint_count: number;
+        schema: string;
+        pass: boolean;
+        status: string;
+        status_label: string;
+        reason: string;
+        missing: string[];
+        hints: string[];
+        lazy_delegation: boolean;
+        done_criteria_present: boolean;
+    };
+    codedNotificationSummary: {
+        agent: any;
+        content: string;
+        structured_summary: {
+            schema: string;
+            rows: {
+                id: string;
+                agent: string;
+                status: string;
+                receipt_status: string;
+                status_label: string;
+                summary: string;
+                result: string;
+                gaps: string[];
+            }[];
+            gaps: any[];
+            next_action: string;
+        };
+    };
+    sanitizedCoordinatorSummary: string;
     documentFindings: any;
 };
 export declare function buildCodedCoordinatorSummary(group: any, outputs: string[]): {
     agent: any;
     content: string;
+    structured_summary: {
+        schema: string;
+        rows: {
+            id: string;
+            agent: string;
+            status: string;
+            receipt_status: string;
+            status_label: string;
+            summary: string;
+            result: string;
+            gaps: string[];
+        }[];
+        gaps: any[];
+        next_action: string;
+    };
 };
 export declare function runLlmCoordinatorSummary(group: any, userMessage: string, outputs: string[]): Promise<{
     agent: any;
@@ -273,8 +359,8 @@ export declare function runLlmCoordinatorReview(group: any, userMessage: string,
     agent: any;
     status: string;
     followUps: any;
-    gaps: any;
-    conflicts: any;
+    gaps: string[];
+    conflicts: string[];
     content: string;
     confidence: any;
     structured_review: {
@@ -287,8 +373,9 @@ export declare function runLlmCoordinatorReview(group: any, userMessage: string,
         summary: string;
         checks: any;
         worker_reviews: any;
-        gaps: any;
-        conflicts: any;
+        follow_ups: any;
+        gaps: string[];
+        conflicts: string[];
         user_question: string;
         confidence: any;
     };
@@ -307,6 +394,7 @@ export declare function runGroupOrchestrator(input: {
     ragContext?: string;
     ragCitations?: string[];
     ragScoped?: boolean;
+    extraInstructions?: string;
 }): Promise<{
     agent: any;
     delegated: any[];

@@ -8,6 +8,7 @@ import DailyDevTaskModal from './DailyDevTaskModal.vue'
 import { toast, confirmDialog } from '../../utils/toast.js'
 import { useTaskBacklog } from '../../composables/useTaskBacklog.js'
 import { useTaskExecutionDashboard } from '../../composables/useTaskExecutionDashboard.js'
+import { sanitizeUserFacingAgentText, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
 const emit = defineEmits(['navigated'])
@@ -193,6 +194,23 @@ const formatDuration = (ms) => {
   return minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`
 }
 
+const visibleReportText = (value, fallback = '信息已整理。', max = 420) => sanitizeUserFacingAgentText(value, fallback, max)
+const visibleReportObject = (value, fallback = '信息已整理。', max = 420) => sanitizeUserFacingStructure(value, { fallback, max })
+const visibleReportList = (value, fallback = '信息已整理。', max = 260) => {
+  const list = Array.isArray(value) ? value : value === undefined || value === null || value === '' ? [] : [value]
+  return list.map(item => visibleReportText(item, fallback, max)).filter(Boolean)
+}
+const continuationStrategyLabel = (item = {}) => {
+  const route = item.reworkRoute || item.rework_route || item.routing || {}
+  const value = String(route.user_label || route.userLabel || item.continuationStrategy || item.continuation_strategy || '').trim()
+  if (!value) return ''
+  if (value === 'same_worker_scratchpad' || value === 'continue_same_worker') return '继续同一子 Agent'
+  if (value === 'fresh_verification_worker' || value === 'independent_verification') return '独立验证复核'
+  if (value === 'spawn_fresh_worker') return '重新派发'
+  if (value === 'stop_wrong_direction_then_continue') return '停止旧方向后继续'
+  return visibleReportText(value, '继续处理缺口。', 80)
+}
+
 const updateStats = () => {
   stats.value = {
     total: tasks.value.length,
@@ -289,7 +307,7 @@ const workflowSummaryItems = (task) => {
     { key: 'plan', label: `主计划 ${planCount}`, tone: planCount ? 'ok' : 'muted' },
     { key: 'assign', label: `已派发 ${assignmentCount}`, tone: assignmentCount ? 'ok' : 'muted' },
     { key: 'worker', label: `子 Agent ${workerCount}`, tone: workerCount ? 'ok' : 'muted' },
-    { key: 'receipt', label: `回执 ${receiptCount}`, tone: receiptCount ? 'ok' : 'warn' },
+    { key: 'receipt', label: `结果说明 ${receiptCount}`, tone: receiptCount ? 'ok' : 'warn' },
     { key: 'verify', label: `验证 ${verificationCount}`, tone: verificationCount ? 'ok' : (summary.requires_verification ? 'warn' : 'muted') }
   ]
 }
@@ -297,22 +315,22 @@ const workflowSummaryItems = (task) => {
 const normalizeReceiptEvidence = (receipt, fallbackAgent = '') => {
   if (!receipt) return null
   return {
-    agent: receipt.agent || fallbackAgent || '子 Agent',
+    agent: visibleReportText(receipt.agent || fallbackAgent || '子 Agent', '子 Agent', 80),
     status: receipt.status || 'unknown',
-    summary: receipt.summary || '',
-    actions: Array.isArray(receipt.actions) ? receipt.actions : [],
+    summary: visibleReportText(receipt.summary || '', '', 260),
+    actions: visibleReportList(receipt.actions, '已执行动作。', 160),
     filesChanged: Array.isArray(receipt.filesChanged || receipt.files_changed || receipt.files)
       ? (receipt.filesChanged || receipt.files_changed || receipt.files)
       : [],
-    verification: Array.isArray(receipt.verification || receipt.tests) ? (receipt.verification || receipt.tests) : [],
-    memoryUsed: Array.isArray(receipt.memoryUsed || receipt.memory_used || receipt.used)
+    verification: visibleReportList(Array.isArray(receipt.verification || receipt.tests) ? (receipt.verification || receipt.tests) : [], '验证结果已整理。', 180),
+    memoryUsed: visibleReportList(Array.isArray(receipt.memoryUsed || receipt.memory_used || receipt.used)
       ? (receipt.memoryUsed || receipt.memory_used || receipt.used)
-      : [],
-    memoryIgnored: Array.isArray(receipt.memoryIgnored || receipt.memory_ignored || receipt.ignored)
+      : [], '记忆记录已整理。', 160),
+    memoryIgnored: visibleReportList(Array.isArray(receipt.memoryIgnored || receipt.memory_ignored || receipt.ignored)
       ? (receipt.memoryIgnored || receipt.memory_ignored || receipt.ignored)
-      : [],
-    blockers: Array.isArray(receipt.blockers) ? receipt.blockers : [],
-    needs: Array.isArray(receipt.needs || receipt.followUps || receipt.follow_ups) ? (receipt.needs || receipt.followUps || receipt.follow_ups) : []
+      : [], '记忆记录已整理。', 160),
+    blockers: visibleReportList(Array.isArray(receipt.blockers) ? receipt.blockers : [], '阻塞信息已整理。', 220),
+    needs: visibleReportList(Array.isArray(receipt.needs || receipt.followUps || receipt.follow_ups) ? (receipt.needs || receipt.followUps || receipt.follow_ups) : [], '待补充信息已整理。', 220)
   }
 }
 
@@ -352,7 +370,7 @@ const buildContinuationDraft = (task) => {
   if (summary.verification_required_missing?.length) {
     lines.push('需要补齐的项目验证命令证据：')
     summary.verification_required_missing.slice(0, 10).forEach(item => {
-      lines.push(`- ${item.agent || '未知 Agent'}：请实际运行并回执 ${item.required?.join(' / ') || '项目配置验证命令'}`)
+      lines.push(`- ${item.agent || '未知 Agent'}：请实际运行并补充结果说明 ${item.required?.join(' / ') || '项目配置验证命令'}`)
     })
     lines.push('')
   }
@@ -368,7 +386,7 @@ const buildContinuationDraft = (task) => {
   }
   const receipts = receiptEvidenceItems(task).filter(item => item.status !== 'done')
   if (receipts.length) {
-    lines.push('需要跟进的子 Agent 回执：')
+    lines.push('需要跟进的子 Agent 结果说明：')
     receipts.slice(0, 8).forEach(item => {
       lines.push(`- ${item.agent}：${receiptStatusText(item.status)}；${item.summary || '无摘要'}`)
       ;[...item.blockers, ...item.needs].filter(Boolean).slice(0, 5).forEach(need => lines.push(`  - ${need}`))
@@ -383,7 +401,7 @@ const buildContinuationDraft = (task) => {
   lines.push('继续执行要求：')
   lines.push('- 主 Agent 先判断这些阻塞是否已被本次补充消解。')
   lines.push('- 如可继续，优先派发给相关子 Agent 返工。')
-  lines.push('- 完成后仍需子 Agent 回执、主 Agent 复盘、实际变更证据和已执行验证记录。')
+  lines.push('- 完成后仍需子 Agent 结果说明、主 Agent 复盘、实际变更证据和已执行验证记录。')
   return lines.filter((line, index, arr) => line || arr[index - 1]).join('\n').trim()
 }
 
@@ -683,9 +701,9 @@ const replanDashboardTask = async (item) => {
     `请主 Agent 重新规划任务：${task.title}`,
     '',
     '重新规划要求：',
-    '- 重新读取业务目标、验收标准、上一轮计划、子 Agent 回执和阻塞项。',
+    '- 重新读取业务目标、验收标准、上一轮计划、子 Agent 结果说明和阻塞项。',
     '- 按当前项目 Agent 能力边界重新拆分任务。',
-    '- 重新派发时写清每个子 Agent 的目标、允许修改范围、验证命令和交付回执要求。',
+    '- 重新派发时写清每个子 Agent 的目标、允许修改范围、验证命令和交付结果要求。',
     '- 如果仍然无法继续，必须明确列出需要用户确认的信息。'
   ].join('\n')
   const ok = await submitContinuationPayload(task, message, { source: 'user_replan' })
@@ -768,6 +786,24 @@ const loadTaskExecutions = async (taskId) => {
 }
 
 const currentExecutions = () => taskExecutions.value[currentTaskReport.value?.id] || []
+const currentDeliverySummary = () => visibleReportObject(currentTaskReport.value?.delivery_summary || null, '交付摘要已整理。')
+const currentReviewSummary = () => visibleReportObject(currentTaskReport.value?.review || null, '主 Agent 复盘已整理。')
+const currentWorkerNotifications = () => {
+  const notifications = currentDeliverySummary()?.worker_notifications || []
+  return Array.isArray(notifications) ? notifications : []
+}
+const visibleTaskTitle = () => visibleReportText(currentTaskReport.value?.title || '任务', '任务', 120)
+const visibleTaskStatusDetail = () => visibleReportText(currentTaskReport.value?.status_detail || '暂无状态说明', '暂无状态说明', 260)
+const visibleRequiredVerification = (item = {}) => {
+  const agent = visibleReportText(item.agent || '未知 Agent', '未知 Agent', 80)
+  const required = visibleReportList(item.required, '项目配置验证命令', 160)
+  return `${agent}：${required.length ? required.join(' / ') : '未配置命令'}`
+}
+const visibleDeliveryBlockers = () => {
+  const summary = currentDeliverySummary() || {}
+  return visibleReportList([...(summary.blockers || []), ...(summary.needs || [])], '待补充信息已整理。', 220)
+}
+const visibleUserDeliveryReport = () => visibleReportText(currentDeliverySummary()?.user_report || '', '交付报告已整理。', 1600)
 
 const loadTaskTrace = async (task) => {
   currentTaskTrace.value = null
@@ -1103,14 +1139,14 @@ onMounted(() => {
                   {{ worker.agent }} · {{ receiptStatusText(worker.status) }}
                 </span>
               </div>
-              <div v-else class="dashboard-muted">等待派发或回执。</div>
+              <div v-else class="dashboard-muted">等待派发或结果说明。</div>
             </div>
 
             <div class="dashboard-panel evidence">
               <div class="dashboard-panel-title">验收证据</div>
               <div class="dashboard-evidence-grid">
                 <span>实变 <strong>{{ item.evidence?.actual_file_change_count || 0 }}</strong></span>
-                <span>回执 <strong>{{ item.evidence?.receipt_count || 0 }}</strong></span>
+                <span>结果说明 <strong>{{ item.evidence?.receipt_count || 0 }}</strong></span>
                 <span>验证 <strong>{{ item.evidence?.verification_executed?.length || 0 }}</strong></span>
                 <span>返工 <strong>{{ item.rework_records?.length || 0 }}</strong></span>
               </div>
@@ -1356,8 +1392,8 @@ onMounted(() => {
         <h3>📄 任务执行报告</h3>
         <div class="modal-body" style="flex: 1; overflow-y: auto; padding-right: 4px; margin-top: 12px; display: flex; flex-direction: column; gap: 16px;">
         <div class="report-meta">
-          <div><strong>{{ currentTaskReport?.title }}</strong></div>
-          <div>{{ currentTaskReport?.status_detail || '暂无状态说明' }}</div>
+          <div><strong>{{ visibleTaskTitle() }}</strong></div>
+          <div>{{ visibleTaskStatusDetail() }}</div>
         </div>
         <details v-if="currentTaskReport?.trace_id || taskTraceLoading || currentTaskTrace?.events?.length" class="technical-report-details">
           <summary>Trace 技术详情</summary>
@@ -1379,132 +1415,132 @@ onMounted(() => {
             </div>
           </div>
         </details>
-        <div v-if="currentTaskReport?.delivery_summary" class="delivery-summary">
+        <div v-if="currentDeliverySummary()" class="delivery-summary">
           <div class="delivery-grid">
             <div>
               <span class="delivery-label">交付状态</span>
-              <strong>{{ currentTaskReport.delivery_summary.headline }}</strong>
+              <strong>{{ currentDeliverySummary().headline || '交付状态已整理。' }}</strong>
             </div>
             <div>
               <span class="delivery-label">参与 Agent</span>
-              <strong>{{ currentTaskReport.delivery_summary.agents?.join('、') || '暂无' }}</strong>
+              <strong>{{ currentDeliverySummary().agents?.join('、') || '暂无' }}</strong>
             </div>
             <div>
               <span class="delivery-label">文件变更</span>
-              <strong>{{ currentTaskReport.delivery_summary.files_changed?.length || 0 }} 个</strong>
+              <strong>{{ currentDeliverySummary().files_changed?.length || 0 }} 个</strong>
             </div>
             <div>
               <span class="delivery-label">实际捕获</span>
-              <strong>{{ currentTaskReport.delivery_summary.actual_file_change_count || 0 }} 个</strong>
+              <strong>{{ currentDeliverySummary().actual_file_change_count || 0 }} 个</strong>
             </div>
             <div>
               <span class="delivery-label">验证记录</span>
-              <strong>{{ currentTaskReport.delivery_summary.verification?.length || 0 }} 条</strong>
+              <strong>{{ currentDeliverySummary().verification?.length || 0 }} 条</strong>
             </div>
             <div>
               <span class="delivery-label">已执行验证</span>
-              <strong>{{ currentTaskReport.delivery_summary.verification_executed?.length || 0 }} 条</strong>
+              <strong>{{ currentDeliverySummary().verification_executed?.length || 0 }} 条</strong>
             </div>
             <div>
               <span class="delivery-label">失败验证</span>
-              <strong>{{ currentTaskReport.delivery_summary.verification_failed?.length || 0 }} 条</strong>
+              <strong>{{ currentDeliverySummary().verification_failed?.length || 0 }} 条</strong>
             </div>
           </div>
-          <div v-if="currentTaskReport.delivery_summary.actual_file_changes?.length" class="delivery-list">
+          <div v-if="currentDeliverySummary().actual_file_changes?.length" class="delivery-list">
             <span class="delivery-label">实际文件变更</span>
-            <code v-for="file in currentTaskReport.delivery_summary.actual_file_changes" :key="`${file.agent || ''}:${file.path}:${file.status_kind || file.status}`">
+            <code v-for="file in currentDeliverySummary().actual_file_changes" :key="`${file.agent || ''}:${file.path}:${file.status_kind || file.status}`">
               {{ file.agent ? `${file.agent} · ` : '' }}{{ file.path }}{{ file.status ? ` (${file.status})` : '' }}
             </code>
           </div>
-          <div v-if="currentTaskReport.delivery_summary.files_changed?.length" class="delivery-list">
+          <div v-if="currentDeliverySummary().files_changed?.length" class="delivery-list">
             <span class="delivery-label">变更文件</span>
-            <code v-for="file in currentTaskReport.delivery_summary.files_changed" :key="file">{{ file }}</code>
+            <code v-for="file in currentDeliverySummary().files_changed" :key="file">{{ file }}</code>
           </div>
-          <div v-if="currentTaskReport.delivery_summary.verification_executed?.length" class="delivery-list ok">
+          <div v-if="currentDeliverySummary().verification_executed?.length" class="delivery-list ok">
             <span class="delivery-label">已执行验证</span>
-            <span v-for="item in currentTaskReport.delivery_summary.verification_executed" :key="item" class="delivery-pill">{{ item }}</span>
+            <span v-for="item in visibleReportList(currentDeliverySummary().verification_executed, '验证结果已整理。', 180)" :key="item" class="delivery-pill">{{ item }}</span>
           </div>
-          <div v-if="currentTaskReport.delivery_summary.verification_suggested?.length" class="delivery-list muted">
+          <div v-if="currentDeliverySummary().verification_suggested?.length" class="delivery-list muted">
             <span class="delivery-label">建议/未执行</span>
-            <span v-for="item in currentTaskReport.delivery_summary.verification_suggested" :key="item" class="delivery-pill">{{ item }}</span>
+            <span v-for="item in visibleReportList(currentDeliverySummary().verification_suggested, '建议验证已整理。', 180)" :key="item" class="delivery-pill">{{ item }}</span>
           </div>
-          <div v-if="currentTaskReport.delivery_summary.verification_failed?.length" class="delivery-list danger">
+          <div v-if="currentDeliverySummary().verification_failed?.length" class="delivery-list danger">
             <span class="delivery-label">失败验证</span>
-            <span v-for="item in currentTaskReport.delivery_summary.verification_failed" :key="item" class="delivery-pill">{{ item }}</span>
+            <span v-for="item in visibleReportList(currentDeliverySummary().verification_failed, '失败验证已整理。', 180)" :key="item" class="delivery-pill">{{ item }}</span>
           </div>
-          <div v-if="currentTaskReport.delivery_summary.verification_required_missing?.length" class="delivery-list warning">
+          <div v-if="currentDeliverySummary().verification_required_missing?.length" class="delivery-list warning">
             <span class="delivery-label">缺命令验证</span>
-            <span v-for="item in currentTaskReport.delivery_summary.verification_required_missing" :key="item.agent" class="delivery-pill">
-              {{ item.agent }}：{{ item.required?.join(' / ') || '未配置命令' }}
+            <span v-for="item in currentDeliverySummary().verification_required_missing" :key="item.agent" class="delivery-pill">
+              {{ visibleRequiredVerification(item) }}
             </span>
           </div>
-          <div v-if="!hasCategorizedVerification(currentTaskReport.delivery_summary) && currentTaskReport.delivery_summary.verification?.length" class="delivery-list">
+          <div v-if="!hasCategorizedVerification(currentDeliverySummary()) && currentDeliverySummary().verification?.length" class="delivery-list">
             <span class="delivery-label">验证</span>
-            <span v-for="item in currentTaskReport.delivery_summary.verification" :key="item" class="delivery-pill">{{ item }}</span>
+            <span v-for="item in visibleReportList(currentDeliverySummary().verification, '验证结果已整理。', 180)" :key="item" class="delivery-pill">{{ item }}</span>
           </div>
-          <div v-if="currentTaskReport.delivery_summary.blockers?.length || currentTaskReport.delivery_summary.needs?.length" class="delivery-list warning">
+          <div v-if="visibleDeliveryBlockers().length" class="delivery-list warning">
             <span class="delivery-label">阻塞/待补充</span>
-            <span v-for="item in [...(currentTaskReport.delivery_summary.blockers || []), ...(currentTaskReport.delivery_summary.needs || [])]" :key="item" class="delivery-pill">{{ item }}</span>
+            <span v-for="item in visibleDeliveryBlockers()" :key="item" class="delivery-pill">{{ item }}</span>
           </div>
-          <div v-if="currentTaskReport?.delivery_summary?.user_report" class="report-section user-delivery-report">
+          <div v-if="currentDeliverySummary()?.user_report" class="report-section user-delivery-report">
             <h4>交付报告</h4>
-            <pre class="report-block">{{ currentTaskReport.delivery_summary.user_report }}</pre>
+            <pre class="report-block">{{ visibleUserDeliveryReport() }}</pre>
           </div>
           <details class="technical-report-details">
             <summary>技术执行详情</summary>
-          <div v-if="currentTaskReport.delivery_summary.latest_coordination_plan?.phases?.length" class="delivery-list">
+          <div v-if="currentDeliverySummary().latest_coordination_plan?.phases?.length" class="delivery-list">
             <span class="delivery-label">主 Agent 计划</span>
-            <span v-for="phase in currentTaskReport.delivery_summary.latest_coordination_plan.phases" :key="phase" class="delivery-pill plan-pill">{{ phase }}</span>
+            <span v-for="phase in visibleReportList(currentDeliverySummary().latest_coordination_plan.phases, '计划阶段已整理。', 180)" :key="phase" class="delivery-pill plan-pill">{{ phase }}</span>
           </div>
-          <div v-if="currentTaskReport.delivery_summary.assignment_evidence?.length" class="delivery-list">
+          <div v-if="currentDeliverySummary().assignment_evidence?.length" class="delivery-list">
             <span class="delivery-label">派发证据</span>
             <span
-              v-for="item in currentTaskReport.delivery_summary.assignment_evidence"
+              v-for="item in currentDeliverySummary().assignment_evidence"
               :key="`${item.project || ''}:${item.message_id || ''}:${item.task}`"
               class="delivery-pill plan-pill"
             >
-              {{ item.project || '未知 Agent' }}{{ item.status ? ` · ${item.statusText || item.status}` : '' }}{{ item.dependsOn ? ` · 依赖 ${item.dependsOn}` : '' }}{{ item.continuationStrategy ? ` · 续跑 ${item.continuationStrategy}` : '' }}
+              {{ visibleReportText(item.project || '未知 Agent', '未知 Agent', 80) }}{{ item.status ? ` · ${item.statusText || item.status}` : '' }}{{ item.dependsOn ? ` · 依赖 ${item.dependsOn}` : '' }}{{ continuationStrategyLabel(item) ? ` · ${continuationStrategyLabel(item)}` : '' }}
             </span>
           </div>
-          <div v-if="currentTaskReport.delivery_summary.dependency_evidence?.length" class="delivery-list warning">
+          <div v-if="currentDeliverySummary().dependency_evidence?.length" class="delivery-list warning">
             <span class="delivery-label">依赖证据</span>
             <span
-              v-for="item in currentTaskReport.delivery_summary.dependency_evidence"
+              v-for="item in currentDeliverySummary().dependency_evidence"
               :key="`${item.project || ''}:${item.dependsOn}:${item.task}`"
               class="delivery-pill"
             >
-              {{ item.project || '未知 Agent' }} 等待 {{ item.dependsOn }}{{ item.status ? ` · ${item.statusText || item.status}` : '' }}
+              {{ visibleReportText(item.project || '未知 Agent', '未知 Agent', 80) }} 等待 {{ item.dependsOn }}{{ item.status ? ` · ${item.statusText || item.status}` : '' }}
             </span>
           </div>
-          <div v-if="currentTaskReport.delivery_summary.rework_evidence?.length" class="delivery-list warning">
+          <div v-if="currentDeliverySummary().rework_evidence?.length" class="delivery-list warning">
             <span class="delivery-label">返工证据</span>
             <span
-              v-for="item in currentTaskReport.delivery_summary.rework_evidence"
+              v-for="item in currentDeliverySummary().rework_evidence"
               :key="`${item.project || ''}:${item.message_id || ''}:${item.task || item.reason}`"
               class="delivery-pill"
             >
-              {{ item.project ? `${item.project}：` : '' }}{{ item.attempt ? `第 ${item.attempt} 轮 ` : '' }}{{ item.reason || item.task }}
+              {{ item.project ? `${visibleReportText(item.project, '子 Agent', 80)}：` : '' }}{{ item.attempt ? `第 ${item.attempt} 轮 ` : '' }}{{ visibleReportText(item.reason || item.task, '返工信息已整理。', 180) }}
             </span>
           </div>
           </details>
         </div>
         <details class="technical-report-details">
-          <summary>Agent、执行器与原始回执</summary>
+          <summary>Agent、执行器与原始结果说明</summary>
         <div v-if="hasExecutionEvidence(currentTaskReport)" class="execution-evidence">
           <div class="evidence-head">
             <strong>Agent 执行证据</strong>
-            <span>主 Agent 复盘、子 Agent 回执和实际变更会共同决定任务能否完成</span>
+            <span>主 Agent 复盘、子 Agent 结果说明和实际变更会共同决定任务能否完成</span>
           </div>
-          <div v-if="currentTaskReport.delivery_summary?.worker_notifications?.length" class="receipt-card-list">
+          <div v-if="currentWorkerNotifications().length" class="receipt-card-list">
             <div
-              v-for="item in currentTaskReport.delivery_summary.worker_notifications"
+              v-for="item in currentWorkerNotifications()"
               :key="`${item.task_id}:${item.status}:${item.summary}`"
               class="receipt-card"
               :class="receiptTone(item.receipt_status === 'done' ? 'done' : item.status)"
             >
               <div class="receipt-top">
                 <strong>{{ item.task_id || 'Worker' }}</strong>
-                <span>通知 {{ item.status || 'unknown' }} · 回执 {{ item.receipt_status || 'missing' }}</span>
+                <span>通知 {{ item.status || 'unknown' }} · 结果说明 {{ item.receipt_status || 'missing' }}</span>
               </div>
               <div v-if="item.summary" class="receipt-summary">{{ item.summary }}</div>
               <div v-if="item.result" class="receipt-row">
@@ -1543,12 +1579,12 @@ onMounted(() => {
               </div>
             </div>
           </div>
-          <div v-if="currentTaskReport?.review" class="review-card">
+          <div v-if="currentReviewSummary()" class="review-card">
             <div class="receipt-top">
               <strong>主 Agent 复盘</strong>
-              <span>{{ currentTaskReport.review.status || '已记录' }}</span>
+              <span>{{ currentReviewSummary().status || '已记录' }}</span>
             </div>
-            <div class="receipt-summary">{{ currentTaskReport.review.content || currentTaskReport.review.summary || '暂无复盘摘要' }}</div>
+            <div class="receipt-summary">{{ currentReviewSummary().content || currentReviewSummary().summary || '暂无复盘摘要' }}</div>
           </div>
         </div>
         <div v-if="currentExecutions().length" class="kernel-execution-section">
@@ -1591,7 +1627,7 @@ onMounted(() => {
         </div>
         <pre class="report-block">{{ currentTaskReport?.final_report || currentTaskReport?.result || '暂无执行报告' }}</pre>
         <div v-if="currentTaskReport?.receipt" class="report-section">
-          <h4>结构化回执</h4>
+          <h4>结构化结果说明</h4>
           <pre class="report-block">{{ JSON.stringify(currentTaskReport.receipt, null, 2) }}</pre>
         </div>
         <div v-if="currentTaskReport?.review" class="report-section">
@@ -1625,7 +1661,7 @@ onMounted(() => {
         <div class="form-group">
           <label>补充说明</label>
           <textarea v-model="continueMessage" rows="5" placeholder="补充接口字段、业务规则、验收要求、用户确认结果或返工方向"></textarea>
-          <div class="continue-hint">已根据任务阻塞、子 Agent 回执和主 Agent 复盘生成草稿，可直接修改后继续执行。</div>
+          <div class="continue-hint">已根据任务阻塞、子 Agent 结果说明和主 Agent 复盘生成草稿，可直接修改后继续执行。</div>
         </div>
         <div class="form-actions">
           <button class="btn btn-cancel" @click="showContinue = false">取消</button>

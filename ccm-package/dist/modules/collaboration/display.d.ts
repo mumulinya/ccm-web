@@ -31,8 +31,12 @@ export declare function buildTechnicalDetailSections(input: {
     items: any[];
 }[];
 export declare function buildMainAgentDisplayStream(input: {
+    surface?: "group" | "global";
     mode: string;
+    status?: string;
+    phase?: string;
     userText?: string;
+    goal?: string;
     actionIds?: string[];
     steps?: any[];
     permissions?: any[];
@@ -43,6 +47,10 @@ export declare function buildMainAgentDisplayStream(input: {
     executions?: any[];
     summary?: any;
     rawEvents?: any[];
+    taskId?: string;
+    runId?: string;
+    missionId?: string;
+    supervisorId?: string;
 }): {
     schema: string;
     type: string;
@@ -65,6 +73,112 @@ export declare function buildMainAgentDisplayStream(input: {
         };
         hidden_tool_uses: number;
     };
+    workchain: {
+        schema: string;
+        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+        mode: string;
+        status: string;
+        phase: string;
+        user_visible_text: string;
+        stages: {
+            id: string;
+            label: string;
+            status: string;
+            summary: string;
+        }[];
+        progress_checkpoints: {
+            schema: string;
+            title: string;
+            display_policy: {
+                user_visible: boolean;
+                hide_for_ordinary_conversation: boolean;
+                raw_events_default_collapsed: boolean;
+            };
+            items: any[];
+        };
+        completion_summary: {
+            headline: string;
+            evidence: string[];
+            files: any[];
+            verification: string[];
+            risks: string[];
+            next_action: any;
+            verification_status: string;
+            risk_status: string;
+            final_summary_quality: {
+                schema: string;
+                required: boolean;
+                passed: boolean;
+                checks: {
+                    id: string;
+                    label: string;
+                    passed: boolean;
+                    detail: string;
+                }[];
+                missing: string[];
+                verification_status: string;
+                risk_status: string;
+                source: string;
+            };
+            terminal: boolean;
+        };
+        display_policy: {
+            user_text_first: boolean;
+            technical_default_collapsed: boolean;
+            hide_internal_protocols: boolean;
+            final_summary_required: boolean;
+        };
+        technical_details: {
+            id: string;
+            title: string;
+            items: any[];
+        }[];
+    };
+    completion_summary: {
+        headline: string;
+        evidence: string[];
+        files: any[];
+        verification: string[];
+        risks: string[];
+        next_action: any;
+        verification_status: string;
+        risk_status: string;
+        final_summary_quality: {
+            schema: string;
+            required: boolean;
+            passed: boolean;
+            checks: {
+                id: string;
+                label: string;
+                passed: boolean;
+                detail: string;
+            }[];
+            missing: string[];
+            verification_status: string;
+            risk_status: string;
+            source: string;
+        };
+        terminal: boolean;
+    };
+    progress_checkpoints: {
+        schema: string;
+        title: string;
+        display_policy: {
+            user_visible: boolean;
+            hide_for_ordinary_conversation: boolean;
+            raw_events_default_collapsed: boolean;
+        };
+        items: any[];
+    };
+    dispatch_launch_summary: any;
+    dispatchLaunchSummary: any;
+    delivery_report: any;
+    workchain_stages: {
+        id: string;
+        label: string;
+        status: string;
+        summary: string;
+    }[];
     technical_details: {
         id: string;
         title: string;

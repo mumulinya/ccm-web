@@ -7,6 +7,7 @@ type OrchestratorRouteDeps = {
     replayAgentTrace: (traceId: string) => any;
     buildTraceReplaySuite: (limit?: number) => any;
     runAgentRuntimeKernelSelfTest: () => any;
+    runWorkerHandoffSelfTest: () => any;
     runGroupMainAgentActionRegistrySelfTest: () => any;
     runGroupMainAgentToolLoopSelfTest: () => any;
     getGroupMainAgentActionRegistry: () => any;

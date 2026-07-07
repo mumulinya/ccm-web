@@ -43,6 +43,7 @@ export function globalMissionChildGatePassed(task: any, deps: GlobalMissionDeps)
   if (requiresCode && actualChanges <= 0) return false;
   if (requiresVerification && executedVerification <= 0) return false;
   if (failedVerification > 0 || summary.verification_required_gate_passed === false || (requiresVerification && summary.verification_source_gate_passed !== true)) return false;
+  if (summary.independent_review_required === true && summary.independent_review_gate_passed !== true) return false;
   return true;
 }
 
@@ -87,7 +88,7 @@ export function refreshGlobalMissionParentInTaskList(tasks: any[], parentId: str
   const cancelled = parent.status === "cancelled";
   parent.status = allPassed ? "done" : cancelled ? "cancelled" : "in_progress";
   parent.status_detail = allPassed
-    ? "所有群聊主 Agent和项目 Agent子任务均已通过交付门禁"
+    ? "所有群聊主 Agent和项目 Agent子任务均已通过交付验收"
     : cancelled
       ? (parent.status_detail || "全局任务已取消")
       : controlMode === "manual"
@@ -111,7 +112,7 @@ export function refreshGlobalMissionParentInTaskList(tasks: any[], parentId: str
     updated_at: now,
   };
   parent.delivery_summary = {
-    headline: allPassed ? "全局开发任务已完成并通过全部门禁" : "全局开发任务仍在执行或验收中",
+    headline: allPassed ? "全局开发任务已完成并通过全部交付验收" : "全局开发任务仍在执行或验收中",
     global_mission: true,
     child_tasks: rows,
     actual_file_changes: actualFileChanges,

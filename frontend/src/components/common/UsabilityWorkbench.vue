@@ -75,6 +75,23 @@ const confirmIntake = async () => {
   intakeBusy.value = false
 }
 
+const reviseIntake = async () => {
+  if (!confirmation.value?.id) return
+  const feedback = window.prompt('希望主 Agent 怎么调整这份执行前计划？', '')
+  if (!feedback?.trim()) return
+  intakeBusy.value = true
+  try {
+    const result = await api('/api/usability/intake/revise', { task_id: confirmation.value.id, feedback: feedback.trim() })
+    confirmation.value = {
+      ...result.task,
+      intake: result.plan_mode || result.task?.intake_draft || confirmation.value.intake || null,
+    }
+    toast.success('执行前计划已调整，确认前仍不会开始')
+    await load(true)
+  } catch (error) { toast.error(error.message) }
+  intakeBusy.value = false
+}
+
 const discardIntake = async () => {
   if (!confirmation.value?.id) return
   try {
@@ -94,12 +111,17 @@ const actionLabel = action => ({
 })[action] || action
 
 const runAction = async (task, action) => {
-  if (['edit', 'supplement', 'switch_executor', 'view_report', 'view'].includes(action)) return navigateTask(task)
+  if (['supplement', 'switch_executor', 'view_report', 'view'].includes(action)) return navigateTask(task)
   actionBusy.value = `${task.id}:${action}`
   try {
     if (action === 'confirm') {
       confirmation.value = task
       return await confirmIntake()
+    }
+    if (action === 'edit') {
+      const feedback = window.prompt('希望主 Agent 怎么调整这份执行前计划？', '')
+      if (!feedback?.trim()) return
+      await api('/api/usability/intake/revise', { task_id: task.id, feedback: feedback.trim() })
     }
     if (action === 'retry') await api('/api/tasks/retry', { task_id: task.id, reason: '用户从工作台重试', auto_execute: true })
     if (action === 'start') await api('/api/tasks/queue', { task_id: task.id })
@@ -164,13 +186,17 @@ onUnmounted(() => timer && window.clearInterval(timer))
       </div>
       <div class="confirm-grid">
         <div><label>目标项目</label><strong>{{ confirmation.intake?.group_name || confirmation.intake?.project }}</strong></div>
-        <div><label>影响范围</label><strong>{{ confirmation.intake?.scope?.join('、') }}</strong></div>
-        <div class="wide"><label>验收标准</label><p>{{ confirmation.intake?.acceptance }}</p></div>
-        <div class="wide"><label>主要风险</label><p>{{ confirmation.intake?.risks?.join('；') }}</p></div>
+        <div><label>影响范围</label><strong>{{ (confirmation.intake?.scope || confirmation.intake?.impact_scope?.areas || []).join('、') }}</strong></div>
+        <div class="wide"><label>验收标准</label><p>{{ Array.isArray(confirmation.intake?.acceptance) ? confirmation.intake.acceptance.join('；') : confirmation.intake?.acceptance }}</p></div>
+        <div class="wide"><label>主要风险</label><p>{{ (confirmation.intake?.risks || confirmation.intake?.risk?.reasons || [confirmation.intake?.risk?.summary]).filter(Boolean).join('；') }}</p></div>
+        <div v-if="confirmation.intake?.clarification_questions?.length" class="wide">
+          <label>需要确认</label>
+          <p v-for="item in confirmation.intake.clarification_questions.slice(0, 4)" :key="item.id || item.question">{{ item.question }}</p>
+        </div>
       </div>
       <details><summary>技术记录</summary><code>Task {{ confirmation.id }} · Trace {{ confirmation.trace_id }}</code></details>
       <div class="confirm-actions">
-        <button class="ghost" @click="navigateTask(confirmation)">调整计划</button>
+        <button class="ghost" :disabled="intakeBusy" @click="reviseIntake">调整计划</button>
         <button class="ghost danger-text" @click="discardIntake">放弃</button>
         <button class="primary" :disabled="intakeBusy" @click="confirmIntake">确认并开始</button>
       </div>
@@ -218,7 +244,7 @@ onUnmounted(() => timer && window.clearInterval(timer))
         <button @click="navigateResource('cron')"><span>定时任务</span><strong>{{ resources.cron.length }}</strong><small>{{ resources.cron.filter(c => c.enabled).length }} 个已启用</small></button>
       </section>
 
-      <details class="technical"><summary>系统与技术详情</summary><p>工作台每 15 秒同步一次。完成或取消超过 {{ data.archive?.retention_days || 30 }} 天的任务会自动归档；内部协议、回执和 Trace 默认不打扰日常使用。</p></details>
+      <details class="technical"><summary>系统与技术详情</summary><p>工作台每 15 秒同步一次。完成或取消超过 {{ data.archive?.retention_days || 30 }} 天的任务会自动归档；内部协议、原始结果说明和 Trace 默认不打扰日常使用。</p></details>
     </template>
   </div>
 </template>

@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { sanitizeUserFacingAgentText } from '../utils/agentDisplay.js'
 
 const DEFAULT_AGENT_PROBE_TIMEOUT_MS = 45000
 
@@ -49,7 +50,7 @@ export const actionClass = (action) => {
 
 export const compactDashboardText = (value, max = 120) => {
   const text = String(value || '').replace(/\s+/g, ' ').trim()
-  return text.length > max ? `${text.slice(0, max)}...` : text
+  return sanitizeUserFacingAgentText(text.length > max ? `${text.slice(0, max)}...` : text, '任务状态已整理。', max)
 }
 
 export const actionVisible = (item, kind) => (item?.actions || []).some(action => action.kind === kind)

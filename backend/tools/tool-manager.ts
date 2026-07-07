@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
+import { loadMcpTools, loadSkills } from "../core/db";
 
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const MCP_DIR = path.join(CCM_DIR, "mcp");
@@ -31,6 +32,16 @@ interface SkillDef {
 export interface ToolScope {
   mcp?: string[];
   skill?: string[];
+  auditContext?: ToolInvocationAuditContext;
+}
+
+export interface ToolInvocationAuditContext {
+  runtime?: string;
+  project?: string;
+  groupId?: string;
+  taskId?: string;
+  executionId?: string;
+  source?: string;
 }
 
 interface McpServerStatus {
@@ -80,8 +91,24 @@ function safeSlug(value: string) {
 function parseMcpGrant(value: any) {
   const raw = String(value || "").trim();
   if (!raw) return { raw, server: "", tool: "" };
-  const mcpRule = raw.match(/^mcp__(.+?)(?:__(.+))?$/);
-  if (mcpRule) return { raw, server: mcpRule[1] || "", tool: mcpRule[2] === "*" ? "" : mcpRule[2] || "" };
+  if (raw.startsWith("mcp__")) {
+    const body = raw.slice("mcp__".length);
+    if (body.startsWith("ccm__")) {
+      const rest = body.slice("ccm__".length);
+      const separator = rest.lastIndexOf("__");
+      if (separator > 0) {
+        const tool = rest.slice(separator + 2);
+        return { raw, server: `ccm__${rest.slice(0, separator)}`, tool: tool === "*" ? "" : tool };
+      }
+      return { raw, server: body, tool: "" };
+    }
+    const separator = body.lastIndexOf("__");
+    if (separator > 0) {
+      const tool = body.slice(separator + 2);
+      return { raw, server: body.slice(0, separator), tool: tool === "*" ? "" : tool };
+    }
+    return { raw, server: body, tool: "" };
+  }
   const match = raw.match(/^([^/:]+)[/:](.+)$/);
   if (match) return { raw, server: match[1] || "", tool: match[2] === "*" ? "" : match[2] || "" };
   return { raw, server: raw, tool: "" };
@@ -93,7 +120,8 @@ function serverMatches(grantServer: string, serverName: string) {
 
 function isMcpToolAllowed(scope: ToolScope | undefined, tool: ToolDef) {
   const grants = normalizeScopeList(scope?.mcp);
-  if (!scope || !grants.length) return true;
+  if (!scope) return true;
+  if (!grants.length) return false;
   return grants.some(raw => {
     if (raw === tool.name) return true;
     const grant = parseMcpGrant(raw);
@@ -104,8 +132,18 @@ function isMcpToolAllowed(scope: ToolScope | undefined, tool: ToolDef) {
 
 function isSkillAllowed(scope: ToolScope | undefined, skillName: string) {
   const grants = normalizeScopeList(scope?.skill);
-  if (!scope || !grants.length) return true;
+  if (!scope) return true;
+  if (!grants.length) return false;
   return grants.includes(skillName) || grants.includes(`skill:${skillName}`) || grants.includes(`Skill:${skillName}`);
+}
+
+function mcpToolCandidates(tools: ToolDef[], toolName: string) {
+  const raw = String(toolName || "").trim();
+  const grant = parseMcpGrant(raw);
+  if (grant.server && grant.tool) {
+    return tools.filter(tool => tool.name === grant.tool && serverMatches(grant.server, tool.serverName));
+  }
+  return tools.filter(tool => tool.name === raw);
 }
 
 function appendToolPermissionAudit(entry: any) {
@@ -114,6 +152,30 @@ function appendToolPermissionAudit(entry: any) {
 
 function appendSkillInvocationAudit(entry: any) {
   appendJsonlBounded(SKILL_INVOCATION_AUDIT_FILE, entry);
+}
+
+function cleanAuditContextText(value: any, max = 180) {
+  return String(value || "").replace(/[\0\r\n\t]+/g, " ").trim().slice(0, max);
+}
+
+function auditContextFromScope(scope?: ToolScope): ToolInvocationAuditContext {
+  const ctx = scope?.auditContext || {};
+  return {
+    runtime: cleanAuditContextText(ctx.runtime, 80),
+    project: cleanAuditContextText(ctx.project, 180),
+    groupId: cleanAuditContextText(ctx.groupId, 180),
+    taskId: cleanAuditContextText(ctx.taskId, 180),
+    executionId: cleanAuditContextText(ctx.executionId, 180),
+    source: cleanAuditContextText(ctx.source, 120),
+  };
+}
+
+function auditMetaFromScope(scope?: ToolScope) {
+  const context = auditContextFromScope(scope);
+  return {
+    ...context,
+    scope,
+  };
 }
 
 function safeIsoDate(value: any): string {
@@ -209,6 +271,12 @@ export class ToolManager {
 
   // 加载所有启用的 MCP 服务器和 Skills
   async loadTools() {
+    for (const client of this.clients.values()) {
+      try { client.disconnect(); } catch {}
+    }
+    this.clients.clear();
+    this.serverConfigs.clear();
+    this.serverStatuses.clear();
     this.tools = [];
     // 加载 MCP 工具配置
     const mcpConfigs = this.loadMcpConfigs();
@@ -441,7 +509,7 @@ export class ToolManager {
     const skillName = String(name || "").replace(/^Skill\s*[:：]\s*/i, "").replace(/^skill:/i, "").trim();
     const skill = this.skills.find(item => item.name === skillName && item.enabled !== false);
     if (!skill) {
-      appendSkillInvocationAudit({ type: "skill_missing", skill: skillName, scope });
+      appendSkillInvocationAudit({ type: "skill_missing", skill: skillName, ...auditMetaFromScope(scope) });
       return {
         ok: false,
         name: skillName,
@@ -450,7 +518,7 @@ export class ToolManager {
       };
     }
     if (scope && !isSkillAllowed(scope, skill.name)) {
-      appendSkillInvocationAudit({ type: "skill_unauthorized", skill: skill.name, scope, contentHash: skill.contentHash });
+      appendSkillInvocationAudit({ type: "skill_unauthorized", skill: skill.name, contentHash: skill.contentHash, ...auditMetaFromScope(scope) });
       return {
         ok: false,
         name: skill.name,
@@ -475,7 +543,7 @@ export class ToolManager {
       invokedAt: new Date().toISOString(),
       auditFile: SKILL_INVOCATION_AUDIT_FILE,
     };
-    appendSkillInvocationAudit({ type: "skill_invoked", skill: skill.name, contentHash: result.contentHash, scope, inputBytes: Buffer.byteLength(inputText, "utf-8") });
+    appendSkillInvocationAudit({ type: "skill_invoked", skill: skill.name, contentHash: result.contentHash, inputBytes: Buffer.byteLength(inputText, "utf-8"), ...auditMetaFromScope(scope) });
     return result;
   }
 
@@ -585,7 +653,10 @@ export class ToolManager {
       const result = this.invokeSkill(skillCall.name, skillCall.input, scope);
       return JSON.stringify({ skillTool: result }, null, 2);
     }
-    const tool = this.tools.find(t => t.name === toolName);
+    const candidates = mcpToolCandidates(this.tools, toolName);
+    const tool = scope
+      ? candidates.find(candidate => isMcpToolAllowed(scope, candidate)) || candidates[0]
+      : candidates[0];
     if (!tool) {
       return `[错误] 工具 "${toolName}" 不存在`;
     }
@@ -594,8 +665,8 @@ export class ToolManager {
         type: "mcp_unauthorized_tool_call",
         tool: toolName,
         server: tool.serverName,
-        scope,
         rule: "ToolManager.isMcpToolAllowed",
+        ...auditMetaFromScope(scope),
       });
       return `[错误] 工具 "${toolName}" 未授权给当前 Agent 使用`;
     }
@@ -607,7 +678,7 @@ export class ToolManager {
       if (!reconnected || !client || !client.isConnected()) return `[错误] MCP 服务器 "${tool.serverName}" 未连接，自动重连失败`;
     }
 
-    const result = await client.callTool(toolName, args);
+    const result = await client.callTool(tool.name, args);
     if (result.isError) {
       const errorText = result.content.map(c => c.text).join("\n");
       const diagnostics = client.getDiagnostics();
@@ -692,46 +763,26 @@ export class ToolManager {
   }
 
   private loadMcpConfigs(): any[] {
-    if (!fs.existsSync(MCP_DIR)) return [];
-    return fs.readdirSync(MCP_DIR)
-      .filter(f => f.endsWith(".json"))
-      .map(f => {
-        try { return JSON.parse(fs.readFileSync(path.join(MCP_DIR, f), "utf-8")); }
-        catch { return null; }
-      })
-      .filter(Boolean);
+    return loadMcpTools();
   }
 
   private loadSkillConfigs(): SkillDef[] {
-    if (!fs.existsSync(SKILLS_DIR)) return [];
-    return fs.readdirSync(SKILLS_DIR)
-      .filter(f => f.endsWith(".json"))
-      .map(f => {
-        try {
-          const sourcePath = path.join(SKILLS_DIR, f);
-          const parsed = JSON.parse(fs.readFileSync(sourcePath, "utf-8"));
-          return {
-            ...parsed,
-            filename: f,
-            sourcePath,
-            contentHash: contentHash({ name: parsed.name, description: parsed.description || "", prompt: parsed.prompt || "", enabled: parsed.enabled !== false }),
-          };
-        }
-        catch { return null; }
-      })
-      .filter(Boolean);
+    return loadSkills().map(parsed => ({
+      ...parsed,
+      sourcePath: parsed.packagePath && fs.existsSync(path.join(parsed.packagePath, "SKILL.md"))
+        ? path.join(parsed.packagePath, "SKILL.md")
+        : parsed.filename ? path.join(SKILLS_DIR, parsed.filename) : "",
+      contentHash: parsed.contentHash || contentHash({
+        name: parsed.name,
+        description: parsed.description || "",
+        prompt: parsed.prompt || "",
+        enabled: parsed.enabled !== false,
+      }),
+    }));
   }
 
-  private parseEnv(envStr: string): Record<string, string> {
-    if (!envStr) return {};
-    const env: Record<string, string> = {};
-    for (const line of envStr.split("\n")) {
-      const idx = line.indexOf("=");
-      if (idx > 0) {
-        env[line.substring(0, idx).trim()] = line.substring(idx + 1).trim();
-      }
-    }
-    return env;
+  private parseEnv(value: any): Record<string, string> {
+    return parseEnv(value);
   }
 
   private parseArgs(args: any): string[] {
@@ -744,7 +795,7 @@ export class ToolManager {
 // 单例
 export const toolManager = new ToolManager();
 
-export function runToolManagerRuntimeSelfTest() {
+export async function runToolManagerRuntimeSelfTest() {
   const manager = new ToolManager() as any;
   manager.initialized = true;
   manager.tools = [
@@ -761,23 +812,77 @@ export function runToolManagerRuntimeSelfTest() {
       auth: deriveMcpAuthStatus({ name: "github", auth: { type: "oauth", expires_at: "2001-01-01T00:00:00.000Z" } }, "401 unauthorized"),
     }],
   ]);
+  manager.clients = new Map([["payments", {
+    isConnected: () => true,
+    callTool: async (name: string, args: any) => ({ isError: false, content: [{ text: `called:${name}:${args.id}` }] }),
+    getDiagnostics: () => ({ lastError: "", stderr: "", elicitationRequired: false }),
+  }]]);
   const audit = manager.buildScopeAudit({ mcp: ["payments/createInvoice", "payments/deleteInvoice"], skill: ["release-notes", "missing-skill"] });
+  const nativeRuleAudit = manager.buildScopeAudit({ mcp: ["mcp__ccm__payments__createInvoice"], skill: [] });
   const prompt = manager.buildToolPrompt({ mcp: ["payments/createInvoice"], skill: ["release-notes"] });
   const discovered = manager.discoverSkills({ skill: ["release-notes"] });
   const invoked = manager.invokeSkill("release-notes", "v1.2.3", { skill: ["release-notes"] });
+  const auditContextTaskId = `tool-manager-context-${Date.now()}`;
+  manager.invokeSkill("release-notes", "context-check", {
+    skill: ["release-notes"],
+    auditContext: {
+      runtime: "codex",
+      project: "context-project",
+      groupId: "context-group",
+      taskId: auditContextTaskId,
+      executionId: "context-exec",
+      source: "selftest",
+    },
+  });
+  const skillAuditRows = fs.existsSync(SKILL_INVOCATION_AUDIT_FILE)
+    ? fs.readFileSync(SKILL_INVOCATION_AUDIT_FILE, "utf-8").split(/\r?\n/).filter(Boolean).slice(-40).map(line => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean)
+    : [];
+  const contextAudit = skillAuditRows.find((row: any) => row.taskId === auditContextTaskId);
   const invokedViaTool = manager.parseSkillToolCall("invoke_skill", { name: "release-notes", input: "v1.2.3" });
   const denied = manager.invokeSkill("release-notes", "v1.2.3", { skill: ["other-skill"] });
+  const deniedByEmptyScope = manager.invokeSkill("release-notes", "v1.2.3", { mcp: [], skill: [] });
+  const emptyScopePrompt = manager.buildToolPrompt({ mcp: [], skill: [] });
   const authStatus = manager.getToolList().servers.find((server: any) => server.name === "github")?.auth;
+  const nativeAliasExecuted = await manager.executeToolCall("mcp__ccm__payments__createInvoice", { id: 7 }, { mcp: ["mcp__ccm__payments__createInvoice"] });
+  const nativeAliasDenied = await manager.executeToolCall("mcp__ccm__payments__createInvoice", { id: 7 }, { mcp: ["payments/deleteInvoice"] });
+  const reloadFlags = { staleClientDisconnected: false };
+  const reloadManager = new ToolManager() as any;
+  reloadManager.clients = new Map([["stale-server", {
+    isConnected: () => true,
+    disconnect: () => { reloadFlags.staleClientDisconnected = true; },
+  }]]);
+  reloadManager.serverConfigs = new Map([["stale-server", { name: "stale-server" }]]);
+  reloadManager.serverStatuses = new Map([["stale-server", { name: "stale-server", state: "connected", toolsCount: 1 }]]);
+  reloadManager.loadMcpConfigs = () => [];
+  reloadManager.loadSkillConfigs = () => [{ name: "fresh-skill", description: "fresh", prompt: "Fresh prompt", enabled: true, contentHash: "freshhash" }];
+  await reloadManager.loadTools();
+  const reloadList = reloadManager.getToolList();
   const checks = {
     detectsMissingTool: audit.missing_mcp_tools.length === 1 && audit.missing_mcp_tools[0].missingTools.includes("deleteInvoice"),
+    nativeStyleMcpGrantParsesAsAvailable: nativeRuleAudit.mcp[0]?.state === "available"
+      && nativeRuleAudit.mcp[0]?.server === "ccm__payments"
+      && nativeRuleAudit.mcp[0]?.tool === "createInvoice",
     detectsMissingSkill: audit.missing_skills.length === 1 && audit.missing_skills[0].name === "missing-skill",
     promptOnlyShowsAuthorizedTool: prompt.includes("createInvoice") && !prompt.includes("deleteInvoice"),
     promptShowsSkillToolProtocol: prompt.includes('"name": "invoke_skill"') && prompt.includes("skill:release-notes"),
     discoversAuthorizedSkillTool: discovered.length === 1 && discovered[0].toolName === "skill:release-notes",
     invokesAuthorizedSkillTool: invoked.ok === true && invoked.renderedPrompt.includes("v1.2.3") && !!invoked.contentHash,
+    skillInvocationAuditCarriesContext: contextAudit?.runtime === "codex"
+      && contextAudit?.project === "context-project"
+      && contextAudit?.groupId === "context-group"
+      && contextAudit?.executionId === "context-exec"
+      && contextAudit?.source === "selftest",
     parsesInvokeSkillToolCall: invokedViaTool?.name === "release-notes",
+    executesNativeStyleMcpToolName: nativeAliasExecuted === "called:createInvoice:7",
+    rejectsUnauthorizedNativeStyleMcpToolName: /^\[错误\].*未授权/.test(nativeAliasDenied),
     rejectsUnauthorizedSkillTool: denied.ok === false && /未授权/.test(denied.error),
+    emptyScopeDeniesAllTools: !emptyScopePrompt.includes("createInvoice") && !emptyScopePrompt.includes("release-notes") && deniedByEmptyScope.ok === false,
     detectsMcpAuthRequired: authStatus?.needsUserAuth === true && authStatus?.tokenExpired === true,
+    reloadDisconnectsStaleClient: reloadFlags.staleClientDisconnected === true,
+    reloadClearsStaleMcpStatus: !reloadList.servers.some((server: any) => server.name === "stale-server"),
+    reloadRefreshesSkillCatalog: reloadList.skillTools.some((skill: any) => skill.name === "fresh-skill"),
   };
   return { pass: Object.values(checks).every(Boolean), checks, audit, discovered, invoked, denied, authStatus };
 }

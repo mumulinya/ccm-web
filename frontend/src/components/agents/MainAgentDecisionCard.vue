@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { getDisplayStream, getStreamlinedToolSummary, getStreamlinedUserText, getTechnicalDetailSections } from '../../utils/agentDisplay.js'
+import { getDisplayStream, getStreamlinedToolSummary, getStreamlinedUserText, getTechnicalDetailSections, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
 
 const props = defineProps({
   decision: { type: Object, default: null },
@@ -18,7 +18,7 @@ const actionLabels = {
   dispatch_child_agent: '派发子 Agent',
   ask_user_clarification: '追问用户',
   govern_task_lifecycle: '任务治理',
-  read_child_agent_receipts: '读取子 Agent 回执',
+  read_child_agent_receipts: '读取子 Agent 结果说明',
   replan_from_observation: '重新规划',
   generate_final_reply: '生成回复',
 }
@@ -103,6 +103,29 @@ const visiblePlanSteps = computed(() => {
   }))
 })
 const hiddenPlanCount = computed(() => hasExplicitPlan.value ? Math.max(0, rawPlanSteps.value.length - planSteps.value.length) : 0)
+const fallbackVerificationReminder = () => ({
+  schema: 'ccm-main-agent-plan-verification-reminder-v1',
+  status: 'needs_verification_step',
+  title: '还缺验收步骤',
+  headline: '完成前需要补一项真实验证，或者说明为什么当前不能验证。',
+  next_action: '主 Agent 会把验收补进计划，再继续交付总结。',
+})
+const verificationReminder = computed(() => {
+  if (!visiblePlanSteps.value.length || props.decision?.mode === 'conversation') return null
+  const raw = props.decision?.todo_plan?.verification_reminder
+    || props.decision?.todo_plan?.verificationReminder
+    || props.decision?.verification_reminder
+    || props.decision?.verificationReminder
+    || null
+  const legacyNudge = props.decision?.todo_plan?.verification_nudge === true || props.decision?.todo_plan?.verificationNudge === true
+  const reminder = raw || (legacyNudge ? fallbackVerificationReminder() : null)
+  const policy = reminder?.display_policy || reminder?.displayPolicy || {}
+  if (!reminder || policy.user_visible === false || policy.show_for_ordinary_conversation === true && props.decision?.mode === 'conversation') return null
+  return sanitizeUserFacingStructure(reminder, {
+    fallback: '完成前需要补一项真实验证，或者说明为什么当前不能验证。',
+    max: 260,
+  })
+})
 const planProgress = computed(() => {
   const steps = visiblePlanSteps.value
   if (!steps.length) return { done: 0, total: 0 }
@@ -171,7 +194,7 @@ const evidenceTypeLabel = (type) => ({
   trace: '技术记录',
   agent: 'Agent',
   execution: '执行',
-  receipt: '回执',
+  receipt: '结果说明',
   verification: '验证',
   acceptance: '验收',
   blocker: '阻塞',
@@ -195,7 +218,7 @@ const contextLabels = computed(() => {
   if (selectedActions.value.includes('read_project_code_snapshot')) labels.push('项目代码快照')
   if (selectedActions.value.includes('query_knowledge_base')) labels.push('知识库')
   if (selectedActions.value.includes('inspect_task_status')) labels.push('任务状态')
-  if (selectedActions.value.includes('read_child_agent_receipts')) labels.push('子 Agent 回执')
+  if (selectedActions.value.includes('read_child_agent_receipts')) labels.push('子 Agent 结果说明')
   return labels
 })
 
@@ -204,8 +227,19 @@ const reason = computed(() => dispatchPolicy.value?.reason || props.decision?.de
 const publicHeaderNote = computed(() => modeInfo.value.summary)
 const rawJson = computed(() => JSON.stringify(props.decision || {}, null, 2))
 const displayStream = computed(() => getDisplayStream(props.decision))
+const workchain = computed(() => displayStream.value?.workchain || props.decision?.workchain || null)
+const workchainStages = computed(() => Array.isArray(workchain.value?.stages) ? workchain.value.stages : [])
 const streamlinedText = computed(() => getStreamlinedUserText(props.decision, modeInfo.value.summary))
 const streamlinedToolSummary = computed(() => getStreamlinedToolSummary(props.decision, visibleActions.value.join('、')))
+const dispatchLaunchSummary = computed(() => sanitizeUserFacingStructure(
+  props.decision?.dispatch_launch_summary
+    || props.decision?.dispatchLaunchSummary
+    || displayStream.value?.dispatch_launch_summary
+    || displayStream.value?.dispatchLaunchSummary
+    || null,
+  { fallback: '派发信息已整理，技术细节已放入技术详情。', max: 260 }
+))
+const dispatchLaunchRows = computed(() => Array.isArray(dispatchLaunchSummary.value?.rows) ? dispatchLaunchSummary.value.rows : [])
 const technicalSections = computed(() => getTechnicalDetailSections(props.decision, {
   trace_id: props.decision?.trace_id,
   blockers: blockedPermissions.value.map(item => item.reason || item.action_id),
@@ -215,7 +249,7 @@ const decisionExplanation = computed(() => {
   if (!selectedActions.value.includes('dispatch_child_agent') && props.decision?.mode === 'conversation') return '没有派发：这轮是普通对话，主 Agent 只回复用户，不创建任务。'
   if (!selectedActions.value.includes('dispatch_child_agent') && props.decision?.mode === 'project_analysis') return '没有派发：这轮是只读项目分析，只读取上下文和代码快照，不修改项目。'
   if (selectedActions.value.includes('create_project_task')) return '已创建任务：当前消息包含明确执行意图，允许进入项目任务流程。'
-  if (selectedActions.value.includes('dispatch_child_agent')) return '已派发：主 Agent 已生成工作单，等待子 Agent 执行和回执。'
+  if (selectedActions.value.includes('dispatch_child_agent')) return '已派发：主 Agent 已生成工作单，等待子 Agent 执行并提交结果说明。'
   return modeInfo.value.summary
 })
 const userSummary = computed(() => {
@@ -258,6 +292,32 @@ const actionRows = computed(() => selectedActions.value.map(id => {
       <small v-if="streamlinedToolSummary" class="tool-use-summary">工具摘要：{{ streamlinedToolSummary }}</small>
     </div>
 
+    <div v-if="dispatchLaunchRows.length" class="dispatch-launch-summary">
+      <div class="dispatch-launch-head">
+        <strong>{{ dispatchLaunchSummary.title || '已派发的工作' }}</strong>
+        <span>{{ dispatchLaunchSummary.count_label || `${dispatchLaunchRows.length} 个子 Agent` }}</span>
+      </div>
+      <p v-if="dispatchLaunchSummary.headline">{{ dispatchLaunchSummary.headline }}</p>
+      <div class="dispatch-launch-list">
+        <div v-for="row in dispatchLaunchRows" :key="row.id || row.agent" class="dispatch-launch-row">
+          <div>
+            <span>{{ row.role || '子 Agent' }} · {{ row.agent }}</span>
+            <em>{{ row.status_label || '已派发' }}</em>
+          </div>
+          <strong>{{ row.task }}</strong>
+          <small v-if="row.reason">{{ row.reason }}</small>
+          <small v-if="row.depends_on?.length">依赖：{{ row.depends_on.join('、') }}</small>
+        </div>
+      </div>
+      <small v-if="dispatchLaunchSummary.next_action" class="dispatch-launch-next">下一步：{{ dispatchLaunchSummary.next_action }}</small>
+    </div>
+    <div v-if="workchainStages.length" class="decision-workchain" aria-label="主 Agent 工作链路">
+      <div v-for="stage in workchainStages" :key="stage.id" :class="['workchain-stage', stage.status]">
+        <span>{{ stage.label }}</span>
+        <small>{{ loopStatusText(stage.status) }}</small>
+      </div>
+    </div>
+
     <div class="decision-plan" v-if="visiblePlanSteps.length">
       <div class="plan-head">
         <strong>{{ planTitle }}</strong>
@@ -276,6 +336,11 @@ const actionRows = computed(() => selectedActions.value.map(id => {
             @click.stop="emit('step-action', action)"
           >{{ action.label }}</button>
         </div>
+      </div>
+      <div v-if="verificationReminder" class="plan-verification-reminder">
+        <span>{{ verificationReminder.title || '还缺验收步骤' }}</span>
+        <strong>{{ verificationReminder.headline || '完成前需要补一项真实验证，或者说明为什么当前不能验证。' }}</strong>
+        <small v-if="verificationReminder.next_action || verificationReminder.nextAction">下一步：{{ verificationReminder.next_action || verificationReminder.nextAction }}</small>
       </div>
       <ol>
         <li v-for="(step, index) in visiblePlanSteps" :key="step.id || index" :class="`status-${step.status || 'pending'}`">
@@ -399,6 +464,28 @@ header { display:flex; justify-content:space-between; align-items:flex-start; ga
 .decision-public-summary strong { display:block; color:#334155; font-size:12.5px; line-height:1.45; }
 .decision-public-summary small { display:block; margin-top:3px; color:#64748b; font-size:11.5px; line-height:1.4; overflow-wrap:anywhere; }
 .decision-public-summary .tool-use-summary { color:#2563eb; font-weight:800; }
+.dispatch-launch-summary { display:grid; gap:8px; margin-top:9px; padding:10px; border:1px solid rgba(14,165,233,.18); border-radius:11px; background:rgba(240,249,255,.72); }
+.dispatch-launch-head { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.dispatch-launch-head strong { color:#0f172a; font-size:12px; }
+.dispatch-launch-head span { padding:2px 7px; border-radius:999px; background:rgba(14,165,233,.12); color:#0369a1; font-size:10px; font-weight:900; white-space:nowrap; }
+.dispatch-launch-summary p { margin:0; color:#334155; font-size:12px; line-height:1.45; overflow-wrap:anywhere; }
+.dispatch-launch-list { display:grid; gap:6px; }
+.dispatch-launch-row { display:grid; gap:3px; padding:8px; border:1px solid rgba(14,165,233,.14); border-radius:9px; background:rgba(255,255,255,.68); }
+.dispatch-launch-row div { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+.dispatch-launch-row span { color:#0369a1; font-size:10.5px; font-weight:900; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dispatch-launch-row em { flex:0 0 auto; font-style:normal; color:#0f766e; font-size:10px; font-weight:900; }
+.dispatch-launch-row strong { color:#1e293b; font-size:12px; line-height:1.4; overflow-wrap:anywhere; }
+.dispatch-launch-row small,.dispatch-launch-next { color:#64748b; font-size:10.5px; line-height:1.35; overflow-wrap:anywhere; }
+.decision-workchain { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:5px; margin-top:8px; }
+.workchain-stage { min-width:0; padding:6px 5px; border:1px solid rgba(148,163,184,.18); border-radius:7px; background:rgba(248,250,252,.8); text-align:center; }
+.workchain-stage span,.workchain-stage small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.workchain-stage span { color:#334155; font-size:10.5px; font-weight:800; }
+.workchain-stage small { margin-top:2px; color:#64748b; font-size:9.8px; }
+.workchain-stage.completed { border-color:rgba(34,197,94,.22); background:#f0fdf4; }
+.workchain-stage.in_progress { border-color:rgba(37,99,235,.22); background:#eff6ff; }
+.workchain-stage.needs_confirmation { border-color:rgba(245,158,11,.24); background:#fffbeb; }
+.workchain-stage.failed { border-color:rgba(239,68,68,.22); background:#fef2f2; }
+@media (max-width:640px){ .decision-workchain { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 .decision-loop { margin-top:10px; padding:9px; border:1px solid rgba(148,163,184,.18); border-radius:11px; background:rgba(255,255,255,.5); }
 .loop-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:7px; }
 .loop-head strong { font-size:12px; color:#334155; }
@@ -431,6 +518,10 @@ header { display:flex; justify-content:space-between; align-items:flex-start; ga
 .plan-focus.status-needs_confirmation span,.plan-focus.status-reworking span { color:#b45309; }
 .plan-focus.status-failed { border-color:#fecaca; background:#fef2f2; }
 .plan-focus.status-failed span { color:#dc2626; }
+.plan-verification-reminder { display:grid; gap:3px; margin-bottom:8px; padding:8px 9px; border-radius:9px; border:1px solid #fde68a; background:#fffbeb; }
+.plan-verification-reminder span { color:#b45309; font-size:10px; font-weight:900; }
+.plan-verification-reminder strong { color:#78350f; font-size:12px; line-height:1.4; overflow-wrap:anywhere; }
+.plan-verification-reminder small { color:#92400e; font-size:10.5px; line-height:1.35; overflow-wrap:anywhere; }
 .decision-plan ol { list-style:none; margin:0; padding:0; display:grid; gap:6px; }
 .decision-plan li { display:grid; grid-template-columns:20px minmax(0,1fr) auto; gap:7px; align-items:start; padding:6px 7px; border-radius:9px; background:rgba(248,250,252,.78); border:1px solid rgba(148,163,184,.14); }
 .plan-index { width:18px; height:18px; display:grid; place-items:center; border-radius:999px; background:#e2e8f0; color:#475569; font-size:11px; font-weight:900; }
@@ -488,6 +579,9 @@ pre { max-height:180px; overflow:auto; margin:8px 0 0; padding:8px; border-radiu
 :global([data-theme="dark"]) .decision-plan { background:rgba(15,23,42,.55); border-color:rgba(148,163,184,.18); }
 :global([data-theme="dark"]) .decision-public-summary { background:rgba(15,23,42,.55); border-color:rgba(148,163,184,.18); }
 :global([data-theme="dark"]) .decision-public-summary strong { color:#e2e8f0; }
+:global([data-theme="dark"]) .dispatch-launch-summary { background:rgba(14,116,144,.16); border-color:rgba(125,211,252,.2); }
+:global([data-theme="dark"]) .dispatch-launch-head strong,:global([data-theme="dark"]) .dispatch-launch-summary p,:global([data-theme="dark"]) .dispatch-launch-row strong { color:#e2e8f0; }
+:global([data-theme="dark"]) .dispatch-launch-row { background:rgba(15,23,42,.56); border-color:rgba(125,211,252,.16); }
 :global([data-theme="dark"]) .decision-loop { background:rgba(15,23,42,.55); border-color:rgba(148,163,184,.18); }
 :global([data-theme="dark"]) .loop-head strong,:global([data-theme="dark"]) .loop-details summary,:global([data-theme="dark"]) .loop-detail-row strong { color:#e2e8f0; }
 :global([data-theme="dark"]) .loop-stage,:global([data-theme="dark"]) .loop-detail-row { background:rgba(15,23,42,.5); border-color:rgba(148,163,184,.16); }
@@ -498,6 +592,8 @@ pre { max-height:180px; overflow:auto; margin:8px 0 0; padding:8px; border-radiu
 :global([data-theme="dark"]) .decision-plan li.status-completed strong { color:#94a3b8; }
 :global([data-theme="dark"]) .evidence-row { background:rgba(15,23,42,.55); border-color:rgba(148,163,184,.16); }
 :global([data-theme="dark"]) .plan-step-evidence summary,:global([data-theme="dark"]) .evidence-row strong { color:#e2e8f0 !important; }
+:global([data-theme="dark"]) .plan-verification-reminder { background:rgba(120,53,15,.28); border-color:rgba(251,191,36,.32); }
+:global([data-theme="dark"]) .plan-verification-reminder strong { color:#fde68a; }
 :global([data-theme="dark"]) .decision-grid div { background:rgba(15,23,42,.55); border-color:rgba(148,163,184,.18); }
 :global([data-theme="dark"]) .decision-grid strong,:global([data-theme="dark"]) code { color:#e2e8f0; }
 @media (max-width: 720px) { .decision-grid { grid-template-columns:1fr; } .loop-rail { grid-template-columns:repeat(4,minmax(0,1fr)); } }

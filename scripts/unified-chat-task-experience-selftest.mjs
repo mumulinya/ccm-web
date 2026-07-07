@@ -5,8 +5,16 @@ import {
   projectExecutionTaskCard,
   taskPhasePresentation,
 } from '../frontend/src/utils/taskExperience.js'
+import { __globalAgentSessionTestHooks } from '../frontend/src/composables/useGlobalAgentSessions.js'
 
 const checks = {}
+
+const demoPlanMode = {
+  title: '执行前计划',
+  requires_confirmation: false,
+  auto_continue: true,
+  acceptance: ['登录页文件改动可查看', 'npm test 必须通过'],
+}
 
 const ordinaryGlobal = globalAgentRunTaskCard({
   role: 'assistant',
@@ -20,6 +28,166 @@ const ordinaryGlobal = globalAgentRunTaskCard({
 })
 checks.globalOrdinaryQuestionStaysDirect = ordinaryGlobal === null
 
+const globalStatusFollowup = globalAgentRunTaskCard({
+  role: 'assistant',
+  type: 'global_agent_result',
+  content: '最近全局任务进展：web 正在验证；api 已完成。',
+  agenticRun: {
+    id: 'global-status-followup',
+    status: 'completed',
+    phase: 'complete',
+    final_reply: '最近全局任务进展：web 正在验证；api 已完成。',
+    tool_calls: 0,
+    decision_summary: { intent: { category: 'question', action_required: false, confidence: 0.99 } },
+    display_stream: {
+      schema: 'ccm-global-status-summary-v1',
+      user_visible_text: '最近全局任务进展：web 正在验证；api 已完成。',
+      technical_details: [],
+    },
+  },
+})
+checks.globalStatusFollowupStaysDirect = globalStatusFollowup === null
+
+const plainGlobalHistoryMessage = {
+  role: 'assistant',
+  content: '登录修复已完成。',
+  timestamp: '2026-07-07T10:00:00.000Z',
+}
+const richGlobalHistoryMessage = {
+  ...plainGlobalHistoryMessage,
+  type: 'global_agent_result',
+  agenticRun: {
+    id: 'run_history_sync',
+    status: 'completed',
+    final_delivery_report: {
+      schema: 'ccm-main-agent-delivery-report-v1',
+      headline: '登录修复已完成。',
+      status: 'done',
+      plan_review: ['执行前计划：登录修复计划', '计划核对：已对齐'],
+      files: ['src/Login.vue'],
+      verification: ['npm test'],
+      verification_evidence: { schema: 'ccm-main-agent-verification-evidence-v1', items: ['已实际执行 1 项验证：npm test', '外部 Runner 证据 1 项：验证来源已记录。'] },
+      acceptance: ['主 Agent 验收：已通过'],
+      independent_review: ['独立复核：已通过', 'qa-agent：已复核登录修复。'],
+      pickup_summary: {
+        schema: 'ccm-main-agent-pickup-summary-v1',
+        title: '回来继续看这里',
+        status: 'done',
+        review_items: ['改动：src/Login.vue', '验证：npm test'],
+        resume_action: '可以继续补充新的要求。',
+      },
+    },
+    plan_mode: demoPlanMode,
+    work_items: [
+      { id: 'wi_history_web', owner: 'web', target: 'web', subject: '修复登录页', status: 'completed', evidence: ['登录修复已完成。'], filesChanged: ['src/Login.vue'], verification: ['npm test'] },
+    ],
+  },
+}
+const mergedGlobalHistory = __globalAgentSessionTestHooks.mergeHistoryMessages([plainGlobalHistoryMessage], [richGlobalHistoryMessage])
+const restoredGlobalCard = globalAgentRunTaskCard(mergedGlobalHistory[0])
+checks.globalHistoryMergePreservesStructuredCompletion = restoredGlobalCard?.phase === 'completed'
+  && restoredGlobalCard?.delivery_report?.headline === '登录修复已完成。'
+  && restoredGlobalCard?.delivery_report?.plan_review?.some(item => item.includes('登录修复计划'))
+  && restoredGlobalCard?.delivery_report?.acceptance?.some(item => item.includes('已通过'))
+  && restoredGlobalCard?.delivery_report?.verification_evidence?.items?.some(item => item.includes('已实际执行 1 项验证'))
+  && restoredGlobalCard?.delivery_report?.independent_review?.some(item => item.includes('qa-agent'))
+  && restoredGlobalCard?.delivery_report?.pickup_summary?.schema === 'ccm-main-agent-pickup-summary-v1'
+  && restoredGlobalCard?.delivery?.files?.some(file => (file?.path || file) === 'src/Login.vue')
+  && restoredGlobalCard?.agent_progress_summary?.schema === 'ccm-child-agent-progress-summary-v1'
+  && restoredGlobalCard?.agent_progress_summary?.rows?.some(row => row.agent === 'web' && row.status === 'completed')
+  && restoredGlobalCard?.change_summary?.schema === 'ccm-main-agent-change-summary-v1'
+  && restoredGlobalCard?.change_summary?.files?.some(file => file.path === 'src/Login.vue')
+  && restoredGlobalCard?.plan_alignment?.schema === 'ccm-main-agent-plan-alignment-v1'
+  && restoredGlobalCard?.plan_alignment?.status === 'aligned'
+  && restoredGlobalCard?.user_handoff?.schema === 'ccm-main-agent-user-handoff-v1'
+  && restoredGlobalCard?.user_handoff?.primary_action?.kind === 'view_changes'
+  && restoredGlobalCard?.user_handoff?.evidence?.some(item => item.includes('复核：独立复核'))
+  && __globalAgentSessionTestHooks.messagesChanged([plainGlobalHistoryMessage], mergedGlobalHistory)
+
+const deliveryReportHandoffCard = globalAgentRunTaskCard({
+  role: 'assistant',
+  type: 'global_agent_result',
+  content: '支付链路改造已完成。',
+  agenticRun: {
+    id: 'run_delivery_report_handoff',
+    status: 'completed',
+    tool_calls: 1,
+    final_delivery_report: {
+      schema: 'ccm-main-agent-delivery-report-v1',
+      status: 'done',
+      headline: '支付链路改造已完成。',
+      plan_review: ['执行前计划：支付链路改造计划'],
+      files: ['src/pay.ts'],
+      verification: ['npm test'],
+      acceptance: ['主 Agent 验收：已通过'],
+      independent_review: ['独立复核：已通过', 'qa-agent：已复核支付链路。'],
+      user_handoff: {
+        schema: 'ccm-main-agent-user-handoff-v1',
+        title: '接下来建议',
+        status: 'ready',
+        primary_action: { id: 'review_delivery', label: '核对交付总结', kind: 'review_delivery', tone: 'primary' },
+        evidence: ['交付报告已由后端整理'],
+      },
+    },
+  },
+})
+checks.globalRunUsesDeliveryReportUserHandoff = deliveryReportHandoffCard?.user_handoff?.primary_action?.kind === 'review_delivery'
+  && deliveryReportHandoffCard?.user_handoff?.evidence?.includes('交付报告已由后端整理')
+  && deliveryReportHandoffCard?.delivery_report?.plan_review?.some(item => item.includes('支付链路改造计划'))
+  && deliveryReportHandoffCard?.delivery_report?.acceptance?.some(item => item.includes('已通过'))
+  && deliveryReportHandoffCard?.delivery_report?.independent_review?.some(item => item.includes('支付链路'))
+
+const failedGlobalCard = globalAgentRunTaskCard({
+  role: 'assistant',
+  content: '任务没有完成，原因已整理。',
+  agenticRun: {
+    id: 'run_failed_terminal',
+    status: 'failed',
+    goal: '修复登录状态刷新问题',
+    tool_calls: 1,
+    error: '缺少测试环境变量',
+    final_report: { risks: '需要补齐 .env.test 后再验收' },
+  },
+})
+const failedRiskSection = failedGlobalCard?.delivery_report?.sections?.find(section => section.title === '未完成原因')
+const failedAcceptanceSection = failedGlobalCard?.delivery_report?.sections?.find(section => section.title === '验收结论')
+checks.globalFailedTerminalHasFriendlyFallback = failedGlobalCard?.phase === 'failed'
+  && failedGlobalCard?.delivery_report?.status === 'failed'
+  && failedAcceptanceSection?.items?.some(item => item.includes('未通过'))
+  && failedRiskSection?.items?.some(item => item.includes('缺少测试环境变量'))
+  && failedRiskSection?.items?.some(item => item.includes('.env.test'))
+  && failedGlobalCard?.blockers?.some(item => item.includes('缺少测试环境变量'))
+  && failedGlobalCard?.user_handoff?.status === 'failed'
+  && failedGlobalCard?.user_handoff?.primary_action?.kind === 'retry'
+  && failedGlobalCard?.actions?.some(action => action.kind === 'retry')
+
+const cancelledGlobalCard = globalAgentRunTaskCard({
+  role: 'assistant',
+  content: '用户取消了本轮任务。',
+  agenticRun: {
+    id: 'run_cancelled_terminal',
+    status: 'cancelled',
+    goal: '整理自动化任务列表',
+    tool_calls: 1,
+    final_reply: '本轮任务已按要求停止。',
+    final_report: { risks: ['用户取消了本轮任务'] },
+  },
+})
+const cancelledStopSection = cancelledGlobalCard?.delivery_report?.sections?.find(section => section.title === '停止说明')
+const cancelledReasonSection = cancelledGlobalCard?.delivery_report?.sections?.find(section => section.title === '停止原因')
+const cancelledAcceptanceSection = cancelledGlobalCard?.delivery_report?.sections?.find(section => section.title === '验收结论')
+checks.globalCancelledTerminalHasFriendlyFallback = cancelledGlobalCard?.phase === 'cancelled'
+  && cancelledGlobalCard?.delivery_report?.status === 'cancelled'
+  && cancelledStopSection?.items?.some(item => item.includes('停止'))
+  && cancelledAcceptanceSection?.items?.some(item => item.includes('任务已停止'))
+  && cancelledReasonSection?.items?.some(item => item.includes('用户取消') || item.includes('停止'))
+  && !cancelledGlobalCard?.delivery_report?.sections?.some(section => section.title === '风险与待确认')
+  && String(cancelledGlobalCard?.next_action || '').includes('重新发起')
+  && cancelledGlobalCard?.user_handoff?.status === 'cancelled'
+  && cancelledGlobalCard?.user_handoff?.primary_action?.kind === 'continue'
+  && cancelledGlobalCard?.user_handoff?.headline?.includes('任务已经停止')
+  && cancelledGlobalCard?.actions?.some(action => action.kind === 'save_knowledge')
+
 const missionCard = globalMissionTaskCard({
   role: 'assistant',
   type: 'global_mission',
@@ -29,15 +197,88 @@ const missionCard = globalMissionTaskCard({
     status: 'in_progress',
     business_goal: '让前后端支付链路可用',
     mission_summary: { total: 2, passed: 1, blocked: 0 },
+    plan_mode: {
+      title: '执行前计划',
+      acceptance: ['支付 API 文件改动可查看', '前后端协作工作单已进入执行'],
+    },
   },
   globalMissionChildren: [
-    { task: { id: 'task_api', status: 'done', target_project: 'api' }, target: { type: 'project', name: 'api' } },
+    { task: { id: 'task_api', status: 'done', target_project: 'api', delivery_summary: { actual_file_changes: [{ path: 'api/src/pay.ts', project: 'api', additions: 12, deletions: 1 }] } }, target: { type: 'project', name: 'api' } },
     { task: { id: 'task_web', status: 'in_progress', target_project: 'web' }, target: { type: 'project', name: 'web' } },
   ],
 })
 checks.globalMissionUsesUnifiedCard = missionCard?.version === 1 && missionCard?.phase === 'executing' && missionCard?.agents?.length === 2
+checks.globalMissionShowsAgentProgressSummary = missionCard?.agent_progress_summary?.schema === 'ccm-child-agent-progress-summary-v1'
+  && missionCard?.agent_progress_summary?.rows?.some(row => row.agent === 'web' && row.status === 'running')
+  && !/CCM_AGENT_RECEIPT|trace_id|session_id|WorkerContextPacket|raw receipt|raw payload|原始回执/i.test(JSON.stringify(missionCard?.agent_progress_summary || {}))
+checks.globalMissionShowsChangeSummary = missionCard?.change_summary?.schema === 'ccm-main-agent-change-summary-v1'
+  && missionCard?.change_summary?.files?.some(file => file.path)
+checks.globalMissionShowsPlanAlignment = missionCard?.plan_alignment?.schema === 'ccm-main-agent-plan-alignment-v1'
+  && missionCard?.plan_alignment?.checks?.some(item => item.label.includes('支付 API 文件改动') && item.ok)
 checks.globalMissionTechnicalCollapsedDataOnly = !!missionCard?.technical?.execution_ids?.includes('task_api')
 checks.globalMissionHasCancelAction = missionCard?.actions?.some(action => action.kind === 'cancel')
+const missionQueueCard = globalMissionTaskCard({
+  role: 'assistant',
+  type: 'global_mission',
+  globalMission: {
+    id: 'mission_queue',
+    title: '依赖队列测试',
+    status: 'in_progress',
+    mission_summary: { total: 2, passed: 1, blocked: 0 },
+    collaboration_state: {
+      last_continuation: {
+        source: 'user_next_work_item',
+        at: '2026-07-07T10:10:00.000Z',
+        rework_kind: 'next_claimable_work_item',
+        target: 'web',
+        reason: '接入 owner 筛选 UI',
+        status: 'accepted',
+      },
+    },
+    delivery_summary: {
+      weak_receipt_quality: [
+        { agent: 'web', status: 'done', score: 66, grade: 'partial', missing: ['已执行验证', '声明记忆使用'] },
+      ],
+    },
+  },
+  globalMissionChildren: [
+    { task: { id: 'task_api', status: 'done', target_project: 'api' }, target: { type: 'project', name: 'api' } },
+    { task: { id: 'task_web', status: 'pending', target_project: 'web' }, target: { type: 'project', name: 'web', depends_on: ['api'] } },
+  ],
+})
+checks.globalMissionShowsNextClaimableWorkItem = missionQueueCard?.work_item_summary?.next_claimable?.some(item => item.target === 'web')
+checks.globalMissionQueueShowsAgentProgressSummary = missionQueueCard?.agent_progress_summary?.rows?.some(row => row.agent === 'web' && row.current_focus?.includes('执行目标'))
+checks.globalMissionShowsContinuationStatus = missionQueueCard?.continuation_status?.schema === 'ccm-main-agent-continuation-status-v1'
+  && missionQueueCard?.continuation_status?.title === '下一步派发已接上'
+  && missionQueueCard?.continuation_status?.target === 'web'
+checks.globalMissionShowsReceiptReworkSummary = missionQueueCard?.receipt_rework_summary?.schema === 'ccm-main-agent-receipt-rework-summary-v1'
+  && missionQueueCard?.receipt_rework_summary?.gaps?.some(item => item.target === 'web' && item.action?.kind === 'targeted_rework')
+const missionReceiptResolvedCard = globalMissionTaskCard({
+  role: 'assistant',
+  type: 'global_mission',
+  globalMission: {
+    id: 'mission_receipt_resolved',
+    title: '结果说明补充复检测试',
+    status: 'in_progress',
+    mission_summary: { total: 1, passed: 1, blocked: 0 },
+    collaboration_state: {
+      last_continuation: {
+        source: 'user_targeted_rework',
+        at: '2026-07-07T10:20:00.000Z',
+        rework_kind: 'weak_receipt',
+        target: 'web',
+        reason: '补充验证证据',
+        status: 'accepted',
+      },
+    },
+    delivery_summary: { receipt_quality: [{ agent: 'web', status: 'done', score: 100, grade: 'good', missing: [] }] },
+  },
+  globalMissionChildren: [
+    { task: { id: 'task_web_done', status: 'done', target_project: 'web' }, target: { type: 'project', name: 'web' } },
+  ],
+})
+checks.globalMissionShowsReceiptReworkResolved = missionReceiptResolvedCard?.receipt_rework_summary?.status === 'passed'
+  && missionReceiptResolvedCard?.receipt_rework_summary?.resolved?.some(item => item.target === 'web' && item.status === 'passed')
 const pausedMissionCard = globalMissionTaskCard({
   role: 'assistant',
   type: 'global_mission',
@@ -67,12 +308,18 @@ const projectCard = projectExecutionTaskCard({
     rollback_available: true,
     trace_id: 'project_chat_demo',
     requires_card: true,
+    plan_mode: demoPlanMode,
+    verification: ['npm test'],
   },
   projectRun: { id: 'pchat_demo', trace_id: 'project_chat_demo', parent_run_id: 'pchat_parent' },
   workEvents: [{ kind: 'done', text: '项目 Agent 已完成' }],
   fileChanges: { count: 1, files: [{ path: 'src/Login.vue', statusText: '修改' }] },
 }, 'demo')
 checks.projectExecutionUsesUnifiedCard = projectCard?.version === 1 && projectCard?.phase === 'completed' && projectCard?.delivery?.files?.includes('src/Login.vue')
+checks.projectExecutionShowsChangeSummary = projectCard?.change_summary?.schema === 'ccm-main-agent-change-summary-v1'
+  && projectCard?.change_summary?.files?.some(file => file.path === 'src/Login.vue')
+checks.projectExecutionShowsPlanAlignment = projectCard?.plan_alignment?.schema === 'ccm-main-agent-plan-alignment-v1'
+  && projectCard?.plan_alignment?.status === 'aligned'
 checks.projectExecutionHasSafeActions = ['view_changes', 'continue', 'rollback'].every(kind => projectCard?.actions?.some(action => action.kind === kind))
 checks.projectContinuationIdentityIsTraceable = projectCard?.technical?.run_id === 'pchat_demo' && projectCard?.technical?.parent_run_id === 'pchat_parent'
 

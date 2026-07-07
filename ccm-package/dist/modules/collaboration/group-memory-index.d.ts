@@ -1,0 +1,992 @@
+export declare const GROUP_TYPED_MEMORY_VERSION = 1;
+export declare const GROUP_TYPED_MEMORY_ENTRYPOINT = "MEMORY.md";
+export declare const GROUP_TYPED_MEMORY_MAX_INDEX_LINES = 200;
+export declare const GROUP_TYPED_MEMORY_MAX_INDEX_BYTES = 25000;
+export declare const GROUP_TYPED_MEMORY_MAX_RECALL = 5;
+export declare const GROUP_TYPED_MEMORY_RECALL_LEDGER = ".recall-ledger.json";
+export declare const GROUP_TYPED_MEMORY_LOAD_PLAN_VERSION = 1;
+export declare const GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_ENTRIES = 80;
+export declare const GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_INCLUDE_DEPTH = 5;
+export declare const GROUP_PROJECT_MEMORY_IMPORT_VERSION = 1;
+export declare const GROUP_GLOBAL_CLAUDE_MEMORY_IMPORT_VERSION = 1;
+export declare const GROUP_CLAUDE_MEMORY_INCLUDE_AUDIT_VERSION = 1;
+export declare const GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_VERSION = 1;
+export declare const GROUP_CLAUDE_MEMORY_SETTING_SOURCE_POLICY_VERSION = 1;
+export declare const GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_VERSION = 1;
+export declare const GROUP_TYPED_MEMORY_DISTILLATION_VERSION = 1;
+export declare const GROUP_TYPED_MEMORY_DISTILLATION_LEDGER = ".distillation-ledger.json";
+export declare const GROUP_TYPED_MEMORY_DISTILLATION_MAX_MESSAGES = 1200;
+export declare const GROUP_TYPED_MEMORY_DISTILLATION_FACT_LIMIT = 100;
+export declare const GROUP_TYPED_MEMORY_DISTILLATION_QUALITY_VERSION = 1;
+export declare const GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_LEDGER = ".claude-external-include-approvals.json";
+export declare const GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_LEDGER = ".instructions-loaded-hooks.json";
+export type GroupTypedMemoryType = "user" | "feedback" | "project" | "reference";
+export declare function buildClaudeMemorySettingSourcePolicy(options?: any): {
+    schema: string;
+    version: number;
+    configured: string[];
+    invalid: string[];
+    enabled: string[];
+    disabled: ("userSettings" | "projectSettings" | "localSettings" | "policySettings" | "flagSettings")[];
+    isolationMode: boolean;
+    includeUser: boolean;
+    includeProject: boolean;
+    includeLocal: boolean;
+    includeManaged: boolean;
+    includeFlagSettings: boolean;
+    order: string[];
+};
+export declare function deriveGroupTypedMemoryTargetPaths(value: any, extra?: any[]): string[];
+export declare function getGroupTypedMemoryDir(groupId: string): string;
+export declare function getGroupTypedMemoryIndexFile(groupId: string): string;
+export declare function getGroupTypedMemoryRecallLedgerFile(groupId: string): string;
+export declare function getGroupTypedMemoryDistillationLedgerFile(groupId: string): string;
+export declare function getGroupClaudeInstructionsLoadedHookLedgerFile(groupId: string): string;
+export declare function registerGroupMemoryInstructionsLoadedHook(hook: (input: any) => any): () => boolean;
+export declare function hasGroupMemoryInstructionsLoadedHook(): boolean;
+export declare function loadGroupClaudeInstructionsLoadedHookLedger(groupId: string): {
+    schema: string;
+    version: number;
+    groupId: string;
+    file: string;
+    entries: any;
+    updatedAt: string;
+};
+export declare function executeGroupMemoryInstructionsLoadedHooks(groupId: string, input?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    configured: boolean;
+    hookCount: number;
+    event: {
+        schema: string;
+        version: number;
+        groupId: string;
+        hook_event_name: string;
+        file_path: string;
+        memory_type: string;
+        load_reason: string;
+        globs: string[];
+        trigger_file_path: string;
+        parent_file_path: string;
+        source: string;
+        scope: string;
+        kind: string;
+        rel_path: string;
+        firedAt: string;
+    };
+    rows: any[];
+    firedCount: number;
+    failureCount: number;
+    ledgerFile: string;
+};
+export declare function getGroupClaudeMemoryExternalIncludeApprovalLedgerFile(groupId: string): string;
+export declare function loadGroupClaudeMemoryExternalIncludeApprovalLedger(groupId: string): {
+    schema: string;
+    version: number;
+    groupId: string;
+    file: string;
+    hasExternalIncludesApproved: boolean;
+    hasExternalIncludesWarningShown: boolean;
+    warningShownAt: string;
+    approved: any;
+    warnings: any;
+    updatedAt: string;
+};
+export declare function approveGroupClaudeMemoryExternalInclude(groupId: string, input?: any): {
+    file: string;
+    schema: string;
+    version: number;
+    groupId: string;
+    hasExternalIncludesApproved: boolean;
+    hasExternalIncludesWarningShown: boolean;
+    warningShownAt: string;
+    approved: any;
+    warnings: any;
+    updatedAt: string;
+};
+export declare function markGroupClaudeMemoryExternalIncludeWarningShown(groupId: string, input?: any): {
+    file: string;
+    schema: string;
+    version: number;
+    groupId: string;
+    hasExternalIncludesApproved: boolean;
+    hasExternalIncludesWarningShown: boolean;
+    warningShownAt: string;
+    approved: any;
+    warnings: any;
+    updatedAt: string;
+};
+export declare function upsertGroupTypedMemoryDocument(groupId: string, input: any): {
+    file: string;
+    changed: boolean;
+    slug: string;
+    type: GroupTypedMemoryType;
+    name: string;
+};
+export declare function discoverProjectMemoryFiles(projectRoot: string, options?: any): {
+    schema: string;
+    version: number;
+    projectRoot: string;
+    status: string;
+    settingSourcePolicy: {
+        schema: string;
+        version: number;
+        configured: string[];
+        invalid: string[];
+        enabled: string[];
+        disabled: ("userSettings" | "projectSettings" | "localSettings" | "policySettings" | "flagSettings")[];
+        isolationMode: boolean;
+        includeUser: boolean;
+        includeProject: boolean;
+        includeLocal: boolean;
+        includeManaged: boolean;
+        includeFlagSettings: boolean;
+        order: string[];
+    };
+    files: any[];
+    issues: {
+        type: string;
+        path: string;
+    }[];
+    includeProject?: undefined;
+    includeLocal?: undefined;
+    maxParentDepth?: undefined;
+    maxRuleFiles?: undefined;
+    discoveredCount?: undefined;
+} | {
+    schema: string;
+    version: number;
+    projectRoot: string;
+    status: string;
+    settingSourcePolicy: {
+        schema: string;
+        version: number;
+        configured: string[];
+        invalid: string[];
+        enabled: string[];
+        disabled: ("userSettings" | "projectSettings" | "localSettings" | "policySettings" | "flagSettings")[];
+        isolationMode: boolean;
+        includeUser: boolean;
+        includeProject: boolean;
+        includeLocal: boolean;
+        includeManaged: boolean;
+        includeFlagSettings: boolean;
+        order: string[];
+    };
+    includeProject: boolean;
+    includeLocal: boolean;
+    maxParentDepth: number;
+    maxRuleFiles: number;
+    discoveredCount: number;
+    files: any[];
+    issues: any[];
+};
+export declare function importProjectMemoryFilesToGroupTypedMemory(groupId: string, projectRoot: string, options?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    project: string;
+    projectRoot: string;
+    status: string;
+    settingSourcePolicy: {
+        schema: string;
+        version: number;
+        configured: string[];
+        invalid: string[];
+        enabled: string[];
+        disabled: ("userSettings" | "projectSettings" | "localSettings" | "policySettings" | "flagSettings")[];
+        isolationMode: boolean;
+        includeUser: boolean;
+        includeProject: boolean;
+        includeLocal: boolean;
+        includeManaged: boolean;
+        includeFlagSettings: boolean;
+        order: string[];
+    };
+    includeProject: boolean;
+    includeLocal: boolean;
+    discoveredCount: number;
+    importedCount: number;
+    instructionsLoadedHooks: {
+        schema: string;
+        version: number;
+        groupId: string;
+        configured: boolean;
+        eventCount: number;
+        hookCount: any;
+        firedCount: any;
+        failureCount: any;
+        ledgerFile: string;
+        executions: any[];
+    };
+    includeAudit: {
+        files: any;
+        importedIncludeCount: number;
+        schema: string;
+        version: number;
+        generatedAt: string;
+        maxIncludeDepth: number;
+        includedCount: number;
+        skippedCount: number;
+        externalIncludeCount: number;
+        externalIncludeApproval: {
+            schema: string;
+            version: number;
+            ledgerFile: any;
+            hasExternalIncludesApproved: boolean;
+            hasExternalIncludesWarningShown: boolean;
+            warningShownAt: string;
+            pendingCount: number;
+            approvedCount: number;
+            shouldShowWarning: boolean;
+            pendingExternalIncludes: any[];
+            approvedExternalIncludes: any[];
+        };
+        graph: any[];
+        issues: any[];
+    };
+    skipped: any[];
+    issues: any[];
+    writes: any[];
+    index: {
+        file: string;
+        dir: string;
+        docs: {
+            file: string;
+            relPath: string;
+            name: any;
+            description: any;
+            type: GroupTypedMemoryType;
+            source: any;
+            paths: string[];
+            updatedAt: any;
+            checksum: any;
+            body: string;
+            mtimeMs: number;
+            bytes: number;
+        }[];
+        changed: boolean;
+        lineCount: number;
+        bytes: number;
+    };
+    importedAt: string;
+};
+export declare function discoverGlobalClaudeMemoryFiles(options?: any): {
+    schema: string;
+    version: number;
+    status: string;
+    settingSourcePolicy: {
+        schema: string;
+        version: number;
+        configured: string[];
+        invalid: string[];
+        enabled: string[];
+        disabled: ("userSettings" | "projectSettings" | "localSettings" | "policySettings" | "flagSettings")[];
+        isolationMode: boolean;
+        includeUser: boolean;
+        includeProject: boolean;
+        includeLocal: boolean;
+        includeManaged: boolean;
+        includeFlagSettings: boolean;
+        order: string[];
+    };
+    includeUser: boolean;
+    includeManaged: boolean;
+    userRoot: string;
+    managedRoot: string;
+    discoveredCount: number;
+    files: any[];
+    issues: any[];
+};
+export declare function importGlobalClaudeMemoryToGroupTypedMemory(groupId: string, options?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    status: string;
+    settingSourcePolicy: {
+        schema: string;
+        version: number;
+        configured: string[];
+        invalid: string[];
+        enabled: string[];
+        disabled: ("userSettings" | "projectSettings" | "localSettings" | "policySettings" | "flagSettings")[];
+        isolationMode: boolean;
+        includeUser: boolean;
+        includeProject: boolean;
+        includeLocal: boolean;
+        includeManaged: boolean;
+        includeFlagSettings: boolean;
+        order: string[];
+    };
+    includeUser: boolean;
+    includeManaged: boolean;
+    userRoot: string;
+    managedRoot: string;
+    discoveredCount: number;
+    importedCount: number;
+    instructionsLoadedHooks: {
+        schema: string;
+        version: number;
+        groupId: string;
+        configured: boolean;
+        eventCount: number;
+        hookCount: any;
+        firedCount: any;
+        failureCount: any;
+        ledgerFile: string;
+        executions: any[];
+    };
+    includeAudit: {
+        files: any;
+        importedIncludeCount: number;
+        schema: string;
+        version: number;
+        generatedAt: string;
+        maxIncludeDepth: number;
+        includedCount: number;
+        skippedCount: number;
+        externalIncludeCount: number;
+        externalIncludeApproval: {
+            schema: string;
+            version: number;
+            ledgerFile: any;
+            hasExternalIncludesApproved: boolean;
+            hasExternalIncludesWarningShown: boolean;
+            warningShownAt: string;
+            pendingCount: number;
+            approvedCount: number;
+            shouldShowWarning: boolean;
+            pendingExternalIncludes: any[];
+            approvedExternalIncludes: any[];
+        };
+        graph: any[];
+        issues: any[];
+    };
+    skipped: any[];
+    issues: any[];
+    writes: any[];
+    index: {
+        file: string;
+        dir: string;
+        docs: {
+            file: string;
+            relPath: string;
+            name: any;
+            description: any;
+            type: GroupTypedMemoryType;
+            source: any;
+            paths: string[];
+            updatedAt: any;
+            checksum: any;
+            body: string;
+            mtimeMs: number;
+            bytes: number;
+        }[];
+        changed: boolean;
+        lineCount: number;
+        bytes: number;
+    };
+    importedAt: string;
+};
+export declare function scanGroupTypedMemoryDocuments(groupId: string): {
+    file: string;
+    relPath: string;
+    name: any;
+    description: any;
+    type: GroupTypedMemoryType;
+    source: any;
+    paths: string[];
+    updatedAt: any;
+    checksum: any;
+    body: string;
+    mtimeMs: number;
+    bytes: number;
+}[];
+export declare function buildGroupTypedMemoryIndex(groupId: string): {
+    file: string;
+    dir: string;
+    docs: {
+        file: string;
+        relPath: string;
+        name: any;
+        description: any;
+        type: GroupTypedMemoryType;
+        source: any;
+        paths: string[];
+        updatedAt: any;
+        checksum: any;
+        body: string;
+        mtimeMs: number;
+        bytes: number;
+    }[];
+    changed: boolean;
+    lineCount: number;
+    bytes: number;
+};
+export declare function buildGroupTypedMemoryLoadPlan(groupId: string, options?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    generatedAt: string;
+    status: string;
+    pass: boolean;
+    loadOrderPolicy: string;
+    priorityTiers: {
+        entrypoint: number;
+        reference: number;
+        project: number;
+        feedback: number;
+        user: number;
+    };
+    maxEntries: number;
+    maxIncludeDepth: number;
+    targetPaths: string[];
+    conditionalMatched: number;
+    conditionalSkipped: number;
+    entryCount: number;
+    totalDiscoveredEntries: number;
+    truncated: boolean;
+    totalBytes: any;
+    estimatedTokens: any;
+    byType: any;
+    issues: any[];
+    indexFile: string;
+    memoryDir: string;
+    entries: any[];
+};
+export declare function renderGroupTypedMemoryLoadPlan(plan: any): string;
+export declare function readGroupTypedMemoryDistillationLedger(groupId: string): any;
+export declare function evaluateGroupTypedMemoryDistillationQuality(groupId: string, options?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    score: number;
+    pass: boolean;
+    status: string;
+    evaluatedAt: string;
+    projectRoot: string;
+    factCount: number;
+    docCount: number;
+    pathClaimCount: number;
+    stalePathCount: number;
+    contradictionCount: number;
+    checks: any[];
+};
+export declare function distillGroupMessagesToTypedMemory(groupId: string, messages?: any[], memory?: any, options?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    skipped: boolean;
+    reason: string;
+    ledgerFile?: undefined;
+    sourceMessageCount?: undefined;
+    candidateCount?: undefined;
+    newFactCount?: undefined;
+    updatedFactCount?: undefined;
+    writeCount?: undefined;
+    writes?: undefined;
+    index?: undefined;
+    quality?: undefined;
+    postCompactUsageArchive?: undefined;
+    lastDistilledMessageId?: undefined;
+    distilledAt?: undefined;
+} | {
+    schema: string;
+    version: number;
+    groupId: string;
+    skipped: boolean;
+    reason: string;
+    ledgerFile: any;
+    sourceMessageCount: number;
+    candidateCount: number;
+    newFactCount: number;
+    updatedFactCount: number;
+    writeCount: number;
+    writes: any[];
+    index: {
+        file: string;
+        dir: string;
+        docs: {
+            file: string;
+            relPath: string;
+            name: any;
+            description: any;
+            type: GroupTypedMemoryType;
+            source: any;
+            paths: string[];
+            updatedAt: any;
+            checksum: any;
+            body: string;
+            mtimeMs: number;
+            bytes: number;
+        }[];
+        changed: boolean;
+        lineCount: number;
+        bytes: number;
+    };
+    quality: {
+        schema: string;
+        version: number;
+        groupId: string;
+        score: number;
+        pass: boolean;
+        status: string;
+        evaluatedAt: string;
+        projectRoot: string;
+        factCount: number;
+        docCount: number;
+        pathClaimCount: number;
+        stalePathCount: number;
+        contradictionCount: number;
+        checks: any[];
+    };
+    postCompactUsageArchive: {
+        schema: string;
+        archived_count: number;
+        rows: {
+            candidate_id: string;
+            value: string;
+            recommendation: string;
+            used_count: number;
+            verified_count: number;
+            ignored_count: number;
+            mentioned_count: number;
+        }[];
+    };
+    lastDistilledMessageId: string;
+    distilledAt: string;
+};
+export declare function syncGroupTypedMemoryFromGroupMemory(groupId: string, memory?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    writes: any[];
+    index: {
+        file: string;
+        dir: string;
+        docs: {
+            file: string;
+            relPath: string;
+            name: any;
+            description: any;
+            type: GroupTypedMemoryType;
+            source: any;
+            paths: string[];
+            updatedAt: any;
+            checksum: any;
+            body: string;
+            mtimeMs: number;
+            bytes: number;
+        }[];
+        changed: boolean;
+        lineCount: number;
+        bytes: number;
+    };
+};
+export declare function shouldIgnoreGroupMemoryRequest(query: string, options?: any): boolean;
+export declare function readGroupTypedMemoryRecallLedger(groupId: string): any;
+export declare function getAlreadySurfacedGroupTypedMemory(groupId: string, scope?: string, options?: any): string[];
+export declare function recordGroupTypedMemoryRecall(groupId: string, scope: string, recall: any, query?: string, options?: any): any;
+export declare function buildGroupTypedMemoryRecall(groupId: string, query: string, options?: any): {
+    schema: string;
+    ignored: boolean;
+    reason: string;
+    indexFile: string;
+    memoryDir: string;
+    recalled: any[];
+    surfaced: any[];
+    candidateCount?: undefined;
+    targetPaths?: undefined;
+    conditionalMatched?: undefined;
+    conditionalSkipped?: undefined;
+    postCompactUsageScoring?: undefined;
+    diagnostics?: undefined;
+} | {
+    schema: string;
+    ignored: boolean;
+    reason: string;
+    indexFile: string;
+    memoryDir: string;
+    recalled: {
+        pathCondition: {
+            conditional: boolean;
+            matched: boolean;
+            matchedPaths: string[];
+            globs: string[];
+        };
+        score: number;
+        postCompactUsage: {
+            adjustment: number;
+            matched: any[];
+        };
+        snippet: string;
+        file: string;
+        relPath: string;
+        name: any;
+        description: any;
+        type: GroupTypedMemoryType;
+        source: any;
+        paths: string[];
+        updatedAt: any;
+        checksum: any;
+        body: string;
+        mtimeMs: number;
+        bytes: number;
+    }[];
+    surfaced: any[];
+    candidateCount: number;
+    targetPaths: string[];
+    conditionalMatched: number;
+    conditionalSkipped: number;
+    postCompactUsageScoring: {
+        schema: string;
+        hint_count: number;
+        matched_count: number;
+        boosted_count: number;
+        deprioritized_count: number;
+    };
+    diagnostics: any[];
+};
+export declare function renderGroupTypedMemoryRecall(recall: any): string;
+export declare function runGroupTypedMemoryIndexSelfTest(): {
+    pass: boolean;
+    checks: {
+        indexCreated: boolean;
+        fourTypeDocsCreated: boolean;
+        recallFindsSentinel: boolean;
+        recallFindsFile: boolean;
+        recallLedgerStartsEmpty: boolean;
+        recallLedgerRecordsSurfaced: boolean;
+        alreadySurfacedDedupesRecall: boolean;
+        ignoreMemoryHonored: boolean;
+        renderedMentionsVerification: boolean;
+    };
+    indexFile: string;
+    recalled: any[];
+};
+export declare function runGroupTypedMemoryPostCompactUsageScoringSelfTest(): {
+    pass: boolean;
+    checks: {
+        usefulCandidateRecalled: boolean;
+        usefulCandidateBoosted: any;
+        ignoredCandidateDeprioritized: boolean;
+        recallSummaryCountsUsageScoring: boolean;
+        renderedShowsUsageAdjustment: boolean;
+    };
+    scoring: {
+        schema: string;
+        hint_count: number;
+        matched_count: number;
+        boosted_count: number;
+        deprioritized_count: number;
+    };
+    recalled: {
+        relPath: any;
+        score: any;
+        postCompactUsage: any;
+    }[];
+};
+export declare function runGroupTypedMemoryLoadPlanSelfTest(): {
+    pass: boolean;
+    checks: {
+        schema: boolean;
+        entrypointFirst: boolean;
+        priorityTierOrdering: boolean;
+        includeLoadsBeforeParent: boolean;
+        missingIncludeAudited: boolean;
+        cycleAudited: boolean;
+        userMemoryHighestPriority: boolean;
+        boundedEntries: boolean;
+        renderedMentionsPlan: boolean;
+    };
+    plan: {
+        status: string;
+        entryCount: number;
+        issues: any[];
+    };
+};
+export declare function runGroupTypedMemoryPathConditionSelfTest(): {
+    pass: boolean;
+    checks: {
+        pathsPersistedInFrontmatter: boolean;
+        payRecallIncludesPayRule: boolean;
+        payRecallSkipsSearchRule: boolean;
+        searchRecallIncludesSearchRule: boolean;
+        unrelatedSkipsConditionalRules: boolean;
+        diagnosticsRecordPathMiss: boolean;
+        loadPlanIncludesMatchedConditional: boolean;
+        loadPlanSkipsUnmatchedConditionals: boolean;
+        loadPlanCountsConditionalSkips: boolean;
+        renderedMentionsPathCondition: boolean;
+    };
+    payRecall: {
+        surfaced: any[];
+        conditionalMatched: number;
+        conditionalSkipped: number;
+    };
+    payPlan: {
+        conditionalMatched: number;
+        conditionalSkipped: number;
+    };
+};
+export declare function runGroupProjectMemoryImportSelfTest(): {
+    pass: boolean;
+    checks: {
+        discoversClaudeFiles: boolean;
+        importsTypedDocs: boolean;
+        importsClaudeIncludes: boolean;
+        missingIncludeAudited: boolean;
+        preservesPathFrontmatter: boolean;
+        recallFindsPathRule: boolean;
+        unrelatedSkipsPathRule: boolean;
+        loadPlanIncludesImportedRule: boolean;
+        indexLinksImportedDocs: boolean;
+    };
+    discovery: {
+        discoveredCount: number;
+        status: string;
+    };
+    imported: {
+        importedCount: number;
+        status: string;
+        includeAudit: {
+            files: any;
+            importedIncludeCount: number;
+            schema: string;
+            version: number;
+            generatedAt: string;
+            maxIncludeDepth: number;
+            includedCount: number;
+            skippedCount: number;
+            externalIncludeCount: number;
+            externalIncludeApproval: {
+                schema: string;
+                version: number;
+                ledgerFile: any;
+                hasExternalIncludesApproved: boolean;
+                hasExternalIncludesWarningShown: boolean;
+                warningShownAt: string;
+                pendingCount: number;
+                approvedCount: number;
+                shouldShowWarning: boolean;
+                pendingExternalIncludes: any[];
+                approvedExternalIncludes: any[];
+            };
+            graph: any[];
+            issues: any[];
+        };
+    };
+    recalled: any[];
+};
+export declare function runGroupGlobalClaudeMemoryImportSelfTest(): {
+    pass: boolean;
+    checks: {
+        discoversUserAndManaged: boolean;
+        importsTypedDocs: boolean;
+        importsUserExternalInclude: boolean;
+        skipsManagedExternalInclude: boolean;
+        userMemoryHasHighPriorityType: boolean;
+        managedMemoryIsReference: boolean;
+        preservesRulePaths: boolean;
+        recallFindsPathRule: boolean;
+        unrelatedSkipsPathRule: boolean;
+        indexLinksGlobalDocs: boolean;
+    };
+    discovery: {
+        discoveredCount: number;
+        status: string;
+    };
+    imported: {
+        importedCount: number;
+        status: string;
+        includeAudit: {
+            files: any;
+            importedIncludeCount: number;
+            schema: string;
+            version: number;
+            generatedAt: string;
+            maxIncludeDepth: number;
+            includedCount: number;
+            skippedCount: number;
+            externalIncludeCount: number;
+            externalIncludeApproval: {
+                schema: string;
+                version: number;
+                ledgerFile: any;
+                hasExternalIncludesApproved: boolean;
+                hasExternalIncludesWarningShown: boolean;
+                warningShownAt: string;
+                pendingCount: number;
+                approvedCount: number;
+                shouldShowWarning: boolean;
+                pendingExternalIncludes: any[];
+                approvedExternalIncludes: any[];
+            };
+            graph: any[];
+            issues: any[];
+        };
+    };
+    recalled: any[];
+};
+export declare function runGroupClaudeMemoryExternalIncludeApprovalSelfTest(): {
+    pass: boolean;
+    checks: {
+        firstWarnsAndSkips: boolean;
+        warningShownSuppressesRepeatPrompt: boolean;
+        approvalLedgerPersists: boolean;
+        approvedExternalImports: boolean;
+        recallFindsApprovedExternalInclude: boolean;
+    };
+    first: {
+        importedCount: number;
+        approval: any;
+    };
+    second: {
+        importedCount: number;
+        approval: any;
+    };
+    recalled: any[];
+};
+export declare function runGroupClaudeMemorySettingSourcePolicySelfTest(): {
+    pass: boolean;
+    checks: {
+        defaultEnablesEditableAndAlwaysOn: boolean;
+        emptySettingSourcesEnterIsolationButKeepManaged: boolean;
+        projectOnlySkipsLocal: boolean;
+        localOnlySkipsProject: boolean;
+        isolatedProjectSkipsProjectAndLocal: boolean;
+        isolatedGlobalImportsManagedOnly: boolean;
+        recallFindsManagedButNotUser: boolean;
+    };
+    defaultPolicy: {
+        schema: string;
+        version: number;
+        configured: string[];
+        invalid: string[];
+        enabled: string[];
+        disabled: ("userSettings" | "projectSettings" | "localSettings" | "policySettings" | "flagSettings")[];
+        isolationMode: boolean;
+        includeUser: boolean;
+        includeProject: boolean;
+        includeLocal: boolean;
+        includeManaged: boolean;
+        includeFlagSettings: boolean;
+        order: string[];
+    };
+    isolatedPolicy: {
+        schema: string;
+        version: number;
+        configured: string[];
+        invalid: string[];
+        enabled: string[];
+        disabled: ("userSettings" | "projectSettings" | "localSettings" | "policySettings" | "flagSettings")[];
+        isolationMode: boolean;
+        includeUser: boolean;
+        includeProject: boolean;
+        includeLocal: boolean;
+        includeManaged: boolean;
+        includeFlagSettings: boolean;
+        order: string[];
+    };
+    projectDiscovery: {
+        discoveredCount: number;
+        files: any[];
+    };
+    isolatedGlobal: {
+        importedCount: number;
+        includeUser: boolean;
+        includeManaged: boolean;
+    };
+};
+export declare function runGroupInstructionsLoadedHookPipelineSelfTest(): {
+    pass: boolean;
+    checks: {
+        hooksRegistered: boolean;
+        hookSummaryRecordsEvents: boolean;
+        goodHookSawTopLevelAndInclude: boolean;
+        ledgerPersistsRows: boolean;
+        importContinuesAfterHookFailure: boolean;
+        typedLoadPlanStillWorks: boolean;
+    };
+    hookSummary: {
+        eventCount: any;
+        firedCount: any;
+        failureCount: any;
+    };
+    seen: {
+        memory_type: any;
+        load_reason: any;
+        parent_file_path: any;
+    }[];
+};
+export declare function runGroupTypedMemoryLogDistillationSelfTest(): {
+    pass: boolean;
+    checks: {
+        distillationCreatedFacts: boolean;
+        repeatDoesNotAddDuplicates: boolean;
+        qualityReportRecorded: boolean;
+        ledgerPersistsFacts: boolean;
+        fourTypedDocsCreated: boolean;
+        indexLinksDistilledDocs: boolean;
+        recallFindsSentinelAndFile: boolean;
+        recallFindsFailureAndVerification: boolean;
+        renderedMentionsDistilledMemory: boolean;
+        rawTranscriptUntouched: boolean;
+    };
+    first: {
+        newFactCount: number;
+        writeCount: number;
+    };
+    second: {
+        newFactCount: number;
+        updatedFactCount: number;
+    };
+    recalled: any[];
+};
+export declare function runGroupTypedMemoryPostCompactUsageDistillationSelfTest(): {
+    pass: boolean;
+    checks: {
+        archiveDocWritten: boolean;
+        distillationReportsArchive: boolean;
+        ledgerPersistsArchive: boolean;
+        recallDeprioritizesArchive: boolean;
+        recallScoringCountsArchive: boolean;
+    };
+    archive: {
+        schema: string;
+        archived_count: number;
+        rows: {
+            candidate_id: string;
+            value: string;
+            recommendation: string;
+            used_count: number;
+            verified_count: number;
+            ignored_count: number;
+            mentioned_count: number;
+        }[];
+    };
+    recalled: {
+        relPath: any;
+        score: any;
+        postCompactUsage: any;
+    }[];
+};
+export declare function runGroupTypedMemoryDistillationQualitySelfTest(): {
+    pass: boolean;
+    checks: {
+        qualityReportCreated: boolean;
+        qualityStoredInLedger: boolean;
+        stalePathDetected: boolean;
+        existingPathNotFlagged: boolean;
+        contradictionDetected: boolean;
+        sourceLinksPreserved: boolean;
+        qualityStatusNotPass: boolean;
+    };
+    quality: {
+        score: any;
+        status: any;
+        stalePathCount: any;
+        contradictionCount: any;
+    };
+};

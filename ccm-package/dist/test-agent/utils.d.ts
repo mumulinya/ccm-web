@@ -1,0 +1,13 @@
+export declare function nowIso(): string;
+export declare function asArray(value: any): any[];
+export declare function compactText(value: any, max?: number): string;
+export declare function safeSegment(value: string, fallback?: string): string;
+export declare function makeRunId(prefix?: string): string;
+export declare function ensureDir(dir: string): string;
+export declare function defaultArtifactDir(runId: string): string;
+export declare function resolveWorkDir(workDir: string): string;
+export declare function stringifyEnv(env: Record<string, string | number | boolean | undefined> | undefined): Record<string, string>;
+export declare function appendLimited(current: string, chunk: any, maxChars: number): string;
+export declare function isUnsafeVerificationCommand(command: string): "" | "empty command" | "git write operation is not allowed" | "dependency installation is not allowed" | "destructive filesystem command is not allowed";
+export declare function resolveUrl(baseUrl: string, maybeUrl: string): string;
+export declare function hasRequiredCheck(requiredChecks: string[], pattern: RegExp): boolean;

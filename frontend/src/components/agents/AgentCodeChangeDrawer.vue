@@ -22,6 +22,7 @@ const fetchedDiffs = ref({})
 const fileContents = ref({})
 const loadError = ref('')
 const fileKey = (file) => `${file?.project || props.project || ''}|${file?.path || ''}`
+const fileIdentity = (file) => String(file?.path || '').trim().replace(/\\/g, '/').toLowerCase()
 
 const escapeHtml = (text) => String(text || '')
   .replace(/&/g, '&amp;')
@@ -44,17 +45,39 @@ const normalizeFile = (item) => {
     diff: item.diff || ((item.additions || item.deletions) ? { additions: Number(item.additions || 0), deletions: Number(item.deletions || 0), available: false } : null),
   }
 }
+const isGenericChangeOwner = (value) => {
+  const text = String(value || '').trim().toLowerCase()
+  return !text || ['项目', 'project', 'agent', 'default'].includes(text)
+}
+const pickChangeOwner = (current, incoming) => {
+  const currentText = String(current || '').trim()
+  const incomingText = String(incoming || '').trim()
+  if (isGenericChangeOwner(currentText) && !isGenericChangeOwner(incomingText)) return incomingText
+  return currentText || incomingText
+}
+const mergeFile = (current, incoming) => ({
+  ...current,
+  ...incoming,
+  path: current.path || incoming.path,
+  project: pickChangeOwner(current.project, incoming.project),
+  agent: pickChangeOwner(current.agent, incoming.agent || incoming.project),
+  statusText: incoming.statusText || current.statusText,
+  statusColor: incoming.statusColor || current.statusColor,
+  additions: Math.max(Number(current.additions || 0), Number(incoming.additions || 0)),
+  deletions: Math.max(Number(current.deletions || 0), Number(incoming.deletions || 0)),
+  diff: incoming.diff || current.diff || null,
+})
 
 const changeFiles = computed(() => {
   const fromChanges = Array.isArray(props.fileChanges?.files) ? props.fileChanges.files : []
   const raw = fromChanges.length ? fromChanges : props.files
-  const seen = new Set()
-  return raw.map(normalizeFile).filter(file => {
-    const key = fileKey(file)
-    if (!file || seen.has(key)) return false
-    seen.add(key)
-    return true
+  const byPath = new Map()
+  raw.map(normalizeFile).filter(Boolean).forEach(file => {
+    const key = fileIdentity(file)
+    if (!key) return
+    byPath.set(key, byPath.has(key) ? mergeFile(byPath.get(key), file) : file)
   })
+  return [...byPath.values()]
 })
 
 const totals = computed(() => changeFiles.value.reduce((acc, file) => {

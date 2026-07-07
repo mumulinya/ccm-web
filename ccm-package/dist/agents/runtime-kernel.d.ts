@@ -176,6 +176,7 @@ export declare function runAgentRuntimeKernelSelfTest(): {
         highRiskAsks: boolean;
         contextBudgetComputed: boolean;
         workerPacketHasAckGate: boolean;
+        workerPacketRendersMemory: boolean;
         contractInjectionHasId: any;
         replaySuiteShape: boolean;
     };

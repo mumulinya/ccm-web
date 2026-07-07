@@ -19,6 +19,7 @@ type OrchestratorRouteDeps = {
   replayAgentTrace: (traceId: string) => any;
   buildTraceReplaySuite: (limit?: number) => any;
   runAgentRuntimeKernelSelfTest: () => any;
+  runWorkerHandoffSelfTest: () => any;
   runGroupMainAgentActionRegistrySelfTest: () => any;
   runGroupMainAgentToolLoopSelfTest: () => any;
   getGroupMainAgentActionRegistry: () => any;
@@ -108,6 +109,12 @@ export function handleOrchestratorRoutes(
 
   if (pathname === "/api/orchestrator/runtime-kernel/self-test" && req.method === "GET") {
     const result = deps.runAgentRuntimeKernelSelfTest();
+    sendJson(res, { success: result.pass, result }, result.pass ? 200 : 500);
+    return true;
+  }
+
+  if (pathname === "/api/orchestrator/worker-handoff/self-test" && req.method === "GET") {
+    const result = deps.runWorkerHandoffSelfTest();
     sendJson(res, { success: result.pass, result }, result.pass ? 200 : 500);
     return true;
   }
