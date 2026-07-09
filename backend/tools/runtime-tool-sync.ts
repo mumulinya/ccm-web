@@ -429,9 +429,9 @@ export function listRecentRuntimeToolAudits(limit = 30): any[] {
   snapshotRows.sort((left, right) => String(right.timestamp || "").localeCompare(String(left.timestamp || "")));
   const seen = new Set<string>();
   const result: any[] = [];
-  for (const row of [...snapshotRows, ...rows]) {
+  for (const row of [...rows, ...snapshotRows]) {
     const key = row.snapshotId
-      ? `${row.runtime || ""}:${row.snapshotId}`
+      ? `${row.runtime || ""}:${row.snapshotId}:${row.workDir || ""}:${row.projectName || ""}:${row.groupId || ""}`
       : `${row.projectName || ""}:${row.groupId || ""}:${row.runtime || ""}:${row.mcpConfigPath || ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -1869,14 +1869,16 @@ export function resyncMissingRuntimeToolSnapshots(options: any = {}): RuntimeMis
       const audit = syncRuntimeToolsWithCatalog(target.workDir, target.agentType, requested, options.catalog || {}, {
         authorizationReadiness: authorization.authorization_readiness,
       });
+      (audit as any).projectName = target.projectName;
+      (audit as any).groupId = target.groupId;
       audit.authorization_readiness = authorization.authorization_readiness;
       recordRuntimeToolSyncAudit(audit, target.projectName, target.groupId);
       const readiness = probeRuntimeToolReadiness(audit, { record: false, catalog: options.catalog || {} });
       const after = {
         runtime: readiness.runtime,
         snapshotId: readiness.snapshotId,
-        projectName: readiness.projectName,
-        groupId: readiness.groupId,
+        projectName: target.projectName,
+        groupId: target.groupId,
         catalogStale: readiness.catalogStale === true,
         deliveryReady: readiness.deliveryReady === true,
         runtimeReady: readiness.runtimeReady === true,
@@ -1924,7 +1926,7 @@ export function resyncRecentRuntimeToolSnapshots(options: any = {}): RuntimeTool
   for (const audit of audits) {
     scanned += 1;
     const key = audit?.snapshotId
-      ? `${audit.runtime || ""}:${audit.snapshotId}`
+      ? `${audit.runtime || ""}:${audit.snapshotId}:${audit?.workDir || ""}:${audit?.projectName || ""}:${audit?.groupId || ""}`
       : `${audit?.runtime || ""}:${audit?.workDir || ""}:${JSON.stringify(audit?.requested || {})}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -1970,6 +1972,8 @@ export function resyncRecentRuntimeToolSnapshots(options: any = {}): RuntimeTool
     const nextAudit = syncRuntimeToolsWithCatalog(workDir, runtime, requested, options.catalog || {}, {
       authorizationReadiness: authorizationPayload.authorization_readiness,
     });
+    (nextAudit as any).projectName = String(audit?.projectName || "");
+    (nextAudit as any).groupId = String(audit?.groupId || "");
     recordRuntimeToolSyncAudit(nextAudit, String(audit?.projectName || ""), String(audit?.groupId || ""));
     const afterReadiness = probeRuntimeToolReadiness(nextAudit, { record: false, catalog: options.catalog || {} });
     items.push({
@@ -1986,8 +1990,8 @@ export function resyncRecentRuntimeToolSnapshots(options: any = {}): RuntimeTool
       after: {
         runtime: afterReadiness.runtime,
         snapshotId: afterReadiness.snapshotId,
-        projectName: afterReadiness.projectName,
-        groupId: afterReadiness.groupId,
+        projectName: String(audit?.projectName || ""),
+        groupId: String(audit?.groupId || ""),
         catalogStale: afterReadiness.catalogStale,
         deliveryReady: afterReadiness.deliveryReady,
         dispatchReady: afterReadiness.dispatchGate?.dispatchReady !== false,

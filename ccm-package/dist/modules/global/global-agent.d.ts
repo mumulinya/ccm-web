@@ -7,6 +7,8 @@ export declare function runGlobalAgentHistorySyncSelfTest(): {
         preservesDeliveryReport: boolean;
         mergesRicherMetadata: any;
         preservesProgressCheckpoints: boolean;
+        sanitizesProtocolContent: boolean;
+        sanitizesArtifactPathContent: boolean;
     };
 };
 export declare function runGlobalAgentIntentSelfTest(): {
@@ -51,6 +53,9 @@ export declare function runGlobalAgentIntentSelfTest(): {
         globalStatusFollowupAvoidsManagementMutation: boolean;
         globalStatusSummaryFriendly: boolean;
         globalStatusShowsChildAgentWaitingState: boolean;
+        globalStatusShowsSupervisionWaitingState: boolean;
+        globalStatusShowsSupervisionReworkState: boolean;
+        globalStatusShowsStandaloneRunState: boolean;
         globalStatusIncludesDirectDispatch: boolean;
         globalStatusShowsDirectDispatchContinuation: boolean;
         globalStatusShowsPickupSummary: boolean;
@@ -61,7 +66,10 @@ export declare function runGlobalAgentIntentSelfTest(): {
         groupVisibleWorkOrderFriendly: boolean;
         groupVisibleWorkOrderNoProtocolLeak: boolean;
         groupDirectDispatchSaysAcceptedNotDone: boolean;
+        groupDirectDispatchHidesTaskId: boolean;
         groupDirectDispatchUsesFriendlyReplyLabel: boolean;
+        globalFeishuDevelopmentDispatchHidesIds: boolean;
+        globalFeishuTaskDispatchHidesIds: boolean;
         projectInternalWorkOrderSelfContained: boolean;
         directDispatchHandoffSummary: boolean;
         verificationOnlyCanAvoidCodeChanges: boolean;

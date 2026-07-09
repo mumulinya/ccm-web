@@ -6,6 +6,7 @@ export interface TestAgentCliOptions {
   verifyArtifactsPath: string;
   help: boolean;
   validateOnly: boolean;
+  planOnly: boolean;
   summary: boolean;
   json: boolean;
   artifactDir?: string;
@@ -28,6 +29,7 @@ export function testAgentCliUsage() {
     "",
     "Options:",
     "  --validate-only              Validate the work order contract without executing checks.",
+    "  --plan-only                  Print the normalized execution plan without running checks.",
     "  --from-handoff <file>        Build a work order from a group-main-agent handoff JSON file.",
     "  --verify-artifacts <file>    Verify an artifact-manifest.json integrity bundle.",
     "  --summary                    Print a concise human summary instead of the full JSON report.",
@@ -53,6 +55,7 @@ export function parseTestAgentCliArgs(args: string[]): TestAgentCliParseResult {
     verifyArtifactsPath: "",
     help: false,
     validateOnly: false,
+    planOnly: false,
     summary: false,
     json: true,
   };
@@ -64,6 +67,8 @@ export function parseTestAgentCliArgs(args: string[]): TestAgentCliParseResult {
       options.help = true;
     } else if (arg === "--validate-only") {
       options.validateOnly = true;
+    } else if (arg === "--plan-only") {
+      options.planOnly = true;
     } else if (arg === "--verify-artifacts" || arg.startsWith("--verify-artifacts=")) {
       const { value, consumed } = readValue(args, i, "--verify-artifacts");
       if (!value || value.startsWith("--")) errors.push("--verify-artifacts requires an artifact manifest file.");
@@ -107,6 +112,8 @@ export function parseTestAgentCliArgs(args: string[]): TestAgentCliParseResult {
   if (options.verifyArtifactsPath && options.handoffPath) errors.push("--verify-artifacts cannot be combined with --from-handoff.");
   if (options.handoffPath && options.workOrderPath) errors.push("--from-handoff cannot be combined with a work order path.");
   if (options.verifyArtifactsPath && options.validateOnly) errors.push("--verify-artifacts cannot be combined with --validate-only.");
+  if (options.verifyArtifactsPath && options.planOnly) errors.push("--verify-artifacts cannot be combined with --plan-only.");
+  if (options.validateOnly && options.planOnly) errors.push("--validate-only cannot be combined with --plan-only.");
   return { options, errors };
 }
 

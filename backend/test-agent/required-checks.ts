@@ -163,7 +163,7 @@ function browserLogSignal(browserResults: BrowserCheckResult[], kind: "console" 
   return { status: "unknown", evidence: browserResults.map(item => evidence(item.name, item.status)), missingReason: `Browser checks ran but no ${kind} log artifact was recorded.` };
 }
 
-function browserArtifactSignal(browserResults: BrowserCheckResult[], kind: "trace" | "har" | "video" | "any"): Signal {
+function browserArtifactSignal(browserResults: BrowserCheckResult[], kind: "trace" | "har" | "video" | "download" | "any"): Signal {
   if (!browserResults.length) return { status: "unknown", evidence: [], missingReason: "No browser results were recorded for browser artifact checks." };
   const artifacts = browserResults.flatMap(item => (item.browserArtifacts || [])
     .filter(artifact => kind === "any" || artifact.type === kind)
@@ -215,6 +215,7 @@ function coverageFor(check: TestAgentRequiredCheck, input: {
   else if (/browser_trace|trace/.test(normalized)) signal = browserArtifactSignal(input.browserResults, "trace");
   else if (/browser_har|\bhar\b/.test(normalized)) signal = browserArtifactSignal(input.browserResults, "har");
   else if (/browser_video|video/.test(normalized)) signal = browserArtifactSignal(input.browserResults, "video");
+  else if (/browser_download|download/.test(normalized)) signal = browserArtifactSignal(input.browserResults, "download");
   else if (/browser_artifacts?|evidence_artifacts?/.test(normalized)) signal = browserArtifactSignal(input.browserResults, "any");
   else if (/browser_snapshot|dom_snapshot|page_snapshot|snapshots?/.test(normalized)) signal = browserSnapshotSignal(input.browserResults);
   else if (/browser|e2e|playwright|cypress/.test(normalized)) signal = browserSignal(input.browserResults, `No browser result was recorded for required check "${check}".`);

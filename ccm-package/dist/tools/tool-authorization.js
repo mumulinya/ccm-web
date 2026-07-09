@@ -189,11 +189,15 @@ function buildInventoryScopeRow(input) {
 function inventorySnapshotKey(snapshot) {
     const runtime = cleanInventoryText(snapshot?.runtime || "", 80);
     const snapshotId = cleanInventoryText(snapshot?.snapshotId || "", 120);
+    const projectName = cleanInventoryText(snapshot?.projectName || "", 180);
+    const groupId = cleanInventoryText(snapshot?.groupId || "", 180);
+    if (projectName || groupId)
+        return `${runtime}:${projectName}:${groupId}`;
     if (runtime || snapshotId)
         return `${runtime}:${snapshotId}`;
     return [
-        cleanInventoryText(snapshot?.projectName || "", 180),
-        cleanInventoryText(snapshot?.groupId || "", 180),
+        projectName,
+        groupId,
         cleanInventoryText(snapshot?.checkedAt || "", 80),
     ].join(":");
 }
@@ -229,7 +233,7 @@ function runtimeMatchesInventoryScope(scope, id, snapshot) {
         return false;
     if (scope === "group")
         return cleanInventoryText(snapshot?.groupId) === scopeId;
-    return cleanInventoryText(snapshot?.projectName) === scopeId;
+    return cleanInventoryText(snapshot?.projectName) === scopeId && !cleanInventoryText(snapshot?.groupId);
 }
 function summarizeInventoryRuntimeSnapshots(snapshots) {
     const total = snapshots.length;
@@ -638,7 +642,7 @@ function runToolAuthorizationSelfTest() {
             && inventory.summary.runtimeOverallReady === 1
             && inventory.summary.runtimeCatalogStale === 1
             && inventory.summary.runtimeDispatchBlocked === 1,
-        inventoryAttachesProjectRuntimeCoverage: inventory.scopes.find((row) => row.scope === "project" && row.id === "alpha")?.runtime?.summary?.total === 2,
+        inventoryAttachesProjectRuntimeCoverage: inventory.scopes.find((row) => row.scope === "project" && row.id === "alpha")?.runtime?.summary?.total === 1,
         inventoryAttachesGroupRuntimeCoverage: inventory.scopes.find((row) => row.scope === "group" && row.id === "g1")?.runtime?.summary?.catalogStale === 1,
         inventoryHidesRuntimePaths: !JSON.stringify(inventory).includes("snapshotPath"),
     };

@@ -30,8 +30,32 @@ export type MainAgentWorkItemClaimResult = {
     ok: boolean;
     reason?: "task_not_found" | "already_claimed" | "already_resolved" | "blocked" | "agent_busy";
     item?: MainAgentWorkItem;
+    busy?: MainAgentWorkItem;
     items: MainAgentWorkItem[];
     blocking?: string[];
+};
+export type MainAgentWorkItemUnlockSummary = {
+    schema: "ccm-main-agent-work-item-unlock-summary-v1";
+    title: string;
+    status: "ready_to_dispatch" | "auto_dispatch_deferred" | "auto_dispatch_queued" | "auto_dispatch_blocked";
+    status_label: string;
+    headline: string;
+    rows: Array<{
+        id: string;
+        target: string;
+        owner: string;
+        subject: string;
+        label: string;
+    }>;
+    next_claimable: Array<{
+        id: string;
+        target: string;
+        owner: string;
+        subject: string;
+    }>;
+    next_action: string;
+    display_policy: any;
+    technical: any;
 };
 export declare function normalizeMainAgentWorkItemStatus(status: any): MainAgentWorkItemStatus;
 export declare function buildMainAgentWorkItems(task?: any, options?: {
@@ -43,6 +67,33 @@ export declare function claimMainAgentWorkItem(items: MainAgentWorkItem[], itemR
     checkOwnerBusy?: boolean;
     now?: string;
 }): MainAgentWorkItemClaimResult;
+export declare function buildMainAgentWorkItemUnlockSummary(previousItems: MainAgentWorkItem[], nextItems: MainAgentWorkItem[], options?: any): MainAgentWorkItemUnlockSummary | null;
+export declare function buildMainAgentWorkItemClaimSummary(result: MainAgentWorkItemClaimResult, owner?: string, itemRef?: string): {
+    schema: string;
+    title: string;
+    status: string;
+    status_label: string;
+    headline: string;
+    next_action: string;
+    work_item: {
+        id: string;
+        target: string;
+        owner: string;
+        subject: string;
+    };
+    display_policy: {
+        user_text_first: boolean;
+        technical_default_collapsed: boolean;
+        hide_internal_protocols: boolean;
+        show_for_ordinary_conversation: boolean;
+    };
+    technical: {
+        reason_code: string;
+        work_item_id: string;
+        blocking_refs: string[];
+        busy_work_item_id: string;
+    };
+};
 export declare function requeueStaleMainAgentWorkItems(items: MainAgentWorkItem[], options?: {
     staleMs?: number;
     nowMs?: number;
@@ -65,6 +116,47 @@ export declare function buildMainAgentWorkItemSummary(items: MainAgentWorkItem[]
         target: string;
         subject: string;
     }[];
+    dependency_summary: {
+        schema: string;
+        title: string;
+        status: string;
+        status_label: string;
+        headline: string;
+        rows: {
+            id: string;
+            target: string;
+            subject: string;
+            status: MainAgentWorkItemStatus;
+            dependency_count: number;
+            open_dependency_count: number;
+            dependencies: {
+                id: string;
+                label: string;
+                status: MainAgentWorkItemStatus;
+                completed: boolean;
+            }[];
+            label: string;
+            next_action: string;
+        }[];
+        ready: {
+            id: string;
+            target: string;
+            subject: string;
+            label: string;
+        }[];
+        next_claimable: {
+            id: string;
+            target: string;
+            subject: string;
+        }[];
+        next_action: string;
+        display_policy: {
+            user_text_first: boolean;
+            technical_default_collapsed: boolean;
+            hide_internal_protocols: boolean;
+            show_for_ordinary_conversation: boolean;
+        };
+    };
     verification_nudge: boolean;
     verification_reminder: {
         schema: string;
@@ -89,11 +181,21 @@ export declare function runMainAgentWorkItemSelfTest(): {
         receiptCompletesDependency: boolean;
         blocksBeforeDependencyDone: boolean;
         claimAfterDependencyDone: boolean;
+        unlockSummaryFriendly: boolean;
         ownerBusyGuard: boolean;
+        claimSummaryFriendlySuccess: boolean;
+        claimSummaryFriendlyBlocked: boolean;
+        claimSummaryFriendlyBusy: boolean;
+        claimSummaryFriendlyAlreadyClaimed: boolean;
+        claimSummaryFriendlyAlreadyResolved: boolean;
+        claimSummaryFriendlyNotFound: boolean;
+        claimSummaryKeepsRawReasonTechnical: boolean;
         staleRequeues: boolean;
         summaryCounts: boolean;
+        dependencySummaryExplainsUnlockedWork: boolean;
         workItemVerificationReminderWhenAllDoneWithoutVerification: boolean;
         workItemVerificationReminderSkippedWhenVerificationExists: boolean;
+        workItemVisibleTextUsesFriendlyRoles: boolean;
     };
     items: MainAgentWorkItem[];
     blockedBefore: MainAgentWorkItem[];

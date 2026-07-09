@@ -33,6 +33,8 @@ export const GLOBAL_AGENT_MEMORY_FILE = path.join(MEMORY_DIR, "memory.json");
 const TRANSCRIPT_DIR = path.join(MEMORY_DIR, "transcripts");
 const KEY_FILE = path.join(MEMORY_DIR, "transcript.key");
 const POLICY_FILE = path.join(MEMORY_DIR, "policy.json");
+const SELFTEST_LOCK_FILE = path.join(MEMORY_DIR, ".selftest.lock");
+const SELFTEST_RESIDUE_ARCHIVE_DIR = path.join(MEMORY_DIR, "selftest-residue-archive");
 const MEMORY_ITEM_KEYS: GlobalMemoryItemType[] = ["user", "feedback", "authorization", "decisions", "missions", "unresolved", "references"];
 const COMPACT_MESSAGE_THRESHOLD = 60;
 const COMPACT_TOKEN_THRESHOLD = 50_000;
@@ -55,6 +57,336 @@ function writeAtomic(file: string, value: any) {
   if (fs.existsSync(file)) { try { fs.copyFileSync(file, `${file}.bak`); } catch {} }
   fs.writeFileSync(temp, typeof value === "string" ? value : JSON.stringify(value, null, 2), "utf-8");
   fs.renameSync(temp, file);
+}
+
+function sleepSync(ms: number) {
+  const buffer = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(buffer), 0, 0, ms);
+}
+
+export function acquireGlobalAgentMemorySelfTestLock(label = "global-memory-selftest", options: any = {}) {
+  ensureDirs();
+  const timeoutMs = Math.max(500, Number(options.timeoutMs || options.timeout_ms || 30_000));
+  const staleMs = Math.max(timeoutMs, Number(options.staleMs || options.stale_ms || 120_000));
+  const startedAt = Date.now();
+  const payload = () => JSON.stringify({
+    schema: "ccm-global-agent-memory-selftest-lock-v1",
+    label,
+    pid: process.pid,
+    acquiredAt: now(),
+  }, null, 2);
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const fd = fs.openSync(SELFTEST_LOCK_FILE, "wx");
+      fs.writeFileSync(fd, payload(), "utf-8");
+      fs.closeSync(fd);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        try {
+          const lock = readJson(SELFTEST_LOCK_FILE, {});
+          if (Number(lock.pid || 0) === process.pid) fs.rmSync(SELFTEST_LOCK_FILE, { force: true });
+        } catch {
+          try { fs.rmSync(SELFTEST_LOCK_FILE, { force: true }); } catch {}
+        }
+      };
+    } catch {
+      try {
+        const stat = fs.statSync(SELFTEST_LOCK_FILE);
+        if (Date.now() - stat.mtimeMs > staleMs) fs.rmSync(SELFTEST_LOCK_FILE, { force: true });
+      } catch {}
+      sleepSync(50);
+    }
+  }
+  throw new Error(`Global Agent memory selftest lock timeout: ${label}`);
+}
+
+function globalAgentMemorySelftestMatch(value: any) {
+  const text = typeof value === "string" ? value : JSON.stringify(value || {});
+  if (!text) return { contaminated: false, sentinels: [], hasSelftestSource: false };
+  const sentinels = [...new Set([...text.matchAll(/\b[A-Z][A-Z0-9_]{4,}_SENTINEL\b/g)].map(match => match[0]))].slice(0, 12);
+  const hasSelftestSource = /"source"\s*:\s*"self-?test"|source['"]?\s*:\s*['"]self-?test|selftest/i.test(text);
+  return {
+    contaminated: sentinels.length > 0 || hasSelftestSource,
+    sentinels,
+    hasSelftestSource,
+  };
+}
+
+function globalAgentMemoryScanFiles(options: any = {}) {
+  const includeResidue = options.includeResidue !== false && options.include_residue !== false;
+  const files = [
+    { file: GLOBAL_AGENT_MEMORY_FILE, role: "active", active: true },
+    { file: `${GLOBAL_AGENT_MEMORY_FILE}.bak`, role: "active_backup", active: true },
+  ];
+  if (includeResidue) {
+    try {
+      for (const name of fs.readdirSync(MEMORY_DIR)) {
+        if (!/^memory\.(?:json\..*\.tmp|selftest-polluted-|bak-before-)/.test(name)) continue;
+        const file = path.join(MEMORY_DIR, name);
+        if (files.some(item => item.file === file)) continue;
+        files.push({ file, role: "residue", active: false });
+      }
+    } catch {}
+  }
+  return files;
+}
+
+export function scanGlobalAgentMemorySelfTestContamination(options: any = {}) {
+  const rows: any[] = [];
+  const files = globalAgentMemoryScanFiles(options).map(meta => {
+    const exists = fs.existsSync(meta.file);
+    if (!exists) return { ...meta, exists, contaminated: false, sentinelCount: 0, hasSelftestSource: false, bytes: 0 };
+    const text = (() => { try { return fs.readFileSync(meta.file, "utf-8"); } catch { return ""; } })();
+    const parsed = (() => { try { return JSON.parse(text); } catch { return null; } })();
+    const match = globalAgentMemorySelftestMatch(text);
+    if (match.contaminated) {
+      const memory = parsed && typeof parsed === "object" ? parsed : {};
+      const addRow = (kind: string, entry: any, index: number) => {
+        const entryMatch = globalAgentMemorySelftestMatch(entry);
+        if (!entryMatch.contaminated) return;
+        rows.push({
+          file: meta.file,
+          role: meta.role,
+          active: meta.active,
+          kind,
+          index,
+          id: entry?.id || entry?.sessionId || entry?.archiveId || "",
+          source: entry?.source?.source || entry?.source || "",
+          sentinels: entryMatch.sentinels,
+          has_selftest_source: entryMatch.hasSelftestSource,
+          preview: compact(JSON.stringify(entry || {}).replace(/\s+/g, " "), 420),
+        });
+      };
+      for (const key of [...MEMORY_ITEM_KEYS, "sessions", "archives"]) {
+        const entries = Array.isArray(memory[key]) ? memory[key] : [];
+        entries.forEach((entry: any, index: number) => addRow(key, entry, index));
+      }
+      if (!rows.some(row => row.file === meta.file)) {
+        rows.push({
+          file: meta.file,
+          role: meta.role,
+          active: meta.active,
+          kind: "file",
+          index: 0,
+          id: "",
+          source: "",
+          sentinels: match.sentinels,
+          has_selftest_source: match.hasSelftestSource,
+          preview: compact(text.replace(/\s+/g, " "), 420),
+        });
+      }
+    }
+    return {
+      ...meta,
+      exists,
+      contaminated: match.contaminated,
+      sentinelCount: match.sentinels.length,
+      hasSelftestSource: match.hasSelftestSource,
+      bytes: Buffer.byteLength(text, "utf-8"),
+    };
+  });
+  const activeRows = rows.filter(row => row.active);
+  const residueRows = rows.filter(row => !row.active);
+  const status = activeRows.length ? "fail" : residueRows.length ? "warn" : "ok";
+  return {
+    schema: "ccm-global-agent-memory-selftest-contamination-scan-v1",
+    generatedAt: now(),
+    file: GLOBAL_AGENT_MEMORY_FILE,
+    status,
+    pass: activeRows.length === 0,
+    active_contamination_count: activeRows.length,
+    residue_contamination_count: residueRows.length,
+    contamination_count: rows.length,
+    contaminated_file_count: files.filter(file => file.contaminated).length,
+    files,
+    rows: rows.slice(0, Number(options.limit || 80)),
+  };
+}
+
+export function archiveGlobalAgentMemorySelfTestResidues(options: any = {}) {
+  const dryRun = options.dryRun === true || options.dry_run === true;
+  const reason = String(options.reason || "").trim();
+  const actor = String(options.actor || "local-user").trim() || "local-user";
+  if (!dryRun && !reason) throw new Error("归档 Global Agent 记忆自测残留前必须填写 reason");
+  const release = acquireGlobalAgentMemorySelfTestLock("archive-global-memory-selftest-residue");
+  try {
+    const rawFiles = Array.isArray(options.files || options.file)
+      ? (options.files || options.file)
+      : (options.files || options.file ? [options.files || options.file] : []);
+    const selectedFileList = rawFiles.map((value: any) => String(value || "").trim()).filter(Boolean);
+    const selectedFiles = new Set<string>(selectedFileList);
+    const selectedBasenames = new Set<string>(selectedFileList.map((file: string) => path.basename(file)));
+    const scanBefore = scanGlobalAgentMemorySelfTestContamination({ includeResidue: true, limit: options.limit || 200 });
+    const residueFiles = scanBefore.files
+      .filter((file: any) => file.exists && file.contaminated && file.active !== true && file.role === "residue")
+      .filter((file: any) => !selectedFiles.size || selectedFiles.has(file.file) || selectedBasenames.has(path.basename(file.file)));
+    const archived: any[] = [];
+    const skipped: any[] = [];
+    for (const row of residueFiles) {
+      const file = path.resolve(row.file);
+      if (!pathInside(MEMORY_DIR, file)) {
+        skipped.push({ file: row.file, reason: "outside_memory_dir" });
+        continue;
+      }
+      if (!fs.existsSync(file)) {
+        skipped.push({ file: row.file, reason: "missing" });
+        continue;
+      }
+      const text = fs.readFileSync(file, "utf-8");
+      const match = globalAgentMemorySelftestMatch(text);
+      if (!match.contaminated) {
+        skipped.push({ file: row.file, reason: "not_contaminated" });
+        continue;
+      }
+      const archiveName = `${cleanId(path.basename(file))}-${sha(file, 10)}-${Date.now().toString(36)}.json`;
+      const target = path.join(SELFTEST_RESIDUE_ARCHIVE_DIR, archiveName);
+      if (!pathInside(SELFTEST_RESIDUE_ARCHIVE_DIR, target)) {
+        skipped.push({ file: row.file, reason: "unsafe_archive_target" });
+        continue;
+      }
+      const item = {
+        file,
+        archiveFile: target,
+        bytes: Buffer.byteLength(text, "utf-8"),
+        sentinels: match.sentinels,
+        dryRun,
+      };
+      if (!dryRun) {
+        fs.mkdirSync(SELFTEST_RESIDUE_ARCHIVE_DIR, { recursive: true });
+        fs.renameSync(file, target);
+      }
+      archived.push(item);
+    }
+    const scanAfter = dryRun ? scanBefore : scanGlobalAgentMemorySelfTestContamination({ includeResidue: true, limit: options.limit || 200 });
+    const result = {
+      schema: "ccm-global-agent-memory-selftest-residue-archive-v1",
+      dryRun,
+      reason,
+      actor,
+      archiveDir: SELFTEST_RESIDUE_ARCHIVE_DIR,
+      selectedCount: selectedFiles.size,
+      archivedCount: archived.length,
+      skippedCount: skipped.length,
+      archived,
+      skipped,
+      before: {
+        active_contamination_count: scanBefore.active_contamination_count,
+        residue_contamination_count: scanBefore.residue_contamination_count,
+      },
+      after: {
+        active_contamination_count: scanAfter.active_contamination_count,
+        residue_contamination_count: scanAfter.residue_contamination_count,
+      },
+    };
+    if (!dryRun) {
+      recordMemoryOperation({
+        action: "archive_selftest_residue",
+        scope: "global",
+        scopeId: "global-agent",
+        actor,
+        reason,
+        archivedCount: archived.length,
+        skippedCount: skipped.length,
+        archiveDir: SELFTEST_RESIDUE_ARCHIVE_DIR,
+      });
+    }
+    return result;
+  } finally {
+    release();
+  }
+}
+
+export function runGlobalAgentMemorySelfTestResidueArchiveSelfTest() {
+  const testFile = path.join(MEMORY_DIR, `memory.selftest-polluted-phase73-${process.pid}-${Date.now().toString(36)}.json`);
+  fs.mkdirSync(MEMORY_DIR, { recursive: true });
+  fs.writeFileSync(testFile, JSON.stringify({
+    version: 1,
+    scope: "global",
+    id: "global-agent",
+    user: [{
+      id: "gmi_phase73_residue_archive",
+      text: "GLOBAL_AGENT_MEMORY_RESIDUE_ARCHIVE_SENTINEL: residue archive selftest",
+      source: { source: "selftest" },
+    }],
+  }, null, 2), "utf-8");
+  let archiveFile = "";
+  try {
+    const before = scanGlobalAgentMemorySelfTestContamination({ includeResidue: true });
+    const dryRun = archiveGlobalAgentMemorySelfTestResidues({
+      dryRun: true,
+      files: [testFile],
+      reason: "selftest dry-run",
+      actor: "selftest",
+    });
+    const existsAfterDryRun = fs.existsSync(testFile);
+    const archived = archiveGlobalAgentMemorySelfTestResidues({
+      files: [testFile],
+      reason: "selftest archive",
+      actor: "selftest",
+    });
+    archiveFile = archived.archived?.[0]?.archiveFile || "";
+    const after = scanGlobalAgentMemorySelfTestContamination({ includeResidue: true });
+    const checks = {
+      beforeDetectsResidue: before.rows?.some((row: any) => row.file === testFile && row.active === false),
+      dryRunDoesNotMoveFile: dryRun.dryRun === true && existsAfterDryRun && dryRun.archivedCount === 1,
+      archiveMovesOnlyResidue: archived.dryRun === false && archived.archivedCount === 1 && !fs.existsSync(testFile) && !!archiveFile && fs.existsSync(archiveFile),
+      activeMemoryStillClean: after.active_contamination_count === 0,
+      residueNoLongerIncludesTestFile: !after.rows?.some((row: any) => row.file === testFile),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      archived: { archiveFile, archivedCount: archived.archivedCount, skippedCount: archived.skippedCount },
+    };
+  } finally {
+    try { if (fs.existsSync(testFile)) fs.rmSync(testFile, { force: true }); } catch {}
+    try { if (archiveFile && fs.existsSync(archiveFile)) fs.rmSync(archiveFile, { force: true }); } catch {}
+  }
+}
+
+export function runGlobalAgentMemorySelfTestIsolationSelfTest() {
+  const before = scanGlobalAgentMemorySelfTestContamination({ includeResidue: false });
+  const release = acquireGlobalAgentMemorySelfTestLock("global-memory-isolation-selftest");
+  const previousMain = fs.existsSync(GLOBAL_AGENT_MEMORY_FILE) ? fs.readFileSync(GLOBAL_AGENT_MEMORY_FILE, "utf-8") : null;
+  const previousBak = fs.existsSync(`${GLOBAL_AGENT_MEMORY_FILE}.bak`) ? fs.readFileSync(`${GLOBAL_AGENT_MEMORY_FILE}.bak`, "utf-8") : null;
+  try {
+    writeAtomic(GLOBAL_AGENT_MEMORY_FILE, {
+      ...emptyMemory(),
+      user: [{
+        id: "gmi_selftest_isolation_sentinel",
+        type: "user",
+        text: "GLOBAL_AGENT_MEMORY_ISOLATION_SENTINEL: this test data must not survive sandbox restore.",
+        importance: 1,
+        confidence: 1,
+        createdAt: now(),
+        updatedAt: now(),
+        source: { source: "selftest", sessionId: "isolation-selftest", messageIds: ["isolation-selftest"] },
+      }],
+    });
+    const polluted = scanGlobalAgentMemorySelfTestContamination({ includeResidue: false });
+    const checksBeforeRestore = {
+      detectsActivePollution: polluted.pass === false
+        && polluted.active_contamination_count >= 1
+        && JSON.stringify(polluted.rows || []).includes("GLOBAL_AGENT_MEMORY_ISOLATION_SENTINEL"),
+      lockFileExists: fs.existsSync(SELFTEST_LOCK_FILE),
+      startedCleanOrWarnOnly: before.active_contamination_count === 0,
+    };
+    return {
+      pass: Object.values(checksBeforeRestore).every(Boolean),
+      checks: checksBeforeRestore,
+      polluted: { status: polluted.status, active: polluted.active_contamination_count },
+    };
+  } finally {
+    try {
+      if (previousMain === null) fs.rmSync(GLOBAL_AGENT_MEMORY_FILE, { force: true });
+      else fs.writeFileSync(GLOBAL_AGENT_MEMORY_FILE, previousMain, "utf-8");
+      if (previousBak === null) fs.rmSync(`${GLOBAL_AGENT_MEMORY_FILE}.bak`, { force: true });
+      else fs.writeFileSync(`${GLOBAL_AGENT_MEMORY_FILE}.bak`, previousBak, "utf-8");
+    } catch {}
+    release();
+  }
 }
 
 function readJson(file: string, fallback: any) {
@@ -92,6 +424,11 @@ function decryptJson(value: any) {
 }
 
 function transcriptFile(sessionId: string) { return path.join(TRANSCRIPT_DIR, `${cleanId(sessionId)}-${sha(String(sessionId || "default"), 12)}.enc.json`); }
+
+function pathInside(parent: string, child: string) {
+  const relative = path.relative(path.resolve(parent), path.resolve(child));
+  return !!relative && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
 
 function normalizeMessage(message: any, sessionId: string, source = "global-agent") {
   const role = message?.role === "assistant" ? "assistant" : "user";
@@ -702,7 +1039,10 @@ export function rebuildGlobalAgentMemory(reason = "manual_rebuild", actor = "loc
 export function getGlobalAgentMemoryPolicy() { return loadPolicy(); }
 
 export function runGlobalAgentMemorySelfTest() {
-  const previousMemory = JSON.parse(JSON.stringify(loadGlobalAgentMemory()));
+  const releaseGlobalMemorySelftest = acquireGlobalAgentMemorySelfTestLock("global-agent-memory-selftest");
+  const previousMainMemoryText = fs.existsSync(GLOBAL_AGENT_MEMORY_FILE) ? fs.readFileSync(GLOBAL_AGENT_MEMORY_FILE, "utf-8") : null;
+  const previousBakMemoryText = fs.existsSync(`${GLOBAL_AGENT_MEMORY_FILE}.bak`) ? fs.readFileSync(`${GLOBAL_AGENT_MEMORY_FILE}.bak`, "utf-8") : null;
+  const previousMemory = previousMainMemoryText ? JSON.parse(previousMainMemoryText) : emptyMemory();
   const id = `memory-selftest-${process.pid}-${Date.now().toString(36)}`;
   const messages: any[] = [];
   for (let index = 0; index < 90; index += 1) {
@@ -772,13 +1112,20 @@ export function runGlobalAgentMemorySelfTest() {
   try {
     fs.rmSync(transcriptFile(id), { force: true });
     fs.rmSync(`${transcriptFile(id)}.bak`, { force: true });
-    saveMemory(previousMemory);
-  } catch {}
+    if (previousMainMemoryText === null) fs.rmSync(GLOBAL_AGENT_MEMORY_FILE, { force: true });
+    else fs.writeFileSync(GLOBAL_AGENT_MEMORY_FILE, previousMainMemoryText, "utf-8");
+    if (previousBakMemoryText === null) fs.rmSync(`${GLOBAL_AGENT_MEMORY_FILE}.bak`, { force: true });
+    else fs.writeFileSync(`${GLOBAL_AGENT_MEMORY_FILE}.bak`, previousBakMemoryText, "utf-8");
+  } catch {} finally {
+    releaseGlobalMemorySelftest();
+  }
   return { pass: Object.values(checks).every(Boolean), checks, packetPreview: packet.slice(0, 1200), ingest: { extracted: result.extracted, rejected: result.rejected } };
 }
 
 export function runGlobalAgentMemoryStressSelfTest() {
-  const previousMemory = JSON.parse(JSON.stringify(loadGlobalAgentMemory()));
+  const releaseGlobalMemorySelftest = acquireGlobalAgentMemorySelfTestLock("global-agent-memory-stress-selftest");
+  const previousMainMemoryText = fs.existsSync(GLOBAL_AGENT_MEMORY_FILE) ? fs.readFileSync(GLOBAL_AGENT_MEMORY_FILE, "utf-8") : null;
+  const previousBakMemoryText = fs.existsSync(`${GLOBAL_AGENT_MEMORY_FILE}.bak`) ? fs.readFileSync(`${GLOBAL_AGENT_MEMORY_FILE}.bak`, "utf-8") : null;
   const id = `memory-stress-${process.pid}-${Date.now().toString(36)}`;
   let totalMessages = 0;
   try {
@@ -814,7 +1161,12 @@ export function runGlobalAgentMemoryStressSelfTest() {
     try {
       fs.rmSync(transcriptFile(id), { force: true });
       fs.rmSync(`${transcriptFile(id)}.bak`, { force: true });
-      saveMemory(previousMemory);
-    } catch {}
+      if (previousMainMemoryText === null) fs.rmSync(GLOBAL_AGENT_MEMORY_FILE, { force: true });
+      else fs.writeFileSync(GLOBAL_AGENT_MEMORY_FILE, previousMainMemoryText, "utf-8");
+      if (previousBakMemoryText === null) fs.rmSync(`${GLOBAL_AGENT_MEMORY_FILE}.bak`, { force: true });
+      else fs.writeFileSync(`${GLOBAL_AGENT_MEMORY_FILE}.bak`, previousBakMemoryText, "utf-8");
+    } catch {} finally {
+      releaseGlobalMemorySelftest();
+    }
   }
 }

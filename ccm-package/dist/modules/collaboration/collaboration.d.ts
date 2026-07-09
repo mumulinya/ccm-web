@@ -10,6 +10,11 @@ export declare function deriveTaskLifecycle(task: any, executions?: any[]): {
 export declare function runCollaborationUxSelfTest(): {
     pass: boolean;
     checks: {
+        completionReadinessShowsFriendlyBlockers: boolean;
+        completionReadinessHidesTechnicalIds: any;
+        completionAcceptanceNamesQueueAndSessionBlockers: boolean;
+        acceptanceReviewVisibleTextHidesProtocolTerms: boolean;
+        acceptanceReviewKeepsRawGateDetailsTechnical: boolean;
         simplePhaseLanguage: boolean;
         conciseAgentLanguage: boolean;
         simpleActions: boolean;
@@ -35,10 +40,13 @@ export declare function runCollaborationUxSelfTest(): {
         independentReviewGateBlocksComplexChange: any;
         independentReviewGatePassesWithEvidence: boolean;
         independentReviewGapDraftGuidesReviewer: boolean;
+        independentReviewFailedGapDraftRoutesRework: boolean;
         liveTodoPlanVisible: boolean;
         workItemsVisible: boolean;
         workItemSelfTestPasses: boolean;
         workerHandoffSelfTestPasses: boolean;
+        globalMemoryHealthGateReceiptSelfTestPasses: boolean;
+        taskAgentMemoryContextSnapshotReceiptSelfTestPasses: boolean;
         workerContinuationHandoffBuildsRuntime: any;
         workerContinuationHandoffRenderedForDispatch: boolean;
         liveTodoReviewing: any;
@@ -91,6 +99,7 @@ export declare function runCollaborationUxSelfTest(): {
         planAlignmentVisible: boolean;
         missingEvidencePlanAlignmentShowsDeviation: boolean;
         userHandoffVisible: boolean;
+        userHandoffSummaryCardsVisible: boolean;
         ordinaryQuestionHasNoUserHandoff: boolean;
         userHandoffHidesProtocol: boolean;
         agentCoordinationProtocolVisible: any;
@@ -147,6 +156,7 @@ export declare function runCollaborationUxSelfTest(): {
         dispatchLaunchSummaryVisible: boolean;
         dispatchLaunchSummaryHidesProtocol: boolean;
         followupClassification: boolean;
+        qualityFollowupContinuationDecision: boolean;
         followupDetection: boolean;
     };
     card: {
@@ -210,6 +220,47 @@ export declare function runCollaborationUxSelfTest(): {
                 target: string;
                 subject: string;
             }[];
+            dependency_summary: {
+                schema: string;
+                title: string;
+                status: string;
+                status_label: string;
+                headline: string;
+                rows: {
+                    id: string;
+                    target: string;
+                    subject: string;
+                    status: import("../../agents/work-items").MainAgentWorkItemStatus;
+                    dependency_count: number;
+                    open_dependency_count: number;
+                    dependencies: {
+                        id: string;
+                        label: string;
+                        status: import("../../agents/work-items").MainAgentWorkItemStatus;
+                        completed: boolean;
+                    }[];
+                    label: string;
+                    next_action: string;
+                }[];
+                ready: {
+                    id: string;
+                    target: string;
+                    subject: string;
+                    label: string;
+                }[];
+                next_claimable: {
+                    id: string;
+                    target: string;
+                    subject: string;
+                }[];
+                next_action: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    show_for_ordinary_conversation: boolean;
+                };
+            };
             verification_nudge: boolean;
             verification_reminder: {
                 schema: string;
@@ -226,6 +277,62 @@ export declare function runCollaborationUxSelfTest(): {
                 };
             };
             all_completed: boolean;
+        };
+        work_item_claim_summary: any;
+        workItemClaimSummary: any;
+        work_item_unlock_summary: any;
+        workItemUnlockSummary: any;
+        completion_readiness_summary: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            headline: string;
+            rows: {
+                target: string;
+                subject: string;
+                status: string;
+                status_label: string;
+            }[];
+            open_session_count: number;
+            unresolved_work_item_count: number;
+            next_action: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+            technical: {
+                unresolved_work_item_ids: any[];
+                open_session_ids: any;
+            };
+        };
+        completionReadinessSummary: {
+            schema: string;
+            title: string;
+            status: string;
+            status_label: string;
+            headline: string;
+            rows: {
+                target: string;
+                subject: string;
+                status: string;
+                status_label: string;
+            }[];
+            open_session_count: number;
+            unresolved_work_item_count: number;
+            next_action: string;
+            display_policy: {
+                user_text_first: boolean;
+                technical_default_collapsed: boolean;
+                hide_internal_protocols: boolean;
+                show_for_ordinary_conversation: boolean;
+            };
+            technical: {
+                unresolved_work_item_ids: any[];
+                open_session_ids: any;
+            };
         };
         display_stream: {
             schema: string;
@@ -262,6 +369,146 @@ export declare function runCollaborationUxSelfTest(): {
                     status: string;
                     summary: string;
                 }[];
+                todo_plan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
+                todoPlan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
                 progress_checkpoints: {
                     schema: string;
                     title: string;
@@ -277,8 +524,11 @@ export declare function runCollaborationUxSelfTest(): {
                     evidence: string[];
                     files: any[];
                     verification: string[];
+                    acceptance: string[];
+                    independent_review: string[];
+                    independentReview: string[];
                     risks: string[];
-                    next_action: any;
+                    next_action: string;
                     verification_status: string;
                     risk_status: string;
                     final_summary_quality: {
@@ -295,6 +545,172 @@ export declare function runCollaborationUxSelfTest(): {
                         verification_status: string;
                         risk_status: string;
                         source: string;
+                    };
+                    quality_followup: {
+                        schema: string;
+                        title: string;
+                        headline: string;
+                        missing: string[];
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    qualityFollowup: {
+                        schema: string;
+                        title: string;
+                        headline: string;
+                        missing: string[];
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
                     };
                     terminal: boolean;
                 };
@@ -315,8 +731,11 @@ export declare function runCollaborationUxSelfTest(): {
                 evidence: string[];
                 files: any[];
                 verification: string[];
+                acceptance: string[];
+                independent_review: string[];
+                independentReview: string[];
                 risks: string[];
-                next_action: any;
+                next_action: string;
                 verification_status: string;
                 risk_status: string;
                 final_summary_quality: {
@@ -334,7 +753,341 @@ export declare function runCollaborationUxSelfTest(): {
                     risk_status: string;
                     source: string;
                 };
+                quality_followup: {
+                    schema: string;
+                    title: string;
+                    headline: string;
+                    missing: string[];
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                qualityFollowup: {
+                    schema: string;
+                    title: string;
+                    headline: string;
+                    missing: string[];
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                todo_plan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
+                todoPlan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
                 terminal: boolean;
+            };
+            todo_plan: {
+                schema: string;
+                source: string;
+                title: string;
+                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                mode: string;
+                task_id: string;
+                run_id: string;
+                mission_id: string;
+                steps: any[];
+                current_step: any;
+                currentStep: any;
+                completed_count: number;
+                total_count: number;
+                progress_label: string;
+                visible_steps: any[];
+                visibleSteps: any[];
+                archived_steps_count: number;
+                archivedStepsCount: number;
+                archive_summary: string;
+                archiveSummary: string;
+                quality_followup_required: boolean;
+                qualityFollowupRequired: boolean;
+                quality_followup: any;
+                qualityFollowup: any;
+                verification_nudge: boolean;
+                verification_reminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                verificationReminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                display_policy: {
+                    user_visible: boolean;
+                    hide_for_ordinary_conversation: boolean;
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    quiet_completed: boolean;
+                    archive_completed_todo: boolean;
+                    archiveCompletedTodo: boolean;
+                    archived_when_complete: boolean;
+                    archivedWhenComplete: boolean;
+                    visible_when_completed: boolean;
+                    visibleWhenCompleted: boolean;
+                    max_visible_steps: number;
+                };
+            };
+            todoPlan: {
+                schema: string;
+                source: string;
+                title: string;
+                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                mode: string;
+                task_id: string;
+                run_id: string;
+                mission_id: string;
+                steps: any[];
+                current_step: any;
+                currentStep: any;
+                completed_count: number;
+                total_count: number;
+                progress_label: string;
+                visible_steps: any[];
+                visibleSteps: any[];
+                archived_steps_count: number;
+                archivedStepsCount: number;
+                archive_summary: string;
+                archiveSummary: string;
+                quality_followup_required: boolean;
+                qualityFollowupRequired: boolean;
+                quality_followup: any;
+                qualityFollowup: any;
+                verification_nudge: boolean;
+                verification_reminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                verificationReminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                display_policy: {
+                    user_visible: boolean;
+                    hide_for_ordinary_conversation: boolean;
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    quiet_completed: boolean;
+                    archive_completed_todo: boolean;
+                    archiveCompletedTodo: boolean;
+                    archived_when_complete: boolean;
+                    archivedWhenComplete: boolean;
+                    visible_when_completed: boolean;
+                    visibleWhenCompleted: boolean;
+                    max_visible_steps: number;
+                };
+            };
+            verification_reminder: {
+                schema: string;
+                status: string;
+                title: string;
+                headline: string;
+                reason: string;
+                next_action: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    show_for_ordinary_conversation: boolean;
+                };
+            };
+            verificationReminder: {
+                schema: string;
+                status: string;
+                title: string;
+                headline: string;
+                reason: string;
+                next_action: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    show_for_ordinary_conversation: boolean;
+                };
             };
             progress_checkpoints: {
                 schema: string;
@@ -407,6 +1160,146 @@ export declare function runCollaborationUxSelfTest(): {
                     status: string;
                     summary: string;
                 }[];
+                todo_plan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
+                todoPlan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
                 progress_checkpoints: {
                     schema: string;
                     title: string;
@@ -422,8 +1315,11 @@ export declare function runCollaborationUxSelfTest(): {
                     evidence: string[];
                     files: any[];
                     verification: string[];
+                    acceptance: string[];
+                    independent_review: string[];
+                    independentReview: string[];
                     risks: string[];
-                    next_action: any;
+                    next_action: string;
                     verification_status: string;
                     risk_status: string;
                     final_summary_quality: {
@@ -440,6 +1336,172 @@ export declare function runCollaborationUxSelfTest(): {
                         verification_status: string;
                         risk_status: string;
                         source: string;
+                    };
+                    quality_followup: {
+                        schema: string;
+                        title: string;
+                        headline: string;
+                        missing: string[];
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    qualityFollowup: {
+                        schema: string;
+                        title: string;
+                        headline: string;
+                        missing: string[];
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
                     };
                     terminal: boolean;
                 };
@@ -460,8 +1522,11 @@ export declare function runCollaborationUxSelfTest(): {
                 evidence: string[];
                 files: any[];
                 verification: string[];
+                acceptance: string[];
+                independent_review: string[];
+                independentReview: string[];
                 risks: string[];
-                next_action: any;
+                next_action: string;
                 verification_status: string;
                 risk_status: string;
                 final_summary_quality: {
@@ -479,7 +1544,341 @@ export declare function runCollaborationUxSelfTest(): {
                     risk_status: string;
                     source: string;
                 };
+                quality_followup: {
+                    schema: string;
+                    title: string;
+                    headline: string;
+                    missing: string[];
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                qualityFollowup: {
+                    schema: string;
+                    title: string;
+                    headline: string;
+                    missing: string[];
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                todo_plan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
+                todoPlan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
                 terminal: boolean;
+            };
+            todo_plan: {
+                schema: string;
+                source: string;
+                title: string;
+                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                mode: string;
+                task_id: string;
+                run_id: string;
+                mission_id: string;
+                steps: any[];
+                current_step: any;
+                currentStep: any;
+                completed_count: number;
+                total_count: number;
+                progress_label: string;
+                visible_steps: any[];
+                visibleSteps: any[];
+                archived_steps_count: number;
+                archivedStepsCount: number;
+                archive_summary: string;
+                archiveSummary: string;
+                quality_followup_required: boolean;
+                qualityFollowupRequired: boolean;
+                quality_followup: any;
+                qualityFollowup: any;
+                verification_nudge: boolean;
+                verification_reminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                verificationReminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                display_policy: {
+                    user_visible: boolean;
+                    hide_for_ordinary_conversation: boolean;
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    quiet_completed: boolean;
+                    archive_completed_todo: boolean;
+                    archiveCompletedTodo: boolean;
+                    archived_when_complete: boolean;
+                    archivedWhenComplete: boolean;
+                    visible_when_completed: boolean;
+                    visibleWhenCompleted: boolean;
+                    max_visible_steps: number;
+                };
+            };
+            todoPlan: {
+                schema: string;
+                source: string;
+                title: string;
+                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                mode: string;
+                task_id: string;
+                run_id: string;
+                mission_id: string;
+                steps: any[];
+                current_step: any;
+                currentStep: any;
+                completed_count: number;
+                total_count: number;
+                progress_label: string;
+                visible_steps: any[];
+                visibleSteps: any[];
+                archived_steps_count: number;
+                archivedStepsCount: number;
+                archive_summary: string;
+                archiveSummary: string;
+                quality_followup_required: boolean;
+                qualityFollowupRequired: boolean;
+                quality_followup: any;
+                qualityFollowup: any;
+                verification_nudge: boolean;
+                verification_reminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                verificationReminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                display_policy: {
+                    user_visible: boolean;
+                    hide_for_ordinary_conversation: boolean;
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    quiet_completed: boolean;
+                    archive_completed_todo: boolean;
+                    archiveCompletedTodo: boolean;
+                    archived_when_complete: boolean;
+                    archivedWhenComplete: boolean;
+                    visible_when_completed: boolean;
+                    visibleWhenCompleted: boolean;
+                    max_visible_steps: number;
+                };
+            };
+            verification_reminder: {
+                schema: string;
+                status: string;
+                title: string;
+                headline: string;
+                reason: string;
+                next_action: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    show_for_ordinary_conversation: boolean;
+                };
+            };
+            verificationReminder: {
+                schema: string;
+                status: string;
+                title: string;
+                headline: string;
+                reason: string;
+                next_action: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    show_for_ordinary_conversation: boolean;
+                };
             };
             progress_checkpoints: {
                 schema: string;
@@ -686,6 +2085,146 @@ export declare function runCollaborationUxSelfTest(): {
                         status: string;
                         summary: string;
                     }[];
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
                     progress_checkpoints: {
                         schema: string;
                         title: string;
@@ -701,8 +2240,11 @@ export declare function runCollaborationUxSelfTest(): {
                         evidence: string[];
                         files: any[];
                         verification: string[];
+                        acceptance: string[];
+                        independent_review: string[];
+                        independentReview: string[];
                         risks: string[];
-                        next_action: any;
+                        next_action: string;
                         verification_status: string;
                         risk_status: string;
                         final_summary_quality: {
@@ -719,6 +2261,172 @@ export declare function runCollaborationUxSelfTest(): {
                             verification_status: string;
                             risk_status: string;
                             source: string;
+                        };
+                        quality_followup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        qualityFollowup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        todo_plan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
+                        todoPlan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
                         };
                         terminal: boolean;
                     };
@@ -739,8 +2447,11 @@ export declare function runCollaborationUxSelfTest(): {
                     evidence: string[];
                     files: any[];
                     verification: string[];
+                    acceptance: string[];
+                    independent_review: string[];
+                    independentReview: string[];
                     risks: string[];
-                    next_action: any;
+                    next_action: string;
                     verification_status: string;
                     risk_status: string;
                     final_summary_quality: {
@@ -758,7 +2469,341 @@ export declare function runCollaborationUxSelfTest(): {
                         risk_status: string;
                         source: string;
                     };
+                    quality_followup: {
+                        schema: string;
+                        title: string;
+                        headline: string;
+                        missing: string[];
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    qualityFollowup: {
+                        schema: string;
+                        title: string;
+                        headline: string;
+                        missing: string[];
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
                     terminal: boolean;
+                };
+                todo_plan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
+                todoPlan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
+                verification_reminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                verificationReminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
                 };
                 progress_checkpoints: {
                     schema: string;
@@ -831,6 +2876,146 @@ export declare function runCollaborationUxSelfTest(): {
                         status: string;
                         summary: string;
                     }[];
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
                     progress_checkpoints: {
                         schema: string;
                         title: string;
@@ -846,8 +3031,11 @@ export declare function runCollaborationUxSelfTest(): {
                         evidence: string[];
                         files: any[];
                         verification: string[];
+                        acceptance: string[];
+                        independent_review: string[];
+                        independentReview: string[];
                         risks: string[];
-                        next_action: any;
+                        next_action: string;
                         verification_status: string;
                         risk_status: string;
                         final_summary_quality: {
@@ -864,6 +3052,172 @@ export declare function runCollaborationUxSelfTest(): {
                             verification_status: string;
                             risk_status: string;
                             source: string;
+                        };
+                        quality_followup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        qualityFollowup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        todo_plan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
+                        todoPlan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
                         };
                         terminal: boolean;
                     };
@@ -884,8 +3238,11 @@ export declare function runCollaborationUxSelfTest(): {
                     evidence: string[];
                     files: any[];
                     verification: string[];
+                    acceptance: string[];
+                    independent_review: string[];
+                    independentReview: string[];
                     risks: string[];
-                    next_action: any;
+                    next_action: string;
                     verification_status: string;
                     risk_status: string;
                     final_summary_quality: {
@@ -903,7 +3260,341 @@ export declare function runCollaborationUxSelfTest(): {
                         risk_status: string;
                         source: string;
                     };
+                    quality_followup: {
+                        schema: string;
+                        title: string;
+                        headline: string;
+                        missing: string[];
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    qualityFollowup: {
+                        schema: string;
+                        title: string;
+                        headline: string;
+                        missing: string[];
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
                     terminal: boolean;
+                };
+                todo_plan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
+                todoPlan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
+                verification_reminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                verificationReminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
                 };
                 progress_checkpoints: {
                     schema: string;
@@ -1117,6 +3808,146 @@ export declare function runCollaborationUxSelfTest(): {
                         status: string;
                         summary: string;
                     }[];
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
                     progress_checkpoints: {
                         schema: string;
                         title: string;
@@ -1132,8 +3963,11 @@ export declare function runCollaborationUxSelfTest(): {
                         evidence: string[];
                         files: any[];
                         verification: string[];
+                        acceptance: string[];
+                        independent_review: string[];
+                        independentReview: string[];
                         risks: string[];
-                        next_action: any;
+                        next_action: string;
                         verification_status: string;
                         risk_status: string;
                         final_summary_quality: {
@@ -1150,6 +3984,172 @@ export declare function runCollaborationUxSelfTest(): {
                             verification_status: string;
                             risk_status: string;
                             source: string;
+                        };
+                        quality_followup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        qualityFollowup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        todo_plan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
+                        todoPlan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
                         };
                         terminal: boolean;
                     };
@@ -1170,8 +4170,11 @@ export declare function runCollaborationUxSelfTest(): {
                     evidence: string[];
                     files: any[];
                     verification: string[];
+                    acceptance: string[];
+                    independent_review: string[];
+                    independentReview: string[];
                     risks: string[];
-                    next_action: any;
+                    next_action: string;
                     verification_status: string;
                     risk_status: string;
                     final_summary_quality: {
@@ -1189,7 +4192,341 @@ export declare function runCollaborationUxSelfTest(): {
                         risk_status: string;
                         source: string;
                     };
+                    quality_followup: {
+                        schema: string;
+                        title: string;
+                        headline: string;
+                        missing: string[];
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    qualityFollowup: {
+                        schema: string;
+                        title: string;
+                        headline: string;
+                        missing: string[];
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
                     terminal: boolean;
+                };
+                todo_plan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
+                todoPlan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
+                verification_reminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                verificationReminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
                 };
                 progress_checkpoints: {
                     schema: string;
@@ -1262,6 +4599,146 @@ export declare function runCollaborationUxSelfTest(): {
                         status: string;
                         summary: string;
                     }[];
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
                     progress_checkpoints: {
                         schema: string;
                         title: string;
@@ -1277,8 +4754,11 @@ export declare function runCollaborationUxSelfTest(): {
                         evidence: string[];
                         files: any[];
                         verification: string[];
+                        acceptance: string[];
+                        independent_review: string[];
+                        independentReview: string[];
                         risks: string[];
-                        next_action: any;
+                        next_action: string;
                         verification_status: string;
                         risk_status: string;
                         final_summary_quality: {
@@ -1295,6 +4775,172 @@ export declare function runCollaborationUxSelfTest(): {
                             verification_status: string;
                             risk_status: string;
                             source: string;
+                        };
+                        quality_followup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        qualityFollowup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        todo_plan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
+                        todoPlan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
                         };
                         terminal: boolean;
                     };
@@ -1315,8 +4961,11 @@ export declare function runCollaborationUxSelfTest(): {
                     evidence: string[];
                     files: any[];
                     verification: string[];
+                    acceptance: string[];
+                    independent_review: string[];
+                    independentReview: string[];
                     risks: string[];
-                    next_action: any;
+                    next_action: string;
                     verification_status: string;
                     risk_status: string;
                     final_summary_quality: {
@@ -1334,7 +4983,341 @@ export declare function runCollaborationUxSelfTest(): {
                         risk_status: string;
                         source: string;
                     };
+                    quality_followup: {
+                        schema: string;
+                        title: string;
+                        headline: string;
+                        missing: string[];
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    qualityFollowup: {
+                        schema: string;
+                        title: string;
+                        headline: string;
+                        missing: string[];
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
                     terminal: boolean;
+                };
+                todo_plan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
+                todoPlan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
+                verification_reminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                verificationReminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
                 };
                 progress_checkpoints: {
                     schema: string;
@@ -1427,14 +5410,12 @@ export declare function runCollaborationUxSelfTest(): {
             pass: boolean;
             status: string;
             headline: string;
-            checks: {
-                ok: boolean;
-                detail: any;
-                id: string;
-                label: string;
-            }[];
-            missing: string[];
+            checks: any[];
+            missing: any[];
             next_action: string;
+            technical: {
+                raw_gate_checks: any;
+            };
         };
         plan_alignment: {
             schema: string;
@@ -1540,6 +5521,41 @@ export declare function runCollaborationUxSelfTest(): {
                 missing_count: number;
                 rows: any;
             };
+            global_memory_receipt_summary: {
+                schema: string;
+                required: any;
+                pass: boolean;
+                status: any;
+                status_label: string;
+                summary: any;
+                gate_count: number;
+                global_memory_count: number;
+                gate_ids: string[];
+                global_memory_ids: string[];
+                missing_global_memory_ids: string[];
+                unsafe_used_global_memory_ids: string[];
+                missing_current_verification_ids: string[];
+                missing_semantic_acknowledgement_ids: string[];
+                missing_cross_group_acknowledgement_ids: string[];
+                missing_count: any;
+                rows: any;
+            };
+            global_memory_health_gate_summary: {
+                schema: string;
+                required: any;
+                pass: boolean;
+                status: any;
+                status_label: string;
+                summary: any;
+                gate_count: number;
+                gate_ids: string[];
+                missing_gate_ids: string[];
+                missing_ignore_gate_ids: string[];
+                missing_warning_ack_gate_ids: string[];
+                blocked_global_memory_used_gate_ids: string[];
+                missing_count: any;
+                rows: any;
+            };
             read_plan_revalidation_gate_summary: {
                 schema: string;
                 required: any;
@@ -1573,6 +5589,24 @@ export declare function runCollaborationUxSelfTest(): {
                 missing_candidate_reference_gate_ids: string[];
                 missing_candidate_usage_gate_ids: string[];
                 missing_candidate_usage_candidate_ids: string[];
+                missing_count: number;
+                rows: any;
+            };
+            api_microcompact_receipt_summary: {
+                schema: string;
+                required: any;
+                pass: any;
+                status: string;
+                status_label: string;
+                summary: string;
+                plan_count: number;
+                plan_checksums: string[];
+                missing_plan_checksums: string[];
+                unsafe_native_applied_plan_checksums: string[];
+                session_mismatch_plan_checksums: string[];
+                native_applied_count: any;
+                advisory_count: any;
+                ignored_count: any;
                 missing_count: number;
                 rows: any;
             };
@@ -1610,12 +5644,86 @@ export declare function runCollaborationUxSelfTest(): {
                         ok: any;
                         detail: string;
                     })[];
+                    task_agent_memory_snapshot: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        snapshot_ids: any[];
+                        matched_snapshot_ids: any[];
+                        missing_snapshot_ids: any[];
+                        task_agent_session_ids: any[];
+                        receipt_task_agent_session_id: string;
+                        receipt_memory_context_snapshot_id: string;
+                        receipt_memory_context_snapshot_checksum: string;
+                        gate_ids: string[];
+                        matched_gate_ids: string[];
+                        rows: {
+                            schema: any;
+                            snapshot_id: any;
+                            snapshot_file: any;
+                            checksum: any;
+                            generated_at: any;
+                            task_agent_session_id: any;
+                            task_id: any;
+                            group_id: any;
+                            project: any;
+                            agent_type: any;
+                            native_session_id: any;
+                            turn: number;
+                            worker_context_packet_id: any;
+                            worker_handoff_id: any;
+                            memory_context_checksum: any;
+                            rendered_prompt_checksum: any;
+                            gate_ids: string[];
+                            replay_repair_dispatch_brief_ids: any[];
+                            replay_repair_dispatch_briefs: any[];
+                        }[];
+                    };
                     memory_gate: {
                         schema: string;
                         required: boolean;
                         pass: boolean;
                         gate_ids: any;
                         missing_gate_ids: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    global_memory_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: any;
+                        gate_ids: any;
+                        global_memory_ids: string[];
+                        missing_global_memory_ids: string[];
+                        missing_usage_state_ids: string[];
+                        unsafe_used_global_memory_ids: string[];
+                        missing_current_verification_ids: string[];
+                        missing_semantic_acknowledgement_ids: string[];
+                        missing_cross_group_acknowledgement_ids: string[];
+                        used_global_memory_ids: string[];
+                        ignored_global_memory_ids: string[];
+                        verified_global_memory_ids: string[];
+                        background_global_memory_ids: string[];
+                        advisory_global_memory_ids: string[];
+                        rows: any;
+                        structured_usage_rows: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    global_memory_health_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: any;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        fail_gate_ids: any;
+                        warn_gate_ids: any;
+                        missing_ignore_gate_ids: any;
+                        missing_warning_ack_gate_ids: any;
+                        blocked_global_memory_used_gate_ids: any;
+                        rows: any;
                         declared: boolean;
                         used: any;
                         ignored: any;
@@ -1680,6 +5788,36 @@ export declare function runCollaborationUxSelfTest(): {
                         }[];
                         candidate_rows: any;
                         declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    api_microcompact: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        plan_checksums: any;
+                        missing_plan_checksums: any;
+                        unsafe_native_applied_plan_checksums: any;
+                        session_mismatch_plan_checksums: any;
+                        native_applied_count: any;
+                        advisory_count: any;
+                        ignored_count: any;
+                        rows: any;
+                        declared: boolean;
+                        structured_usage_rows: {
+                            plan_checksum: string;
+                            apply_plan_checksum: string;
+                            request_patch_checksum: string;
+                            task_agent_session_id: string;
+                            native_session_id: string;
+                            memory_context_snapshot_id: string;
+                            memory_context_snapshot_checksum: string;
+                            usage_state: string;
+                            native_applied: boolean;
+                            advisory_only: boolean;
+                            reason: string;
+                            raw: any;
+                        }[];
                         used: any;
                         ignored: any;
                     };
@@ -1722,12 +5860,86 @@ export declare function runCollaborationUxSelfTest(): {
                         ok: any;
                         detail: string;
                     })[];
+                    task_agent_memory_snapshot: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        snapshot_ids: any[];
+                        matched_snapshot_ids: any[];
+                        missing_snapshot_ids: any[];
+                        task_agent_session_ids: any[];
+                        receipt_task_agent_session_id: string;
+                        receipt_memory_context_snapshot_id: string;
+                        receipt_memory_context_snapshot_checksum: string;
+                        gate_ids: string[];
+                        matched_gate_ids: string[];
+                        rows: {
+                            schema: any;
+                            snapshot_id: any;
+                            snapshot_file: any;
+                            checksum: any;
+                            generated_at: any;
+                            task_agent_session_id: any;
+                            task_id: any;
+                            group_id: any;
+                            project: any;
+                            agent_type: any;
+                            native_session_id: any;
+                            turn: number;
+                            worker_context_packet_id: any;
+                            worker_handoff_id: any;
+                            memory_context_checksum: any;
+                            rendered_prompt_checksum: any;
+                            gate_ids: string[];
+                            replay_repair_dispatch_brief_ids: any[];
+                            replay_repair_dispatch_briefs: any[];
+                        }[];
+                    };
                     memory_gate: {
                         schema: string;
                         required: boolean;
                         pass: boolean;
                         gate_ids: any;
                         missing_gate_ids: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    global_memory_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: any;
+                        gate_ids: any;
+                        global_memory_ids: string[];
+                        missing_global_memory_ids: string[];
+                        missing_usage_state_ids: string[];
+                        unsafe_used_global_memory_ids: string[];
+                        missing_current_verification_ids: string[];
+                        missing_semantic_acknowledgement_ids: string[];
+                        missing_cross_group_acknowledgement_ids: string[];
+                        used_global_memory_ids: string[];
+                        ignored_global_memory_ids: string[];
+                        verified_global_memory_ids: string[];
+                        background_global_memory_ids: string[];
+                        advisory_global_memory_ids: string[];
+                        rows: any;
+                        structured_usage_rows: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    global_memory_health_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: any;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        fail_gate_ids: any;
+                        warn_gate_ids: any;
+                        missing_ignore_gate_ids: any;
+                        missing_warning_ack_gate_ids: any;
+                        blocked_global_memory_used_gate_ids: any;
+                        rows: any;
                         declared: boolean;
                         used: any;
                         ignored: any;
@@ -1792,6 +6004,36 @@ export declare function runCollaborationUxSelfTest(): {
                         }[];
                         candidate_rows: any;
                         declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    api_microcompact: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        plan_checksums: any;
+                        missing_plan_checksums: any;
+                        unsafe_native_applied_plan_checksums: any;
+                        session_mismatch_plan_checksums: any;
+                        native_applied_count: any;
+                        advisory_count: any;
+                        ignored_count: any;
+                        rows: any;
+                        declared: boolean;
+                        structured_usage_rows: {
+                            plan_checksum: string;
+                            apply_plan_checksum: string;
+                            request_patch_checksum: string;
+                            task_agent_session_id: string;
+                            native_session_id: string;
+                            memory_context_snapshot_id: string;
+                            memory_context_snapshot_checksum: string;
+                            usage_state: string;
+                            native_applied: boolean;
+                            advisory_only: boolean;
+                            reason: string;
+                            raw: any;
+                        }[];
                         used: any;
                         ignored: any;
                     };
@@ -1884,6 +6126,41 @@ export declare function runCollaborationUxSelfTest(): {
                 missing_count: number;
                 rows: any;
             };
+            global_memory_receipt_summary: {
+                schema: string;
+                required: any;
+                pass: boolean;
+                status: any;
+                status_label: string;
+                summary: any;
+                gate_count: number;
+                global_memory_count: number;
+                gate_ids: string[];
+                global_memory_ids: string[];
+                missing_global_memory_ids: string[];
+                unsafe_used_global_memory_ids: string[];
+                missing_current_verification_ids: string[];
+                missing_semantic_acknowledgement_ids: string[];
+                missing_cross_group_acknowledgement_ids: string[];
+                missing_count: any;
+                rows: any;
+            };
+            global_memory_health_gate_summary: {
+                schema: string;
+                required: any;
+                pass: boolean;
+                status: any;
+                status_label: string;
+                summary: any;
+                gate_count: number;
+                gate_ids: string[];
+                missing_gate_ids: string[];
+                missing_ignore_gate_ids: string[];
+                missing_warning_ack_gate_ids: string[];
+                blocked_global_memory_used_gate_ids: string[];
+                missing_count: any;
+                rows: any;
+            };
             read_plan_revalidation_gate_summary: {
                 schema: string;
                 required: any;
@@ -1917,6 +6194,24 @@ export declare function runCollaborationUxSelfTest(): {
                 missing_candidate_reference_gate_ids: string[];
                 missing_candidate_usage_gate_ids: string[];
                 missing_candidate_usage_candidate_ids: string[];
+                missing_count: number;
+                rows: any;
+            };
+            api_microcompact_receipt_summary: {
+                schema: string;
+                required: any;
+                pass: any;
+                status: string;
+                status_label: string;
+                summary: string;
+                plan_count: number;
+                plan_checksums: string[];
+                missing_plan_checksums: string[];
+                unsafe_native_applied_plan_checksums: string[];
+                session_mismatch_plan_checksums: string[];
+                native_applied_count: any;
+                advisory_count: any;
+                ignored_count: any;
                 missing_count: number;
                 rows: any;
             };
@@ -1954,12 +6249,86 @@ export declare function runCollaborationUxSelfTest(): {
                         ok: any;
                         detail: string;
                     })[];
+                    task_agent_memory_snapshot: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        snapshot_ids: any[];
+                        matched_snapshot_ids: any[];
+                        missing_snapshot_ids: any[];
+                        task_agent_session_ids: any[];
+                        receipt_task_agent_session_id: string;
+                        receipt_memory_context_snapshot_id: string;
+                        receipt_memory_context_snapshot_checksum: string;
+                        gate_ids: string[];
+                        matched_gate_ids: string[];
+                        rows: {
+                            schema: any;
+                            snapshot_id: any;
+                            snapshot_file: any;
+                            checksum: any;
+                            generated_at: any;
+                            task_agent_session_id: any;
+                            task_id: any;
+                            group_id: any;
+                            project: any;
+                            agent_type: any;
+                            native_session_id: any;
+                            turn: number;
+                            worker_context_packet_id: any;
+                            worker_handoff_id: any;
+                            memory_context_checksum: any;
+                            rendered_prompt_checksum: any;
+                            gate_ids: string[];
+                            replay_repair_dispatch_brief_ids: any[];
+                            replay_repair_dispatch_briefs: any[];
+                        }[];
+                    };
                     memory_gate: {
                         schema: string;
                         required: boolean;
                         pass: boolean;
                         gate_ids: any;
                         missing_gate_ids: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    global_memory_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: any;
+                        gate_ids: any;
+                        global_memory_ids: string[];
+                        missing_global_memory_ids: string[];
+                        missing_usage_state_ids: string[];
+                        unsafe_used_global_memory_ids: string[];
+                        missing_current_verification_ids: string[];
+                        missing_semantic_acknowledgement_ids: string[];
+                        missing_cross_group_acknowledgement_ids: string[];
+                        used_global_memory_ids: string[];
+                        ignored_global_memory_ids: string[];
+                        verified_global_memory_ids: string[];
+                        background_global_memory_ids: string[];
+                        advisory_global_memory_ids: string[];
+                        rows: any;
+                        structured_usage_rows: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    global_memory_health_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: any;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        fail_gate_ids: any;
+                        warn_gate_ids: any;
+                        missing_ignore_gate_ids: any;
+                        missing_warning_ack_gate_ids: any;
+                        blocked_global_memory_used_gate_ids: any;
+                        rows: any;
                         declared: boolean;
                         used: any;
                         ignored: any;
@@ -2024,6 +6393,36 @@ export declare function runCollaborationUxSelfTest(): {
                         }[];
                         candidate_rows: any;
                         declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    api_microcompact: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        plan_checksums: any;
+                        missing_plan_checksums: any;
+                        unsafe_native_applied_plan_checksums: any;
+                        session_mismatch_plan_checksums: any;
+                        native_applied_count: any;
+                        advisory_count: any;
+                        ignored_count: any;
+                        rows: any;
+                        declared: boolean;
+                        structured_usage_rows: {
+                            plan_checksum: string;
+                            apply_plan_checksum: string;
+                            request_patch_checksum: string;
+                            task_agent_session_id: string;
+                            native_session_id: string;
+                            memory_context_snapshot_id: string;
+                            memory_context_snapshot_checksum: string;
+                            usage_state: string;
+                            native_applied: boolean;
+                            advisory_only: boolean;
+                            reason: string;
+                            raw: any;
+                        }[];
                         used: any;
                         ignored: any;
                     };
@@ -2066,12 +6465,86 @@ export declare function runCollaborationUxSelfTest(): {
                         ok: any;
                         detail: string;
                     })[];
+                    task_agent_memory_snapshot: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        snapshot_ids: any[];
+                        matched_snapshot_ids: any[];
+                        missing_snapshot_ids: any[];
+                        task_agent_session_ids: any[];
+                        receipt_task_agent_session_id: string;
+                        receipt_memory_context_snapshot_id: string;
+                        receipt_memory_context_snapshot_checksum: string;
+                        gate_ids: string[];
+                        matched_gate_ids: string[];
+                        rows: {
+                            schema: any;
+                            snapshot_id: any;
+                            snapshot_file: any;
+                            checksum: any;
+                            generated_at: any;
+                            task_agent_session_id: any;
+                            task_id: any;
+                            group_id: any;
+                            project: any;
+                            agent_type: any;
+                            native_session_id: any;
+                            turn: number;
+                            worker_context_packet_id: any;
+                            worker_handoff_id: any;
+                            memory_context_checksum: any;
+                            rendered_prompt_checksum: any;
+                            gate_ids: string[];
+                            replay_repair_dispatch_brief_ids: any[];
+                            replay_repair_dispatch_briefs: any[];
+                        }[];
+                    };
                     memory_gate: {
                         schema: string;
                         required: boolean;
                         pass: boolean;
                         gate_ids: any;
                         missing_gate_ids: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    global_memory_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: any;
+                        gate_ids: any;
+                        global_memory_ids: string[];
+                        missing_global_memory_ids: string[];
+                        missing_usage_state_ids: string[];
+                        unsafe_used_global_memory_ids: string[];
+                        missing_current_verification_ids: string[];
+                        missing_semantic_acknowledgement_ids: string[];
+                        missing_cross_group_acknowledgement_ids: string[];
+                        used_global_memory_ids: string[];
+                        ignored_global_memory_ids: string[];
+                        verified_global_memory_ids: string[];
+                        background_global_memory_ids: string[];
+                        advisory_global_memory_ids: string[];
+                        rows: any;
+                        structured_usage_rows: any;
+                        declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    global_memory_health_gate: {
+                        schema: string;
+                        required: boolean;
+                        pass: any;
+                        gate_ids: any;
+                        missing_gate_ids: any;
+                        fail_gate_ids: any;
+                        warn_gate_ids: any;
+                        missing_ignore_gate_ids: any;
+                        missing_warning_ack_gate_ids: any;
+                        blocked_global_memory_used_gate_ids: any;
+                        rows: any;
                         declared: boolean;
                         used: any;
                         ignored: any;
@@ -2136,6 +6609,36 @@ export declare function runCollaborationUxSelfTest(): {
                         }[];
                         candidate_rows: any;
                         declared: boolean;
+                        used: any;
+                        ignored: any;
+                    };
+                    api_microcompact: {
+                        schema: string;
+                        required: boolean;
+                        pass: boolean;
+                        plan_checksums: any;
+                        missing_plan_checksums: any;
+                        unsafe_native_applied_plan_checksums: any;
+                        session_mismatch_plan_checksums: any;
+                        native_applied_count: any;
+                        advisory_count: any;
+                        ignored_count: any;
+                        rows: any;
+                        declared: boolean;
+                        structured_usage_rows: {
+                            plan_checksum: string;
+                            apply_plan_checksum: string;
+                            request_patch_checksum: string;
+                            task_agent_session_id: string;
+                            native_session_id: string;
+                            memory_context_snapshot_id: string;
+                            memory_context_snapshot_checksum: string;
+                            usage_state: string;
+                            native_applied: boolean;
+                            advisory_only: boolean;
+                            reason: string;
+                            raw: any;
+                        }[];
                         used: any;
                         ignored: any;
                     };
@@ -2328,6 +6831,12 @@ export declare function runCollaborationUxSelfTest(): {
             headline: string;
             primary_action: any;
             secondary_actions: any[];
+            summary_cards: {
+                id: string;
+                label: string;
+                value: string;
+                tone: string;
+            }[];
             evidence: string[];
             unresolved: string[];
             next_action: any;
@@ -2347,6 +6856,12 @@ export declare function runCollaborationUxSelfTest(): {
             headline: string;
             primary_action: any;
             secondary_actions: any[];
+            summary_cards: {
+                id: string;
+                label: string;
+                value: string;
+                tone: string;
+            }[];
             evidence: string[];
             unresolved: string[];
             next_action: any;
@@ -2532,6 +7047,47 @@ export declare function runCollaborationUxSelfTest(): {
                     target: string;
                     subject: string;
                 }[];
+                dependency_summary: {
+                    schema: string;
+                    title: string;
+                    status: string;
+                    status_label: string;
+                    headline: string;
+                    rows: {
+                        id: string;
+                        target: string;
+                        subject: string;
+                        status: import("../../agents/work-items").MainAgentWorkItemStatus;
+                        dependency_count: number;
+                        open_dependency_count: number;
+                        dependencies: {
+                            id: string;
+                            label: string;
+                            status: import("../../agents/work-items").MainAgentWorkItemStatus;
+                            completed: boolean;
+                        }[];
+                        label: string;
+                        next_action: string;
+                    }[];
+                    ready: {
+                        id: string;
+                        target: string;
+                        subject: string;
+                        label: string;
+                    }[];
+                    next_claimable: {
+                        id: string;
+                        target: string;
+                        subject: string;
+                    }[];
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
                 verification_nudge: boolean;
                 verification_reminder: {
                     schema: string;
@@ -2548,6 +7104,34 @@ export declare function runCollaborationUxSelfTest(): {
                     };
                 };
                 all_completed: boolean;
+            };
+            work_item_claim_summary: any;
+            work_item_unlock_summary: any;
+            completion_readiness_summary: {
+                schema: string;
+                title: string;
+                status: string;
+                status_label: string;
+                headline: string;
+                rows: {
+                    target: string;
+                    subject: string;
+                    status: string;
+                    status_label: string;
+                }[];
+                open_session_count: number;
+                unresolved_work_item_count: number;
+                next_action: string;
+                display_policy: {
+                    user_text_first: boolean;
+                    technical_default_collapsed: boolean;
+                    hide_internal_protocols: boolean;
+                    show_for_ordinary_conversation: boolean;
+                };
+                technical: {
+                    unresolved_work_item_ids: any[];
+                    open_session_ids: any;
+                };
             };
             recovery_summary: {
                 schema: string;
@@ -2677,6 +7261,12 @@ export declare function runCollaborationUxSelfTest(): {
                 headline: string;
                 primary_action: any;
                 secondary_actions: any[];
+                summary_cards: {
+                    id: string;
+                    label: string;
+                    value: string;
+                    tone: string;
+                }[];
                 evidence: string[];
                 unresolved: string[];
                 next_action: any;
@@ -2839,6 +7429,146 @@ export declare function runCollaborationUxSelfTest(): {
                             status: string;
                             summary: string;
                         }[];
+                        todo_plan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
+                        todoPlan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
                         progress_checkpoints: {
                             schema: string;
                             title: string;
@@ -2854,8 +7584,11 @@ export declare function runCollaborationUxSelfTest(): {
                             evidence: string[];
                             files: any[];
                             verification: string[];
+                            acceptance: string[];
+                            independent_review: string[];
+                            independentReview: string[];
                             risks: string[];
-                            next_action: any;
+                            next_action: string;
                             verification_status: string;
                             risk_status: string;
                             final_summary_quality: {
@@ -2872,6 +7605,172 @@ export declare function runCollaborationUxSelfTest(): {
                                 verification_status: string;
                                 risk_status: string;
                                 source: string;
+                            };
+                            quality_followup: {
+                                schema: string;
+                                title: string;
+                                headline: string;
+                                missing: string[];
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            qualityFollowup: {
+                                schema: string;
+                                title: string;
+                                headline: string;
+                                missing: string[];
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            todo_plan: {
+                                schema: string;
+                                source: string;
+                                title: string;
+                                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                                mode: string;
+                                task_id: string;
+                                run_id: string;
+                                mission_id: string;
+                                steps: any[];
+                                current_step: any;
+                                currentStep: any;
+                                completed_count: number;
+                                total_count: number;
+                                progress_label: string;
+                                visible_steps: any[];
+                                visibleSteps: any[];
+                                archived_steps_count: number;
+                                archivedStepsCount: number;
+                                archive_summary: string;
+                                archiveSummary: string;
+                                quality_followup_required: boolean;
+                                qualityFollowupRequired: boolean;
+                                quality_followup: any;
+                                qualityFollowup: any;
+                                verification_nudge: boolean;
+                                verification_reminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                verificationReminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                display_policy: {
+                                    user_visible: boolean;
+                                    hide_for_ordinary_conversation: boolean;
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    quiet_completed: boolean;
+                                    archive_completed_todo: boolean;
+                                    archiveCompletedTodo: boolean;
+                                    archived_when_complete: boolean;
+                                    archivedWhenComplete: boolean;
+                                    visible_when_completed: boolean;
+                                    visibleWhenCompleted: boolean;
+                                    max_visible_steps: number;
+                                };
+                            };
+                            todoPlan: {
+                                schema: string;
+                                source: string;
+                                title: string;
+                                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                                mode: string;
+                                task_id: string;
+                                run_id: string;
+                                mission_id: string;
+                                steps: any[];
+                                current_step: any;
+                                currentStep: any;
+                                completed_count: number;
+                                total_count: number;
+                                progress_label: string;
+                                visible_steps: any[];
+                                visibleSteps: any[];
+                                archived_steps_count: number;
+                                archivedStepsCount: number;
+                                archive_summary: string;
+                                archiveSummary: string;
+                                quality_followup_required: boolean;
+                                qualityFollowupRequired: boolean;
+                                quality_followup: any;
+                                qualityFollowup: any;
+                                verification_nudge: boolean;
+                                verification_reminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                verificationReminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                display_policy: {
+                                    user_visible: boolean;
+                                    hide_for_ordinary_conversation: boolean;
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    quiet_completed: boolean;
+                                    archive_completed_todo: boolean;
+                                    archiveCompletedTodo: boolean;
+                                    archived_when_complete: boolean;
+                                    archivedWhenComplete: boolean;
+                                    visible_when_completed: boolean;
+                                    visibleWhenCompleted: boolean;
+                                    max_visible_steps: number;
+                                };
                             };
                             terminal: boolean;
                         };
@@ -2892,8 +7791,11 @@ export declare function runCollaborationUxSelfTest(): {
                         evidence: string[];
                         files: any[];
                         verification: string[];
+                        acceptance: string[];
+                        independent_review: string[];
+                        independentReview: string[];
                         risks: string[];
-                        next_action: any;
+                        next_action: string;
                         verification_status: string;
                         risk_status: string;
                         final_summary_quality: {
@@ -2911,7 +7813,341 @@ export declare function runCollaborationUxSelfTest(): {
                             risk_status: string;
                             source: string;
                         };
+                        quality_followup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        qualityFollowup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        todo_plan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
+                        todoPlan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
                         terminal: boolean;
+                    };
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
                     };
                     progress_checkpoints: {
                         schema: string;
@@ -2984,6 +8220,146 @@ export declare function runCollaborationUxSelfTest(): {
                             status: string;
                             summary: string;
                         }[];
+                        todo_plan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
+                        todoPlan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
                         progress_checkpoints: {
                             schema: string;
                             title: string;
@@ -2999,8 +8375,11 @@ export declare function runCollaborationUxSelfTest(): {
                             evidence: string[];
                             files: any[];
                             verification: string[];
+                            acceptance: string[];
+                            independent_review: string[];
+                            independentReview: string[];
                             risks: string[];
-                            next_action: any;
+                            next_action: string;
                             verification_status: string;
                             risk_status: string;
                             final_summary_quality: {
@@ -3017,6 +8396,172 @@ export declare function runCollaborationUxSelfTest(): {
                                 verification_status: string;
                                 risk_status: string;
                                 source: string;
+                            };
+                            quality_followup: {
+                                schema: string;
+                                title: string;
+                                headline: string;
+                                missing: string[];
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            qualityFollowup: {
+                                schema: string;
+                                title: string;
+                                headline: string;
+                                missing: string[];
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            todo_plan: {
+                                schema: string;
+                                source: string;
+                                title: string;
+                                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                                mode: string;
+                                task_id: string;
+                                run_id: string;
+                                mission_id: string;
+                                steps: any[];
+                                current_step: any;
+                                currentStep: any;
+                                completed_count: number;
+                                total_count: number;
+                                progress_label: string;
+                                visible_steps: any[];
+                                visibleSteps: any[];
+                                archived_steps_count: number;
+                                archivedStepsCount: number;
+                                archive_summary: string;
+                                archiveSummary: string;
+                                quality_followup_required: boolean;
+                                qualityFollowupRequired: boolean;
+                                quality_followup: any;
+                                qualityFollowup: any;
+                                verification_nudge: boolean;
+                                verification_reminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                verificationReminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                display_policy: {
+                                    user_visible: boolean;
+                                    hide_for_ordinary_conversation: boolean;
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    quiet_completed: boolean;
+                                    archive_completed_todo: boolean;
+                                    archiveCompletedTodo: boolean;
+                                    archived_when_complete: boolean;
+                                    archivedWhenComplete: boolean;
+                                    visible_when_completed: boolean;
+                                    visibleWhenCompleted: boolean;
+                                    max_visible_steps: number;
+                                };
+                            };
+                            todoPlan: {
+                                schema: string;
+                                source: string;
+                                title: string;
+                                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                                mode: string;
+                                task_id: string;
+                                run_id: string;
+                                mission_id: string;
+                                steps: any[];
+                                current_step: any;
+                                currentStep: any;
+                                completed_count: number;
+                                total_count: number;
+                                progress_label: string;
+                                visible_steps: any[];
+                                visibleSteps: any[];
+                                archived_steps_count: number;
+                                archivedStepsCount: number;
+                                archive_summary: string;
+                                archiveSummary: string;
+                                quality_followup_required: boolean;
+                                qualityFollowupRequired: boolean;
+                                quality_followup: any;
+                                qualityFollowup: any;
+                                verification_nudge: boolean;
+                                verification_reminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                verificationReminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                display_policy: {
+                                    user_visible: boolean;
+                                    hide_for_ordinary_conversation: boolean;
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    quiet_completed: boolean;
+                                    archive_completed_todo: boolean;
+                                    archiveCompletedTodo: boolean;
+                                    archived_when_complete: boolean;
+                                    archivedWhenComplete: boolean;
+                                    visible_when_completed: boolean;
+                                    visibleWhenCompleted: boolean;
+                                    max_visible_steps: number;
+                                };
                             };
                             terminal: boolean;
                         };
@@ -3037,8 +8582,11 @@ export declare function runCollaborationUxSelfTest(): {
                         evidence: string[];
                         files: any[];
                         verification: string[];
+                        acceptance: string[];
+                        independent_review: string[];
+                        independentReview: string[];
                         risks: string[];
-                        next_action: any;
+                        next_action: string;
                         verification_status: string;
                         risk_status: string;
                         final_summary_quality: {
@@ -3056,7 +8604,341 @@ export declare function runCollaborationUxSelfTest(): {
                             risk_status: string;
                             source: string;
                         };
+                        quality_followup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        qualityFollowup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        todo_plan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
+                        todoPlan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
                         terminal: boolean;
+                    };
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
                     };
                     progress_checkpoints: {
                         schema: string;
@@ -3270,6 +9152,146 @@ export declare function runCollaborationUxSelfTest(): {
                             status: string;
                             summary: string;
                         }[];
+                        todo_plan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
+                        todoPlan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
                         progress_checkpoints: {
                             schema: string;
                             title: string;
@@ -3285,8 +9307,11 @@ export declare function runCollaborationUxSelfTest(): {
                             evidence: string[];
                             files: any[];
                             verification: string[];
+                            acceptance: string[];
+                            independent_review: string[];
+                            independentReview: string[];
                             risks: string[];
-                            next_action: any;
+                            next_action: string;
                             verification_status: string;
                             risk_status: string;
                             final_summary_quality: {
@@ -3303,6 +9328,172 @@ export declare function runCollaborationUxSelfTest(): {
                                 verification_status: string;
                                 risk_status: string;
                                 source: string;
+                            };
+                            quality_followup: {
+                                schema: string;
+                                title: string;
+                                headline: string;
+                                missing: string[];
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            qualityFollowup: {
+                                schema: string;
+                                title: string;
+                                headline: string;
+                                missing: string[];
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            todo_plan: {
+                                schema: string;
+                                source: string;
+                                title: string;
+                                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                                mode: string;
+                                task_id: string;
+                                run_id: string;
+                                mission_id: string;
+                                steps: any[];
+                                current_step: any;
+                                currentStep: any;
+                                completed_count: number;
+                                total_count: number;
+                                progress_label: string;
+                                visible_steps: any[];
+                                visibleSteps: any[];
+                                archived_steps_count: number;
+                                archivedStepsCount: number;
+                                archive_summary: string;
+                                archiveSummary: string;
+                                quality_followup_required: boolean;
+                                qualityFollowupRequired: boolean;
+                                quality_followup: any;
+                                qualityFollowup: any;
+                                verification_nudge: boolean;
+                                verification_reminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                verificationReminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                display_policy: {
+                                    user_visible: boolean;
+                                    hide_for_ordinary_conversation: boolean;
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    quiet_completed: boolean;
+                                    archive_completed_todo: boolean;
+                                    archiveCompletedTodo: boolean;
+                                    archived_when_complete: boolean;
+                                    archivedWhenComplete: boolean;
+                                    visible_when_completed: boolean;
+                                    visibleWhenCompleted: boolean;
+                                    max_visible_steps: number;
+                                };
+                            };
+                            todoPlan: {
+                                schema: string;
+                                source: string;
+                                title: string;
+                                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                                mode: string;
+                                task_id: string;
+                                run_id: string;
+                                mission_id: string;
+                                steps: any[];
+                                current_step: any;
+                                currentStep: any;
+                                completed_count: number;
+                                total_count: number;
+                                progress_label: string;
+                                visible_steps: any[];
+                                visibleSteps: any[];
+                                archived_steps_count: number;
+                                archivedStepsCount: number;
+                                archive_summary: string;
+                                archiveSummary: string;
+                                quality_followup_required: boolean;
+                                qualityFollowupRequired: boolean;
+                                quality_followup: any;
+                                qualityFollowup: any;
+                                verification_nudge: boolean;
+                                verification_reminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                verificationReminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                display_policy: {
+                                    user_visible: boolean;
+                                    hide_for_ordinary_conversation: boolean;
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    quiet_completed: boolean;
+                                    archive_completed_todo: boolean;
+                                    archiveCompletedTodo: boolean;
+                                    archived_when_complete: boolean;
+                                    archivedWhenComplete: boolean;
+                                    visible_when_completed: boolean;
+                                    visibleWhenCompleted: boolean;
+                                    max_visible_steps: number;
+                                };
                             };
                             terminal: boolean;
                         };
@@ -3323,8 +9514,11 @@ export declare function runCollaborationUxSelfTest(): {
                         evidence: string[];
                         files: any[];
                         verification: string[];
+                        acceptance: string[];
+                        independent_review: string[];
+                        independentReview: string[];
                         risks: string[];
-                        next_action: any;
+                        next_action: string;
                         verification_status: string;
                         risk_status: string;
                         final_summary_quality: {
@@ -3342,7 +9536,341 @@ export declare function runCollaborationUxSelfTest(): {
                             risk_status: string;
                             source: string;
                         };
+                        quality_followup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        qualityFollowup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        todo_plan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
+                        todoPlan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
                         terminal: boolean;
+                    };
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
                     };
                     progress_checkpoints: {
                         schema: string;
@@ -3415,6 +9943,146 @@ export declare function runCollaborationUxSelfTest(): {
                             status: string;
                             summary: string;
                         }[];
+                        todo_plan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
+                        todoPlan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
                         progress_checkpoints: {
                             schema: string;
                             title: string;
@@ -3430,8 +10098,11 @@ export declare function runCollaborationUxSelfTest(): {
                             evidence: string[];
                             files: any[];
                             verification: string[];
+                            acceptance: string[];
+                            independent_review: string[];
+                            independentReview: string[];
                             risks: string[];
-                            next_action: any;
+                            next_action: string;
                             verification_status: string;
                             risk_status: string;
                             final_summary_quality: {
@@ -3448,6 +10119,172 @@ export declare function runCollaborationUxSelfTest(): {
                                 verification_status: string;
                                 risk_status: string;
                                 source: string;
+                            };
+                            quality_followup: {
+                                schema: string;
+                                title: string;
+                                headline: string;
+                                missing: string[];
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            qualityFollowup: {
+                                schema: string;
+                                title: string;
+                                headline: string;
+                                missing: string[];
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            todo_plan: {
+                                schema: string;
+                                source: string;
+                                title: string;
+                                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                                mode: string;
+                                task_id: string;
+                                run_id: string;
+                                mission_id: string;
+                                steps: any[];
+                                current_step: any;
+                                currentStep: any;
+                                completed_count: number;
+                                total_count: number;
+                                progress_label: string;
+                                visible_steps: any[];
+                                visibleSteps: any[];
+                                archived_steps_count: number;
+                                archivedStepsCount: number;
+                                archive_summary: string;
+                                archiveSummary: string;
+                                quality_followup_required: boolean;
+                                qualityFollowupRequired: boolean;
+                                quality_followup: any;
+                                qualityFollowup: any;
+                                verification_nudge: boolean;
+                                verification_reminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                verificationReminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                display_policy: {
+                                    user_visible: boolean;
+                                    hide_for_ordinary_conversation: boolean;
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    quiet_completed: boolean;
+                                    archive_completed_todo: boolean;
+                                    archiveCompletedTodo: boolean;
+                                    archived_when_complete: boolean;
+                                    archivedWhenComplete: boolean;
+                                    visible_when_completed: boolean;
+                                    visibleWhenCompleted: boolean;
+                                    max_visible_steps: number;
+                                };
+                            };
+                            todoPlan: {
+                                schema: string;
+                                source: string;
+                                title: string;
+                                surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                                mode: string;
+                                task_id: string;
+                                run_id: string;
+                                mission_id: string;
+                                steps: any[];
+                                current_step: any;
+                                currentStep: any;
+                                completed_count: number;
+                                total_count: number;
+                                progress_label: string;
+                                visible_steps: any[];
+                                visibleSteps: any[];
+                                archived_steps_count: number;
+                                archivedStepsCount: number;
+                                archive_summary: string;
+                                archiveSummary: string;
+                                quality_followup_required: boolean;
+                                qualityFollowupRequired: boolean;
+                                quality_followup: any;
+                                qualityFollowup: any;
+                                verification_nudge: boolean;
+                                verification_reminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                verificationReminder: {
+                                    schema: string;
+                                    status: string;
+                                    title: string;
+                                    headline: string;
+                                    reason: string;
+                                    next_action: string;
+                                    display_policy: {
+                                        user_text_first: boolean;
+                                        technical_default_collapsed: boolean;
+                                        hide_internal_protocols: boolean;
+                                        show_for_ordinary_conversation: boolean;
+                                    };
+                                };
+                                display_policy: {
+                                    user_visible: boolean;
+                                    hide_for_ordinary_conversation: boolean;
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    quiet_completed: boolean;
+                                    archive_completed_todo: boolean;
+                                    archiveCompletedTodo: boolean;
+                                    archived_when_complete: boolean;
+                                    archivedWhenComplete: boolean;
+                                    visible_when_completed: boolean;
+                                    visibleWhenCompleted: boolean;
+                                    max_visible_steps: number;
+                                };
                             };
                             terminal: boolean;
                         };
@@ -3468,8 +10305,11 @@ export declare function runCollaborationUxSelfTest(): {
                         evidence: string[];
                         files: any[];
                         verification: string[];
+                        acceptance: string[];
+                        independent_review: string[];
+                        independentReview: string[];
                         risks: string[];
-                        next_action: any;
+                        next_action: string;
                         verification_status: string;
                         risk_status: string;
                         final_summary_quality: {
@@ -3487,7 +10327,341 @@ export declare function runCollaborationUxSelfTest(): {
                             risk_status: string;
                             source: string;
                         };
+                        quality_followup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        qualityFollowup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        todo_plan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
+                        todoPlan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
                         terminal: boolean;
+                    };
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
                     };
                     progress_checkpoints: {
                         schema: string;
@@ -3588,6 +10762,146 @@ export declare function runCollaborationUxSelfTest(): {
                         status: string;
                         summary: string;
                     }[];
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
                     progress_checkpoints: {
                         schema: string;
                         title: string;
@@ -3603,8 +10917,11 @@ export declare function runCollaborationUxSelfTest(): {
                         evidence: string[];
                         files: any[];
                         verification: string[];
+                        acceptance: string[];
+                        independent_review: string[];
+                        independentReview: string[];
                         risks: string[];
-                        next_action: any;
+                        next_action: string;
                         verification_status: string;
                         risk_status: string;
                         final_summary_quality: {
@@ -3621,6 +10938,172 @@ export declare function runCollaborationUxSelfTest(): {
                             verification_status: string;
                             risk_status: string;
                             source: string;
+                        };
+                        quality_followup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        qualityFollowup: {
+                            schema: string;
+                            title: string;
+                            headline: string;
+                            missing: string[];
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        todo_plan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
+                        };
+                        todoPlan: {
+                            schema: string;
+                            source: string;
+                            title: string;
+                            surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                            mode: string;
+                            task_id: string;
+                            run_id: string;
+                            mission_id: string;
+                            steps: any[];
+                            current_step: any;
+                            currentStep: any;
+                            completed_count: number;
+                            total_count: number;
+                            progress_label: string;
+                            visible_steps: any[];
+                            visibleSteps: any[];
+                            archived_steps_count: number;
+                            archivedStepsCount: number;
+                            archive_summary: string;
+                            archiveSummary: string;
+                            quality_followup_required: boolean;
+                            qualityFollowupRequired: boolean;
+                            quality_followup: any;
+                            qualityFollowup: any;
+                            verification_nudge: boolean;
+                            verification_reminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            verificationReminder: {
+                                schema: string;
+                                status: string;
+                                title: string;
+                                headline: string;
+                                reason: string;
+                                next_action: string;
+                                display_policy: {
+                                    user_text_first: boolean;
+                                    technical_default_collapsed: boolean;
+                                    hide_internal_protocols: boolean;
+                                    show_for_ordinary_conversation: boolean;
+                                };
+                            };
+                            display_policy: {
+                                user_visible: boolean;
+                                hide_for_ordinary_conversation: boolean;
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                quiet_completed: boolean;
+                                archive_completed_todo: boolean;
+                                archiveCompletedTodo: boolean;
+                                archived_when_complete: boolean;
+                                archivedWhenComplete: boolean;
+                                visible_when_completed: boolean;
+                                visibleWhenCompleted: boolean;
+                                max_visible_steps: number;
+                            };
                         };
                         terminal: boolean;
                     };
@@ -3641,8 +11124,11 @@ export declare function runCollaborationUxSelfTest(): {
                     evidence: string[];
                     files: any[];
                     verification: string[];
+                    acceptance: string[];
+                    independent_review: string[];
+                    independentReview: string[];
                     risks: string[];
-                    next_action: any;
+                    next_action: string;
                     verification_status: string;
                     risk_status: string;
                     final_summary_quality: {
@@ -3660,7 +11146,341 @@ export declare function runCollaborationUxSelfTest(): {
                         risk_status: string;
                         source: string;
                     };
+                    quality_followup: {
+                        schema: string;
+                        title: string;
+                        headline: string;
+                        missing: string[];
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    qualityFollowup: {
+                        schema: string;
+                        title: string;
+                        headline: string;
+                        missing: string[];
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    todo_plan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
+                    todoPlan: {
+                        schema: string;
+                        source: string;
+                        title: string;
+                        surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                        mode: string;
+                        task_id: string;
+                        run_id: string;
+                        mission_id: string;
+                        steps: any[];
+                        current_step: any;
+                        currentStep: any;
+                        completed_count: number;
+                        total_count: number;
+                        progress_label: string;
+                        visible_steps: any[];
+                        visibleSteps: any[];
+                        archived_steps_count: number;
+                        archivedStepsCount: number;
+                        archive_summary: string;
+                        archiveSummary: string;
+                        quality_followup_required: boolean;
+                        qualityFollowupRequired: boolean;
+                        quality_followup: any;
+                        qualityFollowup: any;
+                        verification_nudge: boolean;
+                        verification_reminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        verificationReminder: {
+                            schema: string;
+                            status: string;
+                            title: string;
+                            headline: string;
+                            reason: string;
+                            next_action: string;
+                            display_policy: {
+                                user_text_first: boolean;
+                                technical_default_collapsed: boolean;
+                                hide_internal_protocols: boolean;
+                                show_for_ordinary_conversation: boolean;
+                            };
+                        };
+                        display_policy: {
+                            user_visible: boolean;
+                            hide_for_ordinary_conversation: boolean;
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            quiet_completed: boolean;
+                            archive_completed_todo: boolean;
+                            archiveCompletedTodo: boolean;
+                            archived_when_complete: boolean;
+                            archivedWhenComplete: boolean;
+                            visible_when_completed: boolean;
+                            visibleWhenCompleted: boolean;
+                            max_visible_steps: number;
+                        };
+                    };
                     terminal: boolean;
+                };
+                todo_plan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
+                todoPlan: {
+                    schema: string;
+                    source: string;
+                    title: string;
+                    surface: import("../../agents/workchain").MainAgentWorkchainSurface;
+                    mode: string;
+                    task_id: string;
+                    run_id: string;
+                    mission_id: string;
+                    steps: any[];
+                    current_step: any;
+                    currentStep: any;
+                    completed_count: number;
+                    total_count: number;
+                    progress_label: string;
+                    visible_steps: any[];
+                    visibleSteps: any[];
+                    archived_steps_count: number;
+                    archivedStepsCount: number;
+                    archive_summary: string;
+                    archiveSummary: string;
+                    quality_followup_required: boolean;
+                    qualityFollowupRequired: boolean;
+                    quality_followup: any;
+                    qualityFollowup: any;
+                    verification_nudge: boolean;
+                    verification_reminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    verificationReminder: {
+                        schema: string;
+                        status: string;
+                        title: string;
+                        headline: string;
+                        reason: string;
+                        next_action: string;
+                        display_policy: {
+                            user_text_first: boolean;
+                            technical_default_collapsed: boolean;
+                            hide_internal_protocols: boolean;
+                            show_for_ordinary_conversation: boolean;
+                        };
+                    };
+                    display_policy: {
+                        user_visible: boolean;
+                        hide_for_ordinary_conversation: boolean;
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        quiet_completed: boolean;
+                        archive_completed_todo: boolean;
+                        archiveCompletedTodo: boolean;
+                        archived_when_complete: boolean;
+                        archivedWhenComplete: boolean;
+                        visible_when_completed: boolean;
+                        visibleWhenCompleted: boolean;
+                        max_visible_steps: number;
+                    };
+                };
+                verification_reminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
+                };
+                verificationReminder: {
+                    schema: string;
+                    status: string;
+                    title: string;
+                    headline: string;
+                    reason: string;
+                    next_action: string;
+                    display_policy: {
+                        user_text_first: boolean;
+                        technical_default_collapsed: boolean;
+                        hide_internal_protocols: boolean;
+                        show_for_ordinary_conversation: boolean;
+                    };
                 };
                 progress_checkpoints: {
                     schema: string;
@@ -3742,6 +11562,229 @@ export declare function runMemoryDispatchGateReceiptValidationSelfTest(): {
         };
     };
 };
+export declare function runTaskAgentMemoryContextSnapshotReceiptValidationSelfTest(): {
+    pass: boolean;
+    checks: {
+        snapshotPersistedOnSession: any;
+        deliverySummaryCollectsGateFromSessionSnapshot: boolean;
+        goodReceiptMatchesExactSnapshot: boolean;
+        goodDeliveryPassesMemoryGate: boolean;
+        wrongSessionFailsSnapshotGate: boolean;
+        wrongSessionBlocksAcceptance: any;
+        runtimeKernelShowsSnapshotMismatch: boolean;
+    };
+    snapshot: {
+        schema: any;
+        snapshot_id: any;
+        snapshot_file: any;
+        checksum: any;
+        generated_at: any;
+        task_agent_session_id: any;
+        task_id: any;
+        group_id: any;
+        project: any;
+        agent_type: any;
+        native_session_id: any;
+        turn: number;
+        worker_context_packet_id: any;
+        worker_handoff_id: any;
+        memory_context_checksum: any;
+        rendered_prompt_checksum: any;
+        gate_ids: string[];
+        replay_repair_dispatch_brief_ids: any[];
+        replay_repair_dispatch_briefs: any[];
+    };
+    good: any;
+    wrong: any;
+};
+export declare function runGlobalMemoryUsageReceiptValidationSelfTest(): {
+    pass: boolean;
+    checks: {
+        goodReceiptPassesGlobalMemoryGate: boolean;
+        missingGlobalMemoryHardFailsQuality: boolean;
+        unsafeBackgroundUseHardFailsQuality: boolean;
+        deliverySummaryRecordsMissingGlobalMemory: boolean;
+        acceptanceGateBlocksMissingGlobalMemory: any;
+        runtimeKernelShowsGlobalMemoryGap: boolean;
+        unsafeSummaryShowsUnsafeUse: any;
+        goodDeliverySummaryPassesGate: boolean;
+    };
+    good: {
+        score: number;
+        grade: string;
+        globalMemoryGate: {
+            schema: string;
+            required: boolean;
+            pass: any;
+            gate_ids: any;
+            global_memory_ids: string[];
+            missing_global_memory_ids: string[];
+            missing_usage_state_ids: string[];
+            unsafe_used_global_memory_ids: string[];
+            missing_current_verification_ids: string[];
+            missing_semantic_acknowledgement_ids: string[];
+            missing_cross_group_acknowledgement_ids: string[];
+            used_global_memory_ids: string[];
+            ignored_global_memory_ids: string[];
+            verified_global_memory_ids: string[];
+            background_global_memory_ids: string[];
+            advisory_global_memory_ids: string[];
+            rows: any;
+            structured_usage_rows: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+    missing: {
+        score: number;
+        grade: string;
+        globalMemoryGate: {
+            schema: string;
+            required: boolean;
+            pass: any;
+            gate_ids: any;
+            global_memory_ids: string[];
+            missing_global_memory_ids: string[];
+            missing_usage_state_ids: string[];
+            unsafe_used_global_memory_ids: string[];
+            missing_current_verification_ids: string[];
+            missing_semantic_acknowledgement_ids: string[];
+            missing_cross_group_acknowledgement_ids: string[];
+            used_global_memory_ids: string[];
+            ignored_global_memory_ids: string[];
+            verified_global_memory_ids: string[];
+            background_global_memory_ids: string[];
+            advisory_global_memory_ids: string[];
+            rows: any;
+            structured_usage_rows: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+    unsafe: {
+        score: number;
+        grade: string;
+        globalMemoryGate: {
+            schema: string;
+            required: boolean;
+            pass: any;
+            gate_ids: any;
+            global_memory_ids: string[];
+            missing_global_memory_ids: string[];
+            missing_usage_state_ids: string[];
+            unsafe_used_global_memory_ids: string[];
+            missing_current_verification_ids: string[];
+            missing_semantic_acknowledgement_ids: string[];
+            missing_cross_group_acknowledgement_ids: string[];
+            used_global_memory_ids: string[];
+            ignored_global_memory_ids: string[];
+            verified_global_memory_ids: string[];
+            background_global_memory_ids: string[];
+            advisory_global_memory_ids: string[];
+            rows: any;
+            structured_usage_rows: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+};
+export declare function runGlobalMemoryHealthGateReceiptValidationSelfTest(): {
+    pass: boolean;
+    checks: {
+        goodReceiptPassesHealthGate: any;
+        missingHealthGateHardFailsQuality: boolean;
+        unsafeBlockedGlobalMemoryUseHardFails: any;
+        warnGateRequiresAcknowledgement: any;
+        deliverySummaryRecordsMissingHealthGate: boolean;
+        acceptanceGateBlocksMissingHealthGate: any;
+        runtimeKernelShowsHealthGateGap: boolean;
+        unsafeSummaryShowsBlockedMemoryUse: any;
+        goodDeliverySummaryPassesHealthGate: boolean;
+    };
+    good: {
+        score: number;
+        grade: string;
+        healthGate: {
+            schema: string;
+            required: boolean;
+            pass: any;
+            gate_ids: any;
+            missing_gate_ids: any;
+            fail_gate_ids: any;
+            warn_gate_ids: any;
+            missing_ignore_gate_ids: any;
+            missing_warning_ack_gate_ids: any;
+            blocked_global_memory_used_gate_ids: any;
+            rows: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+    missing: {
+        score: number;
+        grade: string;
+        healthGate: {
+            schema: string;
+            required: boolean;
+            pass: any;
+            gate_ids: any;
+            missing_gate_ids: any;
+            fail_gate_ids: any;
+            warn_gate_ids: any;
+            missing_ignore_gate_ids: any;
+            missing_warning_ack_gate_ids: any;
+            blocked_global_memory_used_gate_ids: any;
+            rows: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+    unsafe: {
+        score: number;
+        grade: string;
+        healthGate: {
+            schema: string;
+            required: boolean;
+            pass: any;
+            gate_ids: any;
+            missing_gate_ids: any;
+            fail_gate_ids: any;
+            warn_gate_ids: any;
+            missing_ignore_gate_ids: any;
+            missing_warning_ack_gate_ids: any;
+            blocked_global_memory_used_gate_ids: any;
+            rows: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+    warn: {
+        score: number;
+        grade: string;
+        healthGate: {
+            schema: string;
+            required: boolean;
+            pass: any;
+            gate_ids: any;
+            missing_gate_ids: any;
+            fail_gate_ids: any;
+            warn_gate_ids: any;
+            missing_ignore_gate_ids: any;
+            missing_warning_ack_gate_ids: any;
+            blocked_global_memory_used_gate_ids: any;
+            rows: any;
+            declared: boolean;
+            used: any;
+            ignored: any;
+        };
+    };
+};
 export declare function runReadPlanRevalidationGateReceiptValidationSelfTest(): {
     pass: boolean;
     checks: {
@@ -3815,6 +11858,295 @@ export declare function runReadPlanRevalidationGateReceiptValidationSelfTest(): 
             rows: any;
             declared: boolean;
             structured_usage_rows: any;
+            used: any;
+            ignored: any;
+        };
+    };
+};
+export declare function runApiMicrocompactReceiptValidationSelfTest(): {
+    pass: boolean;
+    checks: {
+        goodReceiptPassesApiMicrocompactGate: boolean;
+        ignoredReceiptPassesAsDeclaredNotSupported: boolean;
+        missingReceiptHardFailsQuality: boolean;
+        unsafeNativeApplyHardFailsQuality: any;
+        nativeApplyPassesWithBoundChecksums: boolean;
+        nativeApplyMissingChecksumsHardFails: any;
+        sessionBoundApiMicrocompactReceiptPasses: boolean;
+        wrongSessionApiMicrocompactReceiptFails: any;
+        deliverySummaryRecordsMissingApiMicrocompact: boolean;
+        acceptanceGateBlocksMissingApiMicrocompact: any;
+        runtimeKernelShowsApiMicrocompactGap: boolean;
+        goodDeliverySummaryPassesApiMicrocompact: boolean;
+    };
+    good: {
+        score: number;
+        grade: string;
+        apiMicrocompact: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            plan_checksums: any;
+            missing_plan_checksums: any;
+            unsafe_native_applied_plan_checksums: any;
+            session_mismatch_plan_checksums: any;
+            native_applied_count: any;
+            advisory_count: any;
+            ignored_count: any;
+            rows: any;
+            declared: boolean;
+            structured_usage_rows: {
+                plan_checksum: string;
+                apply_plan_checksum: string;
+                request_patch_checksum: string;
+                task_agent_session_id: string;
+                native_session_id: string;
+                memory_context_snapshot_id: string;
+                memory_context_snapshot_checksum: string;
+                usage_state: string;
+                native_applied: boolean;
+                advisory_only: boolean;
+                reason: string;
+                raw: any;
+            }[];
+            used: any;
+            ignored: any;
+        };
+    };
+    missing: {
+        score: number;
+        grade: string;
+        apiMicrocompact: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            plan_checksums: any;
+            missing_plan_checksums: any;
+            unsafe_native_applied_plan_checksums: any;
+            session_mismatch_plan_checksums: any;
+            native_applied_count: any;
+            advisory_count: any;
+            ignored_count: any;
+            rows: any;
+            declared: boolean;
+            structured_usage_rows: {
+                plan_checksum: string;
+                apply_plan_checksum: string;
+                request_patch_checksum: string;
+                task_agent_session_id: string;
+                native_session_id: string;
+                memory_context_snapshot_id: string;
+                memory_context_snapshot_checksum: string;
+                usage_state: string;
+                native_applied: boolean;
+                advisory_only: boolean;
+                reason: string;
+                raw: any;
+            }[];
+            used: any;
+            ignored: any;
+        };
+    };
+    unsafe: {
+        score: number;
+        grade: string;
+        apiMicrocompact: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            plan_checksums: any;
+            missing_plan_checksums: any;
+            unsafe_native_applied_plan_checksums: any;
+            session_mismatch_plan_checksums: any;
+            native_applied_count: any;
+            advisory_count: any;
+            ignored_count: any;
+            rows: any;
+            declared: boolean;
+            structured_usage_rows: {
+                plan_checksum: string;
+                apply_plan_checksum: string;
+                request_patch_checksum: string;
+                task_agent_session_id: string;
+                native_session_id: string;
+                memory_context_snapshot_id: string;
+                memory_context_snapshot_checksum: string;
+                usage_state: string;
+                native_applied: boolean;
+                advisory_only: boolean;
+                reason: string;
+                raw: any;
+            }[];
+            used: any;
+            ignored: any;
+        };
+    };
+    native: {
+        score: number;
+        grade: string;
+        apiMicrocompact: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            plan_checksums: any;
+            missing_plan_checksums: any;
+            unsafe_native_applied_plan_checksums: any;
+            session_mismatch_plan_checksums: any;
+            native_applied_count: any;
+            advisory_count: any;
+            ignored_count: any;
+            rows: any;
+            declared: boolean;
+            structured_usage_rows: {
+                plan_checksum: string;
+                apply_plan_checksum: string;
+                request_patch_checksum: string;
+                task_agent_session_id: string;
+                native_session_id: string;
+                memory_context_snapshot_id: string;
+                memory_context_snapshot_checksum: string;
+                usage_state: string;
+                native_applied: boolean;
+                advisory_only: boolean;
+                reason: string;
+                raw: any;
+            }[];
+            used: any;
+            ignored: any;
+        };
+    };
+    nativeMissingChecksum: {
+        score: number;
+        grade: string;
+        apiMicrocompact: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            plan_checksums: any;
+            missing_plan_checksums: any;
+            unsafe_native_applied_plan_checksums: any;
+            session_mismatch_plan_checksums: any;
+            native_applied_count: any;
+            advisory_count: any;
+            ignored_count: any;
+            rows: any;
+            declared: boolean;
+            structured_usage_rows: {
+                plan_checksum: string;
+                apply_plan_checksum: string;
+                request_patch_checksum: string;
+                task_agent_session_id: string;
+                native_session_id: string;
+                memory_context_snapshot_id: string;
+                memory_context_snapshot_checksum: string;
+                usage_state: string;
+                native_applied: boolean;
+                advisory_only: boolean;
+                reason: string;
+                raw: any;
+            }[];
+            used: any;
+            ignored: any;
+        };
+    };
+    sessionBound: {
+        score: number;
+        grade: string;
+        apiMicrocompact: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            plan_checksums: any;
+            missing_plan_checksums: any;
+            unsafe_native_applied_plan_checksums: any;
+            session_mismatch_plan_checksums: any;
+            native_applied_count: any;
+            advisory_count: any;
+            ignored_count: any;
+            rows: any;
+            declared: boolean;
+            structured_usage_rows: {
+                plan_checksum: string;
+                apply_plan_checksum: string;
+                request_patch_checksum: string;
+                task_agent_session_id: string;
+                native_session_id: string;
+                memory_context_snapshot_id: string;
+                memory_context_snapshot_checksum: string;
+                usage_state: string;
+                native_applied: boolean;
+                advisory_only: boolean;
+                reason: string;
+                raw: any;
+            }[];
+            used: any;
+            ignored: any;
+        };
+    };
+    wrongSession: {
+        score: number;
+        grade: string;
+        apiMicrocompact: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            plan_checksums: any;
+            missing_plan_checksums: any;
+            unsafe_native_applied_plan_checksums: any;
+            session_mismatch_plan_checksums: any;
+            native_applied_count: any;
+            advisory_count: any;
+            ignored_count: any;
+            rows: any;
+            declared: boolean;
+            structured_usage_rows: {
+                plan_checksum: string;
+                apply_plan_checksum: string;
+                request_patch_checksum: string;
+                task_agent_session_id: string;
+                native_session_id: string;
+                memory_context_snapshot_id: string;
+                memory_context_snapshot_checksum: string;
+                usage_state: string;
+                native_applied: boolean;
+                advisory_only: boolean;
+                reason: string;
+                raw: any;
+            }[];
+            used: any;
+            ignored: any;
+        };
+    };
+    ignored: {
+        score: number;
+        grade: string;
+        apiMicrocompact: {
+            schema: string;
+            required: boolean;
+            pass: boolean;
+            plan_checksums: any;
+            missing_plan_checksums: any;
+            unsafe_native_applied_plan_checksums: any;
+            session_mismatch_plan_checksums: any;
+            native_applied_count: any;
+            advisory_count: any;
+            ignored_count: any;
+            rows: any;
+            declared: boolean;
+            structured_usage_rows: {
+                plan_checksum: string;
+                apply_plan_checksum: string;
+                request_patch_checksum: string;
+                task_agent_session_id: string;
+                native_session_id: string;
+                memory_context_snapshot_id: string;
+                memory_context_snapshot_checksum: string;
+                usage_state: string;
+                native_applied: boolean;
+                advisory_only: boolean;
+                reason: string;
+                raw: any;
+            }[];
             used: any;
             ignored: any;
         };
@@ -4142,6 +12474,148 @@ export declare function runPostCompactDispatchMarkerVisibleSelfTest(): {
     markerSummary: any;
 };
 export declare function buildEvidenceGateFollowUps(group: any, outputs: string[]): any[];
+export declare function runCoordinatorReworkProtocolSelfTest(): {
+    pass: boolean;
+    checks: {
+        hasReworkPacket: boolean;
+        hasVisibleSummary: boolean;
+        hasRound: boolean;
+        hasRoutePacket: boolean;
+        hasContinuationSemantics: boolean;
+        hasScratchpadContext: boolean;
+        hasOriginalRequirement: boolean;
+        hasCoordinatorPlan: boolean;
+        hasReason: boolean;
+        hasVerification: boolean;
+        hasReceipt: boolean;
+        failedRouteKeepsSameWorker: boolean;
+        independentRouteUsesFreshVerifier: boolean;
+        independentVerifierSelectsTestAgent: boolean;
+        independentVerifierExcludesOriginalTarget: any;
+        independentVerifierReportsMissingCandidate: boolean;
+        independentReworkDispatchesToVerifier: boolean;
+        independentReworkTaskNamesReviewSubject: any;
+        independentReworkBuildsNativeTestAgentHandoff: boolean;
+        independentReworkKeepsNativeHandoffOutOfVisibleText: boolean;
+        nativeTestAgentReportBecomesIndependentReviewReceipt: boolean;
+        nativeTestAgentReceiptConsumesVerdictArtifact: boolean;
+        nativeFailedTestAgentReceiptRequestsRework: boolean;
+        nativeFailedTestAgentVisibleOutputShowsReworkPath: boolean;
+        nativeFailedTestAgentVisibleOutputHidesRawVerdict: boolean;
+        nativeTestAgentOutputCarriesReceiptAndArtifacts: boolean;
+        nativeTestAgentVisibleOutputUsesFriendlyLabels: boolean;
+        nativeTestAgentReceiptIncludesBrowserEvidenceSummary: boolean;
+        nativeTestAgentReceiptIncludesUploadDownloadEvidenceSummary: boolean;
+        nativeTestAgentReceiptIncludesTableEvidenceSummary: boolean;
+        nativeTestAgentVisibleOutputIncludesBrowserEvidenceSummary: boolean;
+        nativeTestAgentVisibleOutputIncludesUploadDownloadEvidenceSummary: boolean;
+        nativeTestAgentVisibleOutputIncludesTableEvidenceSummary: boolean;
+        nativeTestAgentTableFailureSummaryHidesLocatorDetails: boolean;
+        nativeTestAgentPlanSummaryIsUserReadable: boolean;
+        nativeTestAgentPlanSummaryUsesFriendlyArtifactLabels: boolean;
+        nativeTestAgentInvalidPlanBlocksBeforeExecution: boolean;
+        nativeTestAgentRunnerBypassesThirdPartyToolSync: boolean;
+        independentReviewGateCreatesFollowUp: boolean;
+        independentReviewGateRoutesToTestAgent: any;
+        failedIndependentReviewCreatesImplementationRework: any;
+        failedIndependentReviewRoutesBackToImplementationWorker: boolean;
+        failedIndependentReviewDoesNotSpawnVerifierAgain: any;
+        independentReworkBlocksWithoutVerifier: any;
+        wrongDirectionRequestsStop: boolean;
+        wrongDirectionContinuationInterruptsOldRun: boolean;
+        routeLabelsAreUserFriendly: boolean;
+    };
+    routes: {
+        failedRoute: {
+            schema: string;
+            project: string;
+            strategy: string;
+            continuationStrategy: string;
+            continuation_strategy: string;
+            user_label: string;
+            reason: string;
+            context_overlap: any;
+            requires_stop: boolean;
+            requires_fresh_verifier: boolean;
+            signals: string[];
+        };
+        independentRoute: {
+            schema: string;
+            project: string;
+            strategy: string;
+            continuationStrategy: string;
+            continuation_strategy: string;
+            user_label: string;
+            reason: string;
+            context_overlap: any;
+            requires_stop: boolean;
+            requires_fresh_verifier: boolean;
+            signals: string[];
+        };
+        wrongDirectionRoute: {
+            schema: string;
+            project: string;
+            strategy: string;
+            continuationStrategy: string;
+            continuation_strategy: string;
+            user_label: string;
+            reason: string;
+            context_overlap: any;
+            requires_stop: boolean;
+            requires_fresh_verifier: boolean;
+            signals: string[];
+        };
+    };
+    independent_verifier: {
+        verifierSelection: {
+            schema: string;
+            available: boolean;
+            originalTarget: string;
+            targetName: any;
+            reason: string;
+            candidates: any;
+        };
+        noVerifierSelection: {
+            schema: string;
+            available: boolean;
+            originalTarget: string;
+            targetName: any;
+            reason: string;
+            candidates: any;
+        };
+        independentFollowUp: any;
+        independentGateFollowUps: {
+            mention: string;
+            targetName: string;
+            project: string;
+            summary: string;
+            message: string;
+            reason: string;
+            rework_kind: string;
+            independentReviewGate: {
+                required: boolean;
+                pass: boolean;
+                status: string;
+                reason: string;
+                file_change_count: number;
+                high_risk_files: {
+                    project: any;
+                    path: any;
+                }[];
+                evidence_count: number;
+                passed_count: number;
+                failed_count: number;
+                evidence: any[];
+                failed_evidence: any[];
+            };
+            userTaskPreview: string;
+        }[];
+        independentGateRoutedFollowUp: any;
+        failedReviewReworkFollowUps: any[];
+        failedReviewRoutedFollowUp: any;
+        blockedIndependentFollowUp: any;
+    };
+};
 export declare function createAndQueueTask(task: any, ctx: CollabCtx): {
     task: any;
     queueResult: {
@@ -4448,8 +12922,31 @@ export declare function runCollaborationProtocolSelfTest(): {
             independentVerifierReportsMissingCandidate: boolean;
             independentReworkDispatchesToVerifier: boolean;
             independentReworkTaskNamesReviewSubject: any;
+            independentReworkBuildsNativeTestAgentHandoff: boolean;
+            independentReworkKeepsNativeHandoffOutOfVisibleText: boolean;
+            nativeTestAgentReportBecomesIndependentReviewReceipt: boolean;
+            nativeTestAgentReceiptConsumesVerdictArtifact: boolean;
+            nativeFailedTestAgentReceiptRequestsRework: boolean;
+            nativeFailedTestAgentVisibleOutputShowsReworkPath: boolean;
+            nativeFailedTestAgentVisibleOutputHidesRawVerdict: boolean;
+            nativeTestAgentOutputCarriesReceiptAndArtifacts: boolean;
+            nativeTestAgentVisibleOutputUsesFriendlyLabels: boolean;
+            nativeTestAgentReceiptIncludesBrowserEvidenceSummary: boolean;
+            nativeTestAgentReceiptIncludesUploadDownloadEvidenceSummary: boolean;
+            nativeTestAgentReceiptIncludesTableEvidenceSummary: boolean;
+            nativeTestAgentVisibleOutputIncludesBrowserEvidenceSummary: boolean;
+            nativeTestAgentVisibleOutputIncludesUploadDownloadEvidenceSummary: boolean;
+            nativeTestAgentVisibleOutputIncludesTableEvidenceSummary: boolean;
+            nativeTestAgentTableFailureSummaryHidesLocatorDetails: boolean;
+            nativeTestAgentPlanSummaryIsUserReadable: boolean;
+            nativeTestAgentPlanSummaryUsesFriendlyArtifactLabels: boolean;
+            nativeTestAgentInvalidPlanBlocksBeforeExecution: boolean;
+            nativeTestAgentRunnerBypassesThirdPartyToolSync: boolean;
             independentReviewGateCreatesFollowUp: boolean;
             independentReviewGateRoutesToTestAgent: any;
+            failedIndependentReviewCreatesImplementationRework: any;
+            failedIndependentReviewRoutesBackToImplementationWorker: boolean;
+            failedIndependentReviewDoesNotSpawnVerifierAgain: any;
             independentReworkBlocksWithoutVerifier: any;
             wrongDirectionRequestsStop: boolean;
             wrongDirectionContinuationInterruptsOldRun: boolean;
@@ -4541,6 +13038,8 @@ export declare function runCollaborationProtocolSelfTest(): {
                 userTaskPreview: string;
             }[];
             independentGateRoutedFollowUp: any;
+            failedReviewReworkFollowUps: any[];
+            failedReviewRoutedFollowUp: any;
             blockedIndependentFollowUp: any;
         };
     };

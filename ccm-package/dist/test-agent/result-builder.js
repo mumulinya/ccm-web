@@ -2,6 +2,8 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildTestAgentReport = buildTestAgentReport;
 const coverage_1 = require("./coverage");
+const interaction_summary_1 = require("./browser/interaction-summary");
+const network_summary_1 = require("./browser/network-summary");
 const required_checks_1 = require("./required-checks");
 const utils_1 = require("./utils");
 function resultStatusToAgent(status) {
@@ -86,6 +88,24 @@ function buildEvidence(commandResults, devServerResults, httpResults, browserRes
                 path: result.consoleLogPath,
             });
         }
+        if (result.dialogLogPath) {
+            evidence.push({
+                type: "artifact",
+                project: result.project,
+                title: `Dialog log: ${result.name}`,
+                status: resultStatusToAgent(result.status),
+                path: result.dialogLogPath,
+            });
+        }
+        if (result.popupLogPath) {
+            evidence.push({
+                type: "artifact",
+                project: result.project,
+                title: `Popup log: ${result.name}`,
+                status: resultStatusToAgent(result.status),
+                path: result.popupLogPath,
+            });
+        }
         if (result.networkLogPath) {
             evidence.push({
                 type: "artifact",
@@ -131,6 +151,8 @@ function buildTestAgentReport(input) {
     const httpResults = input.httpResults || [];
     const browserToolCalls = input.browserToolCalls || [];
     const finishedAt = (0, utils_1.nowIso)();
+    const browserInteractionSummary = (0, interaction_summary_1.buildBrowserInteractionSummary)(browserResults);
+    const browserNetworkSummary = (0, network_summary_1.buildBrowserNetworkSummary)(browserResults);
     const requiredCheckCoverage = (0, required_checks_1.buildRequiredCheckCoverage)({
         workOrder,
         commandResults,
@@ -196,6 +218,8 @@ function buildTestAgentReport(input) {
         httpResults,
         browserResults,
         browserToolCalls,
+        browserNetworkSummary,
+        browserInteractionSummary,
         requiredCheckCoverage,
         acceptanceCoverage,
         evidence,

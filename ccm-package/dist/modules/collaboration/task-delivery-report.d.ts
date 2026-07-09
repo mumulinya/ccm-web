@@ -31,6 +31,8 @@ export declare function buildTaskDeliveryReport(task: any, summary: any, status:
         metric_tone: string;
         executed_count: number;
         failed_count: number;
+        incomplete_count: number;
+        weak_missing_count: number;
         suggested_count: number;
         missing_required_count: number;
         external_runner_count: number;
@@ -38,6 +40,8 @@ export declare function buildTaskDeliveryReport(task: any, summary: any, status:
         source_gate_passed: boolean;
         executed: string[];
         failed: string[];
+        incomplete: string[];
+        weak_missing: string[];
         suggested: string[];
         missing_required: string[];
         items: string[];
@@ -59,6 +63,8 @@ export declare function buildTaskDeliveryReport(task: any, summary: any, status:
         metric_tone: string;
         executed_count: number;
         failed_count: number;
+        incomplete_count: number;
+        weak_missing_count: number;
         suggested_count: number;
         missing_required_count: number;
         external_runner_count: number;
@@ -66,6 +72,8 @@ export declare function buildTaskDeliveryReport(task: any, summary: any, status:
         source_gate_passed: boolean;
         executed: string[];
         failed: string[];
+        incomplete: string[];
+        weak_missing: string[];
         suggested: string[];
         missing_required: string[];
         items: string[];

@@ -1,3 +1,12 @@
+export type TaskAgentMemoryContextSnapshotRef = {
+    snapshotId: string;
+    snapshotPath: string;
+    checksum: string;
+    workerContextPacketId?: string;
+    workerHandoffId?: string;
+    gateIds?: string[];
+    generatedAt: string;
+};
 export type TaskAgentSession = {
     id: string;
     scopeId: string;
@@ -27,6 +36,12 @@ export type TaskAgentSession = {
     allowedTools?: any;
     permissionRules?: any[];
     runtimeToolUpdatedAt?: string;
+    memoryContextSnapshotId?: string;
+    memoryContextSnapshotPath?: string;
+    memoryContextSnapshotChecksum?: string;
+    memoryContextPacketId?: string;
+    memoryContextSnapshotAt?: string;
+    memoryContextSnapshots?: TaskAgentMemoryContextSnapshotRef[];
 };
 export declare function openTaskAgentSession(input: {
     scopeId: string;
@@ -43,6 +58,59 @@ export declare function recordTaskAgentSessionTurn(sessionId: string, result?: {
     permissionDrift?: boolean;
     runtimeToolSnapshot?: any;
 }): TaskAgentSession;
+export declare function bindTaskAgentMemoryContextSnapshot(sessionId: string, input?: {
+    taskId?: string;
+    groupId?: string;
+    project?: string;
+    agentType?: string;
+    nativeSessionId?: string;
+    turn?: number;
+    executionId?: string;
+    traceId?: string;
+    workerContextPacket?: any;
+    workerHandoff?: any;
+    workerHandoffSummary?: any;
+    memoryContext?: any;
+    renderedHandoff?: string;
+    renderedPrompt?: string;
+    runtimeToolSnapshot?: any;
+}): {
+    session: TaskAgentSession;
+    snapshot: {
+        checksum: string;
+        snapshot_file: string;
+        schema: string;
+        snapshot_id: string;
+        generated_at: string;
+        session: {
+            id: any;
+            scope_id: any;
+            task_id: string;
+            group_id: string;
+            project: string;
+            agent_type: import("../agents/runtime").AgentRuntimeId;
+            native_session_id: string;
+            turn: number;
+            resume_mode: any;
+        };
+        context: {
+            execution_id: string;
+            trace_id: string;
+            worker_context_packet_id: string;
+            worker_handoff_id: string;
+            worker_context_packet: any;
+            worker_handoff_summary: any;
+            memory_context: any;
+            memory_context_checksum: string;
+            rendered_handoff_checksum: string;
+            rendered_prompt_checksum: string;
+            rendered_prompt_excerpt: string;
+            runtime_tool_snapshot: any;
+            gate_ids: string[];
+        };
+    };
+    ref: TaskAgentMemoryContextSnapshotRef;
+};
 export declare function advanceTaskAgentSession(current: TaskAgentSession, result?: {
     nativeSessionId?: string;
     success?: boolean;
@@ -83,6 +151,101 @@ export declare function listTaskAgentSessions(filter?: {
     project?: string;
     status?: string;
 }): any;
+export declare function listTaskAgentMemoryContextSnapshots(filter?: {
+    scopeId?: string;
+    taskId?: string;
+    groupId?: string;
+    project?: string;
+    status?: string;
+    sessionId?: string;
+}): any[];
+export declare function buildTaskAgentMemoryContextSnapshotInventory(filter?: {
+    scopeId?: string;
+    taskId?: string;
+    groupId?: string;
+    project?: string;
+    status?: string;
+    sessionId?: string;
+    staleAfterDays?: number;
+    stale_after_days?: number;
+    retentionDays?: number;
+    retention_days?: number;
+    keepLatestPerSession?: number;
+    keep_latest_per_session?: number;
+    nowMs?: number;
+    includeOrphans?: boolean;
+    include_orphans?: boolean;
+}): {
+    schema: string;
+    generatedAt: string;
+    directory: string;
+    filters: {
+        scopeId: string;
+        taskId: string;
+        groupId: string;
+        project: string;
+        status: string;
+        sessionId: string;
+    };
+    policy: {
+        staleDays: number;
+        retentionDays: number;
+        keepLatestPerSession: number;
+    };
+    summary: {
+        sessionCount: any;
+        snapshotCount: number;
+        okCount: number;
+        warnCount: number;
+        failCount: number;
+        referencedCount: number;
+        orphanFileCount: number;
+        missingFileCount: number;
+        unreadableCount: number;
+        checksumMismatchCount: number;
+        missingPacketCount: number;
+        missingGateCount: number;
+        staleCount: number;
+        prunableCount: number;
+        groupCount: number;
+    };
+    groups: any[];
+    rows: any[];
+    weakRows: any[];
+    prunableRows: any[];
+};
+export declare function pruneTaskAgentMemoryContextSnapshots(options?: any): {
+    schema: string;
+    generatedAt: string;
+    dryRun: boolean;
+    policy: {
+        staleDays: number;
+        retentionDays: number;
+        keepLatestPerSession: number;
+    };
+    before: {
+        sessionCount: any;
+        snapshotCount: number;
+        okCount: number;
+        warnCount: number;
+        failCount: number;
+        referencedCount: number;
+        orphanFileCount: number;
+        missingFileCount: number;
+        unreadableCount: number;
+        checksumMismatchCount: number;
+        missingPacketCount: number;
+        missingGateCount: number;
+        staleCount: number;
+        prunableCount: number;
+        groupCount: number;
+    };
+    candidateCount: number;
+    prunedCount: number;
+    skippedCount: number;
+    pruned: any[];
+    skipped: any[];
+};
 export declare function purgeTaskAgentSessions(taskId: string): any;
 export declare function reconcileTaskAgentSessions(tasks: any[], nowMs?: number): {
     closed: number;
@@ -112,5 +275,6 @@ export declare function runTaskAgentSessionSelfTest(): {
         invalidNativeSessionCreatesRecoveryPath: boolean;
         runtimeSnapshotPersistsAcrossTurns: boolean;
         permissionDriftRebuildsNativeSession: boolean;
+        taskAgentMemoryContextSnapshotBindsSession: boolean;
     };
 };

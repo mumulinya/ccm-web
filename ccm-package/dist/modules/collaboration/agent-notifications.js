@@ -9,6 +9,7 @@ exports.formatCollectedAgentOutput = formatCollectedAgentOutput;
 exports.runTaskNotificationDisplaySelfTest = runTaskNotificationDisplaySelfTest;
 const memory_1 = require("./memory");
 const agent_receipts_1 = require("./agent-receipts");
+const user_facing_text_1 = require("../../agents/user-facing-text");
 const TASK_NOTIFICATION_INTERNAL_TEXT_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|<\s*\/?\s*task-notification|receipt-status|task-id|WorkerContextPacket|trace_id|session_id|native_session|scratchpad|raw\s+receipt|raw\s+payload|Worker\s+completed/i;
 const TASK_NOTIFICATION_XML_TAG_PATTERN = /<\/?(?:task-notification|task-id|status|receipt-status|summary|result|usage|duration_ms|total_tokens|tool_uses)>/gi;
 function escapeTaskNotificationText(value) {
@@ -38,41 +39,41 @@ function normalizeTaskNotificationStatus(text, receipt = null) {
     return "completed";
 }
 function buildTaskNotificationStatusSummary(agent, status, receiptStatus = "") {
-    const name = String(agent || "子 Agent").trim() || "子 Agent";
+    const name = (0, user_facing_text_1.sanitizeMainAgentRoleLanguage)(String(agent || "执行成员").trim() || "执行成员");
     const normalizedStatus = String(status || "").trim();
     const normalizedReceiptStatus = String(receiptStatus || "").trim();
     if (normalizedStatus === "missing_receipt" || normalizedReceiptStatus === "missing") {
         return `${name} 已返回结果，但缺少可验收的结构化结果说明。`;
     }
     if (normalizedStatus === "failed" || normalizedReceiptStatus === "failed") {
-        return `${name} 的执行没有通过，主 Agent 会根据缺口继续处理。`;
+        return `${name} 的执行没有通过，我会根据缺口继续处理。`;
     }
     if (normalizedStatus === "blocked" || ["blocked", "needs_info"].includes(normalizedReceiptStatus)) {
         return `${name} 遇到阻塞，需要补充信息或调整后继续。`;
     }
     if (normalizedStatus === "partial" || normalizedReceiptStatus === "partial") {
-        return `${name} 只完成了部分工作，主 Agent 会继续跟进剩余缺口。`;
+        return `${name} 只完成了部分工作，我会继续跟进剩余缺口。`;
     }
-    return `${name} 已提交结果说明，主 Agent 正在汇总验收。`;
+    return `${name} 已提交结果说明，我正在汇总验收。`;
 }
 function sanitizeTaskNotificationUserText(value, fallback = "", max = 600) {
-    const fallbackText = (0, memory_1.compactMemoryText)(fallback || "子 Agent 已返回结果，主 Agent 正在汇总验收。", max);
+    const fallbackText = (0, memory_1.compactMemoryText)((0, user_facing_text_1.sanitizeMainAgentRoleLanguage)(fallback || "执行成员已返回结果，我正在汇总验收。"), max);
     const raw = String(value || "").trim();
     if (!raw)
         return fallbackText;
     const normalizedRaw = raw
-        .replace(/Worker completed without\s+CCM_AGENT_RECEIPT/gi, "子 Agent 已返回结果，但缺少可验收的结构化结果说明");
+        .replace(/Worker completed without\s+CCM_AGENT_RECEIPT/gi, "执行成员已返回结果，但缺少可验收的结构化结果说明");
     const beforeReceipt = normalizedRaw.split(/CCM_AGENT_RECEIPT/i)[0].trim();
     const source = beforeReceipt && beforeReceipt.length >= 8 ? beforeReceipt : normalizedRaw;
-    const text = (0, memory_1.compactMemoryText)(source, max)
+    const text = (0, user_facing_text_1.sanitizeMainAgentRoleLanguage)((0, memory_1.compactMemoryText)(source, max)
         .replace(TASK_NOTIFICATION_XML_TAG_PATTERN, " ")
-        .replace(/Worker completed without\s+CCM_AGENT_RECEIPT/gi, "子 Agent 已返回结果，但缺少可验收的结构化结果说明")
+        .replace(/Worker completed without\s+CCM_AGENT_RECEIPT/gi, "执行成员已返回结果，但缺少可验收的结构化结果说明")
         .replace(/CCM_AGENT_RECEIPT/gi, "结构化结果说明")
         .replace(/CCM_AGENT_REQUESTS/gi, "内部协作请求")
-        .replace(/task-notification/gi, "子 Agent 完成通知")
+        .replace(/task-notification/gi, "执行成员完成通知")
         .replace(/receipt-status/gi, "结果说明状态")
-        .replace(/task-id/gi, "子 Agent")
-        .replace(/\bWorker\b/g, "子 Agent")
+        .replace(/task-id/gi, "执行成员")
+        .replace(/\bWorker\b/g, "执行成员")
         .replace(/WorkerContextPacket/gi, "任务上下文包")
         .replace(/\b(?:trace_id|session_id|native_session|scratchpad|runtime kernel|workflow_timeline)\s*[:=]\s*[\w.-]+/gi, " ")
         .replace(/trace_id|session_id|native_session|scratchpad/gi, "技术详情")
@@ -81,7 +82,7 @@ function sanitizeTaskNotificationUserText(value, fallback = "", max = 600) {
         .replace(/\s+/g, " ")
         .replace(/\s+([。！？；，、,.!?;:])/g, "$1")
         .replace(/([。！？])\s*([。！？])+/g, "$1")
-        .trim();
+        .trim());
     if (!text)
         return fallbackText;
     return TASK_NOTIFICATION_INTERNAL_TEXT_PATTERN.test(text) ? fallbackText : (0, memory_1.compactMemoryText)(text, max);

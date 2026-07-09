@@ -134,7 +134,13 @@ function ensureDirs() {
 }
 
 function safePart(value: any, fallback = "execution") {
-  return String(value || fallback).trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100) || fallback;
+  return String(value || fallback)
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 100)
+    .replace(/^-+|-+$/g, "")
+    || fallback;
 }
 
 function hash(value: any, length = 16) {

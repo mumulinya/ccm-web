@@ -7,10 +7,10 @@ export const mainDecisionModeLabel = (mode) => ({
   conversation: '普通回复',
   project_analysis: '项目分析',
   project_task: '创建任务',
-  delegation: '派发子 Agent',
+  delegation: '安排执行成员',
   followup: '追加要求',
   governance: '任务治理'
-}[mode] || '主 Agent 决策')
+}[mode] || '处理决策')
 
 export const mainDecisionTone = (decision) => {
   if (!decision?.verify?.passed) return 'warning'
@@ -29,7 +29,7 @@ export const mainDecisionActionSummary = (decision) => {
     query_knowledge_base: '查知识库',
     inspect_task_status: '看任务',
     create_project_task: '建任务',
-    dispatch_child_agent: '派发',
+    dispatch_child_agent: '安排执行',
     ask_user_clarification: '追问',
     govern_task_lifecycle: '治理',
     read_child_agent_receipts: '读结果',
@@ -41,12 +41,23 @@ export const mainDecisionActionSummary = (decision) => {
 
 export const mainDecisionPlanSummary = (decision) => {
   const display = decision?.todo_plan?.display || {}
+  const policy = decision?.todo_plan?.display_policy || decision?.todo_plan?.displayPolicy || {}
   if (decision?.mode === 'conversation' && (display.user_visible === false || display.hide_for_simple_conversation === true)) return ''
   const steps = Array.isArray(decision?.user_plan_steps)
     ? decision.user_plan_steps
     : Array.isArray(decision?.todo_plan?.steps)
       ? decision.todo_plan.steps
       : []
+  const archiveCompleted = policy.archive_completed_todo === true
+    || policy.archiveCompletedTodo === true
+    || policy.archived_when_complete === true
+    || policy.archivedWhenComplete === true
+    || policy.visible_when_completed === false
+    || policy.visibleWhenCompleted === false
+  const hasVerificationNudge = decision?.todo_plan?.verification_nudge === true
+    || decision?.todo_plan?.verificationNudge === true
+    || Boolean(decision?.todo_plan?.verification_reminder || decision?.todo_plan?.verificationReminder)
+  if (archiveCompleted && !hasVerificationNudge && steps.length > 0 && steps.every(step => ['completed', 'skipped', 'cancelled'].includes(String(step?.status || '').toLowerCase()))) return ''
   const active = steps.find(step => ['in_progress', 'reviewing', 'reworking', 'needs_confirmation', 'failed'].includes(step.status))
   const current = active || steps.find(step => step.status === 'pending') || steps[steps.length - 1]
   const preview = (['in_progress', 'reviewing', 'reworking'].includes(current?.status) && (current?.activeForm || current?.active_form))

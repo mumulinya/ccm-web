@@ -8,6 +8,14 @@ export interface TestAgentArtifactVerificationItem {
     actualSizeBytes?: number;
     expectedSha256?: string;
     actualSha256?: string;
+    imageFormat?: string;
+    imageWidth?: number;
+    imageHeight?: number;
+    imageUniqueColors?: number;
+    imageBlank?: boolean;
+    artifactFormat?: string;
+    artifactEntries?: number;
+    artifactEvents?: number;
     error?: string;
 }
 export interface TestAgentArtifactVerification {

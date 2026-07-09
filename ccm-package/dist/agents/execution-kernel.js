@@ -83,7 +83,13 @@ function ensureDirs() {
     }
 }
 function safePart(value, fallback = "execution") {
-    return String(value || fallback).trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100) || fallback;
+    return String(value || fallback)
+        .trim()
+        .replace(/[^a-zA-Z0-9._-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 100)
+        .replace(/^-+|-+$/g, "")
+        || fallback;
 }
 function hash(value, length = 16) {
     return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex").slice(0, length);

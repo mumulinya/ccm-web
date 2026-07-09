@@ -56,6 +56,8 @@ export declare function buildSelfContainedWorkerHandoff(input: SelfContainedWork
         post_compact_reinjection_gate: any;
         post_compact_dispatch_marker: any;
         read_plan_revalidation_gate: any;
+        global_memory_health_gate: any;
+        api_microcompact_native_apply_plan: any;
     };
     verification: {
         required: string;
@@ -86,6 +88,8 @@ export declare function buildSelfContainedWorkerHandoff(input: SelfContainedWork
             has_post_compact_reinjection_gate: boolean;
             has_post_compact_dispatch_marker: boolean;
             has_read_plan_revalidation_gate: boolean;
+            has_global_memory_health_gate: boolean;
+            has_api_microcompact_native_apply_plan: boolean;
         };
     };
 };
@@ -111,6 +115,7 @@ export declare function runWorkerHandoffSelfTest(): {
         ackAndReceipt: boolean;
         dependencyAndInjection: boolean;
         memoryContextPreserved: boolean;
+        globalMemoryHealthGatePreserved: boolean;
         memoryFreshnessGatePreserved: boolean;
         postCompactReinjectionGatePreserved: boolean;
         postCompactDispatchMarkerPreserved: boolean;
@@ -149,6 +154,8 @@ export declare function runWorkerHandoffSelfTest(): {
             post_compact_reinjection_gate: any;
             post_compact_dispatch_marker: any;
             read_plan_revalidation_gate: any;
+            global_memory_health_gate: any;
+            api_microcompact_native_apply_plan: any;
         };
         verification: {
             required: string;
@@ -179,6 +186,8 @@ export declare function runWorkerHandoffSelfTest(): {
                 has_post_compact_reinjection_gate: boolean;
                 has_post_compact_dispatch_marker: boolean;
                 has_read_plan_revalidation_gate: boolean;
+                has_global_memory_health_gate: boolean;
+                has_api_microcompact_native_apply_plan: boolean;
             };
         };
     };

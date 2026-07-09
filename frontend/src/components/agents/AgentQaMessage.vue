@@ -96,7 +96,7 @@ const isLoading = (action) => !!props.actionLoading[`${qa.value.id}:${action}`]
     <div class="agent-qa-content" v-html="contentHtml"></div>
     <div v-if="visibleQuestion" class="agent-qa-question">问：{{ visibleQuestion }}</div>
     <div v-if="visibleAnswer" class="agent-qa-answer">答：{{ visibleAnswer }}</div>
-    <div v-if="qa.acceptance?.reason" class="agent-qa-meta">主 Agent 结论：{{ sanitizeUserFacingAgentText(qa.acceptance.reason, '主 Agent 已完成问答仲裁。', 180) }}</div>
+    <div v-if="qa.acceptance?.reason" class="agent-qa-meta">仲裁结论：{{ sanitizeUserFacingAgentText(qa.acceptance.reason, '问答仲裁已完成。', 180) }}</div>
     <div v-if="visibleNextAction" class="agent-qa-meta">下一步：{{ visibleNextAction }}</div>
     <div v-if="qa.permission_boundary?.pass === false" class="agent-qa-question">权限门禁：检测到问答外副作用，回答未采纳。</div>
     <details v-if="technicalRows.length" class="agent-qa-details">
@@ -126,7 +126,7 @@ const isLoading = (action) => !!props.actionLoading[`${qa.value.id}:${action}`]
         class="btn btn-sm btn-outline"
         :disabled="isLoading('accept')"
         @click="emit('action', 'accept')"
-      >主 Agent 采纳</button>
+      >采纳</button>
       <button
         v-if="canArbitrate"
         class="btn btn-sm btn-outline"

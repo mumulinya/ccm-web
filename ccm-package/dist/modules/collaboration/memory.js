@@ -33,10 +33,12 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GROUP_GLOBAL_MEMORY_ARBITRATION_LEDGER_VERSION = exports.GROUP_COMPACT_FILE_REFERENCE_READ_PLAN_REVALIDATION_GATE_VERSION = exports.GROUP_COMPACT_FILE_REFERENCE_LEDGER_VERSION = exports.GROUP_TOOL_CONTINUITY_SNAPSHOT_VERSION = exports.GROUP_SESSION_MEMORY_SNAPSHOT_VERSION = exports.GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_LEDGER_VERSION = exports.GROUP_MEMORY_POST_COMPACT_FIRST_DISPATCH_MARKER_VERSION = exports.GROUP_MEMORY_POST_COMPACT_REINJECTION_GATE_VERSION = exports.GROUP_MEMORY_DISPATCH_FRESHNESS_GATE_VERSION = exports.GROUP_MEMORY_SOURCE_CHANGE_TRIGGER_VERSION = exports.GROUP_MEMORY_RELOAD_AUDIT_VERSION = exports.GROUP_MEMORY_SOURCE_MANIFEST_VERSION = void 0;
+exports.GROUP_GLOBAL_MEMORY_HEALTH_GATE_VERSION = exports.GROUP_GLOBAL_MEMORY_ARBITRATION_LEDGER_VERSION = exports.GROUP_COMPACT_FILE_REFERENCE_READ_PLAN_REVALIDATION_GATE_VERSION = exports.GROUP_COMPACT_FILE_REFERENCE_LEDGER_VERSION = exports.GROUP_TOOL_CONTINUITY_SNAPSHOT_VERSION = exports.GROUP_SESSION_MEMORY_SNAPSHOT_VERSION = exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS = exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_LEDGER_VERSION = exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_LEDGER_VERSION = exports.GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_LEDGER_VERSION = exports.GROUP_MEMORY_POST_COMPACT_FIRST_DISPATCH_MARKER_VERSION = exports.GROUP_MEMORY_POST_COMPACT_REINJECTION_GATE_VERSION = exports.GROUP_MEMORY_DISPATCH_FRESHNESS_GATE_VERSION = exports.GROUP_MEMORY_SOURCE_CHANGE_TRIGGER_VERSION = exports.GROUP_MEMORY_RELOAD_AUDIT_VERSION = exports.GROUP_MEMORY_SOURCE_MANIFEST_VERSION = void 0;
 exports.getGroupMemoryFile = getGroupMemoryFile;
 exports.getGroupPostCompactDispatchLedgerFile = getGroupPostCompactDispatchLedgerFile;
 exports.getGroupPostCompactCandidateUsageLedgerFile = getGroupPostCompactCandidateUsageLedgerFile;
+exports.getGroupApiMicrocompactNativeApplyProofLedgerFile = getGroupApiMicrocompactNativeApplyProofLedgerFile;
+exports.getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile;
 exports.getGroupSessionMemorySnapshotFile = getGroupSessionMemorySnapshotFile;
 exports.getGroupSessionMemoryMarkdownFile = getGroupSessionMemoryMarkdownFile;
 exports.getGroupToolContinuitySnapshotFile = getGroupToolContinuitySnapshotFile;
@@ -51,6 +53,7 @@ exports.runGroupMemoryStorageRecoverySelfTest = runGroupMemoryStorageRecoverySel
 exports.uniqueByKey = uniqueByKey;
 exports.compactMemoryText = compactMemoryText;
 exports.compactPreserveLines = compactPreserveLines;
+exports.buildChildGlobalAgentMemoryHealthGate = buildChildGlobalAgentMemoryHealthGate;
 exports.readGroupGlobalMemoryArbitrationLedger = readGroupGlobalMemoryArbitrationLedger;
 exports.recordGroupGlobalMemoryArbitrationLedger = recordGroupGlobalMemoryArbitrationLedger;
 exports.distillGroupGlobalMemoryArbitrationToTypedMemory = distillGroupGlobalMemoryArbitrationToTypedMemory;
@@ -72,8 +75,16 @@ exports.buildGroupMemoryContext = buildGroupMemoryContext;
 exports.buildGroupMemorySourceManifest = buildGroupMemorySourceManifest;
 exports.readGroupPostCompactDispatchLedger = readGroupPostCompactDispatchLedger;
 exports.readGroupPostCompactCandidateUsageLedger = readGroupPostCompactCandidateUsageLedger;
+exports.readGroupApiMicrocompactNativeApplyProofLedger = readGroupApiMicrocompactNativeApplyProofLedger;
+exports.readGroupApiMicrocompactNativeApplyRequestTelemetryLedger = readGroupApiMicrocompactNativeApplyRequestTelemetryLedger;
 exports.recordGroupPostCompactCandidateUsageLedger = recordGroupPostCompactCandidateUsageLedger;
 exports.buildGroupPostCompactCandidateUsageSummary = buildGroupPostCompactCandidateUsageSummary;
+exports.buildGroupApiMicrocompactNativeApplyAdapterTelemetryRow = buildGroupApiMicrocompactNativeApplyAdapterTelemetryRow;
+exports.recordGroupApiMicrocompactNativeApplyAdapterTelemetry = recordGroupApiMicrocompactNativeApplyAdapterTelemetry;
+exports.recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger = recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger;
+exports.buildGroupApiMicrocompactNativeApplyRequestTelemetrySummary = buildGroupApiMicrocompactNativeApplyRequestTelemetrySummary;
+exports.recordGroupApiMicrocompactNativeApplyProofLedger = recordGroupApiMicrocompactNativeApplyProofLedger;
+exports.buildGroupApiMicrocompactNativeApplyProofSummary = buildGroupApiMicrocompactNativeApplyProofSummary;
 exports.recordGroupMemoryReloadAudit = recordGroupMemoryReloadAudit;
 exports.scheduleGroupMemoryAutoCompaction = scheduleGroupMemoryAutoCompaction;
 exports.runGroupMemoryAutoCompactionNow = runGroupMemoryAutoCompactionNow;
@@ -95,8 +106,11 @@ exports.runGroupPostCompactCandidateUsageLedgerSelfTest = runGroupPostCompactCan
 exports.runGroupProjectMemoryImportContextSelfTest = runGroupProjectMemoryImportContextSelfTest;
 exports.runGroupGlobalClaudeMemoryImportContextSelfTest = runGroupGlobalClaudeMemoryImportContextSelfTest;
 exports.runGroupGlobalAgentMemoryBridgeContextSelfTest = runGroupGlobalAgentMemoryBridgeContextSelfTest;
+exports.runGroupGlobalAgentMemoryHealthGateSelfTest = runGroupGlobalAgentMemoryHealthGateSelfTest;
 exports.runGroupGlobalAgentMemoryArbitrationContextSelfTest = runGroupGlobalAgentMemoryArbitrationContextSelfTest;
+exports.runGroupGlobalAgentMemorySemanticArbitrationSelfTest = runGroupGlobalAgentMemorySemanticArbitrationSelfTest;
 exports.runGroupGlobalAgentMemoryCrossGroupSuppressionContextSelfTest = runGroupGlobalAgentMemoryCrossGroupSuppressionContextSelfTest;
+exports.runGroupGlobalAgentMemoryCrossGroupSuppressionFreshnessSelfTest = runGroupGlobalAgentMemoryCrossGroupSuppressionFreshnessSelfTest;
 exports.runGroupTypedMemoryContextSelfTest = runGroupTypedMemoryContextSelfTest;
 exports.buildGroupContextPacket = buildGroupContextPacket;
 exports.findLatestWorkerLedger = findLatestWorkerLedger;
@@ -121,14 +135,20 @@ exports.GROUP_MEMORY_DISPATCH_FRESHNESS_GATE_VERSION = 1;
 exports.GROUP_MEMORY_POST_COMPACT_REINJECTION_GATE_VERSION = 1;
 exports.GROUP_MEMORY_POST_COMPACT_FIRST_DISPATCH_MARKER_VERSION = 1;
 exports.GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_LEDGER_VERSION = 1;
+exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_LEDGER_VERSION = 1;
+exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_LEDGER_VERSION = 1;
+exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 exports.GROUP_SESSION_MEMORY_SNAPSHOT_VERSION = 1;
 exports.GROUP_TOOL_CONTINUITY_SNAPSHOT_VERSION = 1;
 exports.GROUP_COMPACT_FILE_REFERENCE_LEDGER_VERSION = 1;
 exports.GROUP_COMPACT_FILE_REFERENCE_READ_PLAN_REVALIDATION_GATE_VERSION = 1;
 exports.GROUP_GLOBAL_MEMORY_ARBITRATION_LEDGER_VERSION = 1;
+exports.GROUP_GLOBAL_MEMORY_HEALTH_GATE_VERSION = 1;
 const GROUP_MEMORY_RELOAD_DIR = path.join(utils_1.CCM_DIR, "group-memory-reload");
 const GROUP_MEMORY_POST_COMPACT_DISPATCH_DIR = path.join(utils_1.CCM_DIR, "group-memory-post-compact-dispatch");
 const GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_DIR = path.join(utils_1.CCM_DIR, "group-memory-post-compact-candidate-usage");
+const GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_DIR = path.join(utils_1.CCM_DIR, "group-api-microcompact-native-apply-proof");
+const GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_DIR = path.join(utils_1.CCM_DIR, "group-api-microcompact-native-apply-request-telemetry");
 const GROUP_MEMORY_REPLAY_REPAIR_DIR = path.join(utils_1.CCM_DIR, "group-memory-replay-repair");
 const GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = path.join(utils_1.CCM_DIR, "group-memory-replay-repair-work-items");
 const GROUP_SESSION_MEMORY_DIR = path.join(utils_1.CCM_DIR, "group-session-memory");
@@ -146,6 +166,12 @@ function getGroupPostCompactDispatchLedgerFile(groupId) {
 }
 function getGroupPostCompactCandidateUsageLedgerFile(groupId) {
     return path.join(GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_DIR, `${String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-")}.json`);
+}
+function getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId) {
+    return path.join(GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_DIR, `${String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown"}.json`);
+}
+function getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId) {
+    return path.join(GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_DIR, `${String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown"}.json`);
 }
 function getGroupReplayRepairLedgerFile(groupId) {
     return path.join(GROUP_MEMORY_REPLAY_REPAIR_DIR, `${String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown"}.json`);
@@ -260,6 +286,14 @@ function readGroupReplayRepairWorkItemsSummary(groupId) {
                 target: item.target || "",
                 repair_target: item.repair_target || "",
                 target_project: item.target_project || "",
+                source: item.source || "",
+                proof_entry_id: item.proof_entry_id || "",
+                plan_checksum: item.plan_checksum || "",
+                request_patch_checksum: item.request_patch_checksum || "",
+                request_telemetry_status: item.request_telemetry_status || "",
+                request_telemetry_session_status: item.request_telemetry_session_status || "",
+                request_telemetry_dispatch_status: item.request_telemetry_dispatch_status || "",
+                runner_request_id: item.runner_request_id || item.request_telemetry_runner_request_id || "",
                 instruction: compactMemoryText(item.instruction || item.description || "", 260),
                 expected: compactMemoryText(item.expected || "", 160),
                 dispatch_target: item.dispatch_target || item.dispatchTarget || "",
@@ -276,6 +310,14 @@ function readGroupReplayRepairWorkItemsSummary(groupId) {
                 target: item.target || "",
                 repair_target: item.repair_target || "",
                 target_project: item.target_project || "",
+                source: item.source || "",
+                proof_entry_id: item.proof_entry_id || "",
+                plan_checksum: item.plan_checksum || "",
+                request_patch_checksum: item.request_patch_checksum || "",
+                request_telemetry_status: item.request_telemetry_status || "",
+                request_telemetry_session_status: item.request_telemetry_session_status || "",
+                request_telemetry_dispatch_status: item.request_telemetry_dispatch_status || "",
+                runner_request_id: item.runner_request_id || item.request_telemetry_runner_request_id || "",
                 instruction: compactMemoryText(item.instruction || item.description || "", 260),
                 expected: compactMemoryText(item.expected || "", 160),
                 dispatch_target: item.dispatch_target || item.dispatchTarget || "",
@@ -354,6 +396,20 @@ function readGroupReplayRepairDispatchCandidatesSummary(groupId, limit = 12) {
                 targetProject,
                 dispatch_target: dispatchTarget,
                 repair_target: item.repair_target || "",
+                source: item.source || "",
+                proof_entry_id: item.proof_entry_id || "",
+                plan_checksum: item.plan_checksum || "",
+                request_patch_checksum: item.request_patch_checksum || "",
+                worker_context_packet_id: item.worker_context_packet_id || item.packet_id || "",
+                worker_context_packet_binding_id: item.worker_context_packet_binding_id || item.binding_id || "",
+                worker_context_packet_memory_policy_reason: item.worker_context_packet_memory_policy_reason || "",
+                binding_id: item.binding_id || item.worker_context_packet_binding_id || "",
+                assignment_id: item.assignment_id || "",
+                dispatch_key: item.dispatch_key || "",
+                request_telemetry_status: item.request_telemetry_status || "",
+                request_telemetry_session_status: item.request_telemetry_session_status || "",
+                request_telemetry_dispatch_status: item.request_telemetry_dispatch_status || "",
+                runner_request_id: item.runner_request_id || item.request_telemetry_runner_request_id || "",
                 instruction: compactMemoryText(item.instruction || item.description || "", 360),
                 expected: compactMemoryText(item.expected || "", 200),
                 prompt_patch: compactMemoryText(item.prompt_patch || "", 900),
@@ -623,6 +679,80 @@ function compactPreserveLines(value, max = 2200) {
         .trim();
     return text.length > max ? `${text.slice(0, max)}\n…（已截断）` : text;
 }
+function buildChildGlobalAgentMemoryHealthGate(input = {}) {
+    const generatedAt = String(input.generatedAt || input.generated_at || new Date().toISOString());
+    const selftestBypass = input.allowSelftestGlobalMemoryForSelfTest === true || input.allow_selftest_global_memory_for_selftest === true;
+    let scan = null;
+    let error = "";
+    try {
+        scan = (0, memory_1.scanGlobalAgentMemorySelfTestContamination)({
+            includeResidue: input.includeResidue !== false && input.include_residue !== false,
+            limit: input.limit || 40,
+        });
+    }
+    catch (err) {
+        error = err?.message || String(err);
+    }
+    const activeCount = Number(scan?.active_contamination_count || 0);
+    const residueCount = Number(scan?.residue_contamination_count || 0);
+    const status = selftestBypass ? "ok" : error ? "fail" : activeCount > 0 ? "fail" : residueCount > 0 ? "warn" : "ok";
+    const action = status === "fail"
+        ? "block_global_agent_memory_recall"
+        : status === "warn"
+            ? "use_active_global_memory_with_residue_warning"
+            : selftestBypass
+                ? "allow_global_agent_memory_recall_for_selftest_fixture"
+                : "allow_global_agent_memory_recall";
+    const summarizeRow = (row = {}) => ({
+        file: row.file || "",
+        role: row.role || "",
+        kind: row.kind || "",
+        id: row.id || "",
+        active: row.active === true,
+    });
+    const rows = Array.isArray(scan?.rows) ? scan.rows : [];
+    const gate = {
+        schema: "ccm-child-global-agent-memory-health-gate-v1",
+        version: exports.GROUP_GLOBAL_MEMORY_HEALTH_GATE_VERSION,
+        gate_id: `ggmh_${crypto.createHash("sha256").update(JSON.stringify([
+            input.groupId || input.group_id || "",
+            input.targetProject || input.target_project || "",
+            input.task || input.query || "",
+            activeCount,
+            residueCount,
+            scan?.generatedAt || generatedAt,
+        ])).digest("hex").slice(0, 18)}`,
+        generated_at: generatedAt,
+        group_id: String(input.groupId || input.group_id || ""),
+        target_project: String(input.targetProject || input.target_project || ""),
+        status,
+        pass: status !== "fail",
+        action,
+        selftest_bypass: selftestBypass,
+        file: memory_1.GLOBAL_AGENT_MEMORY_FILE,
+        scan_status: scan?.status || (error ? "error" : "unknown"),
+        active_contamination_count: activeCount,
+        residue_contamination_count: residueCount,
+        error: compactMemoryText(error, 420),
+        active_rows: rows.filter((row) => row.active === true).slice(0, 8).map(summarizeRow),
+        residue_rows: rows.filter((row) => row.active !== true).slice(0, 8).map(summarizeRow),
+        policy: {
+            fail_blocks_global_memory_recall: true,
+            residue_warn_allows_active_memory: true,
+            child_agent_must_verify_current_source: true,
+            no_contaminated_preview_in_context: true,
+        },
+        receipt_contract: {
+            required_fields: ["globalMemoryUsage", "memoryUsed", "memoryIgnored"],
+            on_fail: "memoryIgnored must mention this gate and no global_memory_id should be used",
+            on_warn: "globalMemoryUsage may use active memory but should acknowledge residue warning if relevant",
+        },
+    };
+    return {
+        ...gate,
+        context_budget: (0, context_budget_1.buildContextBudget)({ context: gate, maxChars: 5000, maxTokens: 12_000 }),
+    };
+}
 function buildChildGlobalAgentMemoryContext(query, options = {}) {
     if (options.includeGlobalAgentMemory === false || options.include_global_agent_memory === false) {
         return {
@@ -631,6 +761,65 @@ function buildChildGlobalAgentMemoryContext(query, options = {}) {
             ignored: false,
             reason: "disabled_by_options",
             file: memory_1.GLOBAL_AGENT_MEMORY_FILE,
+            items: [],
+            citations: [],
+            itemCount: 0,
+        };
+    }
+    if ((0, group_memory_index_1.shouldIgnoreGroupMemoryRequest)(query, options)) {
+        return {
+            schema: "ccm-child-global-agent-memory-recall-v1",
+            included: false,
+            ignored: true,
+            reason: "user_requested_ignore_memory",
+            file: memory_1.GLOBAL_AGENT_MEMORY_FILE,
+            items: [],
+            citations: [],
+            itemCount: 0,
+        };
+    }
+    const memoryHealthGate = buildChildGlobalAgentMemoryHealthGate({
+        groupId: options.groupId || options.group_id,
+        targetProject: options.targetProject || options.target_project,
+        query,
+        generatedAt: options.generatedAt || options.generated_at,
+        allowSelftestGlobalMemoryForSelfTest: options.allowSelftestGlobalMemoryForSelfTest || options.allow_selftest_global_memory_for_selftest,
+    });
+    if (memoryHealthGate.status === "fail") {
+        return {
+            schema: "ccm-child-global-agent-memory-recall-v1",
+            version: 1,
+            included: false,
+            ignored: false,
+            healthBlocked: true,
+            reason: "global_agent_memory_health_gate_failed",
+            file: memory_1.GLOBAL_AGENT_MEMORY_FILE,
+            memory_health_gate: memoryHealthGate,
+            arbitration: {
+                schema: "ccm-child-global-agent-memory-arbitration-summary-v1",
+                status: "health_blocked",
+                localEvidenceCount: 0,
+                demotedCount: 0,
+                conflictCount: 0,
+                crossGroupSuppressedCount: 0,
+                crossGroupScannedLedgerCount: 0,
+                activeCount: 0,
+                authorityOrder: ["current_task_explicit_user_instruction", "current_group_memory", "typed_MEMORY.md", "global_agent_memory"],
+            },
+            crossGroupSuppression: {
+                schema: "ccm-cross-group-global-memory-suppression-summary-v1",
+                sourceDir: GROUP_GLOBAL_MEMORY_ARBITRATION_DIR,
+                scannedLedgerCount: 0,
+                indexedMemoryCount: 0,
+                suppressedCount: 0,
+                advisoryCount: 0,
+                supersededCount: 0,
+                decayedCount: 0,
+                conflictCount: 0,
+                demotedCount: 0,
+                items: [],
+                advisoryItems: [],
+            },
             items: [],
             citations: [],
             itemCount: 0,
@@ -650,6 +839,7 @@ function buildChildGlobalAgentMemoryContext(query, options = {}) {
             items: [],
             citations: [],
             itemCount: 0,
+            memory_health_gate: memoryHealthGate,
         };
     }
     const currentGroupId = String(options.groupId || options.group_id || "");
@@ -696,6 +886,7 @@ function buildChildGlobalAgentMemoryContext(query, options = {}) {
                 : demotedItems.length ? "global_memory_demoted_by_newer_group_evidence"
                     : items.length ? "relevant_global_agent_memory" : "no_relevant_global_agent_memory",
         file: memory_1.GLOBAL_AGENT_MEMORY_FILE,
+        memory_health_gate: memoryHealthGate,
         sessionSummary: recall?.sessionSummary || null,
         boundary: recall?.boundary || null,
         arbitration: {
@@ -879,14 +1070,49 @@ function buildCrossGroupGlobalMemorySuppressionForItem(item, index = {}, options
     const row = key && index?.byMemoryId instanceof Map ? index.byMemoryId.get(key) : null;
     const conflictGroupThreshold = Math.max(1, Number(options.crossGroupGlobalMemoryConflictGroupThreshold || options.cross_group_global_memory_conflict_group_threshold || 1));
     const occurrenceThreshold = Math.max(2, Number(options.crossGroupGlobalMemoryOccurrenceThreshold || options.cross_group_global_memory_occurrence_threshold || 2));
-    const suppressed = !!row && (Number(row.conflictGroupCount || 0) >= conflictGroupThreshold
+    const rawSuppressed = !!row && (Number(row.conflictGroupCount || 0) >= conflictGroupThreshold
         || Number(row.totalOccurrenceCount || 0) >= occurrenceThreshold);
+    const globalUpdatedAt = String(item.updatedAt || item.updated_at || item.source?.timestamp || item.createdAt || item.created_at || "");
+    const globalUpdatedAtMs = Date.parse(globalUpdatedAt || "");
+    const latestEvidenceAt = String(row?.latestSeenAt || "");
+    const latestEvidenceAtMs = Date.parse(latestEvidenceAt || "");
+    const newerGlobalGraceMs = Math.max(0, Number(options.crossGroupGlobalMemoryNewerGraceMs || options.cross_group_global_memory_newer_grace_ms || 1000));
+    const maxEvidenceAgeDays = Number(options.crossGroupGlobalMemoryMaxEvidenceAgeDays || options.cross_group_global_memory_max_evidence_age_days || 90);
+    const maxEvidenceAgeMs = Number.isFinite(maxEvidenceAgeDays) && maxEvidenceAgeDays > 0 ? maxEvidenceAgeDays * 24 * 60 * 60 * 1000 : 0;
+    const nowMs = Date.now();
+    const globalNewerByMs = Number.isFinite(globalUpdatedAtMs) && Number.isFinite(latestEvidenceAtMs)
+        ? globalUpdatedAtMs - latestEvidenceAtMs
+        : 0;
+    const supersededByNewerGlobalMemory = rawSuppressed && globalNewerByMs > newerGlobalGraceMs;
+    const evidenceAgeMs = Number.isFinite(latestEvidenceAtMs) ? Math.max(0, nowMs - latestEvidenceAtMs) : 0;
+    const decayedToAdvisory = rawSuppressed
+        && !supersededByNewerGlobalMemory
+        && maxEvidenceAgeMs > 0
+        && Number.isFinite(latestEvidenceAtMs)
+        && evidenceAgeMs > maxEvidenceAgeMs;
+    const suppressed = rawSuppressed && !supersededByNewerGlobalMemory && !decayedToAdvisory;
+    const advisory = !!row && !suppressed && (rawSuppressed || supersededByNewerGlobalMemory || decayedToAdvisory);
+    const reason = suppressed
+        ? "global_memory_conflicted_or_demoted_in_other_groups"
+        : supersededByNewerGlobalMemory
+            ? "cross_group_evidence_superseded_by_newer_global_memory"
+            : decayedToAdvisory
+                ? "cross_group_evidence_decayed_to_advisory"
+                : row ? "cross_group_evidence_below_threshold" : "no_cross_group_arbitration_evidence";
     return {
         schema: "ccm-cross-group-global-memory-suppression-v1",
         globalMemoryId: key,
         suppressed,
-        reason: suppressed ? "global_memory_conflicted_or_demoted_in_other_groups" : row ? "cross_group_evidence_below_threshold" : "no_cross_group_arbitration_evidence",
-        action: suppressed ? "treat_as_background_only_verify_current_group_before_use" : "no_cross_group_demotion",
+        rawSuppressed,
+        advisory,
+        reason,
+        action: suppressed
+            ? "treat_as_background_only_verify_current_group_before_use"
+            : supersededByNewerGlobalMemory
+                ? "use_newer_global_memory_as_context_after_current_source_verification"
+                : decayedToAdvisory
+                    ? "treat_cross_group_evidence_as_advisory_only"
+                    : "no_cross_group_demotion",
         sourceDir: index?.sourceDir || GROUP_GLOBAL_MEMORY_ARBITRATION_DIR,
         scannedLedgerCount: Number(index?.scannedLedgerCount || 0),
         groupCount: Number(row?.groupCount || 0),
@@ -898,6 +1124,17 @@ function buildCrossGroupGlobalMemorySuppressionForItem(item, index = {}, options
         sourceLedgers: Array.isArray(row?.sourceLedgers) ? row.sourceLedgers.slice(0, 6) : [],
         typedMemoryDocs: Array.isArray(row?.typedMemoryDocs) ? row.typedMemoryDocs.slice(0, 6) : [],
         latestEvidence: Array.isArray(row?.latestEvidence) ? row.latestEvidence.slice(0, 3) : [],
+        freshness: {
+            schema: "ccm-cross-group-global-memory-suppression-freshness-v1",
+            globalUpdatedAt,
+            latestEvidenceAt,
+            globalNewerByMs,
+            evidenceAgeMs,
+            maxEvidenceAgeMs,
+            newerGlobalGraceMs,
+            supersededByNewerGlobalMemory,
+            decayedToAdvisory,
+        },
         thresholds: {
             conflictGroupThreshold,
             occurrenceThreshold,
@@ -946,12 +1183,18 @@ function applyCrossGroupGlobalMemorySuppression(arbitration = {}, suppression = 
 }
 function summarizeCrossGroupGlobalMemorySuppression(items = [], index = {}) {
     const suppressedItems = items.filter((item) => item.crossGroupSuppression?.suppressed === true);
+    const advisoryItems = items.filter((item) => item.crossGroupSuppression?.advisory === true);
+    const supersededItems = items.filter((item) => item.crossGroupSuppression?.freshness?.supersededByNewerGlobalMemory === true);
+    const decayedItems = items.filter((item) => item.crossGroupSuppression?.freshness?.decayedToAdvisory === true);
     return {
         schema: "ccm-cross-group-global-memory-suppression-summary-v1",
         sourceDir: index?.sourceDir || GROUP_GLOBAL_MEMORY_ARBITRATION_DIR,
         scannedLedgerCount: Number(index?.scannedLedgerCount || 0),
         indexedMemoryCount: Number(index?.itemCount || 0),
         suppressedCount: suppressedItems.length,
+        advisoryCount: advisoryItems.length,
+        supersededCount: supersededItems.length,
+        decayedCount: decayedItems.length,
         conflictCount: suppressedItems.reduce((sum, item) => sum + Number(item.crossGroupSuppression?.conflictCount || 0), 0),
         demotedCount: suppressedItems.reduce((sum, item) => sum + Number(item.crossGroupSuppression?.demotedCount || 0), 0),
         items: suppressedItems.slice(0, 8).map((item) => ({
@@ -962,6 +1205,15 @@ function summarizeCrossGroupGlobalMemorySuppression(items = [], index = {}) {
             totalOccurrenceCount: item.crossGroupSuppression?.totalOccurrenceCount || 0,
             sourceLedgers: item.crossGroupSuppression?.sourceLedgers || [],
             typedMemoryDocs: item.crossGroupSuppression?.typedMemoryDocs || [],
+        })),
+        advisoryItems: advisoryItems.slice(0, 8).map((item) => ({
+            globalMemoryId: item.id || item.crossGroupSuppression?.globalMemoryId || "",
+            reason: item.crossGroupSuppression?.reason || "",
+            action: item.crossGroupSuppression?.action || "",
+            groupCount: item.crossGroupSuppression?.groupCount || 0,
+            conflictGroupCount: item.crossGroupSuppression?.conflictGroupCount || 0,
+            totalOccurrenceCount: item.crossGroupSuppression?.totalOccurrenceCount || 0,
+            freshness: item.crossGroupSuppression?.freshness || {},
         })),
     };
 }
@@ -1020,6 +1272,7 @@ function summarizeGroupGlobalMemoryArbitrationLedger(groupId, ledger, recordedRo
     const entries = Array.isArray(ledger.entries) ? ledger.entries : [];
     const conflicts = entries.filter((entry) => entry.conflict === true);
     const demoted = entries.filter((entry) => entry.demoted === true);
+    const semanticRiskEntries = entries.filter((entry) => Number(entry.semanticRiskScore || 0) > 0);
     const repeatedConflicts = conflicts.filter((entry) => Number(entry.occurrenceCount || 0) > 1);
     const distilledConflicts = repeatedConflicts.filter((entry) => entry.distilledAt || entry.typedMemoryDoc);
     const pendingDistillation = repeatedConflicts.filter((entry) => !entry.distilledAt && !entry.typedMemoryDoc);
@@ -1031,6 +1284,9 @@ function summarizeGroupGlobalMemoryArbitrationLedger(groupId, ledger, recordedRo
         recordedCount: recordedRows.length,
         demotedCount: demoted.length,
         conflictCount: conflicts.length,
+        semanticRiskCount: semanticRiskEntries.length,
+        semanticConflictCount: semanticRiskEntries.filter((entry) => Number(entry.semanticRiskScore || 0) >= 60).length,
+        maxSemanticRiskScore: semanticRiskEntries.reduce((max, entry) => Math.max(max, Number(entry.semanticRiskScore || 0)), 0),
         repeatedConflictCount: repeatedConflicts.length,
         distilledConflictCount: distilledConflicts.length,
         pendingDistillationCount: pendingDistillation.length,
@@ -1049,6 +1305,9 @@ function summarizeGroupGlobalMemoryArbitrationLedger(groupId, ledger, recordedRo
             status: entry.status,
             globalMemoryId: entry.globalMemoryId,
             targetProject: entry.targetProject,
+            semanticRiskScore: Number(entry.semanticRiskScore || 0),
+            semanticRiskLevel: entry.semanticRiskLevel || "",
+            semanticReasons: (Array.isArray(entry.semanticReasons) ? entry.semanticReasons : []).slice(0, 6),
             occurrenceCount: entry.occurrenceCount || 1,
             lastSeenAt: entry.lastSeenAt || entry.at || "",
             distilledAt: entry.distilledAt || "",
@@ -1057,12 +1316,16 @@ function summarizeGroupGlobalMemoryArbitrationLedger(groupId, ledger, recordedRo
                 source: evidence.source || "",
                 messageId: evidence.messageId || "",
                 text: compactMemoryText(evidence.text || "", 180),
+                semanticRiskScore: Number(evidence.semanticRiskScore || 0),
+                semanticReasons: (Array.isArray(evidence.semanticReasons) ? evidence.semanticReasons : []).slice(0, 4),
             })),
         })),
         distillationCandidates: repeatedConflicts.slice(0, 8).map((entry) => ({
             globalMemoryId: entry.globalMemoryId,
             targetProject: entry.targetProject,
             occurrenceCount: entry.occurrenceCount || 1,
+            semanticRiskScore: Number(entry.semanticRiskScore || 0),
+            semanticReasons: (Array.isArray(entry.semanticReasons) ? entry.semanticReasons : []).slice(0, 6),
             suggestedMemoryType: entry.conflict ? "decision" : "fact",
             reason: "同一全局记忆多次被群聊新证据降权/冲突，可蒸馏为 typed MEMORY.md 规则。",
             candidateText: compactMemoryText(entry.localRuleText || entry.globalText || "", 320),
@@ -1099,6 +1362,9 @@ function recordGroupGlobalMemoryArbitrationLedger(groupId, input = {}) {
             demoted: arbitration.demoted === true,
             conflict: arbitration.conflict === true,
             matchedLocalEvidenceCount: Number(arbitration.matchedLocalEvidenceCount || 0),
+            semanticRiskScore: Number(arbitration.semanticRiskScore || arbitration.semanticRisk?.score || 0),
+            semanticRiskLevel: arbitration.semanticRisk?.level || "",
+            semanticReasons: (Array.isArray(arbitration.semanticReasons) ? arbitration.semanticReasons : arbitration.semanticRisk?.reasons || []).slice(0, 10),
             globalText: compactMemoryText(item.text || "", 700),
             globalHowToApply: compactMemoryText(item.howToApply || item.how_to_apply || "", 300),
             localRuleText: compactMemoryText(localRuleText, 700),
@@ -1112,6 +1378,9 @@ function recordGroupGlobalMemoryArbitrationLedger(groupId, input = {}) {
                 matchedTerms: (Array.isArray(evidence.matchedTerms) ? evidence.matchedTerms : []).slice(0, 8),
                 newer: evidence.newer === true,
                 conflict: evidence.conflict === true,
+                semanticRiskScore: Number(evidence.semanticRiskScore || evidence.semanticRisk?.score || 0),
+                semanticReasons: (Array.isArray(evidence.semanticReasons) ? evidence.semanticReasons : evidence.semanticRisk?.reasons || []).slice(0, 8),
+                semanticRisk: evidence.semanticRisk || null,
             })),
             source: item.source || {},
             distillationCandidate: {
@@ -1189,6 +1458,9 @@ function renderGlobalMemoryArbitrationTypedMemoryBody(entries = [], options = {}
         lines.push("");
         lines.push(`- status: ${entry.status || ""}`);
         lines.push(`- occurrence_count: ${entry.occurrenceCount || 1}`);
+        if (Number(entry.semanticRiskScore || 0) > 0) {
+            lines.push(`- semantic_risk: ${entry.semanticRiskScore}; level=${entry.semanticRiskLevel || "unknown"}; reasons=${(entry.semanticReasons || []).join(",")}`);
+        }
         lines.push(`- first_seen: ${entry.firstSeenAt || entry.at || ""}`);
         lines.push(`- last_seen: ${entry.lastSeenAt || entry.at || ""}`);
         if (entry.task)
@@ -1201,7 +1473,10 @@ function renderGlobalMemoryArbitrationTypedMemoryBody(entries = [], options = {}
         if (evidence.length) {
             lines.push("- decisive_evidence:");
             for (const item of evidence.slice(0, 4)) {
-                lines.push(`  - ${item.source || "group"}${item.messageId ? `#${item.messageId}` : ""}: ${compactMemoryText(item.text || "", 420)}`);
+                const semantic = Number(item.semanticRiskScore || item.semanticRisk?.score || 0) > 0
+                    ? ` semantic_risk=${item.semanticRiskScore || item.semanticRisk?.score}; reasons=${(item.semanticReasons || item.semanticRisk?.reasons || []).slice(0, 4).join(",")};`
+                    : "";
+                lines.push(`  - ${item.source || "group"}${item.messageId ? `#${item.messageId}` : ""}:${semantic} ${compactMemoryText(item.text || "", 420)}`);
             }
         }
         lines.push("- application_rule: do_not_apply_the_stale_global_memory_directly; use_current_group_rule_after_current-source verification.");
@@ -1380,13 +1655,96 @@ function collectChildGlobalMemoryLocalEvidence(options = {}) {
     return rows.slice(-120);
 }
 function memoryTextsMayConflict(globalText, localText) {
-    const globalValue = String(globalText || "");
-    const localValue = String(localText || "");
-    const negative = /(不要|不再|禁止|取消|废弃|作废|忽略|不能|不可|无需|不需要|停止|revert|rollback|deprecated|do not|never|stop|cancel)/i;
-    const positive = /(必须|务必|需要|应该|保留|继承|使用|优先|must|required|should|use|keep|prefer)/i;
-    const changed = /(改为|现在(?!目标)|最新|\b(?:current|latest)\s+(?:rule|state|version|source|implementation|code|setting|policy|plan|decision|requirement)s?\b|instead|use .+ instead|replace)/i;
-    return (positive.test(globalValue) && (negative.test(localValue) || changed.test(localValue)))
-        || (positive.test(localValue) && (negative.test(globalValue) || changed.test(globalValue)));
+    return scoreMemorySemanticContradiction(globalText, localText).conflict === true;
+}
+function uniqueMemoryArbitrationValues(values = [], limit = 24) {
+    return [...new Set(values.map(value => String(value || "").trim()).filter(Boolean))].slice(0, limit);
+}
+function memoryArbitrationEntities(value) {
+    const text = String(value || "");
+    const normalized = text.toLowerCase().replace(/\\/g, "/");
+    const paths = uniqueMemoryArbitrationValues([...normalized.matchAll(/(?:^|[\s"'`([{])([a-z0-9_./@-]+\.(?:tsx?|jsx?|mjs|cjs|md|json|ya?ml|toml|css|scss|html|py|go|rs|java|kt|cs|php|rb|sh|sql))/gi)].map(match => match[1]));
+    const sentinels = uniqueMemoryArbitrationValues([...text.matchAll(/\b[A-Z][A-Z0-9_]{5,}_SENTINEL\b/g)].map(match => match[0].toLowerCase()));
+    const ruleTerms = uniqueMemoryArbitrationValues([...normalized.matchAll(/\b[a-z0-9][a-z0-9._-]*(?:rule|policy|mode|strategy|pipeline|provider|adapter|implementation|impl|flow|version)[a-z0-9._-]*\b/g)].map(match => match[0])
+        .filter(term => !paths.includes(term) && !sentinels.includes(term) && !/^(user|system|assistant|agent|task|project|memory)[_-]/.test(term)));
+    return {
+        paths,
+        sentinels,
+        ruleTerms,
+        anchors: uniqueMemoryArbitrationValues([...paths, ...sentinels]),
+    };
+}
+function memoryArbitrationSignals(value) {
+    const text = String(value || "");
+    return {
+        positive: /(必须|务必|需要|应该|保留|继承|使用|优先|启用|must|required|should|use|keep|prefer|enable)/i.test(text),
+        negative: /(不要|不再|禁止|取消|废弃|作废|忽略|不能|不可|无需|不需要|停止|revert|rollback|deprecated|do not|never|stop|cancel|disable)/i.test(text),
+        replacement: /(改为|替换为|切换到|迁移到|以.+为准|现在使用|当前使用|最新使用|instead|use .+ instead|replace|switch(?:ed)? to|migrate(?:d)? to|supersede(?:d)?)/i.test(text),
+        current: /(当前|现在|最新|新规则|新实现|current|latest|new rule|new implementation|source of truth)/i.test(text),
+        legacy: /(旧|历史|过时|陈旧|legacy|stale|old|obsolete|deprecated)/i.test(text),
+    };
+}
+function intersectionValues(a = [], b = []) {
+    const right = new Set(b);
+    return a.filter(value => right.has(value));
+}
+function scoreMemorySemanticContradiction(globalText, localText, options = {}) {
+    const globalEntities = memoryArbitrationEntities(globalText);
+    const localEntities = memoryArbitrationEntities(localText);
+    const globalSignals = memoryArbitrationSignals(globalText);
+    const localSignals = memoryArbitrationSignals(localText);
+    const matchedTerms = uniqueMemoryArbitrationValues(options.matchedTerms || []);
+    const sharedPaths = intersectionValues(globalEntities.paths, localEntities.paths);
+    const sharedSentinels = intersectionValues(globalEntities.sentinels, localEntities.sentinels);
+    const sharedAnchors = uniqueMemoryArbitrationValues([...sharedPaths, ...sharedSentinels, ...intersectionValues(globalEntities.anchors, localEntities.anchors)]);
+    const sharedRuleTerms = intersectionValues(globalEntities.ruleTerms, localEntities.ruleTerms);
+    const differingGlobalRules = globalEntities.ruleTerms.filter(term => !sharedRuleTerms.includes(term));
+    const differingLocalRules = localEntities.ruleTerms.filter(term => !sharedRuleTerms.includes(term));
+    const differentNamedRules = sharedAnchors.length > 0
+        && differingGlobalRules.length > 0
+        && differingLocalRules.length > 0;
+    const reasons = [];
+    let score = 0;
+    const add = (points, reason) => {
+        score += points;
+        reasons.push(reason);
+    };
+    if (sharedSentinels.length)
+        add(25, "shared_sentinel_anchor");
+    if (sharedPaths.length)
+        add(25, "shared_file_anchor");
+    if (!sharedPaths.length && !sharedSentinels.length && matchedTerms.length >= 3)
+        add(12, "shared_task_terms");
+    if (differentNamedRules)
+        add(28, "different_named_rule");
+    if (localSignals.replacement)
+        add(24, "local_replacement_signal");
+    if (localSignals.current && differentNamedRules)
+        add(12, "current_local_rule_differs");
+    if (globalSignals.positive && localSignals.negative)
+        add(34, "local_negates_global_directive");
+    if (globalSignals.positive && (localSignals.current || localSignals.replacement) && differentNamedRules)
+        add(18, "positive_global_superseded_by_current_local_rule");
+    if (globalSignals.legacy || localSignals.legacy)
+        add(8, "legacy_or_stale_rule_signal");
+    if (options.newer === true && score > 0)
+        add(8, "newer_local_evidence");
+    if (!sharedAnchors.length && matchedTerms.length < 2)
+        score = Math.min(score, 35);
+    const normalizedScore = Math.max(0, Math.min(100, score));
+    return {
+        schema: "ccm-child-global-agent-memory-semantic-arbitration-v1",
+        score: normalizedScore,
+        level: normalizedScore >= 80 ? "high" : normalizedScore >= 60 ? "medium" : normalizedScore >= 35 ? "low" : "none",
+        conflict: normalizedScore >= 60 && (sharedAnchors.length > 0 || matchedTerms.length >= 3),
+        reasons: uniqueMemoryArbitrationValues(reasons, 10),
+        sharedAnchors: sharedAnchors.slice(0, 8),
+        sharedPaths: sharedPaths.slice(0, 6),
+        sharedSentinels: sharedSentinels.slice(0, 4),
+        differingGlobalRules: differingGlobalRules.slice(0, 8),
+        differingLocalRules: differingLocalRules.slice(0, 8),
+        matchedTerms: matchedTerms.slice(0, 8),
+    };
 }
 function arbitrateChildGlobalAgentMemoryItem(item, localEvidence = []) {
     const globalText = [item.text, item.why, item.howToApply].filter(Boolean).join("\n");
@@ -1400,13 +1758,15 @@ function arbitrateChildGlobalAgentMemoryItem(item, localEvidence = []) {
             || matchedTerms.some(term => /sentinel|[a-z0-9_-]+\.tsx?$|[a-z0-9_-]+\.jsx?$|[a-z0-9_-]+\.md$/.test(term));
         const evidenceAtMs = Date.parse(evidence.updatedAt || "");
         const newer = Number.isFinite(evidenceAtMs) && (!Number.isFinite(globalAtMs) || evidenceAtMs > globalAtMs + 1000);
-        const conflict = strongMatch && memoryTextsMayConflict(globalText, evidence.text);
+        const semanticRisk = scoreMemorySemanticContradiction(globalText, evidence.text, { matchedTerms, newer });
+        const conflict = strongMatch && semanticRisk.conflict === true;
         return {
             ...evidence,
             matchedTerms,
             strongMatch,
             newer,
             conflict,
+            semanticRisk,
         };
     }).filter((evidence) => evidence.strongMatch && (evidence.newer || evidence.conflict));
     const conflicts = matches.filter((evidence) => evidence.conflict);
@@ -1425,6 +1785,9 @@ function arbitrateChildGlobalAgentMemoryItem(item, localEvidence = []) {
         : newerMatches.length
             ? "demoted_by_newer_group_evidence"
             : "active_global_context";
+    const semanticRiskScores = matches.map((evidence) => Number(evidence.semanticRisk?.score || 0)).filter(score => score > 0);
+    const semanticRiskScore = semanticRiskScores.length ? Math.max(...semanticRiskScores) : 0;
+    const semanticReasons = uniqueMemoryArbitrationValues(matches.flatMap((evidence) => evidence.semanticRisk?.reasons || []), 10);
     return {
         schema: "ccm-child-global-agent-memory-arbitration-v1",
         status,
@@ -1433,6 +1796,15 @@ function arbitrateChildGlobalAgentMemoryItem(item, localEvidence = []) {
         demoted: status !== "active_global_context",
         conflict: conflicts.length > 0,
         matchedLocalEvidenceCount: matches.length,
+        semanticRisk: {
+            schema: "ccm-child-global-agent-memory-semantic-risk-summary-v1",
+            score: semanticRiskScore,
+            level: semanticRiskScore >= 80 ? "high" : semanticRiskScore >= 60 ? "medium" : semanticRiskScore >= 35 ? "low" : "none",
+            conflictCount: conflicts.filter((evidence) => evidence.semanticRisk?.conflict === true).length,
+            reasons: semanticReasons,
+        },
+        semanticRiskScore,
+        semanticReasons,
         decisiveEvidence: decisive.map((evidence) => ({
             source: evidence.source,
             type: evidence.type,
@@ -1442,6 +1814,9 @@ function arbitrateChildGlobalAgentMemoryItem(item, localEvidence = []) {
             matchedTerms: evidence.matchedTerms.slice(0, 8),
             newer: evidence.newer,
             conflict: evidence.conflict,
+            semanticRiskScore: Number(evidence.semanticRisk?.score || 0),
+            semanticReasons: (Array.isArray(evidence.semanticRisk?.reasons) ? evidence.semanticRisk.reasons : []).slice(0, 8),
+            semanticRisk: evidence.semanticRisk,
         })),
     };
 }
@@ -3151,6 +3526,31 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
     const anchors = extractGroupFactAnchors(messagesToSummarize);
     const persistentRequirements = mergeFactAnchorList(memory?.persistentRequirements || [], extractPersistentRequirementsFromAnchors(anchors), 160);
     if (!messagesToSummarize.length) {
+        const now = new Date().toISOString();
+        const compactStrategyDecision = (0, group_memory_compaction_1.buildGroupCompactStrategyDecision)({
+            groupId,
+            messages,
+            messagesToCompact: [],
+            keptMessages: messages,
+            keepIndex,
+            compacted: false,
+            primaryCompact: false,
+            preCompactWarning: currentPressureWarning,
+            activeTokens: activeTokenEstimate,
+            activeMessageCount: messages.length,
+            preCompactTokenCount: activeTokenEstimate,
+            postCompactTokenCount: activeTokenEstimate,
+            transcriptPath: getGroupMessagesFileHint(groupId),
+            reason: "recent window only; no sync snapshot compaction needed",
+            now,
+        });
+        const apiMicroCompactEditPlan = (0, group_memory_compaction_1.buildGroupApiMicroCompactEditPlan)(messages, {
+            groupId,
+            activeTokens: activeTokenEstimate,
+            targetInputTokens: options.apiMicrocompactTargetInputTokens || options.api_microcompact_target_input_tokens,
+            maxInputTokens: options.apiMicrocompactMaxInputTokens || options.api_microcompact_max_input_tokens,
+            now,
+        });
         return saveGroupMemory(groupId, {
             ...memory,
             conversationSummary: null,
@@ -3167,7 +3567,9 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
                 lastCompactedMessageId: "",
                 contextPressureWarning: currentPressureWarning,
                 compactWarning: currentPressureWarning,
-                lastPressureSampleAt: new Date().toISOString(),
+                compactStrategyDecision,
+                apiMicroCompactEditPlan,
+                lastPressureSampleAt: now,
             },
             factAnchors: mergeFactAnchorList(memory?.factAnchors || [], extractGroupFactAnchors(messages), 300),
             persistentRequirements,
@@ -3182,7 +3584,9 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
                 compressedMessages: 0,
                 recentMessages: messages.length,
                 contextPressureWarning: currentPressureWarning,
-                lastCompressedAt: new Date().toISOString(),
+                compactStrategyDecision,
+                apiMicroCompactEditPlan,
+                lastCompressedAt: now,
             },
         });
     }
@@ -3265,6 +3669,34 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         transcriptPath: getGroupMessagesFileHint(groupId),
         now,
     });
+    const compactStrategyDecision = (0, group_memory_compaction_1.buildGroupCompactStrategyDecision)({
+        groupId,
+        messages,
+        messagesToCompact: messagesToSummarize,
+        keptMessages,
+        keepIndex,
+        compacted: true,
+        primaryCompact: true,
+        microCompact,
+        ptlRecovery,
+        preservedSegment,
+        preCompactWarning: currentPressureWarning,
+        activeTokens: activeTokenEstimate,
+        activeMessageCount: messages.length,
+        preCompactTokenCount,
+        postCompactTokenCount,
+        summaryChecksum,
+        transcriptPath: getGroupMessagesFileHint(groupId),
+        reason: "sync snapshot compact selected session-memory style summary plus recent window",
+        now,
+    });
+    const apiMicroCompactEditPlan = (0, group_memory_compaction_1.buildGroupApiMicroCompactEditPlan)(messages, {
+        groupId,
+        activeTokens: preCompactTokenCount,
+        targetInputTokens: options.apiMicrocompactTargetInputTokens || options.api_microcompact_target_input_tokens,
+        maxInputTokens: options.apiMicrocompactMaxInputTokens || options.api_microcompact_max_input_tokens,
+        now,
+    });
     const boundary = {
         id: `compact-sync-${Date.now().toString(36)}`,
         type: "sync-context",
@@ -3276,19 +3708,57 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         preCompactTokenCount,
         postCompactTokenCount,
         summaryChecksum,
+        compactStrategyDecision,
+        apiMicroCompactEditPlan,
         post_compact_restore: {
             strategy: "conversation_summary_recent_reinject",
             preservedMessageIds: keptMessages.slice(-20).map((message, index) => getMemoryMessageIdentity(message, keepIndex + index)),
             preservedSegment,
+            strategyDecision: compactStrategyDecision,
+            apiMicroCompactEditPlan,
             transcriptPath: getGroupMessagesFileHint(groupId),
             microCompact,
             reinjectionPlan: postCompactReinject,
             ptlRecovery,
+            recoveryAudit: null,
+            cleanupAudit: null,
         },
         context_budget: effectiveContextBudget,
         summarySource: "deterministic-sync",
         createdAt: now,
     };
+    const postCompactRecoveryAudit = (0, group_memory_compaction_1.buildGroupPostCompactRecoveryAudit)({
+        groupId,
+        messages,
+        boundary,
+        keepIndex,
+        conversationSummary,
+        messageDigest,
+        summaryChecksum,
+        transcriptPath: getGroupMessagesFileHint(groupId),
+        preservedSegment,
+        postCompactReinject,
+        microCompact,
+        contextPressureWarning: postCompactWarning,
+        contextBudget: effectiveContextBudget,
+        ptlRecovery,
+        now,
+    });
+    boundary.post_compact_restore.recoveryAudit = postCompactRecoveryAudit;
+    const postCompactCleanupAudit = (0, group_memory_compaction_1.buildGroupPostCompactCleanupAudit)({
+        groupId,
+        boundary,
+        compactStrategyDecision,
+        apiMicroCompactEditPlan,
+        postCompactRecoveryAudit,
+        microCompact,
+        postCompactReinject,
+        preservedSegment,
+        transcriptPath: getGroupMessagesFileHint(groupId),
+        summaryChecksum,
+        now,
+    });
+    boundary.post_compact_restore.cleanupAudit = postCompactCleanupAudit;
     const compaction = {
         ...(memory?.compaction || {}),
         version: group_memory_compaction_1.GROUP_MEMORY_COMPACTION_VERSION,
@@ -3315,6 +3785,10 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
         ptlEmergency: activePtlEmergency,
         ptlRecovery,
         preservedSegment,
+        compactStrategyDecision,
+        apiMicroCompactEditPlan,
+        postCompactRecoveryAudit,
+        postCompactCleanupAudit,
         contextPressureWarning: postCompactWarning,
         compactWarning: postCompactWarning,
         preCompactWarning: currentPressureWarning,
@@ -3344,6 +3818,10 @@ function refreshGroupConversationMemorySnapshot(groupId, allMessages, memory, op
             ptlEmergency: activePtlEmergency,
             ptlRecovery,
             preservedSegment,
+            compactStrategyDecision,
+            apiMicroCompactEditPlan,
+            postCompactRecoveryAudit,
+            postCompactCleanupAudit,
             contextPressureWarning: postCompactWarning,
             lastCompressedAt: now,
         },
@@ -3460,7 +3938,7 @@ function buildGroupMemorySourceManifest(groupId, input = {}) {
         baseEntries.push(buildGroupMemorySourceEntry("global_memory_arbitration_ledger", input.globalMemoryArbitrationLedgerFile || input.global_memory_arbitration_ledger_file || input.globalMemoryArbitrationLedger?.file, "global_memory_arbitration_ledger"));
     }
     const crossGroupSuppression = input.globalAgentMemoryRecall?.crossGroupSuppression || input.global_agent_memory_recall?.crossGroupSuppression || {};
-    if (input.globalMemoryCrossGroupArbitrationDir || input.global_memory_cross_group_arbitration_dir || (crossGroupSuppression.sourceDir && Number(crossGroupSuppression.suppressedCount || 0) > 0)) {
+    if (input.globalMemoryCrossGroupArbitrationDir || input.global_memory_cross_group_arbitration_dir || (crossGroupSuppression.sourceDir && (Number(crossGroupSuppression.suppressedCount || 0) > 0 || Number(crossGroupSuppression.advisoryCount || 0) > 0))) {
         baseEntries.push(buildGroupMemorySourceEntry("global_memory_cross_group_arbitration", input.globalMemoryCrossGroupArbitrationDir || input.global_memory_cross_group_arbitration_dir || crossGroupSuppression.sourceDir, "global_memory_cross_group_arbitration_ledgers"));
     }
     const docEntries = typedDocs.slice(0, 80).map((doc) => buildGroupMemorySourceEntry(`typed_doc:${doc.relPath || path.basename(String(doc.file || ""))}`, doc.file, "typed_memory_doc", {
@@ -3626,6 +4104,88 @@ function writeGroupPostCompactCandidateUsageLedger(groupId, ledger) {
         stats: ledger.stats || {},
         entries,
         totals: ledger.totals || { used: 0, ignored: 0, verified: 0, mentioned: 0, total: 0 },
+        updatedAt: ledger.updatedAt || new Date().toISOString(),
+    }, null, 2), "utf-8");
+    fs.renameSync(temp, file);
+}
+function readGroupApiMicrocompactNativeApplyProofLedger(groupId) {
+    const file = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId);
+    try {
+        const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+        return {
+            ...parsed,
+            file,
+            stats: parsed?.stats && typeof parsed.stats === "object" ? parsed.stats : {},
+            entries: Array.isArray(parsed?.entries) ? parsed.entries : [],
+            totals: parsed?.totals && typeof parsed.totals === "object" ? parsed.totals : {},
+        };
+    }
+    catch {
+        return {
+            schema: "ccm-group-api-microcompact-native-apply-proof-ledger-v1",
+            version: exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_LEDGER_VERSION,
+            groupId,
+            file,
+            stats: {},
+            entries: [],
+            totals: { verified: 0, failed: 0, advisory: 0, not_supported: 0, native_claims: 0, total: 0 },
+            updatedAt: "",
+        };
+    }
+}
+function writeGroupApiMicrocompactNativeApplyProofLedger(groupId, ledger) {
+    const file = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const entries = (Array.isArray(ledger.entries) ? ledger.entries : []).slice(-320);
+    const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify({
+        schema: "ccm-group-api-microcompact-native-apply-proof-ledger-v1",
+        version: exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_LEDGER_VERSION,
+        groupId,
+        stats: ledger.stats || {},
+        entries,
+        totals: ledger.totals || { verified: 0, failed: 0, advisory: 0, not_supported: 0, native_claims: 0, total: 0 },
+        updatedAt: ledger.updatedAt || new Date().toISOString(),
+    }, null, 2), "utf-8");
+    fs.renameSync(temp, file);
+}
+function readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId) {
+    const file = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+    try {
+        const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+        return {
+            ...parsed,
+            file,
+            stats: parsed?.stats && typeof parsed.stats === "object" ? parsed.stats : {},
+            entries: Array.isArray(parsed?.entries) ? parsed.entries : [],
+            totals: parsed?.totals && typeof parsed.totals === "object" ? parsed.totals : {},
+        };
+    }
+    catch {
+        return {
+            schema: "ccm-group-api-microcompact-native-apply-request-telemetry-ledger-v1",
+            version: exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_LEDGER_VERSION,
+            groupId,
+            file,
+            stats: {},
+            entries: [],
+            totals: { sent: 0, matched_contract: 0, invalid: 0, failed: 0, total: 0 },
+            updatedAt: "",
+        };
+    }
+}
+function writeGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, ledger) {
+    const file = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const entries = (Array.isArray(ledger.entries) ? ledger.entries : []).slice(-320);
+    const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify({
+        schema: "ccm-group-api-microcompact-native-apply-request-telemetry-ledger-v1",
+        version: exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_LEDGER_VERSION,
+        groupId,
+        stats: ledger.stats || {},
+        entries,
+        totals: ledger.totals || { sent: 0, matched_contract: 0, invalid: 0, failed: 0, total: 0 },
         updatedAt: ledger.updatedAt || new Date().toISOString(),
     }, null, 2), "utf-8");
     fs.renameSync(temp, file);
@@ -3840,6 +4400,785 @@ function buildGroupPostCompactCandidateUsageSummary(groupId, options = {}) {
         recent_entries: (ledger.entries || [])
             .filter((entry) => !targetProject || String(entry.target_project || "").toLowerCase() === targetProject)
             .slice(-16),
+        updatedAt: ledger.updatedAt || "",
+    };
+}
+function normalizeApiMicrocompactNativeApplyProofStatus(row = {}) {
+    const usageState = String(row.usage_state || row.usageState || "").toLowerCase().trim();
+    const nativeApplied = row.native_applied === true || row.nativeApplied === true || usageState === "native_applied";
+    if (nativeApplied) {
+        const checksumMatched = row.apply_plan_checksum_matched !== false
+            && row.request_patch_checksum_matched !== false
+            && !!(row.apply_plan_checksum || row.applyPlanChecksum)
+            && !!(row.request_patch_checksum || row.requestPatchChecksum);
+        const sessionMatched = row.session_matched !== false && row.sessionMismatch !== true && row.session_mismatch !== true;
+        const nativeReady = row.native_apply_ready === true || row.nativeApplyReady === true || row.can_apply_natively === true || row.canApplyNatively === true;
+        const pass = row.pass === true && row.unsafe_native_applied !== true && row.unsafeNativeApplied !== true;
+        return pass && checksumMatched && sessionMatched && nativeReady ? "verified" : "failed";
+    }
+    if (usageState === "advisory")
+        return "advisory";
+    if (usageState === "ignored" || usageState === "not_supported")
+        return "not_supported";
+    return "";
+}
+function buildApiMicrocompactNativeApplyProofEntry(groupId, input = {}, receiptRow = {}, planRow = {}) {
+    const proofStatus = normalizeApiMicrocompactNativeApplyProofStatus(planRow);
+    if (!proofStatus)
+        return null;
+    const agent = String(receiptRow.agent || receiptRow.project || input.agent || input.targetProject || input.target_project || "").trim();
+    const targetProject = String(planRow.target_project || planRow.targetProject || receiptRow.target_project || receiptRow.targetProject || input.targetProject || input.target_project || agent || "").trim();
+    const taskId = String(input.taskId || input.task_id || receiptRow.taskId || receiptRow.task_id || "").trim();
+    const executionId = String(input.executionId || input.execution_id || receiptRow.executionId || receiptRow.execution_id || "").trim();
+    const runnerRequestId = String(planRow.runner_request_id || planRow.runnerRequestId || receiptRow.runner_request_id || receiptRow.runnerRequestId || input.runnerRequestId || input.runner_request_id || "").trim();
+    const externalRunnerRequestId = String(planRow.external_runner_request_id || planRow.externalRunnerRequestId || receiptRow.external_runner_request_id || receiptRow.externalRunnerRequestId || input.externalRunnerRequestId || input.external_runner_request_id || runnerRequestId || "").trim();
+    const generatedAt = String(input.generatedAt || input.generated_at || receiptRow.generatedAt || receiptRow.generated_at || new Date().toISOString());
+    const planChecksum = String(planRow.plan_checksum || planRow.planChecksum || "").trim();
+    const expectedApplyPlanChecksum = String(planRow.apply_plan_checksum || planRow.applyPlanChecksum || "").trim();
+    const expectedRequestPatchChecksum = String(planRow.request_patch_checksum || planRow.requestPatchChecksum || "").trim();
+    const receiptApplyPlanChecksum = String(planRow.receipt_apply_plan_checksum || planRow.receiptApplyPlanChecksum || expectedApplyPlanChecksum || "").trim();
+    const receiptRequestPatchChecksum = String(planRow.receipt_request_patch_checksum || planRow.receiptRequestPatchChecksum || expectedRequestPatchChecksum || "").trim();
+    const expectedTaskAgentSessionId = String(planRow.expected_task_agent_session_id || planRow.expectedTaskAgentSessionId || "").trim();
+    const receiptTaskAgentSessionId = String(planRow.receipt_task_agent_session_id || planRow.receiptTaskAgentSessionId || receiptRow.task_agent_session_id || receiptRow.taskAgentSessionId || "").trim();
+    const expectedNativeSessionId = String(planRow.expected_native_session_id || planRow.expectedNativeSessionId || "").trim();
+    const receiptNativeSessionId = String(planRow.receipt_native_session_id || planRow.receiptNativeSessionId || receiptRow.native_session_id || receiptRow.nativeSessionId || "").trim();
+    const expectedSnapshotId = String(planRow.expected_memory_context_snapshot_id || planRow.expectedMemoryContextSnapshotId || "").trim();
+    const receiptSnapshotId = String(planRow.receipt_memory_context_snapshot_id || planRow.receiptMemoryContextSnapshotId || receiptRow.memory_context_snapshot_id || receiptRow.memoryContextSnapshotId || "").trim();
+    const expectedSnapshotChecksum = String(planRow.expected_memory_context_snapshot_checksum || planRow.expectedMemoryContextSnapshotChecksum || "").trim();
+    const receiptSnapshotChecksum = String(planRow.receipt_memory_context_snapshot_checksum || planRow.receiptMemoryContextSnapshotChecksum || receiptRow.memory_context_snapshot_checksum || receiptRow.memoryContextSnapshotChecksum || "").trim();
+    const usageState = String(planRow.usage_state || planRow.usageState || "").trim();
+    const entryCore = {
+        group_id: groupId,
+        target_project: targetProject,
+        agent,
+        task_id: taskId,
+        execution_id: executionId,
+        runner_request_id: runnerRequestId || externalRunnerRequestId,
+        external_runner_request_id: externalRunnerRequestId || runnerRequestId,
+        final_status: String(input.finalStatus || input.final_status || ""),
+        receipt_status: String(receiptRow.status || receiptRow.receipt_status || ""),
+        plan_checksum: planChecksum,
+        apply_plan_checksum: expectedApplyPlanChecksum,
+        request_patch_checksum: expectedRequestPatchChecksum,
+        receipt_apply_plan_checksum: receiptApplyPlanChecksum,
+        receipt_request_patch_checksum: receiptRequestPatchChecksum,
+        task_agent_session_id: receiptTaskAgentSessionId || expectedTaskAgentSessionId,
+        native_session_id: receiptNativeSessionId || expectedNativeSessionId,
+        memory_context_snapshot_id: receiptSnapshotId || expectedSnapshotId,
+        memory_context_snapshot_checksum: receiptSnapshotChecksum || expectedSnapshotChecksum,
+    };
+    const proofKey = crypto.createHash("sha256").update(JSON.stringify({
+        groupId,
+        taskId,
+        executionId,
+        runnerRequestId: entryCore.runner_request_id,
+        externalRunnerRequestId: entryCore.external_runner_request_id,
+        agent,
+        planChecksum,
+        applyPlanChecksum: expectedApplyPlanChecksum || receiptApplyPlanChecksum,
+        requestPatchChecksum: expectedRequestPatchChecksum || receiptRequestPatchChecksum,
+        taskAgentSessionId: entryCore.task_agent_session_id,
+        nativeSessionId: entryCore.native_session_id,
+        memoryContextSnapshotId: entryCore.memory_context_snapshot_id,
+        memoryContextSnapshotChecksum: entryCore.memory_context_snapshot_checksum,
+    })).digest("hex").slice(0, 20);
+    return {
+        schema: "ccm-group-api-microcompact-native-apply-proof-entry-v1",
+        entry_id: `api_microcompact_native_apply_proof_${proofKey}`,
+        ...entryCore,
+        expected_task_agent_session_id: expectedTaskAgentSessionId,
+        receipt_task_agent_session_id: receiptTaskAgentSessionId,
+        expected_native_session_id: expectedNativeSessionId,
+        receipt_native_session_id: receiptNativeSessionId,
+        expected_memory_context_snapshot_id: expectedSnapshotId,
+        receipt_memory_context_snapshot_id: receiptSnapshotId,
+        expected_memory_context_snapshot_checksum: expectedSnapshotChecksum,
+        receipt_memory_context_snapshot_checksum: receiptSnapshotChecksum,
+        usage_state: usageState,
+        native_applied: planRow.native_applied === true || usageState === "native_applied",
+        proof_status: proofStatus,
+        strong_proof: proofStatus === "verified",
+        native_apply_ready: planRow.native_apply_ready === true || planRow.nativeApplyReady === true,
+        apply_plan_checksum_matched: planRow.apply_plan_checksum_matched === true,
+        request_patch_checksum_matched: planRow.request_patch_checksum_matched === true,
+        session_binding_required: planRow.session_binding_required === true,
+        session_matched: planRow.session_matched !== false,
+        session_mismatch: planRow.session_mismatch === true,
+        unsafe_native_applied: planRow.unsafe_native_applied === true,
+        reason: compactMemoryText(planRow.reason || receiptRow.reason || "", 500),
+        generated_at: generatedAt,
+    };
+}
+function apiMicrocompactNativeApplyProofStatsKey(entry = {}) {
+    return [
+        String(entry.target_project || "").trim().toLowerCase(),
+        String(entry.plan_checksum || "").trim(),
+        String(entry.apply_plan_checksum || entry.receipt_apply_plan_checksum || "").trim(),
+        String(entry.request_patch_checksum || entry.receipt_request_patch_checksum || "").trim(),
+    ].join("|");
+}
+function apiMicrocompactNativeApplyProofTotals(entries = []) {
+    return entries.reduce((acc, entry) => {
+        const status = String(entry.proof_status || "").trim();
+        if (status && Object.prototype.hasOwnProperty.call(acc, status))
+            acc[status] = Number(acc[status] || 0) + 1;
+        if (entry.native_applied === true || status === "verified" || status === "failed")
+            acc.native_claims = Number(acc.native_claims || 0) + 1;
+        if (entry.strong_proof === true || status === "verified")
+            acc.strong_verified = Number(acc.strong_verified || 0) + 1;
+        acc.total = Number(acc.total || 0) + 1;
+        return acc;
+    }, { verified: 0, failed: 0, advisory: 0, not_supported: 0, native_claims: 0, strong_verified: 0, total: 0 });
+}
+function normalizeApiMicrocompactNativeApplyTelemetryStatus(row = {}) {
+    const explicit = String(row.telemetry_status || row.telemetryStatus || row.status || "").toLowerCase().trim();
+    if (["sent", "matched_contract", "invalid", "failed"].includes(explicit))
+        return explicit;
+    const hasContextManagement = row.has_context_management === true
+        || row.hasContextManagement === true
+        || !!row.context_management
+        || !!row.contextManagement
+        || !!row.request_body?.context_management
+        || !!row.requestBody?.context_management;
+    const requestPatchChecksum = String(row.requestPatchChecksum || row.request_patch_checksum || "").trim();
+    if (row.error || row.failed === true || row.ok === false)
+        return "failed";
+    if (hasContextManagement && requestPatchChecksum)
+        return "matched_contract";
+    if (requestPatchChecksum || hasContextManagement)
+        return "sent";
+    return "invalid";
+}
+function stableApiMicrocompactJson(value) {
+    if (value === undefined)
+        return "null";
+    if (value === null || typeof value !== "object")
+        return JSON.stringify(value);
+    if (Array.isArray(value))
+        return `[${value.map(item => stableApiMicrocompactJson(item)).join(",")}]`;
+    const keys = Object.keys(value).sort();
+    return `{${keys.map(key => `${JSON.stringify(key)}:${stableApiMicrocompactJson(value[key])}`).join(",")}}`;
+}
+function stableApiMicrocompactChecksum(value, length = 24) {
+    return crypto.createHash("sha256").update(stableApiMicrocompactJson(value)).digest("hex").slice(0, length);
+}
+function apiMicrocompactHeaderValue(headers, name) {
+    if (!headers)
+        return "";
+    const wanted = String(name || "").toLowerCase();
+    if (typeof headers.get === "function") {
+        try {
+            return String(headers.get(name) || headers.get(wanted) || "");
+        }
+        catch { }
+    }
+    if (Array.isArray(headers)) {
+        const match = headers.find((row) => String(row?.[0] || "").toLowerCase() === wanted);
+        return String(match?.[1] || "");
+    }
+    if (typeof headers === "object") {
+        const key = Object.keys(headers).find(item => item.toLowerCase() === wanted);
+        return key ? String(headers[key] || "") : "";
+    }
+    return "";
+}
+function apiMicrocompactBetaHeadersFromHeaders(headers) {
+    const raw = [
+        apiMicrocompactHeaderValue(headers, "anthropic-beta"),
+        apiMicrocompactHeaderValue(headers, "x-anthropic-beta"),
+    ].filter(Boolean).join(",");
+    return raw.split(",").map(item => item.trim()).filter(Boolean);
+}
+function uniqueApiMicrocompactStrings(...values) {
+    const seen = new Set();
+    const result = [];
+    for (const value of values.flat(Infinity)) {
+        const text = String(value || "").trim();
+        if (!text || seen.has(text))
+            continue;
+        seen.add(text);
+        result.push(text);
+    }
+    return result;
+}
+function buildGroupApiMicrocompactNativeApplyAdapterTelemetryRow(input = {}) {
+    const plan = input.apiMicrocompactNativeApplyPlan
+        || input.api_microcompact_native_apply_plan
+        || input.nativeApplyPlan
+        || input.native_apply_plan
+        || {};
+    const requestPatch = input.requestPatch || input.request_patch || plan.requestPatch || plan.request_patch || {};
+    const requestPatchBody = requestPatch.body || requestPatch.request_body || {};
+    const requestBody = input.requestBody || input.request_body || {};
+    const contextManagement = requestBody?.context_management
+        || requestPatchBody?.context_management
+        || input.contextManagement
+        || input.context_management
+        || null;
+    const betaHeaders = uniqueApiMicrocompactStrings(input.betaHeaders || input.beta_headers || [], requestPatch.beta_headers || requestPatch.betaHeaders || [], apiMicrocompactBetaHeadersFromHeaders(input.headers || input.requestHeaders || input.request_headers));
+    const requestPatchChecksum = String(input.requestPatchChecksum
+        || input.request_patch_checksum
+        || plan.requestPatchChecksum
+        || plan.request_patch_checksum
+        || (Object.keys(requestPatch || {}).length ? stableApiMicrocompactChecksum(requestPatch) : "")).trim();
+    const row = {
+        planChecksum: String(input.planChecksum
+            || input.plan_checksum
+            || plan.apiEditPlanChecksum
+            || plan.api_edit_plan_checksum
+            || plan.planChecksum
+            || plan.plan_checksum
+            || "").trim(),
+        applyPlanChecksum: String(input.applyPlanChecksum || input.apply_plan_checksum || plan.applyPlanChecksum || plan.apply_plan_checksum || "").trim(),
+        requestPatchChecksum,
+        requestBodyChecksum: String(input.requestBodyChecksum || input.request_body_checksum || stableApiMicrocompactChecksum(requestBody)).trim(),
+        requestBody,
+        hasContextManagement: !!contextManagement,
+        contextManagementEditCount: Number(input.contextManagementEditCount
+            || input.context_management_edit_count
+            || contextManagement?.edits?.length
+            || 0),
+        betaHeaders,
+        provider: String(input.provider || plan.executor?.provider || plan.provider || "").trim(),
+        model: String(input.model || "").trim(),
+        endpoint: String(input.endpoint || input.url || input.apiUrl || input.api_url || "").trim(),
+        method: String(input.method || "POST").trim().toUpperCase(),
+        responseStatus: Number(input.responseStatus || input.response_status || input.httpStatus || input.http_status || 0),
+        requestId: String(input.requestId || input.request_id || input.providerRequestId || input.provider_request_id || "").trim(),
+        runnerRequestId: String(input.runnerRequestId || input.runner_request_id || input.externalRunnerRequestId || input.external_runner_request_id || plan.runnerRequestId || plan.runner_request_id || "").trim(),
+        externalRunnerRequestId: String(input.externalRunnerRequestId || input.external_runner_request_id || input.runnerRequestId || input.runner_request_id || plan.externalRunnerRequestId || plan.external_runner_request_id || plan.runnerRequestId || plan.runner_request_id || "").trim(),
+        taskAgentSessionId: String(input.taskAgentSessionId || input.task_agent_session_id || plan.taskAgentSessionId || plan.task_agent_session_id || "").trim(),
+        nativeSessionId: String(input.nativeSessionId || input.native_session_id || plan.nativeSessionId || plan.native_session_id || "").trim(),
+        memoryContextSnapshotId: String(input.memoryContextSnapshotId || input.memory_context_snapshot_id || plan.memoryContextSnapshotId || plan.memory_context_snapshot_id || "").trim(),
+        memoryContextSnapshotChecksum: String(input.memoryContextSnapshotChecksum || input.memory_context_snapshot_checksum || plan.memoryContextSnapshotChecksum || plan.memory_context_snapshot_checksum || "").trim(),
+        targetProject: String(input.targetProject || input.target_project || plan.targetProject || plan.target_project || "").trim(),
+        agent: String(input.agent || input.targetProject || input.target_project || plan.targetProject || plan.target_project || "").trim(),
+        taskId: String(input.taskId || input.task_id || "").trim(),
+        executionId: String(input.executionId || input.execution_id || "").trim(),
+        sentAt: String(input.sentAt || input.sent_at || input.generatedAt || input.generated_at || new Date().toISOString()),
+        telemetrySource: "native_request_adapter",
+        ok: input.ok,
+        error: compactMemoryText(input.error || input.errorMessage || input.error_message || "", 360),
+    };
+    return row;
+}
+function recordGroupApiMicrocompactNativeApplyAdapterTelemetry(input = {}) {
+    const plan = input.apiMicrocompactNativeApplyPlan
+        || input.api_microcompact_native_apply_plan
+        || input.nativeApplyPlan
+        || input.native_apply_plan
+        || {};
+    const groupId = String(input.groupId || input.group_id || plan.groupId || plan.group_id || "").trim();
+    const row = buildGroupApiMicrocompactNativeApplyAdapterTelemetryRow(input);
+    if (!groupId) {
+        return {
+            schema: "ccm-group-api-microcompact-native-apply-adapter-telemetry-record-v1",
+            skipped: true,
+            reason: "missing_group_id",
+            recorded_count: 0,
+        };
+    }
+    if (!row.planChecksum && !row.applyPlanChecksum && !row.requestPatchChecksum && input.force !== true) {
+        return {
+            schema: "ccm-group-api-microcompact-native-apply-adapter-telemetry-record-v1",
+            groupId,
+            skipped: true,
+            reason: "missing_native_apply_plan",
+            recorded_count: 0,
+        };
+    }
+    return recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, {
+        targetProject: row.targetProject,
+        taskId: row.taskId,
+        executionId: row.executionId,
+        rows: [row],
+        telemetrySource: "native_request_adapter",
+        generatedAt: row.sentAt,
+    });
+}
+function buildApiMicrocompactNativeApplyTelemetryEntry(groupId, input = {}, receiptRow = {}, row = {}) {
+    if (!row || typeof row !== "object")
+        return null;
+    const taskId = String(input.taskId || input.task_id || receiptRow.taskId || receiptRow.task_id || row.taskId || row.task_id || "").trim();
+    const executionId = String(input.executionId || input.execution_id || receiptRow.executionId || receiptRow.execution_id || row.executionId || row.execution_id || "").trim();
+    const targetProject = String(row.targetProject || row.target_project || receiptRow.agent || receiptRow.project || input.targetProject || input.target_project || "").trim();
+    const agent = String(row.agent || receiptRow.agent || receiptRow.project || targetProject || "").trim();
+    const sentAt = String(row.sentAt || row.sent_at || row.generatedAt || row.generated_at || input.generatedAt || input.generated_at || new Date().toISOString());
+    const requestBody = row.requestBody || row.request_body || null;
+    const requestBodyChecksum = String(row.requestBodyChecksum || row.request_body_checksum || (requestBody ? crypto.createHash("sha256").update(JSON.stringify(requestBody)).digest("hex").slice(0, 24) : "")).trim();
+    const runnerRequestId = String(row.runnerRequestId
+        || row.runner_request_id
+        || receiptRow.runnerRequestId
+        || receiptRow.runner_request_id
+        || input.runnerRequestId
+        || input.runner_request_id
+        || row.externalRunnerRequestId
+        || row.external_runner_request_id
+        || receiptRow.externalRunnerRequestId
+        || receiptRow.external_runner_request_id
+        || input.externalRunnerRequestId
+        || input.external_runner_request_id
+        || "").trim();
+    const externalRunnerRequestId = String(row.externalRunnerRequestId
+        || row.external_runner_request_id
+        || receiptRow.externalRunnerRequestId
+        || receiptRow.external_runner_request_id
+        || input.externalRunnerRequestId
+        || input.external_runner_request_id
+        || runnerRequestId
+        || "").trim();
+    const betaHeaders = [
+        ...(Array.isArray(row.betaHeaders || row.beta_headers) ? (row.betaHeaders || row.beta_headers) : []),
+        ...apiMicrocompactBetaHeadersFromHeaders(row.headers || row.requestHeaders || row.request_headers),
+    ].map((item) => String(item || "").trim()).filter(Boolean);
+    const hasContextManagement = row.has_context_management === true
+        || row.hasContextManagement === true
+        || !!row.context_management
+        || !!row.contextManagement
+        || !!requestBody?.context_management
+        || betaHeaders.includes("context-management-2025-06-27");
+    const entryCore = {
+        group_id: groupId,
+        target_project: targetProject,
+        agent,
+        task_id: taskId,
+        execution_id: executionId,
+        plan_checksum: String(row.planChecksum || row.plan_checksum || row.apiMicrocompactPlanChecksum || row.api_microcompact_plan_checksum || "").trim(),
+        apply_plan_checksum: String(row.applyPlanChecksum || row.apply_plan_checksum || row.nativeApplyPlanChecksum || row.native_apply_plan_checksum || "").trim(),
+        request_patch_checksum: String(row.requestPatchChecksum || row.request_patch_checksum || "").trim(),
+        runner_request_id: runnerRequestId || externalRunnerRequestId,
+        external_runner_request_id: externalRunnerRequestId || runnerRequestId,
+        task_agent_session_id: String(row.taskAgentSessionId || row.task_agent_session_id || receiptRow.taskAgentSessionId || receiptRow.task_agent_session_id || "").trim(),
+        native_session_id: String(row.nativeSessionId || row.native_session_id || receiptRow.nativeSessionId || receiptRow.native_session_id || "").trim(),
+        memory_context_snapshot_id: String(row.memoryContextSnapshotId || row.memory_context_snapshot_id || receiptRow.memoryContextSnapshotId || receiptRow.memory_context_snapshot_id || "").trim(),
+        memory_context_snapshot_checksum: String(row.memoryContextSnapshotChecksum || row.memory_context_snapshot_checksum || receiptRow.memoryContextSnapshotChecksum || receiptRow.memory_context_snapshot_checksum || "").trim(),
+        provider: String(row.provider || row.apiProvider || row.api_provider || "").trim(),
+        model: String(row.model || "").trim(),
+        endpoint: compactMemoryText(row.endpoint || row.url || row.apiUrl || row.api_url || "", 240),
+        method: String(row.method || "POST").trim().toUpperCase(),
+        request_id: String(row.requestId || row.request_id || row.providerRequestId || row.provider_request_id || "").trim(),
+        request_body_checksum: requestBodyChecksum,
+        beta_headers: betaHeaders.slice(0, 12),
+        has_context_management: hasContextManagement,
+        context_management_edit_count: Number(row.contextManagementEditCount || row.context_management_edit_count || row.context_management?.edits?.length || row.contextManagement?.edits?.length || requestBody?.context_management?.edits?.length || 0),
+        response_status: Number(row.responseStatus || row.response_status || row.httpStatus || row.http_status || 0),
+        telemetry_source: String(row.telemetrySource || row.telemetry_source || input.telemetrySource || input.telemetry_source || "agent_receipt").trim(),
+        sent_at: sentAt,
+    };
+    const telemetryStatus = normalizeApiMicrocompactNativeApplyTelemetryStatus({ ...row, has_context_management: hasContextManagement });
+    const entryId = `api_microcompact_native_apply_request_${crypto.createHash("sha256").update(JSON.stringify({
+        groupId,
+        taskId,
+        executionId,
+        agent,
+        planChecksum: entryCore.plan_checksum,
+        applyPlanChecksum: entryCore.apply_plan_checksum,
+        requestPatchChecksum: entryCore.request_patch_checksum,
+        runnerRequestId: entryCore.runner_request_id,
+        externalRunnerRequestId: entryCore.external_runner_request_id,
+        taskAgentSessionId: entryCore.task_agent_session_id,
+        nativeSessionId: entryCore.native_session_id,
+        memoryContextSnapshotId: entryCore.memory_context_snapshot_id,
+        requestBodyChecksum,
+        requestId: entryCore.request_id,
+    })).digest("hex").slice(0, 20)}`;
+    return {
+        schema: "ccm-group-api-microcompact-native-apply-request-telemetry-entry-v1",
+        entry_id: entryId,
+        ...entryCore,
+        telemetry_status: telemetryStatus,
+        matched_contract: telemetryStatus === "matched_contract",
+        error: compactMemoryText(row.error || row.errorMessage || row.error_message || "", 360),
+    };
+}
+function apiMicrocompactNativeApplyTelemetryTotals(entries = []) {
+    return entries.reduce((acc, entry) => {
+        const status = String(entry.telemetry_status || "").trim();
+        if (status === "matched_contract")
+            acc.matched_contract = Number(acc.matched_contract || 0) + 1;
+        else if (status && Object.prototype.hasOwnProperty.call(acc, status))
+            acc[status] = Number(acc[status] || 0) + 1;
+        if (status === "sent" || status === "matched_contract")
+            acc.sent = Number(acc.sent || 0) + 1;
+        acc.total = Number(acc.total || 0) + 1;
+        return acc;
+    }, { sent: 0, matched_contract: 0, invalid: 0, failed: 0, total: 0 });
+}
+function apiMicrocompactNativeApplyTelemetrySourceCounts(entries = []) {
+    return entries.reduce((acc, entry) => {
+        const source = String(entry.telemetry_source || "unknown").trim() || "unknown";
+        const status = String(entry.telemetry_status || "").trim();
+        const current = acc[source] || { total: 0, sent: 0, matched_contract: 0, invalid: 0, failed: 0 };
+        current.total += 1;
+        if (status === "sent" || status === "matched_contract")
+            current.sent += 1;
+        if (status === "matched_contract")
+            current.matched_contract += 1;
+        if (status === "invalid")
+            current.invalid += 1;
+        if (status === "failed")
+            current.failed += 1;
+        acc[source] = current;
+        return acc;
+    }, {});
+}
+function apiMicrocompactNativeApplyTelemetryStatsKey(entry = {}) {
+    return [
+        String(entry.target_project || "").trim().toLowerCase(),
+        String(entry.plan_checksum || "").trim(),
+        String(entry.apply_plan_checksum || "").trim(),
+        String(entry.request_patch_checksum || "").trim(),
+    ].join("|");
+}
+function recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, input = {}) {
+    groupId = String(groupId || "").trim();
+    if (!groupId || input.disabled === true || input.disableLedger === true || input.disable_ledger === true)
+        return null;
+    const directRows = Array.isArray(input.rows) ? input.rows : [];
+    const receiptRows = Array.isArray(input.receipts || input.receiptRows || input.receipt_rows)
+        ? (input.receipts || input.receiptRows || input.receipt_rows)
+        : [];
+    const rows = [
+        ...directRows.map((row) => ({ receipt: {}, row })),
+        ...receiptRows.flatMap((receipt) => {
+            const telemetryRows = [
+                ...(Array.isArray(receipt.apiMicrocompactNativeApplyRequestTelemetry || receipt.api_microcompact_native_apply_request_telemetry)
+                    ? (receipt.apiMicrocompactNativeApplyRequestTelemetry || receipt.api_microcompact_native_apply_request_telemetry)
+                    : []),
+                ...(Array.isArray(receipt.apiMicrocompactNativeApplyTelemetry || receipt.api_microcompact_native_apply_telemetry)
+                    ? (receipt.apiMicrocompactNativeApplyTelemetry || receipt.api_microcompact_native_apply_telemetry)
+                    : []),
+                ...(Array.isArray(receipt.providerRequestTelemetry || receipt.provider_request_telemetry)
+                    ? (receipt.providerRequestTelemetry || receipt.provider_request_telemetry)
+                    : []),
+            ];
+            return telemetryRows.map((row) => ({ receipt, row }));
+        }),
+    ];
+    const entries = rows
+        .map(({ receipt, row }) => buildApiMicrocompactNativeApplyTelemetryEntry(groupId, input, receipt, row))
+        .filter(Boolean);
+    const file = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+    if (!entries.length) {
+        const ledger = readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId);
+        return {
+            schema: "ccm-group-api-microcompact-native-apply-request-telemetry-record-v1",
+            groupId,
+            file,
+            skipped: true,
+            reason: "no_request_telemetry_rows",
+            recorded_count: 0,
+            totals: ledger.totals || {},
+        };
+    }
+    const ledger = readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId);
+    const entryMap = new Map((Array.isArray(ledger.entries) ? ledger.entries : []).map((entry) => [entry.entry_id, entry]));
+    let recordedCount = 0;
+    let updatedCount = 0;
+    for (const entry of entries) {
+        if (entryMap.has(entry.entry_id))
+            updatedCount += 1;
+        else
+            recordedCount += 1;
+        entryMap.set(entry.entry_id, entry);
+    }
+    const allEntries = Array.from(entryMap.values())
+        .sort((a, b) => String(a.sent_at || "").localeCompare(String(b.sent_at || "")))
+        .slice(-320);
+    const stats = allEntries.reduce((acc, entry) => {
+        const key = apiMicrocompactNativeApplyTelemetryStatsKey(entry);
+        const current = acc[key] || {
+            target_project: entry.target_project,
+            plan_checksum: entry.plan_checksum,
+            apply_plan_checksum: entry.apply_plan_checksum,
+            request_patch_checksum: entry.request_patch_checksum,
+            sent_count: 0,
+            matched_contract_count: 0,
+            invalid_count: 0,
+            failed_count: 0,
+            agents: [],
+            task_ids: [],
+            first_seen_at: entry.sent_at,
+        };
+        const status = String(entry.telemetry_status || "");
+        if (status && !["sent", "matched_contract"].includes(status))
+            current[`${status}_count`] = Number(current[`${status}_count`] || 0) + 1;
+        if (status === "matched_contract")
+            current.matched_contract_count = Number(current.matched_contract_count || 0) + 1;
+        if (status === "sent" || status === "matched_contract")
+            current.sent_count = Number(current.sent_count || 0) + 1;
+        current.last_status = status;
+        current.last_agent = entry.agent;
+        current.last_task_id = entry.task_id;
+        current.last_seen_at = entry.sent_at;
+        current.agents = Array.from(new Set([...(Array.isArray(current.agents) ? current.agents : []), entry.agent].filter(Boolean))).slice(-12);
+        current.task_ids = Array.from(new Set([...(Array.isArray(current.task_ids) ? current.task_ids : []), entry.task_id].filter(Boolean))).slice(-12);
+        acc[key] = current;
+        return acc;
+    }, {});
+    const totals = apiMicrocompactNativeApplyTelemetryTotals(allEntries);
+    const updatedAt = String(input.generatedAt || input.generated_at || new Date().toISOString());
+    writeGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId, {
+        stats,
+        entries: allEntries,
+        totals,
+        updatedAt,
+    });
+    return {
+        schema: "ccm-group-api-microcompact-native-apply-request-telemetry-record-v1",
+        groupId,
+        file,
+        recorded_count: recordedCount,
+        updated_count: updatedCount,
+        totals,
+        updatedAt,
+    };
+}
+function apiMicrocompactNativeApplyTelemetryMatchesProof(telemetry = {}, proof = {}) {
+    const samePlan = !proof.plan_checksum || String(telemetry.plan_checksum || "") === String(proof.plan_checksum || "");
+    const sameApply = !proof.apply_plan_checksum && !proof.receipt_apply_plan_checksum
+        || [proof.apply_plan_checksum, proof.receipt_apply_plan_checksum].some(value => String(value || "") === String(telemetry.apply_plan_checksum || ""));
+    const sameRequest = !proof.request_patch_checksum && !proof.receipt_request_patch_checksum
+        || [proof.request_patch_checksum, proof.receipt_request_patch_checksum].some(value => String(value || "") === String(telemetry.request_patch_checksum || ""));
+    const sameTaskSession = !proof.task_agent_session_id && !proof.receipt_task_agent_session_id
+        || [proof.task_agent_session_id, proof.receipt_task_agent_session_id, proof.expected_task_agent_session_id].some(value => String(value || "") === String(telemetry.task_agent_session_id || ""));
+    const sameNativeSession = !proof.native_session_id && !proof.receipt_native_session_id
+        || [proof.native_session_id, proof.receipt_native_session_id, proof.expected_native_session_id].some(value => String(value || "") === String(telemetry.native_session_id || ""));
+    const sameSnapshot = !proof.memory_context_snapshot_id && !proof.receipt_memory_context_snapshot_id
+        || [proof.memory_context_snapshot_id, proof.receipt_memory_context_snapshot_id, proof.expected_memory_context_snapshot_id].some(value => String(value || "") === String(telemetry.memory_context_snapshot_id || ""));
+    return samePlan && sameApply && sameRequest && sameTaskSession && sameNativeSession && sameSnapshot;
+}
+function enrichApiMicrocompactNativeApplyProofWithTelemetry(entry = {}, telemetryEntries = [], options = {}) {
+    const nowMs = Number(options.nowMs || Date.now());
+    const maxAgeMs = Number(options.telemetryMaxAgeMs || options.telemetry_max_age_ms || exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS);
+    const matched = telemetryEntries.find((telemetry) => apiMicrocompactNativeApplyTelemetryMatchesProof(telemetry, entry));
+    const matchedContract = !!matched && (matched.matched_contract === true || matched.telemetry_status === "matched_contract");
+    const sentMs = Date.parse(matched?.sent_at || "");
+    const ageMs = Number.isFinite(sentMs) && sentMs > 0 ? Math.max(0, nowMs - sentMs) : null;
+    const fresh = !!matched && matchedContract && ageMs !== null && ageMs <= maxAgeMs;
+    const telemetrySource = matched?.telemetry_source || "";
+    const adapterCaptured = telemetrySource === "native_request_adapter";
+    const strong = matchedContract && fresh && adapterCaptured;
+    const telemetryStatus = matched
+        ? !matchedContract
+            ? String(matched.telemetry_status || "invalid")
+            : !fresh
+                ? "stale"
+                : adapterCaptured
+                    ? "matched"
+                    : "receipt_only"
+        : entry.proof_status === "verified"
+            ? "missing"
+            : "not_required";
+    return {
+        ...entry,
+        request_telemetry_matched: matchedContract,
+        request_telemetry_fresh: fresh,
+        request_telemetry_stale: telemetryStatus === "stale",
+        request_telemetry_age_ms: ageMs,
+        request_telemetry_status: telemetryStatus,
+        request_telemetry_entry_id: matched?.entry_id || "",
+        request_telemetry_sent_at: matched?.sent_at || "",
+        request_telemetry_source: telemetrySource,
+        request_telemetry_adapter_captured: adapterCaptured,
+        request_telemetry_strong: strong,
+        request_telemetry_weak_reason: strong
+            ? ""
+            : matchedContract && !fresh
+                ? "stale"
+                : matchedContract && !adapterCaptured
+                    ? "receipt_only"
+                    : telemetryStatus,
+        request_telemetry_file: matched ? getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(entry.group_id || "") : "",
+    };
+}
+function buildGroupApiMicrocompactNativeApplyRequestTelemetrySummary(groupId, options = {}) {
+    groupId = String(groupId || "").trim();
+    const ledger = readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId);
+    const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
+    const planChecksums = new Set((Array.isArray(options.planChecksums || options.plan_checksums) ? (options.planChecksums || options.plan_checksums) : [])
+        .map((item) => String(item || "").trim())
+        .filter(Boolean));
+    const entries = (Array.isArray(ledger.entries) ? ledger.entries : [])
+        .filter((entry) => !targetProject || String(entry.target_project || "").toLowerCase() === targetProject)
+        .filter((entry) => !planChecksums.size || planChecksums.has(String(entry.plan_checksum || "").trim()));
+    const totals = apiMicrocompactNativeApplyTelemetryTotals(entries);
+    const status = entries.length === 0
+        ? "empty"
+        : Number(totals.failed || 0) > 0 || Number(totals.invalid || 0) > 0
+            ? "fail"
+            : Number(totals.matched_contract || 0) > 0
+                ? "ok"
+                : "warn";
+    return {
+        schema: "ccm-group-api-microcompact-native-apply-request-telemetry-summary-v1",
+        version: exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_LEDGER_VERSION,
+        groupId,
+        target_project: targetProject,
+        ledger_file: ledger.file,
+        has_history: entries.length > 0,
+        status,
+        entry_count: entries.length,
+        totals,
+        source_counts: apiMicrocompactNativeApplyTelemetrySourceCounts(entries),
+        matched_entries: entries.filter((entry) => entry.telemetry_status === "matched_contract").slice(-12).reverse(),
+        failed_entries: entries.filter((entry) => entry.telemetry_status === "failed" || entry.telemetry_status === "invalid").slice(-12).reverse(),
+        recent_entries: entries.slice(-20).reverse(),
+        updatedAt: ledger.updatedAt || "",
+    };
+}
+function recordGroupApiMicrocompactNativeApplyProofLedger(groupId, input = {}) {
+    groupId = String(groupId || "").trim();
+    if (!groupId || input.disabled === true || input.disableLedger === true || input.disable_ledger === true)
+        return null;
+    const receiptRows = Array.isArray(input.receiptRows || input.receipt_rows || input.apiMicrocompactReceiptRows || input.api_microcompact_receipt_rows)
+        ? (input.receiptRows || input.receipt_rows || input.apiMicrocompactReceiptRows || input.api_microcompact_receipt_rows)
+        : [];
+    const entries = receiptRows.flatMap((receiptRow) => {
+        const gate = receiptRow.api_microcompact || receiptRow.apiMicrocompact || receiptRow.api_microcompact_receipt || receiptRow.apiMicrocompactReceipt || receiptRow;
+        const rows = Array.isArray(gate.rows) ? gate.rows : [];
+        return rows
+            .map((row) => buildApiMicrocompactNativeApplyProofEntry(groupId, input, receiptRow, row))
+            .filter(Boolean);
+    });
+    const file = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId);
+    if (!entries.length) {
+        const ledger = readGroupApiMicrocompactNativeApplyProofLedger(groupId);
+        return {
+            schema: "ccm-group-api-microcompact-native-apply-proof-record-v1",
+            groupId,
+            file,
+            skipped: true,
+            reason: "no_api_microcompact_receipt_rows",
+            recorded_count: 0,
+            totals: ledger.totals || {},
+        };
+    }
+    const ledger = readGroupApiMicrocompactNativeApplyProofLedger(groupId);
+    const entryMap = new Map((Array.isArray(ledger.entries) ? ledger.entries : []).map((entry) => [entry.entry_id, entry]));
+    let recordedCount = 0;
+    let updatedCount = 0;
+    for (const entry of entries) {
+        if (entryMap.has(entry.entry_id))
+            updatedCount += 1;
+        else
+            recordedCount += 1;
+        entryMap.set(entry.entry_id, entry);
+    }
+    const allEntries = Array.from(entryMap.values())
+        .sort((a, b) => String(a.generated_at || "").localeCompare(String(b.generated_at || "")))
+        .slice(-320);
+    const stats = allEntries.reduce((acc, entry) => {
+        const key = apiMicrocompactNativeApplyProofStatsKey(entry);
+        const current = acc[key] || {
+            target_project: entry.target_project,
+            plan_checksum: entry.plan_checksum,
+            apply_plan_checksum: entry.apply_plan_checksum || entry.receipt_apply_plan_checksum,
+            request_patch_checksum: entry.request_patch_checksum || entry.receipt_request_patch_checksum,
+            verified_count: 0,
+            failed_count: 0,
+            advisory_count: 0,
+            not_supported_count: 0,
+            native_claim_count: 0,
+            agents: [],
+            task_ids: [],
+            first_seen_at: entry.generated_at,
+        };
+        const status = String(entry.proof_status || "");
+        if (status)
+            current[`${status}_count`] = Number(current[`${status}_count`] || 0) + 1;
+        if (entry.native_applied === true || status === "verified" || status === "failed")
+            current.native_claim_count = Number(current.native_claim_count || 0) + 1;
+        current.last_status = status;
+        current.last_agent = entry.agent;
+        current.last_task_id = entry.task_id;
+        current.last_seen_at = entry.generated_at;
+        current.agents = Array.from(new Set([...(Array.isArray(current.agents) ? current.agents : []), entry.agent].filter(Boolean))).slice(-12);
+        current.task_ids = Array.from(new Set([...(Array.isArray(current.task_ids) ? current.task_ids : []), entry.task_id].filter(Boolean))).slice(-12);
+        acc[key] = current;
+        return acc;
+    }, {});
+    const totals = apiMicrocompactNativeApplyProofTotals(allEntries);
+    const updatedAt = String(input.generatedAt || input.generated_at || new Date().toISOString());
+    writeGroupApiMicrocompactNativeApplyProofLedger(groupId, {
+        stats,
+        entries: allEntries,
+        totals,
+        updatedAt,
+    });
+    return {
+        schema: "ccm-group-api-microcompact-native-apply-proof-record-v1",
+        groupId,
+        file,
+        recorded_count: recordedCount,
+        updated_count: updatedCount,
+        totals,
+        updatedAt,
+    };
+}
+function buildGroupApiMicrocompactNativeApplyProofSummary(groupId, options = {}) {
+    groupId = String(groupId || "").trim();
+    const ledger = readGroupApiMicrocompactNativeApplyProofLedger(groupId);
+    const telemetrySummary = buildGroupApiMicrocompactNativeApplyRequestTelemetrySummary(groupId, options);
+    const telemetryEntries = [
+        ...(Array.isArray(telemetrySummary.matched_entries) ? telemetrySummary.matched_entries : []),
+        ...(Array.isArray(telemetrySummary.failed_entries) ? telemetrySummary.failed_entries : []),
+        ...(Array.isArray(telemetrySummary.recent_entries) ? telemetrySummary.recent_entries : []),
+    ];
+    const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
+    const planChecksums = new Set((Array.isArray(options.planChecksums || options.plan_checksums) ? (options.planChecksums || options.plan_checksums) : [])
+        .map((item) => String(item || "").trim())
+        .filter(Boolean));
+    const entries = (Array.isArray(ledger.entries) ? ledger.entries : [])
+        .filter((entry) => !targetProject || String(entry.target_project || "").toLowerCase() === targetProject)
+        .filter((entry) => !planChecksums.size || planChecksums.has(String(entry.plan_checksum || "").trim()));
+    const totals = apiMicrocompactNativeApplyProofTotals(entries);
+    const proofCoverage = Number(totals.native_claims || 0) > 0
+        ? Math.round(Number(totals.verified || 0) / Number(totals.native_claims || 1) * 1000) / 10
+        : null;
+    const enrichedEntries = entries.map((entry) => enrichApiMicrocompactNativeApplyProofWithTelemetry(entry, telemetryEntries, options));
+    const telemetryMatchedCount = enrichedEntries.filter((entry) => entry.proof_status === "verified" && entry.request_telemetry_matched === true).length;
+    const telemetryAdapterMatchedCount = enrichedEntries.filter((entry) => entry.proof_status === "verified" && entry.request_telemetry_matched === true && entry.request_telemetry_source === "native_request_adapter").length;
+    const telemetryReceiptMatchedCount = enrichedEntries.filter((entry) => entry.proof_status === "verified" && entry.request_telemetry_matched === true && entry.request_telemetry_source !== "native_request_adapter").length;
+    const telemetryStrongCount = enrichedEntries.filter((entry) => entry.proof_status === "verified" && entry.request_telemetry_strong === true).length;
+    const telemetryReceiptOnlyCount = enrichedEntries.filter((entry) => entry.proof_status === "verified" && entry.request_telemetry_status === "receipt_only").length;
+    const telemetryMissingCount = enrichedEntries.filter((entry) => entry.proof_status === "verified" && entry.request_telemetry_status === "missing").length;
+    const telemetryStaleCount = enrichedEntries.filter((entry) => entry.proof_status === "verified" && entry.request_telemetry_status === "stale").length;
+    const status = entries.length === 0
+        ? "empty"
+        : Number(totals.failed || 0) > 0
+            ? "fail"
+            : telemetryMissingCount > 0 || telemetryStaleCount > 0
+                ? "warn"
+                : Number(totals.verified || 0) > 0
+                    ? "ok"
+                    : "advisory";
+    return {
+        schema: "ccm-group-api-microcompact-native-apply-proof-summary-v1",
+        version: exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_LEDGER_VERSION,
+        groupId,
+        target_project: targetProject,
+        ledger_file: ledger.file,
+        has_history: entries.length > 0,
+        status,
+        entry_count: entries.length,
+        proof_coverage_rate: proofCoverage,
+        request_telemetry: {
+            ...telemetrySummary,
+            matched_verified_count: telemetryMatchedCount,
+            adapter_matched_verified_count: telemetryAdapterMatchedCount,
+            receipt_matched_verified_count: telemetryReceiptMatchedCount,
+            strong_verified_count: telemetryStrongCount,
+            receipt_only_verified_count: telemetryReceiptOnlyCount,
+            missing_verified_count: telemetryMissingCount,
+            stale_verified_count: telemetryStaleCount,
+            max_age_ms: Number(options.telemetryMaxAgeMs || options.telemetry_max_age_ms || exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS),
+        },
+        totals,
+        verified_entries: enrichedEntries.filter((entry) => entry.proof_status === "verified").slice(-12).reverse(),
+        failed_entries: enrichedEntries.filter((entry) => entry.proof_status === "failed").slice(-12).reverse(),
+        advisory_entries: enrichedEntries.filter((entry) => entry.proof_status === "advisory" || entry.proof_status === "not_supported").slice(-12).reverse(),
+        recent_entries: enrichedEntries.slice(-20).reverse(),
         updatedAt: ledger.updatedAt || "",
     };
 }
@@ -4637,6 +5976,8 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         minKeepMessages: options.minKeepMessages || options.min_keep_messages,
         minKeepTokens: options.minKeepTokens || options.min_keep_tokens,
         maxKeepTokens: options.maxKeepTokens || options.max_keep_tokens,
+        apiMicrocompactTargetInputTokens: options.apiMicrocompactTargetInputTokens || options.api_microcompact_target_input_tokens,
+        apiMicrocompactMaxInputTokens: options.apiMicrocompactMaxInputTokens || options.api_microcompact_max_input_tokens,
     });
     const agentMemory = { ...createEmptyAgentMemory(project), ...((memory.agentMemories || {})[project] || {}) };
     const ownCompleted = (memory.completed || []).filter((item) => item.project === project).slice(-4);
@@ -4718,6 +6059,8 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
     const globalAgentMemoryRecall = buildChildGlobalAgentMemoryContext([task, memory.goal, memory.currentPhase, project].filter(Boolean).join("\n"), {
         ...options,
         groupId,
+        targetProject: project,
+        generatedAt,
         groupMemory: memory,
         groupMessages: allMessages,
         typedMemoryRecall,
@@ -4811,6 +6154,44 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
     const replayRepairDispatchCandidates = readGroupReplayRepairDispatchCandidatesSummary(groupId);
     const boundaryHistory = buildGroupCompactBoundaryHistorySummary(memory);
     const childAgentTypes = buildChildAgentTypeSummary(memory);
+    const storedApiMicroCompactEditPlan = memory.compaction?.apiMicroCompactEditPlan
+        || memory.compactBoundary?.apiMicroCompactEditPlan
+        || memory.compactBoundary?.post_compact_restore?.apiMicroCompactEditPlan
+        || memory.messageCompression?.apiMicroCompactEditPlan
+        || null;
+    const runtimeCapabilities = options.runtimeCapabilities
+        || options.runtime_capabilities
+        || options.task?.runtimeCapabilities
+        || options.task?.runtime_capabilities
+        || options.task?.workflow_meta?.runtime_capabilities
+        || {};
+    const apiMicrocompactNativeApplyPlan = (0, group_memory_compaction_1.buildGroupApiMicrocompactNativeApplyPlan)(storedApiMicroCompactEditPlan || {}, {
+        groupId,
+        targetProject: project,
+        agentType: options.agentType || options.agent_type || "unknown",
+        transport: options.agentTransport || options.agent_transport || options.transport || runtimeCapabilities.transport,
+        provider: options.agentProvider || options.agent_provider || options.provider || runtimeCapabilities.provider,
+        supportsApiContextManagement: options.supportsApiContextManagement === true
+            || options.supports_api_context_management === true
+            || runtimeCapabilities.supportsApiContextManagement === true
+            || runtimeCapabilities.supports_api_context_management === true,
+        nativeApiRequestLayer: options.nativeApiRequestLayer === true
+            || options.native_api_request_layer === true
+            || runtimeCapabilities.nativeApiRequestLayer === true
+            || runtimeCapabilities.native_api_request_layer === true,
+        contextManagementBetaHeaderEnabled: options.contextManagementBetaHeaderEnabled === true
+            || options.context_management_beta_header_enabled === true
+            || runtimeCapabilities.contextManagementBetaHeaderEnabled === true
+            || runtimeCapabilities.context_management_beta_header_enabled === true,
+        betaHeaders: options.betaHeaders || options.beta_headers || runtimeCapabilities.betaHeaders || runtimeCapabilities.beta_headers,
+        featureEnabled: options.apiMicrocompactNativeApplyEnabled !== false && options.api_microcompact_native_apply_enabled !== false,
+        sessionBinding,
+        now: generatedAt,
+    });
+    const apiMicrocompactNativeApplyProofLedger = buildGroupApiMicrocompactNativeApplyProofSummary(groupId, {
+        targetProject: project,
+        planChecksums: [storedApiMicroCompactEditPlan?.planChecksum || storedApiMicroCompactEditPlan?.plan_checksum || ""].filter(Boolean),
+    });
     const bundle = {
         schema: "ccm-group-memory-context-v1",
         version: 1,
@@ -4841,6 +6222,14 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             partialSegments: memory.compaction?.partialSegments || memory.messageCompression?.partialSegments || [],
             ptlEmergency: memory.compaction?.ptlEmergency || memory.compactBoundary?.ptlEmergency || memory.compactBoundary?.post_compact_restore?.ptlEmergency || null,
             ptlRecovery: memory.compaction?.ptlRecovery || memory.messageCompression?.ptlRecovery || memory.compactBoundary?.post_compact_restore?.ptlRecovery || null,
+            compactStrategyDecision: memory.compaction?.compactStrategyDecision
+                || memory.compactBoundary?.compactStrategyDecision
+                || memory.compactBoundary?.post_compact_restore?.strategyDecision
+                || memory.messageCompression?.compactStrategyDecision
+                || null,
+            apiMicroCompactEditPlan: storedApiMicroCompactEditPlan,
+            apiMicrocompactNativeApplyPlan,
+            apiMicrocompactNativeApplyProofLedger,
             compactedMessageCount: Number(memory.compaction?.compactedMessageCount || memory.messageCompression?.compressedMessages || 0),
             preservedRecentMessages: Number(memory.compaction?.preservedRecentMessages || memory.messageCompression?.recentMessages || 0),
             lastCompactedMessageId: memory.compaction?.lastCompactedMessageId || memory.compactBoundary?.summarizedThroughMessageId || "",
@@ -4855,6 +6244,10 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             postCompactRecoveryAudit: memory.compaction?.postCompactRecoveryAudit
                 || memory.compactBoundary?.post_compact_restore?.recoveryAudit
                 || memory.messageCompression?.postCompactRecoveryAudit
+                || null,
+            postCompactCleanupAudit: memory.compaction?.postCompactCleanupAudit
+                || memory.compactBoundary?.post_compact_restore?.cleanupAudit
+                || memory.messageCompression?.postCompactCleanupAudit
                 || null,
             hookLedger: memory.compaction?.hookLedger || null,
             replayRepairPlan: memory.compaction?.replayRepairPlan || memory.compaction?.replay_repair_plan || null,
@@ -4897,6 +6290,7 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         source_manifest: sourceManifest,
         memory_reload_audit: memoryReloadAudit,
         global_agent_memory: globalAgentMemoryRecall,
+        global_memory_health_gate: globalAgentMemoryRecall?.memory_health_gate || null,
         global_memory_arbitration_ledger: effectiveGlobalMemoryArbitrationLedger,
         dispatch_freshness_gate: dispatchFreshnessGate,
         post_compact_reinjection_gate: postCompactReinjectionGate,
@@ -4929,12 +6323,14 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             group_global_memory_arbitration_ledger_file: Number(effectiveGlobalMemoryArbitrationLedger?.entryCount || 0) > 0
                 ? (effectiveGlobalMemoryArbitrationLedger?.file || getGroupGlobalMemoryArbitrationLedgerFile(groupId))
                 : "",
-            global_memory_cross_group_arbitration_dir: Number(globalAgentMemoryRecall?.crossGroupSuppression?.suppressedCount || 0) > 0
+            global_memory_cross_group_arbitration_dir: (Number(globalAgentMemoryRecall?.crossGroupSuppression?.suppressedCount || 0) > 0 || Number(globalAgentMemoryRecall?.crossGroupSuppression?.advisoryCount || 0) > 0)
                 ? (globalAgentMemoryRecall?.crossGroupSuppression?.sourceDir || GROUP_GLOBAL_MEMORY_ARBITRATION_DIR)
                 : "",
             group_memory_reload_ledger_file: memoryReloadAudit.ledgerFile || "",
             group_post_compact_dispatch_ledger_file: postCompactDispatchMarker?.ledger_file || getGroupPostCompactDispatchLedgerFile(groupId),
             group_post_compact_candidate_usage_ledger_file: postCompactCandidateUsage.ledger_file || getGroupPostCompactCandidateUsageLedgerFile(groupId),
+            group_api_microcompact_native_apply_proof_ledger_file: apiMicrocompactNativeApplyProofLedger.ledger_file || getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId),
+            group_api_microcompact_native_apply_request_telemetry_ledger_file: apiMicrocompactNativeApplyProofLedger.request_telemetry?.ledger_file || getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId),
             group_replay_repair_ledger_file: replayRepairLedger?.file || getGroupReplayRepairLedgerFile(groupId),
             group_replay_repair_work_items_file: replayRepairWorkItems?.file || getGroupReplayRepairWorkItemsFile(groupId),
             group_session_memory_snapshot_file: sessionMemorySnapshot?.snapshotFile || getGroupSessionMemorySnapshotFile(groupId),
@@ -4997,6 +6393,7 @@ function renderGroupMemoryContextBundle(bundle) {
     const related = bundle.related_work || {};
     const typedMemory = groupState.typedMemory || {};
     const globalAgentMemory = bundle.global_agent_memory || bundle.globalAgentMemory || {};
+    const globalMemoryHealthGate = bundle.global_memory_health_gate || bundle.globalMemoryHealthGate || globalAgentMemory.memory_health_gate || globalAgentMemory.memoryHealthGate || {};
     const globalMemoryArbitrationLedger = bundle.global_memory_arbitration_ledger || bundle.globalMemoryArbitrationLedger || {};
     const sessionBinding = bundle.session_binding || bundle.sessionBinding || {};
     const sourceManifest = bundle.source_manifest || {};
@@ -5011,6 +6408,26 @@ function renderGroupMemoryContextBundle(bundle) {
     const replayRepairDispatchCandidates = bundle.replay_repair_dispatch_candidates || bundle.replayRepairDispatchCandidates || compaction.replayRepairDispatchCandidates || compaction.replay_repair_dispatch_candidates || {};
     const sessionMemory = bundle.session_memory || bundle.sessionMemory || compaction.sessionMemory || compaction.session_memory || {};
     const toolContinuity = bundle.tool_continuity || bundle.toolContinuity || compaction.toolContinuity || compaction.tool_continuity || {};
+    const compactStrategyDecision = compaction.compactStrategyDecision
+        || compaction.compact_strategy_decision
+        || compaction.boundary?.compactStrategyDecision
+        || compaction.boundary?.post_compact_restore?.strategyDecision
+        || {};
+    const apiMicroCompactEditPlan = compaction.apiMicroCompactEditPlan
+        || compaction.api_microcompact_edit_plan
+        || compaction.boundary?.apiMicroCompactEditPlan
+        || compaction.boundary?.post_compact_restore?.apiMicroCompactEditPlan
+        || {};
+    const apiMicrocompactNativeApplyPlan = compaction.apiMicrocompactNativeApplyPlan
+        || compaction.api_microcompact_native_apply_plan
+        || apiMicroCompactEditPlan.nativeApplyPlan
+        || apiMicroCompactEditPlan.native_apply_plan
+        || {};
+    const apiMicrocompactNativeApplyProofLedger = compaction.apiMicrocompactNativeApplyProofLedger
+        || compaction.api_microcompact_native_apply_proof_ledger
+        || bundle.api_microcompact_native_apply_proof_ledger
+        || bundle.apiMicrocompactNativeApplyProofLedger
+        || {};
     const compactFileReferences = bundle.compact_file_references || bundle.compactFileReferences || {};
     const compactFileReferenceReadPlan = bundle.compact_file_reference_read_plan || bundle.compactFileReferenceReadPlan || {};
     const compactFileReferenceReadPlanAccess = bundle.compact_file_reference_read_plan_access || bundle.compactFileReferenceReadPlanAccess || {};
@@ -5039,6 +6456,18 @@ function renderGroupMemoryContextBundle(bundle) {
     if (sessionBinding.schema) {
         lines.push(`- 子 Agent 会话绑定：binding=${sessionBinding.binding_id || ""}；task=${sessionBinding.task_id || "unknown"}；session=${sessionBinding.task_agent_session_id || "unbound"}；native=${sessionBinding.native_session_id || "pending"}；turn=${sessionBinding.turn || 0}；executor=${sessionBinding.agent_type || "unknown"}；回执中的记忆使用声明应绑定本任务会话。`);
     }
+    if (globalMemoryHealthGate.schema) {
+        lines.push(`- Global Agent memory health gate：gate=${globalMemoryHealthGate.gate_id || ""}；status=${globalMemoryHealthGate.status || "unknown"}；active=${globalMemoryHealthGate.active_contamination_count || 0}；residue=${globalMemoryHealthGate.residue_contamination_count || 0}；action=${globalMemoryHealthGate.action || "unknown"}。`);
+        if (globalMemoryHealthGate.status === "fail") {
+            lines.push("- 全局记忆健康门阻断：active Global Agent memory 含自测污染或扫描失败；本轮不得使用 global_agent_memory 内容，只能使用当前群聊记忆、typed MEMORY.md、当前任务文本和实时仓库检查。回执 memoryIgnored 必须引用该 gate。");
+        }
+        else if (globalMemoryHealthGate.status === "warn") {
+            lines.push("- 全局记忆健康门提示：active Global Agent memory 干净，但目录仍有历史自测残留；可使用 active 记忆，涉及文件/状态/授权时仍必须读取当前源并在 globalMemoryUsage 说明核验。");
+        }
+        else {
+            lines.push("- 全局记忆健康门通过：active Global Agent memory 未发现自测污染；仍按历史上下文处理，当前源优先。");
+        }
+    }
     if (globalAgentMemory.schema && Number(globalAgentMemory.itemCount || 0) > 0) {
         const arbitration = globalAgentMemory.arbitration || {};
         const crossGroupSuppression = globalAgentMemory.crossGroupSuppression || {};
@@ -5046,8 +6475,12 @@ function renderGroupMemoryContextBundle(bundle) {
         if (Number(arbitration.demotedCount || 0) > 0 || Number(arbitration.conflictCount || 0) > 0) {
             lines.push("- 全局记忆仲裁规则：如果下方 global_memory_id 标记为 demoted/conflict，必须以本群聊更新证据或 typed MEMORY.md 为准；该全局记忆只作背景线索，不能直接应用。");
         }
+        lines.push("- 全局记忆回执规则：回复 CCM_AGENT_RECEIPT 时必须填写 globalMemoryUsage，逐条声明本轮看到的 global_memory_id 是 used / ignored / verified / background / advisory；带 semantic_risk、demoted/conflict 或 cross_group_suppression 的记忆若被使用，必须声明 currentSourceVerified=true 和 semanticRiskAcknowledged/crossGroupSuppression。");
         if (Number(arbitration.crossGroupSuppressedCount || crossGroupSuppression.suppressedCount || 0) > 0) {
             lines.push(`- 跨群聊全局记忆抑制：${arbitration.crossGroupSuppressedCount || crossGroupSuppression.suppressedCount || 0} 条全局记忆已在其他群聊仲裁账本中被降权/冲突；source=${crossGroupSuppression.sourceDir || "group-global-memory-arbitration"}；这些条目只能作为 background，必须按当前群聊证据、typed MEMORY.md 和实时仓库状态复核后再行动。`);
+        }
+        if (Number(crossGroupSuppression.advisoryCount || 0) > 0) {
+            lines.push(`- 跨群聊抑制新鲜度：${crossGroupSuppression.advisoryCount || 0} 条跨群聊抑制已降级为 advisory；superseded=${crossGroupSuppression.supersededCount || 0}；decayed=${crossGroupSuppression.decayedCount || 0}；新 Global Agent 记忆或过旧 ledger 不应继续阻断当前上下文，但仍可作为排查线索。`);
         }
         if (globalAgentMemory.boundary?.archiveId) {
             const boundary = globalAgentMemory.boundary || {};
@@ -5060,13 +6493,24 @@ function renderGroupMemoryContextBundle(bundle) {
             const cross = item.crossGroupSuppression || itemArbitration.crossGroupSuppression || {};
             const messageIds = Array.isArray(source.messageIds) && source.messageIds.length ? `；messages=${source.messageIds.join(",")}` : "";
             const mission = source.missionId ? `；mission=${source.missionId}` : "";
-            lines.push(`  - global_memory_id=${item.id || ""}；[${item.type || "memory"} score ${item.score ?? "?"} ${itemArbitration.status || "active"}] ${item.text || ""}${item.howToApply ? `；apply=${item.howToApply}` : ""}；session=${source.sessionId || ""}${mission}${messageIds}`);
+            const semanticRisk = itemArbitration.semanticRisk || {};
+            const semanticRiskText = Number(itemArbitration.semanticRiskScore || semanticRisk.score || 0) > 0
+                ? ` semantic_risk=${itemArbitration.semanticRiskScore || semanticRisk.score};semantic=${semanticRisk.level || "unknown"};reasons=${(itemArbitration.semanticReasons || semanticRisk.reasons || []).slice(0, 4).join(",")}`
+                : "";
+            lines.push(`  - global_memory_id=${item.id || ""}；[${item.type || "memory"} score ${item.score ?? "?"} ${itemArbitration.status || "active"}${semanticRiskText}] ${item.text || ""}${item.howToApply ? `；apply=${item.howToApply}` : ""}；session=${source.sessionId || ""}${mission}${messageIds}`);
             if (cross.suppressed === true) {
                 lines.push(`    - cross_group_suppression=background_only；groups=${cross.groupCount || 0}；conflict_groups=${cross.conflictGroupCount || 0}；occurrences=${cross.totalOccurrenceCount || 0}；action=${cross.action || "verify_current_group_before_use"}`);
             }
+            else if (cross.advisory === true) {
+                const freshness = cross.freshness || {};
+                lines.push(`    - cross_group_suppression=advisory；reason=${cross.reason || ""}；superseded=${freshness.supersededByNewerGlobalMemory === true}；decayed=${freshness.decayedToAdvisory === true}；global_updated=${freshness.globalUpdatedAt || ""}；latest_cross_group_evidence=${freshness.latestEvidenceAt || ""}`);
+            }
             for (const evidence of Array.isArray(itemArbitration.decisiveEvidence) ? itemArbitration.decisiveEvidence.slice(0, 2) : []) {
                 const evidenceLabel = String(evidence.source || "").startsWith("cross_group") ? "cross_group_evidence" : "local_evidence";
-                lines.push(`    - ${evidenceLabel}=${evidence.source || "group"}${evidence.messageId ? `#${evidence.messageId}` : ""}；${evidence.conflict ? "conflict" : "newer"}；${evidence.text || ""}`);
+                const evidenceSemantic = Number(evidence.semanticRiskScore || evidence.semanticRisk?.score || 0) > 0
+                    ? `；semantic_risk=${evidence.semanticRiskScore || evidence.semanticRisk?.score}；semantic_reasons=${(evidence.semanticReasons || evidence.semanticRisk?.reasons || []).slice(0, 4).join(",")}`
+                    : "";
+                lines.push(`    - ${evidenceLabel}=${evidence.source || "group"}${evidence.messageId ? `#${evidence.messageId}` : ""}；${evidence.conflict ? "conflict" : "newer"}${evidenceSemantic}；${evidence.text || ""}`);
             }
         }
     }
@@ -5217,6 +6661,59 @@ function renderGroupMemoryContextBundle(bundle) {
         if (failed.length)
             lines.push(`- 压缩后恢复风险：${failed.slice(0, 5).join("、")}；需要优先按 raw transcript / typed MEMORY.md 回溯后再执行。`);
     }
+    if (compaction.postCompactCleanupAudit?.schema) {
+        const cleanup = compaction.postCompactCleanupAudit;
+        const failed = Array.isArray(cleanup.failedChecks) ? cleanup.failedChecks : [];
+        lines.push(`- 压缩后清理审计：${cleanup.status || "unknown"}；通过 ${cleanup.passedChecks || 0}/${cleanup.checkCount || 0}；mode=${cleanup.mode || "unknown"}；动作 ${cleanup.action || "unknown"}。`);
+        lines.push(`- 清理边界：派生 microcompact/context packet 状态必须重建；invoked skills/tool continuity 不清除；candidate/replay/hook ledger 保留；raw=${cleanup.transcriptPath || "未记录"}。`);
+        if (failed.length)
+            lines.push(`- 压缩后清理风险：${failed.slice(0, 5).join("、")}；本轮子 Agent 需要先按 source manifest / raw transcript / typed MEMORY.md 重建上下文。`);
+    }
+    if (apiMicroCompactEditPlan.schema) {
+        const counts = apiMicroCompactEditPlan.signalCounts || {};
+        lines.push(`- API microcompact edit plan：planChecksum=${apiMicroCompactEditPlan.planChecksum || ""}；edits=${apiMicroCompactEditPlan.editCount || 0}；advisory=${apiMicroCompactEditPlan.advisoryOnly !== false}；tokens=${apiMicroCompactEditPlan.activeTokens || 0}/${apiMicroCompactEditPlan.trigger?.value || apiMicroCompactEditPlan.maxInputTokens || 0}；thinking=${counts.thinkingBlocks || 0}；tool_use=${counts.toolUses || 0}；tool_result=${counts.toolResults || 0}。`);
+        if (apiMicroCompactEditPlan.editCount > 0) {
+            lines.push("- 支持 native API context management 的子 Agent 执行器可按该计划清理旧 thinking/tool result；不支持时只作为上下文压力提示，不得删除 CCM 群聊原文或 typed MEMORY.md。");
+            lines.push("- API microcompact 回执规则：CCM_AGENT_RECEIPT.apiMicrocompactUsage 或 memoryUsed/memoryIgnored 必须引用 planChecksum，并声明 usageState=native_applied/advisory/ignored/not_supported；apiMicrocompactUsage 应绑定本轮 taskAgentSessionId/nativeSessionId/memoryContextSnapshotId；第三方 CLI 未实际调用 native API context-management 时不得写 native_applied。");
+        }
+    }
+    if (apiMicrocompactNativeApplyPlan.schema) {
+        const executor = apiMicrocompactNativeApplyPlan.executor || {};
+        lines.push(`- API microcompact native apply：mode=${apiMicrocompactNativeApplyPlan.mode || "advisory_only"}；ready=${apiMicrocompactNativeApplyPlan.nativeApplyReady === true}；executor=${executor.agentType || "unknown"}/${executor.transport || "unknown"}；applyPlan=${apiMicrocompactNativeApplyPlan.applyPlanChecksum || ""}；session=${apiMicrocompactNativeApplyPlan.task_agent_session_id || "unbound"}。`);
+        if (apiMicrocompactNativeApplyPlan.nativeApplyReady === true) {
+            lines.push(`- Native request adapter 已就绪：把 requestPatch.body.context_management 合并到 provider API 请求，并携带 beta=${apiMicrocompactNativeApplyPlan.capability?.requiredBetaHeader || "context-management-2025-06-27"}；只有真实合并并发出请求后，回执才能声明 native_applied。`);
+            lines.push("- Native apply 强证明规则：native_applied 还必须绑定本轮 taskAgentSessionId/nativeSessionId/memoryContextSnapshotId，并在存在 runnerRequestId/externalRunnerRequestId 时能回查 execution.externalRunnerRequestIds；缺 session/snapshot/dispatch 绑定只能算弱证据。");
+        }
+        else {
+            lines.push(`- Native apply 未就绪：${apiMicrocompactNativeApplyPlan.reason || "executor does not expose provider request body"}；本轮只能声明 advisory/ignored/not_supported，不能声称 native_applied。`);
+        }
+    }
+    if (apiMicrocompactNativeApplyProofLedger.schema && apiMicrocompactNativeApplyProofLedger.has_history) {
+        const totals = apiMicrocompactNativeApplyProofLedger.totals || {};
+        const telemetry = apiMicrocompactNativeApplyProofLedger.request_telemetry || {};
+        lines.push(`- API microcompact native apply proof ledger：status=${apiMicrocompactNativeApplyProofLedger.status || "unknown"}；verified=${totals.verified || 0} failed=${totals.failed || 0} advisory=${totals.advisory || 0} not_supported=${totals.not_supported || 0}；coverage=${apiMicrocompactNativeApplyProofLedger.proof_coverage_rate ?? "n/a"}%；telemetry strong=${telemetry.strong_verified_count || 0} matched=${telemetry.matched_verified_count || 0} adapter=${telemetry.adapter_matched_verified_count || 0} receipt=${telemetry.receipt_matched_verified_count || 0} receiptOnly=${telemetry.receipt_only_verified_count || 0} missing=${telemetry.missing_verified_count || 0} stale=${telemetry.stale_verified_count || 0} sessionBound=${telemetry.session_bound_verified_count || telemetry.session_bound_count || 0} dispatchBound=${telemetry.dispatch_bound_verified_count || telemetry.dispatch_bound_count || 0} runnerBound=${telemetry.runner_bound_verified_count || telemetry.runner_bound_count || 0}；ledger=${apiMicrocompactNativeApplyProofLedger.ledger_file || "未记录"}；requestTelemetry=${telemetry.ledger_file || "未记录"}。`);
+        for (const row of Array.isArray(apiMicrocompactNativeApplyProofLedger.verified_entries) ? apiMicrocompactNativeApplyProofLedger.verified_entries.slice(0, 3) : []) {
+            lines.push(`  - verified native_applied plan=${row.plan_checksum || ""}；requestPatch=${row.request_patch_checksum || row.receipt_request_patch_checksum || ""}；session=${row.task_agent_session_id || "unbound"}；snapshot=${row.memory_context_snapshot_id || "unknown"}；requestTelemetry=${row.request_telemetry_status || "unknown"}；该证明只说明历史 provider request 已带 context_management，本轮仍需按当前执行器真实发送情况重新落账。`);
+        }
+        for (const row of Array.isArray(apiMicrocompactNativeApplyProofLedger.failed_entries) ? apiMicrocompactNativeApplyProofLedger.failed_entries.slice(0, 3) : []) {
+            lines.push(`  - failed native_applied proof plan=${row.plan_checksum || ""}；requestPatch=${row.receipt_request_patch_checksum || row.request_patch_checksum || "missing"}；session=${row.receipt_task_agent_session_id || row.task_agent_session_id || "unbound"}；reason=${row.reason || "checksum/session/snapshot mismatch"}；不得把这类回执当作强 native apply 证明。`);
+        }
+    }
+    if (compactStrategyDecision.schema) {
+        const invariants = compactStrategyDecision.invariants || {};
+        const failedInvariants = Object.entries(invariants)
+            .filter(([, value]) => typeof value === "boolean" && value === false)
+            .map(([key]) => key);
+        lines.push(`- 压缩策略决策：mode=${compactStrategyDecision.mode || "unknown"}；summary=${compactStrategyDecision.summaryChecksum || "none"}；窗口 ${compactStrategyDecision.messagesToSummarize || 0} 条压缩 / ${compactStrategyDecision.keptMessages || 0} 条保留；token ${compactStrategyDecision.preCompactTokenCount || 0} -> ${compactStrategyDecision.postCompactTokenEstimate || 0}；原因 ${compactStrategyDecision.reason || "未记录"}。`);
+        if (compactStrategyDecision.transcriptPath)
+            lines.push(`- 压缩策略原文恢复：raw transcript=${compactStrategyDecision.transcriptPath}；如摘要与当前任务冲突，按 message id 回溯原文。`);
+        if (failedInvariants.length) {
+            lines.push(`- 压缩策略风险：${failedInvariants.slice(0, 5).join("、")} 未通过；执行前优先读取 raw transcript / 近期窗口核验。`);
+        }
+        else if (compactStrategyDecision.invariantPass === true) {
+            lines.push("- 压缩策略 invariants：任务事务、工具结果对/思考块边界和保留窗口检查通过。");
+        }
+    }
     if (replayRepairPlan.schema && Number(replayRepairPlan.requiredActionCount || 0) > 0) {
         lines.push(`- Replay Gate 修复计划：status=${replayRepairPlan.status || "unknown"}；action=${replayRepairPlan.action || "unknown"}；待修复 ${replayRepairPlan.requiredActionCount || 0} 项；score=${replayRepairPlan.sourceReplay?.score ?? "unknown"}；下一轮执行前必须先补齐缺失记忆包字段并重新 replay。`);
         for (const action of Array.isArray(replayRepairPlan.actions) ? replayRepairPlan.actions.slice(0, 5) : []) {
@@ -5232,7 +6729,13 @@ function renderGroupMemoryContextBundle(bundle) {
     if (replayRepairWorkItems.schema && Number(replayRepairWorkItems.total || 0) > 0) {
         lines.push(`- Replay Repair pending work：open=${replayRepairWorkItems.openItemCount || 0}；pending=${replayRepairWorkItems.pendingCount || 0}；inProgress=${replayRepairWorkItems.inProgressCount || 0}；completed=${replayRepairWorkItems.completedCount || 0}；owner=group-main-agent；ledger=${replayRepairWorkItems.file || "未记录"}。`);
         for (const item of Array.isArray(replayRepairWorkItems.openItems) ? replayRepairWorkItems.openItems.slice(0, 5) : []) {
-            lines.push(`  - work ${item.priority || "medium"}:${item.component || "replay"}；${item.subject || "修复 replay 缺口"}；target=${item.repair_target || item.target_project || item.target || "memory-context"}；${item.instruction || ""}${item.expected ? `；expected=${item.expected}` : ""}`);
+            const nativeProofBinding = [
+                item.request_patch_checksum ? `request=${item.request_patch_checksum}` : "",
+                item.request_telemetry_session_status ? `session=${item.request_telemetry_session_status}` : "",
+                item.request_telemetry_dispatch_status ? `dispatch=${item.request_telemetry_dispatch_status}` : "",
+                item.runner_request_id ? `runner=${item.runner_request_id}` : "",
+            ].filter(Boolean).join("；");
+            lines.push(`  - work ${item.priority || "medium"}:${item.component || "replay"}；${item.subject || "修复 replay 缺口"}；target=${item.repair_target || item.target_project || item.target || "memory-context"}${nativeProofBinding ? `；${nativeProofBinding}` : ""}；${item.instruction || ""}${item.expected ? `；expected=${item.expected}` : ""}`);
         }
     }
     if (replayRepairDispatchCandidates.schema && Number(replayRepairDispatchCandidates.candidateCount || 0) > 0) {
@@ -5240,7 +6743,18 @@ function renderGroupMemoryContextBundle(bundle) {
         lines.push("  - 这些候选只说明主 Agent 可将 replay 修复整理成后续工作单；子 Agent 只有在本轮任务明确要求时才执行，不得自行创建额外任务。");
         for (const candidate of Array.isArray(replayRepairDispatchCandidates.candidates) ? replayRepairDispatchCandidates.candidates.slice(0, 5) : []) {
             const targetMatches = !candidate.targetProject || candidate.targetProject === bundle.target_project || candidate.dispatch_target === bundle.target_project;
-            lines.push(`  - candidate=${candidate.candidate_id || ""}；${candidate.priority || "medium"}:${candidate.component || "replay"}；target=${candidate.dispatch_target || candidate.targetProject || candidate.repair_target || "memory-context"}${targetMatches ? "" : "（非本 Agent 目标，仅供主 Agent 协调参考）"}；action=${candidate.recommendedAction || "review"}；${candidate.instruction || candidate.expected || ""}`);
+            const nativeProofBinding = [
+                candidate.proof_entry_id ? `proof=${candidate.proof_entry_id}` : "",
+                candidate.request_patch_checksum ? `request=${candidate.request_patch_checksum}` : "",
+                candidate.worker_context_packet_id ? `packet=${candidate.worker_context_packet_id}` : "",
+                candidate.worker_context_packet_binding_id ? `packetBinding=${candidate.worker_context_packet_binding_id}` : "",
+                candidate.worker_context_packet_memory_policy_reason ? `memoryPolicy=${candidate.worker_context_packet_memory_policy_reason}` : "",
+                candidate.request_telemetry_source ? `source=${candidate.request_telemetry_source}` : "",
+                candidate.request_telemetry_session_status ? `session=${candidate.request_telemetry_session_status}` : "",
+                candidate.request_telemetry_dispatch_status ? `dispatch=${candidate.request_telemetry_dispatch_status}` : "",
+                candidate.runner_request_id ? `runner=${candidate.runner_request_id}` : "",
+            ].filter(Boolean).join("；");
+            lines.push(`  - candidate=${candidate.candidate_id || ""}；${candidate.priority || "medium"}:${candidate.component || "replay"}；target=${candidate.dispatch_target || candidate.targetProject || candidate.repair_target || "memory-context"}${targetMatches ? "" : "（非本 Agent 目标，仅供主 Agent 协调参考）"}${nativeProofBinding ? `；${nativeProofBinding}` : ""}；action=${candidate.recommendedAction || "review"}；${candidate.instruction || candidate.expected || ""}`);
         }
     }
     if (compaction.hookLedger?.schema) {
@@ -5401,7 +6915,7 @@ function renderGroupMemoryContextBundle(bundle) {
         lines.push(bundle.relevant_historical_evidence);
     if (bundle.task_query)
         lines.push(`- 你本次任务：${bundle.task_query}`);
-    lines.push("- 回执要求：回复末尾必须包含 CCM_AGENT_RECEIPT；不能编造未执行的验证或文件修改；必须用 memoryUsed / memoryIgnored 声明本轮是否使用了本记忆包、项目记忆、历史结论、共享文档或知识库；如存在 compact read plan revalidation gate，必须声明 gate/read_plan_id 以及是否已 re-read/current source verified；如存在压缩重注入候选，必须用 postCompactCandidateUsage 逐条声明 used / ignored / verified。");
+    lines.push("- 回执要求：回复末尾必须包含 CCM_AGENT_RECEIPT；不能编造未执行的验证或文件修改；必须用 memoryUsed / memoryIgnored 声明本轮是否使用了本记忆包、项目记忆、历史结论、共享文档或知识库；如存在 global_memory_id，必须用 globalMemoryUsage 逐条声明 used / ignored / verified / background / advisory；如存在 API microcompact edit plan，必须用 apiMicrocompactUsage 或 memoryUsed/memoryIgnored 声明 planChecksum 和 native_applied/advisory/ignored/not_supported，并绑定本轮 taskAgentSessionId/nativeSessionId/memoryContextSnapshotId；如存在 compact read plan revalidation gate，必须声明 gate/read_plan_id 以及是否已 re-read/current source verified；如存在压缩重注入候选，必须用 postCompactCandidateUsage 逐条声明 used / ignored / verified。");
     return lines.join("\n");
 }
 function buildAgentMemoryPacket(groupId, targetProject, task = "") {
@@ -6674,6 +8188,7 @@ function runGroupGlobalAgentMemoryBridgeContextSelfTest() {
     const typedDir = (0, group_memory_index_1.getGroupTypedMemoryDir)(groupId);
     const reloadFile = getGroupMemoryReloadLedgerFile(groupId);
     const arbitrationLedgerFile = getGroupGlobalMemoryArbitrationLedgerFile(groupId);
+    const releaseGlobalMemorySelftest = (0, memory_1.acquireGlobalAgentMemorySelfTestLock)("group-global-agent-memory-bridge-context");
     const previousGlobalMemory = fs.existsSync(memory_1.GLOBAL_AGENT_MEMORY_FILE) ? fs.readFileSync(memory_1.GLOBAL_AGENT_MEMORY_FILE, "utf-8") : null;
     const previousGlobalMemoryBak = fs.existsSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`) ? fs.readFileSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, "utf-8") : null;
     try {
@@ -6749,18 +8264,26 @@ function runGroupGlobalAgentMemoryBridgeContextSelfTest() {
             minKeepTokens: 1,
             maxGlobalAgentMemory: 4,
             globalAgentSessionId: "phase61-global-session",
+            allowSelftestGlobalMemoryForSelfTest: true,
         });
         const rendered = String(bundle.rendered_text || "");
         const globalRecall = bundle.global_agent_memory || {};
+        const healthGate = bundle.global_memory_health_gate || globalRecall.memory_health_gate || {};
         const ignored = buildAgentMemoryContextBundle(groupId, "api", "本轮请忽略记忆，只处理当前任务");
         const ignoredRendered = String(ignored.rendered_text || "");
         const checks = {
+            healthGateAllowsCleanGlobalMemory: healthGate.schema === "ccm-child-global-agent-memory-health-gate-v1"
+                && healthGate.status === "ok"
+                && healthGate.selftest_bypass === true
+                && healthGate.action === "allow_global_agent_memory_recall_for_selftest_fixture",
             globalRecallStructured: globalRecall.schema === "ccm-child-global-agent-memory-recall-v1"
                 && Number(globalRecall.itemCount || 0) >= 1
                 && JSON.stringify(globalRecall.items || []).includes("GLOBAL_AGENT_CHILD_CONTEXT_SENTINEL"),
             renderedInjectsGlobalAgentMemory: rendered.includes("全局 Agent 长期记忆召回")
                 && rendered.includes("GLOBAL_AGENT_CHILD_CONTEXT_SENTINEL")
                 && rendered.includes("global_memory_id=gmi_phase61_child_context_user"),
+            renderedMentionsHealthGate: rendered.includes("Global Agent memory health gate")
+                && rendered.includes("allow_global_agent_memory_recall_for_selftest_fixture"),
             currentStateBoundaryRendered: rendered.includes("必须读取当前真实状态复核") || rendered.includes("必须读取当前真实状态"),
             sourceManifestTracksGlobalMemory: bundle.source_manifest?.schema === "ccm-group-memory-source-manifest-v1"
                 && (bundle.source_manifest.entries || []).some((entry) => entry.id === "global_agent_memory" && entry.exists === true),
@@ -6797,6 +8320,110 @@ function runGroupGlobalAgentMemoryBridgeContextSelfTest() {
                 writeTextAtomic(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, previousGlobalMemoryBak);
         }
         catch { }
+        releaseGlobalMemorySelftest();
+    }
+}
+function runGroupGlobalAgentMemoryHealthGateSelfTest() {
+    const groupId = `group-global-agent-memory-health-gate-selftest-${process.pid}-${Date.now().toString(36)}`;
+    const messageFile = getGroupMessagesFileHint(groupId);
+    const memoryFile = getGroupMemoryFile(groupId);
+    const typedDir = (0, group_memory_index_1.getGroupTypedMemoryDir)(groupId);
+    const reloadFile = getGroupMemoryReloadLedgerFile(groupId);
+    const releaseGlobalMemorySelftest = (0, memory_1.acquireGlobalAgentMemorySelfTestLock)("group-global-agent-memory-health-gate");
+    const previousGlobalMemory = fs.existsSync(memory_1.GLOBAL_AGENT_MEMORY_FILE) ? fs.readFileSync(memory_1.GLOBAL_AGENT_MEMORY_FILE, "utf-8") : null;
+    const previousGlobalMemoryBak = fs.existsSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`) ? fs.readFileSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, "utf-8") : null;
+    try {
+        const at = new Date().toISOString();
+        writeJsonAtomic(memory_1.GLOBAL_AGENT_MEMORY_FILE, {
+            version: 1,
+            scope: "global",
+            id: "global-agent",
+            user: [{
+                    id: "gmi_health_gate_polluted",
+                    text: "GLOBAL_AGENT_MEMORY_HEALTH_GATE_SENTINEL: this active selftest data must never be injected into child Agent context.",
+                    why: "验证 active Global Agent memory 污染会阻断全局记忆召回。",
+                    howToApply: "如果看到这条文本进入 rendered_text，就是健康门失败。",
+                    importance: 99,
+                    confidence: 0.99,
+                    createdAt: at,
+                    updatedAt: at,
+                    source: {
+                        sessionId: "health-gate-selftest",
+                        messageIds: ["health-gate-message"],
+                        source: "selftest",
+                        timestamp: at,
+                    },
+                }],
+            feedback: [],
+            authorization: [],
+            decisions: [],
+            missions: [],
+            unresolved: [],
+            references: [],
+            sessions: [],
+            archives: [],
+            compaction: { boundaryVersion: 1, totalCompactions: 0, consecutiveFailures: 0, health: "healthy", boundaries: [] },
+            privacy: { rejectedCandidates: 0, encryptedTranscripts: true, lastScanAt: at },
+            integrity: { pass: true, corruptedArchives: [] },
+            updatedAt: at,
+        });
+        (0, storage_1.saveGroupMessages)(groupId, [
+            { id: "ggmh-1", role: "user", target: "coordinator", timestamp: at, content: "继续 Global Agent memory health gate 自测任务。" },
+        ]);
+        saveGroupMemory(groupId, {
+            groupId,
+            goal: "验证 Global Agent memory active 污染阻断子 Agent 注入",
+            currentPhase: "global-memory-health-gate",
+            persistentRequirements: [{ messageId: "ggmh-1", text: "active Global Agent memory 污染时不能向子 Agent 注入全局记忆内容。" }],
+            compaction: { health: "healthy", compactedMessageCount: 1, preservedRecentMessages: 1 },
+        });
+        const bundle = buildAgentMemoryContextBundle(groupId, "api", "继续 Global Agent memory health gate 阻断验证 src/health-gate.ts", {
+            minKeepTokens: 1,
+            maxGlobalAgentMemory: 4,
+        });
+        const rendered = String(bundle.rendered_text || "");
+        const globalRecall = bundle.global_agent_memory || {};
+        const healthGate = bundle.global_memory_health_gate || globalRecall.memory_health_gate || {};
+        const checks = {
+            healthGateFailsActivePollution: healthGate.schema === "ccm-child-global-agent-memory-health-gate-v1"
+                && healthGate.status === "fail"
+                && Number(healthGate.active_contamination_count || 0) >= 1,
+            recallBlocked: globalRecall.reason === "global_agent_memory_health_gate_failed"
+                && globalRecall.healthBlocked === true
+                && Number(globalRecall.itemCount || 0) === 0,
+            renderedBlocksGlobalMemory: rendered.includes("全局记忆健康门阻断")
+                && rendered.includes("block_global_agent_memory_recall")
+                && !rendered.includes("global_memory_id=gmi_health_gate_polluted"),
+            contaminatedPreviewNotRendered: !rendered.includes("this active selftest data must never be injected")
+                && !rendered.includes("GLOBAL_AGENT_MEMORY_HEALTH_GATE_SENTINEL"),
+            sourceManifestStillAvailable: bundle.source_manifest?.schema === "ccm-group-memory-source-manifest-v1",
+            rawSourceStillTrackedForAudit: bundle.raw_sources?.global_agent_memory_file === memory_1.GLOBAL_AGENT_MEMORY_FILE,
+        };
+        return { pass: Object.values(checks).every(Boolean), checks, healthGate: { status: healthGate.status, active: healthGate.active_contamination_count } };
+    }
+    finally {
+        for (const file of [messageFile, `${messageFile}.bak`, memoryFile, `${memoryFile}.bak`, reloadFile]) {
+            try {
+                fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+        try {
+            if (previousGlobalMemory === null)
+                fs.rmSync(memory_1.GLOBAL_AGENT_MEMORY_FILE, { force: true });
+            else
+                writeTextAtomic(memory_1.GLOBAL_AGENT_MEMORY_FILE, previousGlobalMemory);
+            if (previousGlobalMemoryBak === null)
+                fs.rmSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, { force: true });
+            else
+                writeTextAtomic(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, previousGlobalMemoryBak);
+        }
+        catch { }
+        releaseGlobalMemorySelftest();
     }
 }
 function runGroupGlobalAgentMemoryArbitrationContextSelfTest() {
@@ -6806,6 +8433,7 @@ function runGroupGlobalAgentMemoryArbitrationContextSelfTest() {
     const typedDir = (0, group_memory_index_1.getGroupTypedMemoryDir)(groupId);
     const reloadFile = getGroupMemoryReloadLedgerFile(groupId);
     const arbitrationLedgerFile = getGroupGlobalMemoryArbitrationLedgerFile(groupId);
+    const releaseGlobalMemorySelftest = (0, memory_1.acquireGlobalAgentMemorySelfTestLock)("group-global-agent-memory-arbitration-context");
     const previousGlobalMemory = fs.existsSync(memory_1.GLOBAL_AGENT_MEMORY_FILE) ? fs.readFileSync(memory_1.GLOBAL_AGENT_MEMORY_FILE, "utf-8") : null;
     const previousGlobalMemoryBak = fs.existsSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`) ? fs.readFileSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, "utf-8") : null;
     try {
@@ -6865,10 +8493,12 @@ function runGroupGlobalAgentMemoryArbitrationContextSelfTest() {
         buildAgentMemoryContextBundle(groupId, "api", "继续 GLOBAL_AGENT_ARBITRATION_SENTINEL src/arbitration.ts", {
             minKeepTokens: 1,
             maxGlobalAgentMemory: 4,
+            allowSelftestGlobalMemoryForSelfTest: true,
         });
         const bundle = buildAgentMemoryContextBundle(groupId, "api", "继续 GLOBAL_AGENT_ARBITRATION_SENTINEL src/arbitration.ts", {
             minKeepTokens: 1,
             maxGlobalAgentMemory: 4,
+            allowSelftestGlobalMemoryForSelfTest: true,
         });
         const rendered = String(bundle.rendered_text || "");
         const globalRecall = bundle.global_agent_memory || {};
@@ -6931,6 +8561,137 @@ function runGroupGlobalAgentMemoryArbitrationContextSelfTest() {
                 writeTextAtomic(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, previousGlobalMemoryBak);
         }
         catch { }
+        releaseGlobalMemorySelftest();
+    }
+}
+function runGroupGlobalAgentMemorySemanticArbitrationSelfTest() {
+    const groupId = `group-global-agent-memory-semantic-arbitration-selftest-${process.pid}-${Date.now().toString(36)}`;
+    const messageFile = getGroupMessagesFileHint(groupId);
+    const memoryFile = getGroupMemoryFile(groupId);
+    const typedDir = (0, group_memory_index_1.getGroupTypedMemoryDir)(groupId);
+    const reloadFile = getGroupMemoryReloadLedgerFile(groupId);
+    const arbitrationLedgerFile = getGroupGlobalMemoryArbitrationLedgerFile(groupId);
+    const releaseGlobalMemorySelftest = (0, memory_1.acquireGlobalAgentMemorySelfTestLock)("group-global-agent-memory-semantic-arbitration");
+    const previousGlobalMemory = fs.existsSync(memory_1.GLOBAL_AGENT_MEMORY_FILE) ? fs.readFileSync(memory_1.GLOBAL_AGENT_MEMORY_FILE, "utf-8") : null;
+    const previousGlobalMemoryBak = fs.existsSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`) ? fs.readFileSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, "utf-8") : null;
+    try {
+        const globalAt = "2026-07-07T03:00:00.000Z";
+        const groupAt = "2026-07-07T04:00:00.000Z";
+        writeJsonAtomic(memory_1.GLOBAL_AGENT_MEMORY_FILE, {
+            version: 1,
+            scope: "global",
+            id: "global-agent",
+            user: [{
+                    id: "gmi_phase70_semantic_rule",
+                    text: "GLOBAL_AGENT_SEMANTIC_ARBITRATION_SENTINEL: src/semantic-arbitration.ts 必须使用 stripe-v1-policy 处理支付重试策略。",
+                    why: "旧全局规则用于验证 semantic arbitration 能识别同一文件锚点下的规则替换。",
+                    howToApply: "如果任务涉及 src/semantic-arbitration.ts，使用 stripe-v1-policy。",
+                    importance: 98,
+                    confidence: 0.99,
+                    createdAt: globalAt,
+                    updatedAt: globalAt,
+                    source: {
+                        sessionId: "phase70-global-session",
+                        messageIds: ["phase70-global-message"],
+                        source: "selftest",
+                        timestamp: globalAt,
+                    },
+                }],
+            feedback: [],
+            authorization: [],
+            decisions: [],
+            missions: [],
+            unresolved: [],
+            references: [],
+            sessions: [],
+            archives: [],
+            compaction: { boundaryVersion: 1, totalCompactions: 0, consecutiveFailures: 0, health: "healthy", boundaries: [] },
+            privacy: { rejectedCandidates: 0, encryptedTranscripts: true, lastScanAt: globalAt },
+            integrity: { pass: true, corruptedArchives: [] },
+            updatedAt: globalAt,
+        });
+        (0, storage_1.saveGroupMessages)(groupId, [
+            { id: "phase70-semantic-1", role: "user", target: "coordinator", timestamp: groupAt, content: "GLOBAL_AGENT_SEMANTIC_ARBITRATION_SENTINEL: src/semantic-arbitration.ts 当前支付重试策略使用 ledger-v2-policy，stripe-v1-policy 只作为历史标签。" },
+            { id: "phase70-semantic-2", role: "assistant", agent: "api", timestamp: groupAt, content: "api 后续核验 src/semantic-arbitration.ts 时以 ledger-v2-policy 为当前规则。" },
+        ]);
+        saveGroupMemory(groupId, {
+            groupId,
+            goal: "验证语义级全局记忆仲裁评分",
+            currentPhase: "phase70-semantic-arbitration",
+            persistentRequirements: [{
+                    messageId: "phase70-semantic-1",
+                    text: "GLOBAL_AGENT_SEMANTIC_ARBITRATION_SENTINEL: src/semantic-arbitration.ts 当前支付重试策略使用 ledger-v2-policy，stripe-v1-policy 只作为历史标签。",
+                }],
+            decisions: [{
+                    messageId: "phase70-semantic-1",
+                    decision: "src/semantic-arbitration.ts 使用 ledger-v2-policy",
+                    reason: "群聊新证据晚于全局记忆，并给出了同一文件锚点下的当前规则名。",
+                }],
+        });
+        const bundle = buildAgentMemoryContextBundle(groupId, "api", "继续 GLOBAL_AGENT_SEMANTIC_ARBITRATION_SENTINEL src/semantic-arbitration.ts", {
+            minKeepTokens: 1,
+            maxGlobalAgentMemory: 4,
+            allowSelftestGlobalMemoryForSelfTest: true,
+        });
+        const rendered = String(bundle.rendered_text || "");
+        const globalRecall = bundle.global_agent_memory || {};
+        const item = (globalRecall.items || []).find((row) => row.id === "gmi_phase70_semantic_rule") || {};
+        const arbitration = item.arbitration || {};
+        const semanticRisk = arbitration.semanticRisk || {};
+        const decisiveEvidence = Array.isArray(arbitration.decisiveEvidence) ? arbitration.decisiveEvidence : [];
+        const ledger = bundle.global_memory_arbitration_ledger || {};
+        const rawLedger = fs.existsSync(arbitrationLedgerFile) ? JSON.parse(fs.readFileSync(arbitrationLedgerFile, "utf-8")) : {};
+        const ledgerEntry = (rawLedger.entries || []).find((entry) => entry.globalMemoryId === "gmi_phase70_semantic_rule") || {};
+        const checks = {
+            globalMemoryWasRecalled: Number(globalRecall.itemCount || 0) >= 1
+                && item.id === "gmi_phase70_semantic_rule",
+            semanticRiskScoresConflict: Number(arbitration.semanticRiskScore || semanticRisk.score || 0) >= 60
+                && semanticRisk.level !== "none"
+                && (semanticRisk.reasons || []).includes("different_named_rule"),
+            arbitrationDemotesViaSemanticConflict: arbitration.demoted === true
+                && arbitration.conflict === true
+                && arbitration.status === "possible_conflict_with_newer_group_memory",
+            decisiveEvidenceCarriesSemanticReasons: decisiveEvidence.some((evidence) => Number(evidence.semanticRiskScore || evidence.semanticRisk?.score || 0) >= 60
+                && (evidence.semanticReasons || evidence.semanticRisk?.reasons || []).includes("current_local_rule_differs")),
+            renderedShowsSemanticRisk: rendered.includes("semantic_risk=")
+                && rendered.includes("semantic_reasons=")
+                && rendered.includes("different_named_rule")
+                && rendered.includes("ledger-v2-policy")
+                && rendered.includes("stripe-v1-policy"),
+            ledgerPersistsSemanticRisk: ledger.schema === "ccm-group-global-memory-arbitration-ledger-summary-v1"
+                && Number(ledger.semanticRiskCount || 0) >= 1
+                && Number(ledger.maxSemanticRiskScore || 0) >= 60
+                && Number(ledgerEntry.semanticRiskScore || 0) >= 60
+                && (ledgerEntry.semanticReasons || []).includes("different_named_rule"),
+            sourceManifestTracksArbitrationLedger: (bundle.source_manifest?.entries || []).some((entry) => entry.id === "global_memory_arbitration_ledger" && entry.exists === true),
+            compactReferencesTrackArbitrationLedger: (bundle.compact_file_references?.references || []).some((entry) => entry.type === "global_memory_arbitration_ledger" && entry.exists === true),
+        };
+        return { pass: Object.values(checks).every(Boolean), checks, arbitration, ledger, ledgerEntry };
+    }
+    finally {
+        for (const file of [messageFile, `${messageFile}.bak`, memoryFile, `${memoryFile}.bak`, reloadFile, arbitrationLedgerFile]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+        try {
+            if (previousGlobalMemory === null)
+                fs.rmSync(memory_1.GLOBAL_AGENT_MEMORY_FILE, { force: true });
+            else
+                writeTextAtomic(memory_1.GLOBAL_AGENT_MEMORY_FILE, previousGlobalMemory);
+            if (previousGlobalMemoryBak === null)
+                fs.rmSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, { force: true });
+            else
+                writeTextAtomic(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, previousGlobalMemoryBak);
+        }
+        catch { }
+        releaseGlobalMemorySelftest();
     }
 }
 function runGroupGlobalAgentMemoryCrossGroupSuppressionContextSelfTest() {
@@ -6948,6 +8709,7 @@ function runGroupGlobalAgentMemoryCrossGroupSuppressionContextSelfTest() {
         `${getGroupGlobalMemoryArbitrationLedgerFile(groupId)}.bak`,
     ]);
     const cleanupDirs = [(0, group_memory_index_1.getGroupTypedMemoryDir)(groupA), (0, group_memory_index_1.getGroupTypedMemoryDir)(groupB)];
+    const releaseGlobalMemorySelftest = (0, memory_1.acquireGlobalAgentMemorySelfTestLock)("group-global-agent-memory-cross-group-suppression");
     const previousGlobalMemory = fs.existsSync(memory_1.GLOBAL_AGENT_MEMORY_FILE) ? fs.readFileSync(memory_1.GLOBAL_AGENT_MEMORY_FILE, "utf-8") : null;
     const previousGlobalMemoryBak = fs.existsSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`) ? fs.readFileSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, "utf-8") : null;
     try {
@@ -7007,6 +8769,7 @@ function runGroupGlobalAgentMemoryCrossGroupSuppressionContextSelfTest() {
         const sourceBundle = buildAgentMemoryContextBundle(groupA, "api", "继续 GLOBAL_AGENT_CROSS_GROUP_SUPPRESSION_SENTINEL src/cross-group.ts", {
             minKeepTokens: 1,
             maxGlobalAgentMemory: 4,
+            allowSelftestGlobalMemoryForSelfTest: true,
         });
         const sourceLedger = sourceBundle.global_memory_arbitration_ledger || {};
         (0, storage_1.saveGroupMessages)(groupB, [
@@ -7022,6 +8785,7 @@ function runGroupGlobalAgentMemoryCrossGroupSuppressionContextSelfTest() {
             minKeepTokens: 1,
             maxGlobalAgentMemory: 4,
             crossGroupGlobalMemoryConflictGroupThreshold: 1,
+            allowSelftestGlobalMemoryForSelfTest: true,
         });
         const rendered = String(targetBundle.rendered_text || "");
         const globalRecall = targetBundle.global_agent_memory || {};
@@ -7085,6 +8849,194 @@ function runGroupGlobalAgentMemoryCrossGroupSuppressionContextSelfTest() {
                 writeTextAtomic(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, previousGlobalMemoryBak);
         }
         catch { }
+        releaseGlobalMemorySelftest();
+    }
+}
+function runGroupGlobalAgentMemoryCrossGroupSuppressionFreshnessSelfTest() {
+    const suffix = `${process.pid}-${Date.now().toString(36)}`;
+    const groupA = `group-global-agent-memory-freshness-source-${suffix}`;
+    const groupB = `group-global-agent-memory-freshness-target-${suffix}`;
+    const cleanupFiles = [groupA, groupB].flatMap(groupId => [
+        getGroupMessagesFileHint(groupId),
+        `${getGroupMessagesFileHint(groupId)}.bak`,
+        getGroupMemoryFile(groupId),
+        `${getGroupMemoryFile(groupId)}.bak`,
+        getGroupMemoryReloadLedgerFile(groupId),
+        `${getGroupMemoryReloadLedgerFile(groupId)}.bak`,
+        getGroupGlobalMemoryArbitrationLedgerFile(groupId),
+        `${getGroupGlobalMemoryArbitrationLedgerFile(groupId)}.bak`,
+    ]);
+    const cleanupDirs = [(0, group_memory_index_1.getGroupTypedMemoryDir)(groupA), (0, group_memory_index_1.getGroupTypedMemoryDir)(groupB)];
+    const releaseGlobalMemorySelftest = (0, memory_1.acquireGlobalAgentMemorySelfTestLock)("group-global-agent-memory-cross-group-freshness");
+    const previousGlobalMemory = fs.existsSync(memory_1.GLOBAL_AGENT_MEMORY_FILE) ? fs.readFileSync(memory_1.GLOBAL_AGENT_MEMORY_FILE, "utf-8") : null;
+    const previousGlobalMemoryBak = fs.existsSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`) ? fs.readFileSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, "utf-8") : null;
+    try {
+        const oldGlobalAt = "2026-07-07T05:00:00.000Z";
+        const sourceAt = "2026-07-07T06:00:00.000Z";
+        const newerGlobalAt = new Date(Date.now() + 60_000).toISOString();
+        writeJsonAtomic(memory_1.GLOBAL_AGENT_MEMORY_FILE, {
+            version: 1,
+            scope: "global",
+            id: "global-agent",
+            user: [{
+                    id: "gmi_phase68_cross_group_freshness_rule",
+                    text: "GLOBAL_AGENT_CROSS_GROUP_FRESHNESS_SENTINEL: src/freshness.ts 必须使用 stale-freshness-rule。",
+                    why: "旧全局规则用于验证 cross-group suppression freshness。",
+                    howToApply: "旧规则：直接使用 stale-freshness-rule。",
+                    importance: 99,
+                    confidence: 0.99,
+                    createdAt: oldGlobalAt,
+                    updatedAt: oldGlobalAt,
+                    source: {
+                        sessionId: "phase68-old-global-session",
+                        messageIds: ["phase68-old-global-message"],
+                        source: "selftest",
+                        timestamp: oldGlobalAt,
+                    },
+                }],
+            feedback: [],
+            authorization: [],
+            decisions: [],
+            missions: [],
+            unresolved: [],
+            references: [],
+            sessions: [],
+            archives: [],
+            compaction: { boundaryVersion: 1, totalCompactions: 0, consecutiveFailures: 0, health: "healthy", boundaries: [] },
+            privacy: { rejectedCandidates: 0, encryptedTranscripts: true, lastScanAt: oldGlobalAt },
+            integrity: { pass: true, corruptedArchives: [] },
+            updatedAt: oldGlobalAt,
+        });
+        (0, storage_1.saveGroupMessages)(groupA, [
+            { id: "phase68-a-1", role: "user", target: "coordinator", timestamp: sourceAt, content: "GLOBAL_AGENT_CROSS_GROUP_FRESHNESS_SENTINEL: src/freshness.ts 不再使用 stale-freshness-rule，改为 source-group-rule。" },
+        ]);
+        saveGroupMemory(groupA, {
+            groupId: groupA,
+            goal: "验证跨群聊抑制新鲜度的来源群聊",
+            currentPhase: "phase68-freshness-source",
+            persistentRequirements: [{
+                    messageId: "phase68-a-1",
+                    text: "GLOBAL_AGENT_CROSS_GROUP_FRESHNESS_SENTINEL: src/freshness.ts 不再使用 stale-freshness-rule，改为 source-group-rule。",
+                }],
+        });
+        const sourceBundle = buildAgentMemoryContextBundle(groupA, "api", "继续 GLOBAL_AGENT_CROSS_GROUP_FRESHNESS_SENTINEL src/freshness.ts", {
+            minKeepTokens: 1,
+            maxGlobalAgentMemory: 4,
+            allowSelftestGlobalMemoryForSelfTest: true,
+        });
+        const sourceLedger = sourceBundle.global_memory_arbitration_ledger || {};
+        writeJsonAtomic(memory_1.GLOBAL_AGENT_MEMORY_FILE, {
+            version: 1,
+            scope: "global",
+            id: "global-agent",
+            user: [{
+                    id: "gmi_phase68_cross_group_freshness_rule",
+                    text: "GLOBAL_AGENT_CROSS_GROUP_FRESHNESS_SENTINEL: src/freshness.ts 已更新为 verified-global-rule；旧跨群聊冲突只能作为 advisory。",
+                    why: "同一 Global Agent memory id 在跨群聊冲突之后被重新写入，应覆盖旧 suppression。",
+                    howToApply: "使用 verified-global-rule 前仍读取当前代码和当前群聊证据。",
+                    importance: 99,
+                    confidence: 0.99,
+                    createdAt: oldGlobalAt,
+                    updatedAt: newerGlobalAt,
+                    source: {
+                        sessionId: "phase68-new-global-session",
+                        messageIds: ["phase68-new-global-message"],
+                        source: "selftest",
+                        timestamp: newerGlobalAt,
+                    },
+                }],
+            feedback: [],
+            authorization: [],
+            decisions: [],
+            missions: [],
+            unresolved: [],
+            references: [],
+            sessions: [],
+            archives: [],
+            compaction: { boundaryVersion: 1, totalCompactions: 0, consecutiveFailures: 0, health: "healthy", boundaries: [] },
+            privacy: { rejectedCandidates: 0, encryptedTranscripts: true, lastScanAt: newerGlobalAt },
+            integrity: { pass: true, corruptedArchives: [] },
+            updatedAt: newerGlobalAt,
+        });
+        (0, storage_1.saveGroupMessages)(groupB, [
+            { id: "phase68-b-1", role: "user", target: "coordinator", timestamp: newerGlobalAt, content: "继续 freshness 目标群聊，按当前来源核验。" },
+        ]);
+        saveGroupMemory(groupB, {
+            groupId: groupB,
+            goal: "验证跨群聊抑制被新全局记忆覆盖",
+            currentPhase: "phase68-freshness-target",
+        });
+        const targetBundle = buildAgentMemoryContextBundle(groupB, "api", "继续 GLOBAL_AGENT_CROSS_GROUP_FRESHNESS_SENTINEL src/freshness.ts", {
+            minKeepTokens: 1,
+            maxGlobalAgentMemory: 4,
+            crossGroupGlobalMemoryConflictGroupThreshold: 1,
+            allowSelftestGlobalMemoryForSelfTest: true,
+        });
+        const rendered = String(targetBundle.rendered_text || "");
+        const globalRecall = targetBundle.global_agent_memory || {};
+        const item = (globalRecall.items || []).find((row) => row.id === "gmi_phase68_cross_group_freshness_rule") || {};
+        const cross = item.crossGroupSuppression || {};
+        const freshness = cross.freshness || {};
+        const arbitration = item.arbitration || {};
+        const checks = {
+            sourceGroupRecordedConflict: sourceLedger.schema === "ccm-group-global-memory-arbitration-ledger-summary-v1"
+                && Number(sourceLedger.conflictCount || 0) >= 1
+                && fs.existsSync(getGroupGlobalMemoryArbitrationLedgerFile(groupA)),
+            targetRecallsUpdatedGlobalMemory: Number(globalRecall.itemCount || 0) >= 1
+                && item.id === "gmi_phase68_cross_group_freshness_rule"
+                && JSON.stringify(globalRecall.items || []).includes("verified-global-rule"),
+            suppressionDowngradedToAdvisory: cross.suppressed === false
+                && cross.advisory === true
+                && cross.reason === "cross_group_evidence_superseded_by_newer_global_memory"
+                && freshness.supersededByNewerGlobalMemory === true
+                && Number(freshness.globalNewerByMs || 0) > 0,
+            arbitrationDoesNotCrossGroupSuppress: arbitration.crossGroupSuppressed === false
+                && arbitration.status === "active_global_context",
+            recallSummaryCountsFreshness: Number(globalRecall.crossGroupSuppression?.advisoryCount || 0) >= 1
+                && Number(globalRecall.crossGroupSuppression?.supersededCount || 0) >= 1
+                && Number(globalRecall.crossGroupSuppression?.suppressedCount || 0) === 0,
+            renderedShowsFreshnessAdvisory: rendered.includes("跨群聊抑制新鲜度")
+                && rendered.includes("cross_group_suppression=advisory")
+                && rendered.includes("superseded=true"),
+            sourceManifestTracksCrossGroupLedgerDir: (targetBundle.source_manifest?.entries || []).some((entry) => entry.id === "global_memory_cross_group_arbitration" && entry.exists === true),
+            compactReferencesTrackCrossGroupLedgerDir: (targetBundle.compact_file_references?.references || []).some((entry) => entry.type === "global_memory_cross_group_arbitration" && entry.exists === true),
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            crossGroupSuppression: cross,
+            arbitration,
+            sourceLedger,
+            targetSummary: globalRecall.crossGroupSuppression || {},
+        };
+    }
+    finally {
+        for (const file of cleanupFiles) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        for (const dir of cleanupDirs) {
+            try {
+                if (dir && fs.existsSync(dir))
+                    fs.rmSync(dir, { recursive: true, force: true });
+            }
+            catch { }
+        }
+        try {
+            if (previousGlobalMemory === null)
+                fs.rmSync(memory_1.GLOBAL_AGENT_MEMORY_FILE, { force: true });
+            else
+                writeTextAtomic(memory_1.GLOBAL_AGENT_MEMORY_FILE, previousGlobalMemory);
+            if (previousGlobalMemoryBak === null)
+                fs.rmSync(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, { force: true });
+            else
+                writeTextAtomic(`${memory_1.GLOBAL_AGENT_MEMORY_FILE}.bak`, previousGlobalMemoryBak);
+        }
+        catch { }
+        releaseGlobalMemorySelftest();
     }
 }
 function runGroupTypedMemoryContextSelfTest() {

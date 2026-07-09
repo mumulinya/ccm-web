@@ -5,6 +5,7 @@ exports.buildStreamlinedToolUseSummary = buildStreamlinedToolUseSummary;
 exports.buildTechnicalDetailSections = buildTechnicalDetailSections;
 exports.buildMainAgentDisplayStream = buildMainAgentDisplayStream;
 const workchain_1 = require("../../agents/workchain");
+const user_facing_text_1 = require("../../agents/user-facing-text");
 function compactDisplayText(value, max = 220) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
     if (text.length <= max)
@@ -13,45 +14,32 @@ function compactDisplayText(value, max = 220) {
 }
 const USER_DISPLAY_INTERNAL_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|<\s*\/?\s*task-notification|task-notification|receipt[-_\s]*status|scratchpad|trace_id|session_id|session_ids|native_session|task_agent_session|WorkerContextPacket|raw\s+receipt|raw\s+payload|raw_report|shouldDelegate|Runtime Kernel|Coordinator|Pipeline|Trace Replay|回执要求|任务级原生会话/i;
 function sanitizeUserVisibleTerminology(value) {
-    return String(value || "")
-        .replace(/最终\s*收尾\s*门禁/g, "最终收尾检查")
-        .replace(/交付\s*门禁/g, "交付验收")
-        .replace(/验收\s*门禁/g, "验收检查")
-        .replace(/完成\s*门禁/g, "完成检查")
-        .replace(/合并\s*门禁/g, "合并前检查")
-        .replace(/测试\s*和\s*合并\s*门禁/g, "测试和合并检查")
-        .replace(/路径\s*门禁/g, "路径范围检查")
-        .replace(/权限\s*门禁/g, "权限检查")
-        .replace(/记忆\s*派发\s*门禁/g, "记忆派发检查")
-        .replace(/压缩后\s*重注入\s*门禁/g, "压缩后重注入检查")
-        .replace(/门禁\s*通过/g, "验收通过")
-        .replace(/门禁\s*未通过/g, "验收未通过")
-        .replace(/未过\s*门禁/g, "未通过验收")
-        .replace(/记忆\s*gate\s*引用/gi, "记忆使用声明")
-        .replace(/重注入\s*gate\s*引用/gi, "重注入声明")
-        .replace(/gate\/候选引用\/使用状态/gi, "声明/候选使用状态")
-        .replace(/\bgate\b/gi, "检查项")
-        .replace(/门禁/g, "检查")
-        .replace(/回执/g, "结果说明");
+    return (0, user_facing_text_1.sanitizeUserFacingTerminology)(value);
 }
-function sanitizeMainAgentUserText(value, fallback = "Agent 正在处理当前请求。", max = 260) {
+function sanitizeUserVisibleProtocolTerms(value) {
+    return (0, user_facing_text_1.sanitizeUserFacingProtocolTerms)(value);
+}
+function sanitizeMainAgentUserText(value, fallback = "我正在处理当前请求。", max = 260) {
     let text = String(value || "").replace(/\s+/g, " ").trim();
     if (!text)
         text = fallback;
     if (USER_DISPLAY_INTERNAL_PATTERN.test(text)) {
         if (/error|失败|denied|invalid|权限|门禁/i.test(text))
-            text = "Agent 遇到需要处理的执行保护或权限问题，排障信息已放入技术详情。";
+            text = "执行时遇到需要处理的保护或权限问题，排障信息已放入技术详情。";
         else if (/done|完成|receipt|回执/i.test(text))
-            text = "Agent 已提交结构化完成信息，主 Agent 正在汇总验收。";
+            text = "执行成员已提交结果说明，我正在汇总验收。";
         else
             text = fallback;
     }
     text = text
-        .replace(/\bCoordinator\b/g, "主 Agent")
+        .replace(/\bCoordinator\b/g, "我")
         .replace(/\bPipeline\b/g, "协作看板")
         .replace(/\bRuntime Kernel\b/g, "技术运行信息")
         .replace(/\bTrace Replay\b/g, "技术回放");
-    text = sanitizeUserVisibleTerminology(text);
+    text = (0, user_facing_text_1.sanitizeMainAgentRoleLanguage)(sanitizeUserVisibleProtocolTerms(sanitizeUserVisibleTerminology(text)))
+        .replace(/([\u4e00-\u9fff])\s+([\u4e00-\u9fff])/g, "$1$2")
+        .replace(/\s{2,}/g, " ")
+        .trim();
     return compactDisplayText(text, max);
 }
 function buildStreamlinedToolUseSummary(input) {
@@ -135,8 +123,8 @@ function buildMainAgentDisplayStream(input) {
         || (input.steps || []).find((step) => step.status === "pending")
         || (input.steps || [])[0];
     const fallback = currentStep
-        ? `${modeLabels[input.mode] || "主 Agent"}：${currentStep.activeForm || currentStep.active_form || currentStep.summary || currentStep.content}`
-        : `${modeLabels[input.mode] || "主 Agent"}正在处理当前请求。`;
+        ? `${modeLabels[input.mode] || "我"}：${currentStep.activeForm || currentStep.active_form || currentStep.summary || currentStep.content}`
+        : `${modeLabels[input.mode] || "我"}正在处理当前请求。`;
     const workchain = (0, workchain_1.buildMainAgentWorkchain)({
         surface: input.surface || "group",
         mode: input.mode,
@@ -187,6 +175,10 @@ function buildMainAgentDisplayStream(input) {
         tool_use_summary: toolUseSummary,
         workchain,
         completion_summary: workchain.completion_summary,
+        todo_plan: workchain.todo_plan,
+        todoPlan: workchain.todoPlan || workchain.todo_plan,
+        verification_reminder: workchain.todo_plan?.verification_reminder || null,
+        verificationReminder: workchain.todo_plan?.verificationReminder || workchain.todo_plan?.verification_reminder || null,
         progress_checkpoints: workchain.progress_checkpoints,
         dispatch_launch_summary: dispatchLaunchSummary,
         dispatchLaunchSummary,

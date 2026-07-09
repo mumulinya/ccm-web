@@ -159,11 +159,11 @@ const updateField = (field, event) => emit('update-field', { field, value: event
         </div>
 
         <div class="tool-section">
-          <div class="tool-section-title">项目 Agent 能力边界</div>
+          <div class="tool-section-title">项目执行成员能力边界</div>
           <div class="boundary-grid">
             <label>
               <span>职责范围</span>
-              <textarea :value="responsibility" rows="3" placeholder="说明这个项目 Agent 负责哪些业务、模块或技术栈" @input="updateField('responsibility', $event)"></textarea>
+              <textarea :value="responsibility" rows="3" placeholder="说明这个项目执行成员负责哪些业务、模块或技术栈" @input="updateField('responsibility', $event)"></textarea>
             </label>
             <label>
               <span>能力标签</span>
@@ -182,7 +182,7 @@ const updateField = (field, event) => emit('update-field', { field, value: event
             <span>交付规范</span>
             <textarea :value="deliveryContract" rows="3" placeholder="说明这个 Agent 结果说明里必须包含的业务证据、截图、接口验证或风险说明" @input="updateField('deliveryContract', $event)"></textarea>
           </label>
-          <div class="helper-text">主 Agent 派发任务时会把这些配置写入子 Agent 工作单；如果配置了路径边界，交付验收会检查实际文件变更是否越界。</div>
+          <div class="helper-text">安排执行任务时会把这些配置写入执行成员任务；如果配置了路径边界，交付验收会检查实际文件变更是否越界。</div>
         </div>
 
         <div class="tool-section">
@@ -194,7 +194,7 @@ const updateField = (field, event) => emit('update-field', { field, value: event
             placeholder="每行一条，例如：&#10;npm run check&#10;npm test&#10;npm run build"
             @input="updateField('verificationCommands', $event)"
           ></textarea>
-          <div class="helper-text">子 Agent 执行 daily_dev 任务时会优先参考这些命令；留空时系统会尝试从项目文件推断。</div>
+          <div class="helper-text">执行成员处理 daily_dev 任务时会优先参考这些命令；留空时系统会尝试从项目文件推断。</div>
           <div v-if="inferredCommands.length" class="inferred-box">
             <div class="inferred-head">
               <span>{{ verificationSource === 'configured' ? '系统也推断出以下验证命令' : '可采用系统推断的验证命令' }}</span>

@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildAcceptanceDerivedBrowserAssertionsByCriterion = buildAcceptanceDerivedBrowserAssertionsByCriterion;
 exports.buildAcceptanceDerivedBrowserAssertions = buildAcceptanceDerivedBrowserAssertions;
 function clean(value) {
     return String(value || "").replace(/\s+/g, " ").trim();
@@ -52,26 +53,48 @@ function usefulVisibleText(value) {
         return "";
     return value;
 }
+function assertionKey(item) {
+    const value = String(item.assertion.text || item.assertion.value || "").toLowerCase();
+    return `${item.reason}:${value}`;
+}
+function buildAcceptanceDerivedBrowserAssertionsForCriterion(criterion) {
+    const assertions = [];
+    const seen = new Set();
+    for (const text of quotedText(criterion)) {
+        const visible = usefulVisibleText(text);
+        if (!visible)
+            continue;
+        addUnique(assertions, seen, `text:${visible.toLowerCase()}`, {
+            criterion,
+            reason: "quoted_text",
+            assertion: { type: "text", text: visible },
+        });
+    }
+    for (const path of explicitUrlPaths(criterion)) {
+        addUnique(assertions, seen, `url:${path.toLowerCase()}`, {
+            criterion,
+            reason: "explicit_url_path",
+            assertion: { type: "urlIncludes", text: path },
+        });
+    }
+    return assertions;
+}
+function buildAcceptanceDerivedBrowserAssertionsByCriterion(criteria) {
+    return criteria
+        .map(clean)
+        .filter(Boolean)
+        .map(criterion => ({
+        criterion,
+        assertions: buildAcceptanceDerivedBrowserAssertionsForCriterion(criterion),
+    }))
+        .filter(item => item.assertions.length > 0);
+}
 function buildAcceptanceDerivedBrowserAssertions(criteria) {
     const derived = [];
     const seen = new Set();
-    for (const criterion of criteria.map(clean).filter(Boolean)) {
-        for (const text of quotedText(criterion)) {
-            const visible = usefulVisibleText(text);
-            if (!visible)
-                continue;
-            addUnique(derived, seen, `text:${visible.toLowerCase()}`, {
-                criterion,
-                reason: "quoted_text",
-                assertion: { type: "text", text: visible },
-            });
-        }
-        for (const path of explicitUrlPaths(criterion)) {
-            addUnique(derived, seen, `url:${path.toLowerCase()}`, {
-                criterion,
-                reason: "explicit_url_path",
-                assertion: { type: "urlIncludes", text: path },
-            });
+    for (const group of buildAcceptanceDerivedBrowserAssertionsByCriterion(criteria)) {
+        for (const item of group.assertions) {
+            addUnique(derived, seen, assertionKey(item), item);
         }
     }
     return derived;

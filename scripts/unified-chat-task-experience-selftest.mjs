@@ -188,6 +188,29 @@ checks.globalCancelledTerminalHasFriendlyFallback = cancelledGlobalCard?.phase =
   && cancelledGlobalCard?.user_handoff?.headline?.includes('任务已经停止')
   && cancelledGlobalCard?.actions?.some(action => action.kind === 'save_knowledge')
 
+const weakAcceptanceOnlyGlobalCard = globalAgentRunTaskCard({
+  role: 'assistant',
+  type: 'global_agent_result',
+  content: '任务已处理。',
+  agenticRun: {
+    id: 'run_weak_acceptance_only',
+    status: 'completed',
+    tool_calls: 1,
+    final_report: {
+      summary: '任务已处理。',
+      acceptance_gate_passed: true,
+      plan_mode: {
+        title: '执行前计划',
+        acceptance: ['业务目标已覆盖'],
+      },
+    },
+  },
+})
+checks.globalWeakAcceptanceOnlyDoesNotAlignPlan = weakAcceptanceOnlyGlobalCard?.plan_alignment?.status === 'deviated'
+  && weakAcceptanceOnlyGlobalCard?.plan_alignment?.checks?.some(item => item.label === '业务目标已覆盖' && item.ok === false)
+  && weakAcceptanceOnlyGlobalCard?.delivery?.acceptance_passed === false
+  && weakAcceptanceOnlyGlobalCard?.user_handoff?.unresolved?.some(item => item.includes('业务目标已覆盖'))
+
 const missionCard = globalMissionTaskCard({
   role: 'assistant',
   type: 'global_mission',
@@ -322,6 +345,26 @@ checks.projectExecutionShowsPlanAlignment = projectCard?.plan_alignment?.schema 
   && projectCard?.plan_alignment?.status === 'aligned'
 checks.projectExecutionHasSafeActions = ['view_changes', 'continue', 'rollback'].every(kind => projectCard?.actions?.some(action => action.kind === kind))
 checks.projectContinuationIdentityIsTraceable = projectCard?.technical?.run_id === 'pchat_demo' && projectCard?.technical?.parent_run_id === 'pchat_parent'
+
+const weakProjectDoneCard = projectExecutionTaskCard({
+  role: 'assistant',
+  requestText: '修改登录页按钮文案',
+  streaming: false,
+  task_id: 'pchat_weak_done',
+  taskExperience: {
+    task_id: 'pchat_weak_done',
+    phase: 'completed',
+    status: 'done',
+    requires_card: true,
+  },
+  workEvents: [{ kind: 'done', text: '项目执行成员已完成' }],
+  fileChanges: { count: 1, files: [{ path: 'src/Login.vue', statusText: '修改' }] },
+}, 'demo')
+checks.projectDoneWithoutVerificationDoesNotPassAcceptance = weakProjectDoneCard?.phase === 'completed'
+  && weakProjectDoneCard?.delivery?.acceptance_passed === false
+  && weakProjectDoneCard?.delivery?.headline?.includes('补齐验证或验收')
+  && weakProjectDoneCard?.user_handoff?.status === 'needs_attention'
+  && weakProjectDoneCard?.next_action?.includes('补齐验证或验收')
 
 checks.naturalPhaseLabels = taskPhasePresentation('waiting_confirmation').label === '需要你确认'
 

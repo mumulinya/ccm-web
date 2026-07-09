@@ -258,6 +258,12 @@ const renderedUserHandoff = {
   status: 'ready',
   status_label: '可验收',
   headline: '这轮任务已经收尾，建议先核对交付总结和改动明细。',
+  summary_cards: [
+    { id: 'completed', label: '完成内容', value: '登录状态刷新后的恢复逻辑已经完成。', tone: 'ok' },
+    { id: 'verification', label: '验证状态', value: '已执行 1 项验证', tone: 'ok' },
+    { id: 'attention', label: '待关注', value: '暂无待处理风险', tone: 'ok' },
+    { id: 'next', label: '下一步', value: 'web 产生了 2 个文件改动。', tone: 'ok' },
+  ],
   primary_action: { id: 'view_changes', label: '查看改动', detail: 'web 产生了 2 个文件改动。', kind: 'view_changes', tone: 'primary' },
   secondary_actions: [
     { id: 'review_delivery', label: '核对交付总结', detail: '查看完成内容、验证结果和风险提示。', kind: 'review_delivery', tone: 'outline' },
@@ -405,6 +411,288 @@ taskCompletedDecision.reply.preview = '任务已完成。'
 taskCompletedDecision.todo_plan.steps = taskCompletedDecision.todo_plan.steps.map(step => ({ ...step, status: 'completed', actions: [] }))
 taskCompletedDecision.user_plan_steps = taskCompletedDecision.todo_plan.steps
 
+const workchainTodoPlan = {
+  schema: 'ccm-main-agent-workchain-todo-v1',
+  source: 'workchain',
+  title: '我准备这样处理',
+  display_policy: { user_visible: true, quiet_completed: true, hide_for_ordinary_conversation: false, technical_default_collapsed: true },
+  steps: [
+    { id: 'plan', content: '确认目标和验收标准', activeForm: '正在确认目标和验收标准', active_form: '正在确认目标和验收标准', status: 'completed' },
+    { id: 'dispatch', content: '派发给子 Agent 执行', activeForm: '正在派发子 Agent 执行', active_form: '正在派发子 Agent 执行', status: 'completed' },
+    { id: 'review', content: '跟踪 TestAgent 独立复核', activeForm: '正在跟踪 TestAgent 独立复核', active_form: '正在跟踪 TestAgent 独立复核', status: 'in_progress' },
+    { id: 'summarize', content: '总结完成内容和下一步', activeForm: '正在整理用户可读总结', active_form: '正在整理用户可读总结', status: 'pending' },
+  ],
+  current_step: { id: 'review', content: '跟踪 TestAgent 独立复核', activeForm: '正在跟踪 TestAgent 独立复核', active_form: '正在跟踪 TestAgent 独立复核', status: 'in_progress' },
+  progress: { completed: 2, total: 4 },
+  next_action: '等待 TestAgent 复核结论，主 Agent 再决定是否返工或总结。',
+}
+const workchainTodoDisplayStream = {
+  schema: 'ccm-streamlined-display-v2',
+  user_visible_text: '主 Agent 正在按计划推进任务，并等待 TestAgent 的独立复核结论。',
+  tool_use_summary: { type: 'streamlined_tool_use_summary', tool_summary: '协作通道 1 个，验证 1 项' },
+  workchain: {
+    schema: 'ccm-main-agent-workchain-v1',
+    mode: 'project_task',
+    user_visible_text: '主 Agent 正在按计划推进任务，并等待 TestAgent 的独立复核结论。',
+    stages: [
+      { id: 'plan', label: '计划', status: 'completed' },
+      { id: 'execute', label: '执行', status: 'completed' },
+      { id: 'review', label: '复核', status: 'in_progress' },
+      { id: 'summarize', label: '总结', status: 'pending' },
+    ],
+    todo_plan: workchainTodoPlan,
+    todoPlan: workchainTodoPlan,
+    progress_checkpoints: {
+      schema: 'ccm-main-agent-progress-checkpoints-v1',
+      title: '关键进展',
+      display_policy: { user_visible: true },
+      items: [
+        { id: 'cp-workchain-plan', label: '主 Agent 已生成计划', detail: '计划包含执行、复核和总结。', status: 'done' },
+        { id: 'cp-workchain-review', label: '正在等待 TestAgent 复核', detail: '复核结论会决定是否返工。', status: 'active' },
+      ],
+    },
+    completion_summary: { evidence: ['已生成计划', '已派发执行', '等待 TestAgent 独立复核'] },
+    technical_details: [{ id: 'records', title: '完整记录', items: [{ label: 'Trace', value: 'trace-workchain-todo' }] }],
+  },
+  todo_plan: workchainTodoPlan,
+  todoPlan: workchainTodoPlan,
+  progress_checkpoints: {
+    schema: 'ccm-main-agent-progress-checkpoints-v1',
+    title: '关键进展',
+    display_policy: { user_visible: true },
+    items: [
+      { id: 'cp-workchain-plan', label: '主 Agent 已生成计划', detail: '计划包含执行、复核和总结。', status: 'done' },
+      { id: 'cp-workchain-review', label: '正在等待 TestAgent 复核', detail: '复核结论会决定是否返工。', status: 'active' },
+    ],
+  },
+  technical_details: [{ id: 'records', title: '完整记录', items: [{ label: 'Trace', value: 'trace-workchain-todo' }] }],
+}
+const workchainTodoCard = {
+  version: 1,
+  visible: true,
+  task_id: 'task-workchain-todo',
+  title: '主 Agent 与 TestAgent 对接',
+  goal: '让主 Agent 等待 TestAgent 独立复核后再总结。',
+  phase: 'executing',
+  phase_label: '复核中',
+  status: 'in_progress',
+  progress: 62,
+  display_stream: workchainTodoDisplayStream,
+  progress_checkpoints: workchainTodoDisplayStream.progress_checkpoints,
+  completed: ['已生成计划', '已派发执行'],
+  blockers: [],
+  next_action: '等待 TestAgent 复核结论。',
+  technical: { trace_id: 'trace-workchain-todo', display_stream: workchainTodoDisplayStream },
+}
+const workchainCompletedArchivedTodoPlan = {
+  ...workchainTodoPlan,
+  steps: workchainTodoPlan.steps.map(step => ({ ...step, status: 'completed', actions: [] })),
+  visible_steps: [],
+  visibleSteps: [],
+  archived_steps_count: workchainTodoPlan.steps.length,
+  archivedStepsCount: workchainTodoPlan.steps.length,
+  archive_summary: '计划已全部完成，主视图只保留最终总结；完整步骤和底层记录可在技术详情中查看。',
+  archiveSummary: '计划已全部完成，主视图只保留最终总结；完整步骤和底层记录可在技术详情中查看。',
+  current_step: null,
+  currentStep: null,
+  completed_count: workchainTodoPlan.steps.length,
+  total_count: workchainTodoPlan.steps.length,
+  progress_label: `${workchainTodoPlan.steps.length}/${workchainTodoPlan.steps.length}`,
+  display_policy: {
+    ...workchainTodoPlan.display_policy,
+    archive_completed_todo: true,
+    archiveCompletedTodo: true,
+    archived_when_complete: true,
+    archivedWhenComplete: true,
+    visible_when_completed: false,
+    visibleWhenCompleted: false,
+  },
+}
+const workchainCompletedArchivedCard = {
+  version: 1,
+  visible: true,
+  task_id: 'task-workchain-completed-archived',
+  title: '主 Agent 与 TestAgent 对接',
+  goal: '完成主 Agent 与 TestAgent 的计划、复核和总结闭环。',
+  phase: 'completed',
+  phase_label: '已完成',
+  status: 'completed',
+  progress: 100,
+  display_stream: {
+    schema: 'ccm-streamlined-display-v2',
+    user_visible_text: '已完成主 Agent 与 TestAgent 的连接闭环，最终总结已整理。',
+    workchain: {
+      schema: 'ccm-main-agent-workchain-v1',
+      mode: 'project_task',
+      status: 'completed',
+      user_visible_text: '已完成主 Agent 与 TestAgent 的连接闭环，最终总结已整理。',
+      stages: workchainTodoDisplayStream.workchain.stages.map(stage => ({ ...stage, status: 'completed' })),
+      todo_plan: workchainCompletedArchivedTodoPlan,
+      todoPlan: workchainCompletedArchivedTodoPlan,
+      completion_summary: {
+        evidence: ['主 Agent 已生成计划', 'TestAgent 已完成独立复核', '最终总结已整理'],
+        verification: ['TestAgent 独立复核已通过'],
+        independent_review: ['TestAgent：已通过'],
+        terminal: true,
+      },
+      technical_details: [{ id: 'records', title: '完整记录', items: [{ label: 'Trace', value: 'trace-workchain-completed-archived' }] }],
+    },
+    todo_plan: workchainCompletedArchivedTodoPlan,
+    todoPlan: workchainCompletedArchivedTodoPlan,
+    technical_details: [{ id: 'records', title: '完整记录', items: [{ label: 'Trace', value: 'trace-workchain-completed-archived' }] }],
+  },
+  todo_plan: workchainCompletedArchivedTodoPlan,
+  todoPlan: workchainCompletedArchivedTodoPlan,
+  completion_card: {
+    schema: 'ccm-main-agent-completion-card-v1',
+    title: '最终交付总览',
+    status: 'completed',
+    status_label: '已完成',
+    headline: '已完成主 Agent 与 TestAgent 的连接闭环，最终总结已整理。',
+    metrics: [
+      { id: 'status', label: '状态', value: '已完成' },
+      { id: 'verification', label: '验证', value: 'TestAgent 已复核' },
+      { id: 'risk', label: '风险', value: '无待处理风险' },
+    ],
+    highlights: ['计划、执行、TestAgent 复核和总结都已收尾。'],
+    verification: ['TestAgent 独立复核已通过。'],
+    acceptance: ['主 Agent 已把复核结论纳入最终验收。'],
+    risks: ['暂无需要你额外处理的风险。'],
+    next_action: '可以继续补充新要求，主 Agent 会重新形成新的计划。',
+    technical_hint: '已完成的 Todo 已归档，完整步骤保留在技术详情里。',
+  },
+  completed: ['计划已完成', 'TestAgent 复核已完成', '最终总结已整理'],
+  blockers: [],
+  next_action: '可以继续补充新要求，主 Agent 会重新形成新的计划。',
+  technical: { trace_id: 'trace-workchain-completed-archived' },
+}
+const workchainQualityFollowup = {
+  schema: 'ccm-main-agent-quality-followup-v1',
+  title: '交付总结还需补齐',
+  status: 'needs_attention',
+  status_label: '需补齐',
+  headline: '这轮任务已经有处理结果，但最终交付总结还缺少可验收的信息。',
+  missing: ['交付证据', '验证结果', '验收结论'],
+  evidence: ['已整理任务目标', '已看到执行完成信号'],
+  next_action: '先补齐交付证据、验证结果和验收结论，再给出最终交付总结。',
+  display_policy: { user_visible: true, show_for_ordinary_conversation: false, technical_default_collapsed: true, hide_internal_protocols: true },
+}
+const workchainQualityFollowupTodoPlan = {
+  schema: 'ccm-main-agent-workchain-todo-v1',
+  source: 'workchain',
+  title: '协作群当前计划',
+  display_policy: { user_visible: true, quiet_completed: true, hide_for_ordinary_conversation: false, archive_completed_todo: false, technical_default_collapsed: true },
+  steps: [
+    ...workchainTodoPlan.steps.map(step => ({ ...step, status: 'completed', actions: [] })),
+    { id: 'quality-followup', content: '补齐交付总结', activeForm: '正在补齐交付证据、验证结果、验收结论', active_form: '正在补齐交付证据、验证结果、验收结论', status: 'in_progress', detail: '先补齐交付证据、验证结果和验收结论，再给出最终交付总结。', source: 'final_summary_quality' },
+  ],
+  current_step: { id: 'quality-followup', content: '补齐交付总结', activeForm: '正在补齐交付证据、验证结果、验收结论', active_form: '正在补齐交付证据、验证结果、验收结论', status: 'in_progress' },
+  currentStep: { id: 'quality-followup', content: '补齐交付总结', activeForm: '正在补齐交付证据、验证结果、验收结论', active_form: '正在补齐交付证据、验证结果、验收结论', status: 'in_progress' },
+  completed_count: workchainTodoPlan.steps.length,
+  total_count: workchainTodoPlan.steps.length + 1,
+  progress_label: `${workchainTodoPlan.steps.length}/${workchainTodoPlan.steps.length + 1}`,
+  visible_steps: [],
+  visibleSteps: [],
+  quality_followup_required: true,
+  qualityFollowupRequired: true,
+  quality_followup: workchainQualityFollowup,
+  qualityFollowup: workchainQualityFollowup,
+}
+workchainQualityFollowupTodoPlan.visible_steps = workchainQualityFollowupTodoPlan.steps
+workchainQualityFollowupTodoPlan.visibleSteps = workchainQualityFollowupTodoPlan.steps
+const workchainQualityFollowupDisplayStream = {
+  schema: 'ccm-streamlined-display-v2',
+  user_visible_text: '任务已有处理结果，但最终交付总结还在补齐，还缺少交付证据、验证结果、验收结论。下一步：先补齐交付证据、验证结果和验收结论，再给出最终交付总结。',
+  tool_use_summary: { type: 'streamlined_tool_use_summary', tool_summary: '已处理任务结果，正在补齐总结证据' },
+  workchain: {
+    schema: 'ccm-main-agent-workchain-v1',
+    mode: 'project_task',
+    status: 'completed',
+    user_visible_text: '任务已有处理结果，但最终交付总结还在补齐，还缺少交付证据、验证结果、验收结论。下一步：先补齐交付证据、验证结果和验收结论，再给出最终交付总结。',
+    stages: workchainTodoDisplayStream.workchain.stages.map(stage => ({ ...stage, status: 'completed' })),
+    completion_summary: {
+      evidence: ['任务已有处理结果'],
+      final_summary_quality: { required: true, passed: false, missing: ['交付证据', '验证结果', '验收结论'] },
+      quality_followup: workchainQualityFollowup,
+    },
+    todo_plan: workchainQualityFollowupTodoPlan,
+    todoPlan: workchainQualityFollowupTodoPlan,
+    progress_checkpoints: {
+      schema: 'ccm-main-agent-progress-checkpoints-v1',
+      title: '关键进展',
+      display_policy: { user_visible: true },
+      items: [
+        { id: 'final-summary-checkpoint', label: '已整理本轮总结', detail: '任务已有处理结果', status: 'done' },
+        { id: 'quality-followup-checkpoint', label: '正在补齐交付总结', detail: '先补齐交付证据、验证结果和验收结论，再给出最终交付总结。', status: 'active' },
+      ],
+    },
+    technical_details: [{ id: 'records', title: '完整记录', items: [{ label: 'Trace', value: 'trace-workchain-quality-followup' }, { label: 'Raw', value: 'CCM_AGENT_RECEIPT raw payload' }] }],
+  },
+  todo_plan: workchainQualityFollowupTodoPlan,
+  todoPlan: workchainQualityFollowupTodoPlan,
+  progress_checkpoints: {
+    schema: 'ccm-main-agent-progress-checkpoints-v1',
+    title: '关键进展',
+    display_policy: { user_visible: true },
+    items: [
+      { id: 'final-summary-checkpoint', label: '已整理本轮总结', detail: '任务已有处理结果', status: 'done' },
+      { id: 'quality-followup-checkpoint', label: '正在补齐交付总结', detail: '先补齐交付证据、验证结果和验收结论，再给出最终交付总结。', status: 'active' },
+    ],
+  },
+  technical_details: [{ id: 'records', title: '完整记录', items: [{ label: 'Trace', value: 'trace-workchain-quality-followup' }, { label: 'Raw', value: 'CCM_AGENT_RECEIPT raw payload' }] }],
+}
+const workchainQualityFollowupCard = {
+  version: 1,
+  visible: true,
+  task_id: 'task-workchain-quality-followup',
+  title: '主 Agent 最终总结补齐',
+  goal: '确保最终交付总结包含证据、验证和验收结论。',
+  phase: 'completed',
+  phase_label: '总结待补齐',
+  status: 'completed',
+  progress: 90,
+  display_stream: workchainQualityFollowupDisplayStream,
+  todo_plan: workchainQualityFollowupTodoPlan,
+  todoPlan: workchainQualityFollowupTodoPlan,
+  progress_checkpoints: workchainQualityFollowupDisplayStream.progress_checkpoints,
+  quality_followup: workchainQualityFollowup,
+  qualityFollowup: workchainQualityFollowup,
+  completed: ['任务已有处理结果'],
+  blockers: [],
+  next_action: '先补齐交付证据、验证结果和验收结论。',
+  technical: { trace_id: 'trace-workchain-quality-followup', display_stream: workchainQualityFollowupDisplayStream },
+}
+const ordinaryWorkchainTodoPlan = {
+  ...workchainTodoPlan,
+  display_policy: { user_visible: true, quiet_completed: true, hide_for_ordinary_conversation: true, technical_default_collapsed: true },
+  steps: [
+    { id: 'chat', content: '直接回答普通问话', activeForm: '正在回答普通问话', active_form: '正在回答普通问话', status: 'completed' },
+  ],
+}
+const ordinaryWorkchainTodoCard = {
+  version: 1,
+  visible: true,
+  task_id: 'task-ordinary-workchain-todo',
+  title: '普通问话',
+  goal: '解释 TestAgent 当前状态。',
+  phase: 'completed',
+  phase_label: '已回复',
+  status: 'completed',
+  progress: 100,
+  display_stream: {
+    schema: 'ccm-streamlined-display-v2',
+    user_visible_text: 'TestAgent 的业务流程由另一个 Agent 处理，我只会连接主 Agent 和 TestAgent 的边界。',
+    tool_use_summary: { type: 'streamlined_tool_use_summary', tool_summary: '本轮没有需要展示的工具调用' },
+    workchain: { schema: 'ccm-main-agent-workchain-v1', mode: 'conversation', todo_plan: ordinaryWorkchainTodoPlan, todoPlan: ordinaryWorkchainTodoPlan, technical_details: [], completion_summary: { evidence: [] } },
+    todo_plan: ordinaryWorkchainTodoPlan,
+    todoPlan: ordinaryWorkchainTodoPlan,
+    technical_details: [],
+  },
+  completed: [],
+  blockers: [],
+  next_action: '继续等待你的下一步要求。',
+}
+
 const deliveryReport = {
   schema: 'ccm-main-agent-delivery-report-v1',
   title: '修复登录状态刷新问题',
@@ -413,19 +701,19 @@ const deliveryReport = {
   headline: '登录状态刷新后的恢复逻辑已经完成。',
   sections: [
     { id: 'completed', title: '完成内容', items: ['刷新页面后会恢复登录态。'] },
-    { id: 'plan_review', title: '计划回顾', items: ['执行前计划：登录态恢复执行计划', '计划步骤：确认登录态恢复范围；修复刷新后恢复逻辑；运行验证', '计划核对：已对齐'] },
+    { id: 'plan_review', title: '计划回顾', items: ['执行前计划：登录态恢复执行计划', '计划步骤：确认登录态恢复范围；修复刷新后恢复逻辑；运行验证', '确认补充要求：刷新后不要打断用户当前页面', '计划核对：已对齐'] },
     { id: 'scope', title: '涉及范围', items: ['frontend/src/stores/login.js', 'frontend/src/views/Login.vue'] },
     { id: 'verification', title: '验证结果', items: ['npm run test:login-state'] },
     { id: 'verification_evidence', title: '验收证据', items: ['已实际执行 1 项验证：npm run test:login-state', '项目配置要求的验证命令：已覆盖。', '外部 Runner 证据 1 项：验证来源已记录。'] },
     { id: 'acceptance', title: '验收结论', items: ['主 Agent 验收：已通过', '计划核对：已对齐'] },
-    { id: 'independent_review', title: '复核结论', items: ['独立复核：已通过', 'qa-agent：已通过 - 已复核登录恢复逻辑和验证记录，未发现阻塞风险。'] },
+    { id: 'independent_review', title: '复核结论', items: ['独立复核：已通过', 'TestAgent：已通过 - 已复核登录恢复逻辑和验证记录，未发现阻塞风险。', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'] },
     { id: 'risks', title: '风险与待确认', items: ['暂无需要你额外处理的风险。'] },
     { id: 'user_handoff', title: '接下来建议', items: ['查看改动：web 产生了 2 个文件改动。', '核对交付总结：查看完成内容、验证结果和风险提示。'] },
     { id: 'next', title: '下一步', items: ['可以查看改动详情，或继续补充新的要求。'] },
   ],
   files: ['frontend/src/stores/login.js', 'frontend/src/views/Login.vue'],
-  plan_review: ['执行前计划：登录态恢复执行计划', '计划步骤：确认登录态恢复范围；修复刷新后恢复逻辑；运行验证', '计划核对：已对齐'],
-  planReview: ['执行前计划：登录态恢复执行计划', '计划步骤：确认登录态恢复范围；修复刷新后恢复逻辑；运行验证', '计划核对：已对齐'],
+  plan_review: ['执行前计划：登录态恢复执行计划', '计划步骤：确认登录态恢复范围；修复刷新后恢复逻辑；运行验证', '确认补充要求：刷新后不要打断用户当前页面', '计划核对：已对齐'],
+  planReview: ['执行前计划：登录态恢复执行计划', '计划步骤：确认登录态恢复范围；修复刷新后恢复逻辑；运行验证', '确认补充要求：刷新后不要打断用户当前页面', '计划核对：已对齐'],
   change_summary: renderedChangeSummary,
   verification: ['npm run test:login-state'],
   verification_evidence: {
@@ -459,8 +747,10 @@ const deliveryReport = {
     items: ['已实际执行 1 项验证：npm run test:login-state', '项目配置要求的验证命令：已覆盖。', '外部 Runner 证据 1 项：验证来源已记录。'],
   },
   acceptance: ['主 Agent 验收：已通过', '计划核对：已对齐'],
-  independent_review: ['独立复核：已通过', 'qa-agent：已通过 - 已复核登录恢复逻辑和验证记录，未发现阻塞风险。'],
-  independentReview: ['独立复核：已通过', 'qa-agent：已通过 - 已复核登录恢复逻辑和验证记录，未发现阻塞风险。'],
+  independent_review: ['独立复核：已通过', 'TestAgent：已通过 - 已复核登录恢复逻辑和验证记录，未发现阻塞风险。', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
+  independentReview: ['独立复核：已通过', 'TestAgent：已通过 - 已复核登录恢复逻辑和验证记录，未发现阻塞风险。', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
+  independent_review_gate: { required: true, pass: true, reason: '复杂变更已完成独立复核。', evidence: ['TestAgent verdict: passed'] },
+  independentReviewGate: { required: true, pass: true, reason: '复杂变更已完成独立复核。', evidence: ['TestAgent verdict: passed'] },
   risks: [],
   next_action: ['可以查看改动详情，或继续补充新的要求。'],
   user_handoff: renderedUserHandoff,
@@ -504,6 +794,230 @@ const deliveryReport = {
     resume_action: '可以查看改动详情，或继续补充新的要求。',
     technical_hint: '底层执行记录和排障信息默认收在技术详情里。',
     display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+  },
+}
+
+const planGapDeliveryReport = {
+  schema: 'ccm-main-agent-delivery-report-v1',
+  title: '登录修复验收缺口',
+  status: 'failed',
+  status_label: '未完成',
+  headline: '登录修复还缺验证证据。',
+  sections: [
+    { id: 'completed', title: '完成内容', items: ['已整理登录修复当前状态。'] },
+    { id: 'plan_review', title: '计划回顾', items: ['执行前计划：登录修复执行计划', '计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）', '计划步骤：修复登录恢复逻辑；运行登录验证', '计划核对：仍有缺口'] },
+    { id: 'verification', title: '验证结果', items: ['npm test -- --run login 失败'] },
+    { id: 'verification_evidence', title: '验收证据', items: ['失败验证 1 项：npm test -- --run login 失败', '项目必需验证缺口 1 项：web：npm run test:login'] },
+    { id: 'acceptance', title: '验收结论', items: ['最终验收：未通过，仍需处理缺口', '计划核对：仍有缺口'] },
+    { id: 'risks', title: '未完成原因', items: ['缺少测试环境变量'] },
+    { id: 'next_action', title: '下一步', items: ['先补齐计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）'] },
+  ],
+  files: [],
+  plan_review: ['执行前计划：登录修复执行计划', '计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）', '计划步骤：修复登录恢复逻辑；运行登录验证', '计划核对：仍有缺口'],
+  planReview: ['执行前计划：登录修复执行计划', '计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）', '计划步骤：修复登录恢复逻辑；运行登录验证', '计划核对：仍有缺口'],
+  verification: ['npm test -- --run login 失败'],
+  acceptance: ['最终验收：未通过，仍需处理缺口', '计划核对：仍有缺口'],
+  risks: ['缺少测试环境变量'],
+  next_action: ['先补齐计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）'],
+  pickup_summary: {
+    schema: 'ccm-main-agent-pickup-summary-v1',
+    title: '恢复处理时先看这里',
+    status: 'failed',
+    status_label: '未完成',
+    headline: '登录修复还缺验证证据。',
+    current_state: '可以从计划缺口继续处理，原始执行记录在技术详情里。',
+    review_items: ['计划：计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）', '待确认：缺少测试环境变量'],
+    resume_action: '先补齐计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）',
+    technical_hint: '底层执行记录和排障信息默认收在技术详情里。',
+    display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+  },
+  user_handoff: {
+    schema: 'ccm-main-agent-user-handoff-v1',
+    title: '接下来建议',
+    status: 'failed',
+    status_label: '未完成',
+    headline: '这轮任务没有完整完成，先补齐计划缺口再继续验收。',
+    primary_action: {
+      id: 'retry_or_continue',
+      label: '补齐计划缺口后继续',
+      detail: '计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）',
+      kind: 'retry',
+      tone: 'primary',
+    },
+    secondary_actions: [{
+      id: 'review_verification',
+      label: '核对验证结果',
+      detail: '已整理 1 项验证记录。',
+      kind: 'review_delivery',
+      tone: 'outline',
+    }],
+    evidence: ['计划：执行前计划：登录修复执行计划', '计划缺口：1 项', '验证：1 项已执行', '待确认：1 项'],
+    unresolved: ['计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）', '缺少测试环境变量'],
+    next_action: '计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）',
+    technical_hint: '底层执行记录和排障信息默认收在技术详情里。',
+    display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+  },
+}
+
+const planGapDeliveryCard = {
+  version: 1,
+  visible: true,
+  task_id: 'task-plan-gap-delivery',
+  title: '登录修复验收缺口',
+  goal: '修复登录恢复并完成验证。',
+  phase: 'failed',
+  phase_label: '待补齐',
+  progress: 78,
+  active_agents: [],
+  agents: [],
+  completed: ['已整理登录修复当前状态'],
+  blockers: ['缺少测试环境变量'],
+  next_action: '先补齐计划缺口：登录恢复验证通过（还没有系统捕获 npm run test:login 的通过记录）',
+  delivery: { headline: planGapDeliveryReport.headline, files: [], verification: planGapDeliveryReport.verification, risks: planGapDeliveryReport.risks, acceptance_passed: false },
+  delivery_report: planGapDeliveryReport,
+  pickup_summary: planGapDeliveryReport.pickup_summary,
+  user_handoff: planGapDeliveryReport.user_handoff,
+  technical: { trace_id: 'trace-plan-gap-delivery', user_handoff: planGapDeliveryReport.user_handoff },
+  actions: [],
+}
+
+const testAgentExecutionPlanFixture = {
+  schema: 'ccm-test-agent-execution-plan-v1',
+  valid: true,
+  workOrderId: 'wo-test-agent-render',
+  artifactDir: 'C:/tmp/test-agent-artifacts/render',
+  summary: {
+    projects: 1,
+    commands: 1,
+    httpChecks: 1,
+    adversarialHttpChecks: 1,
+    browserChecks: 2,
+    expectedArtifactTypes: ['report_json', 'report_markdown', 'artifact_manifest', 'verdict_json', 'screenshot', 'browser_har', 'download', 'upload_file'],
+  },
+  commands: [{ command: 'npm run test:login-state' }],
+  issues: [],
+}
+
+const testAgentExecutionPlanTextSummary = 'TestAgent 复核计划：1 个项目，1 个命令，2 个 HTTP 检查，2 个浏览器检查；预期证据：结构化报告、报告文档、证据清单、复核结论、页面截图、网络归档、文件下载证据、文件上传证据'
+
+const testAgentBlockedExecutionPlanFixture = {
+  ...testAgentExecutionPlanFixture,
+  valid: false,
+  workOrderId: 'wo-test-agent-blocked-render',
+  artifactDir: 'C:/tmp/test-agent-artifacts/blocked',
+  summary: {
+    projects: 1,
+    commands: 0,
+    httpChecks: 0,
+    adversarialHttpChecks: 0,
+    browserChecks: 0,
+    expectedArtifactTypes: ['report_json', 'artifact_manifest', 'verdict_json'],
+  },
+  commands: [],
+  issues: [
+    { severity: 'error', code: 'missing_work_dir', message: 'Project workDir is required. C:/tmp/test-agent-artifacts/blocked' },
+  ],
+}
+
+const testAgentBlockedPlanCard = {
+  version: 1,
+  visible: true,
+  task_id: 'task-test-agent-plan-blocked',
+  title: 'TestAgent 复核计划预检',
+  goal: '在真实复核前确认 TestAgent 工作单是否可执行。',
+  phase: 'blocked',
+  phase_label: '受阻',
+  progress: 42,
+  active_agents: ['TestAgent 等待交接信息修复'],
+  agents: [{ name: 'TestAgent', status: 'blocked', summary: '复核计划预检未通过，等待主 Agent 修复交接信息。' }],
+  completed: ['已生成 TestAgent 复核计划'],
+  blockers: ['缺少项目工作目录，请补齐 TestAgent 交接信息。'],
+  next_action: '主 Agent 会先修复 TestAgent 工作单或项目路径，再重新生成复核计划。',
+  test_agent_execution_plan_summary: 'TestAgent 复核计划：1 个项目，0 个命令，0 个 HTTP 检查，0 个浏览器检查；预期证据：结构化报告、证据清单、复核结论',
+  testAgentExecutionPlanSummary: 'TestAgent 复核计划：1 个项目，0 个命令，0 个 HTTP 检查，0 个浏览器检查；预期证据：结构化报告、证据清单、复核结论',
+  test_agent_execution_plan: testAgentBlockedExecutionPlanFixture,
+  testAgentExecutionPlan: testAgentBlockedExecutionPlanFixture,
+  technical: {
+    trace_id: 'trace-test-agent-plan-blocked',
+    test_agent_execution_plan: testAgentBlockedExecutionPlanFixture,
+  },
+}
+
+const testAgentFailedReviewSummary = {
+  schema: 'ccm-main-agent-independent-review-summary-v1',
+  title: '独立复核',
+  status: 'needs_rework',
+  status_label: '需返工',
+  headline: '独立复核发现待处理缺口，我会先安排返工，再重新验收。',
+  rows: [
+    'TestAgent：未通过，需要返工',
+    '必检项 命令验证未覆盖：npm test 未通过',
+    '验收条件未通过：登录恢复验证必须通过',
+    '浏览器网络：发现 1 个网络问题',
+    '把失败检查项带回给原实现成员返工',
+    '返工后重新运行 TestAgent 复核',
+  ],
+  next_action: '把失败检查项带回给原实现成员返工；返工后重新运行 TestAgent 复核。',
+  display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+}
+
+const testAgentFailedReviewCard = {
+  version: 1,
+  visible: true,
+  task_id: 'task-test-agent-review-failed',
+  title: 'TestAgent 独立复核未通过',
+  goal: '修复登录状态恢复后，由 TestAgent 做独立复核；当前复核要求返工。',
+  phase: 'failed',
+  phase_label: '待返工',
+  progress: 72,
+  active_agents: ['我正在安排返工'],
+  agents: [{ name: 'TestAgent', status: 'failed', summary: '独立复核发现待处理缺口，需要原实现成员返工。' }],
+  completed: ['已完成 TestAgent 独立复核'],
+  blockers: ['命令验证未通过', '登录恢复验收条件未通过'],
+  next_action: '把失败检查项带回给原实现成员返工；返工后重新运行 TestAgent 复核。',
+  independent_review_summary: testAgentFailedReviewSummary,
+  independentReviewSummary: testAgentFailedReviewSummary,
+  independent_review: testAgentFailedReviewSummary.rows,
+  independentReview: testAgentFailedReviewSummary.rows,
+  delivery_report: {
+    schema: 'ccm-main-agent-delivery-report-v1',
+    title: 'TestAgent 复核返工',
+    status: 'failed',
+    status_label: '待返工',
+    headline: 'TestAgent 独立复核没有通过，本轮不能直接验收完成。',
+    sections: [
+      { id: 'completed', title: '已完成检查', items: ['已运行 TestAgent 独立复核。'] },
+      { id: 'independent_review', title: '复核结论', items: testAgentFailedReviewSummary.rows },
+      { id: 'acceptance', title: '验收结论', items: ['最终验收：未通过，需要先返工。'] },
+      { id: 'risks', title: '未完成原因', items: ['命令验证未通过，登录恢复验收条件未通过。'] },
+      { id: 'next_action', title: '下一步', items: ['把失败检查项带回给原实现成员返工；返工后重新运行 TestAgent 复核。'] },
+    ],
+    independent_review_summary: testAgentFailedReviewSummary,
+    independentReviewSummary: testAgentFailedReviewSummary,
+    independent_review: testAgentFailedReviewSummary.rows,
+    independentReview: testAgentFailedReviewSummary.rows,
+    acceptance: ['最终验收：未通过，需要先返工。'],
+    risks: ['命令验证未通过，登录恢复验收条件未通过。'],
+    next_action: ['把失败检查项带回给原实现成员返工；返工后重新运行 TestAgent 复核。'],
+    technical_hint: 'TestAgent 原始报告、裁决文件和证据路径已放入技术详情。',
+    display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true },
+  },
+  display_stream: {
+    schema: 'ccm-streamlined-display-v2',
+    user_visible_text: 'TestAgent 独立复核没有通过，我会先安排原实现成员返工，再重新复核。',
+    tool_use_summary: { type: 'streamlined_tool_use_summary', tool_summary: '独立复核 1 次，发现 2 个待处理缺口' },
+  },
+  technical: {
+    trace_id: 'trace-test-agent-review-failed',
+    test_agent_report: {
+      verdict: 'failed',
+      recommendation: 'rework',
+      needsRework: true,
+      report_json: 'C:/tmp/test-agent-artifacts/failed/report.json',
+      verdict_json: 'C:/tmp/test-agent-artifacts/failed/verdict.json',
+      artifact_manifest: 'C:/tmp/test-agent-artifacts/failed/artifact-manifest.json',
+      browser_artifacts: 'C:/tmp/test-agent-artifacts/failed/browser-artifacts',
+    },
   },
 }
 
@@ -571,6 +1085,10 @@ const taskCard = {
   next_action: '可以查看改动详情，或继续补充新的要求。',
   delivery: { headline: '登录状态刷新后的恢复逻辑已经完成。', files: deliveryReport.files, verification: deliveryReport.verification, risks: [], acceptance_passed: true },
   delivery_report: deliveryReport,
+  test_agent_execution_plan_summary: testAgentExecutionPlanTextSummary,
+  testAgentExecutionPlanSummary: testAgentExecutionPlanTextSummary,
+  test_agent_execution_plan: testAgentExecutionPlanFixture,
+  testAgentExecutionPlan: testAgentExecutionPlanFixture,
   plan_mode: renderedPlanMode,
   plan_alignment: renderedPlanAlignment,
   user_handoff: renderedUserHandoff,
@@ -584,6 +1102,7 @@ const taskCard = {
     plan_alignment: renderedPlanAlignment,
     change_summary: renderedChangeSummary,
     user_handoff: renderedUserHandoff,
+    test_agent_execution_plan: testAgentExecutionPlanFixture,
   },
 }
 
@@ -602,14 +1121,68 @@ const workQueueCard = {
     { name: '前端 · web', status: 'pending', summary: '前置接口完成后可继续接入 UI' },
   ],
   work_items: [
-    { id: 'wi-api', subject: '提供 owner 筛选接口', owner: 'api', target: 'api', status: 'completed', evidence: ['接口契约已确认'], blockedBy: [], attempt: 1 },
-    { id: 'wi-web', subject: '接入 owner 筛选 UI', owner: 'web', target: 'web', status: 'pending', evidence: [], blockedBy: ['api'], attempt: 1 },
+    { id: 'wi-api', subject: '提供 owner 筛选接口', activeForm: '已完成 owner 筛选接口', owner: 'api', target: 'api', status: 'completed', evidence: ['接口契约已确认'], blockedBy: [], attempt: 1 },
+    { id: 'wi-web', subject: '接入 owner 筛选 UI', activeForm: '等待接入 owner 筛选 UI', owner: 'web', target: 'web', status: 'pending', evidence: [], blockedBy: ['api'], attempt: 1 },
   ],
   work_item_summary: {
     total: 2,
     counts: { completed: 1, pending: 1 },
-    next_claimable: [{ id: 'wi-web', target: 'web', subject: '接入 owner 筛选 UI' }],
+    next_claimable: [{ id: 'wi-web', target: 'web', subject: '接入 owner 筛选 UI', activeForm: '等待接入 owner 筛选 UI' }],
+    dependency_summary: {
+      schema: 'ccm-main-agent-work-item-dependency-summary-v1',
+      title: '依赖与派发',
+      status: 'ready_to_dispatch',
+      status_label: '1 项可派发',
+      headline: '1 个工作项已经解锁，可以继续派发。',
+      rows: [{
+        id: 'wi-web',
+        target: 'web',
+        subject: '接入 owner 筛选 UI',
+        status: 'pending',
+        dependency_count: 1,
+        open_dependency_count: 0,
+        label: 'web 的前置依赖已完成，可以进入下一步',
+        next_action: '可以派发给对应子 Agent 继续执行。',
+      }],
+      next_action: '优先派发已解锁工作项，并继续监听前置任务状态。',
+      display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+    },
     all_completed: false,
+  },
+  work_item_unlock_summary: {
+    schema: 'ccm-main-agent-work-item-unlock-summary-v1',
+    title: '前置完成，下一步已解锁',
+    status: 'auto_dispatch_deferred',
+    status_label: '已自动接上',
+    headline: 'api 完成后，“接入 owner 筛选 UI”已经解锁，主 Agent 已自动接上派发。',
+    rows: [{ id: 'wi-web', target: 'web', owner: 'web', subject: '接入 owner 筛选 UI', label: 'web 的前置依赖已完成，可以进入下一步' }],
+    next_claimable: [{ id: 'wi-web', target: 'web', owner: 'web', subject: '接入 owner 筛选 UI', activeForm: '等待接入 owner 筛选 UI' }],
+    next_action: '当前执行轮结束后，主 Agent 会继续派发这个已解锁工作项。',
+    display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+    technical: { completed_agent: 'api', unlocked_work_item_ids: ['wi-web'], auto_dispatch: { deferred: true } },
+  },
+  work_item_claim_summary: {
+    schema: 'ccm-main-agent-work-item-claim-summary-v1',
+    title: '派发状态',
+    status: 'agent_busy',
+    status_label: '继续等待',
+    headline: 'web 正在处理“修复登录状态恢复”，“接入 owner 筛选 UI”会继续等待。',
+    next_action: '当前工作完成后，主 Agent 会重新检查并派发这个工作项。',
+    display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+    technical: { reason_code: 'agent_busy', work_item_id: 'wi-web', busy_work_item_id: 'wi-login' },
+  },
+  completion_readiness_summary: {
+    schema: 'ccm-main-agent-completion-readiness-v1',
+    title: '完成前收尾',
+    status: 'blocked',
+    status_label: '尚未收尾',
+    headline: '还有 1 个工作项未完成，1 个子 Agent 会话仍在处理，主 Agent 不会提前宣布完成。',
+    rows: [{ target: 'web', subject: '接入 owner 筛选 UI', status: 'in_progress', status_label: '执行中' }],
+    open_session_count: 1,
+    unresolved_work_item_count: 1,
+    next_action: '先完成或处理这些工作项；全部收敛后再做最终总结。',
+    display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+    technical: { unresolved_work_item_ids: ['wi-web'], open_session_ids: ['session-hidden'] },
   },
   agent_progress_summary: {
     schema: 'ccm-child-agent-progress-summary-v1',
@@ -636,7 +1209,7 @@ const workQueueCard = {
       status_label: '需调整',
       headline: '1 个子 Agent 的执行计划还不够清楚，主 Agent 会先要求补齐目标、范围或验证安排。',
       rows: [
-        { agent: 'web', status: 'needs_revision', status_label: '需调整', understood_goal: '', planned_scope: [], verification_plan: [], unclear: ['需要明确 owner 筛选 UI 范围'], reason: 'ACK 缺少目标或计划范围' },
+        { agent: 'web', status: 'needs_revision', status_label: '需调整', understood_goal: '', planned_scope: [], verification_plan: [], unclear: ['需要明确 owner 筛选 UI 范围'], reason: '接单说明缺少目标或计划范围' },
       ],
       next_action: '先要求对应子 Agent 重写接单计划，再继续执行或验收。',
       display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
@@ -644,9 +1217,9 @@ const workQueueCard = {
     memory_gate_summary: {
       required: true,
       status: 'missing_receipt_reference',
-      summary: '结果说明缺少记忆 gate 引用：gate-render-1',
+      summary: '结果说明缺少记忆使用声明。',
       rows: [
-        { agent: 'web', status: 'missing_receipt_reference', reason: '结果说明缺少记忆 gate 引用：gate-render-1' },
+        { agent: 'web', status: 'missing_receipt_reference', reason: '结果说明缺少记忆使用声明。' },
       ],
     },
   },
@@ -686,6 +1259,25 @@ const workQueueCard = {
       action: { kind: 'targeted_rework', id: 'weak_receipt', title: '要求补充高质量结果说明', target: 'web', reason: '结果说明质量缺少：已执行验证、声明记忆使用', tone: 'warning', label: '要求补充高质量结果说明' },
     }],
     next_action: '可以按单个结果说明缺口定向补充；补齐后主 Agent 会重新验收并汇总。',
+  },
+  acceptance_review: {
+    title: '主 Agent 验收',
+    status: 'reviewing',
+    headline: '还缺 3 项证据，不能宣布完成',
+    checks: [
+      { id: 'ack_gate', label: '接单说明完整', ok: false, detail: '还有 1 个接单说明需要补齐目标、范围和验证安排' },
+      { id: 'memory_gate_receipt', label: '记忆使用声明', ok: false, detail: '还有 1 条记忆使用声明需要补齐' },
+      { id: 'api_microcompact_receipt', label: '上下文压缩计划使用说明', ok: false, detail: '还有 1 个上下文压缩计划缺少使用状态' },
+    ],
+    missing: ['接单说明完整', '记忆使用声明', '上下文压缩计划使用说明'],
+    next_action: '继续返工或补齐缺失证据后再验收',
+    technical: {
+      raw_gate_checks: [
+        { id: 'ack_gate', detail: 'ACK raw detail' },
+        { id: 'memory_gate_receipt', detail: '记忆 gate raw detail' },
+        { id: 'api_microcompact_receipt', detail: 'API microcompact edit plan raw detail' },
+      ],
+    },
   },
   progress_checkpoints: {
     schema: 'ccm-main-agent-progress-checkpoints-v1',
@@ -860,6 +1452,25 @@ const goalRevisionContinuationCard = {
     next_action: '主 Agent 正在停止当前执行轮；停止后会重新核对目标、影响范围和验收条件，再按新目标继续。',
     at: now,
   },
+  acceptance_review: {
+    title: '主 Agent 验收',
+    status: 'reviewing',
+    headline: '还缺 3 项证据，不能宣布完成',
+    checks: [
+      { id: 'ack_gate', label: '接单说明完整', ok: false, detail: '还有 1 个接单说明需要补齐目标、范围和验证安排' },
+      { id: 'memory_gate_receipt', label: '记忆使用声明', ok: false, detail: '还有 1 条记忆使用声明需要补齐' },
+      { id: 'api_microcompact_receipt', label: '上下文压缩计划使用说明', ok: false, detail: '还有 1 个上下文压缩计划缺少使用状态' },
+    ],
+    missing: ['接单说明完整', '记忆使用声明', '上下文压缩计划使用说明'],
+    next_action: '继续返工或补齐缺失证据后再验收',
+    technical: {
+      raw_gate_checks: [
+        { id: 'ack_gate', detail: 'ACK raw detail' },
+        { id: 'memory_gate_receipt', detail: '记忆 gate raw detail' },
+        { id: 'api_microcompact_receipt', detail: 'API microcompact edit plan raw detail' },
+      ],
+    },
+  },
   progress_checkpoints: {
     schema: 'ccm-main-agent-progress-checkpoints-v1',
     title: '关键进展',
@@ -957,6 +1568,8 @@ const mainAgentActiveStatus = {
     label: 'web 正在执行',
     active_form: '子 Agent 正在执行',
     detail: 'web 正在接入 owner 筛选 UI。',
+    recent_action: '已派发给子 Agent',
+    needs_action: '等待子 Agent 提交结果说明，然后主 Agent 会验收并总结。',
     status: 'in_progress',
     status_label: '进行中',
     progress_label: '4/7',
@@ -987,6 +1600,60 @@ const mainAgentActiveStatus = {
     review_items: ['最后进展：web 正在修改负责人筛选', '待确认：web 是否仍在处理「接入 owner 筛选 UI」', 'trace_id=hidden-progress-refresh'],
     next_action: '先刷新任务卡；如果仍没有新结果，就重新派发或定向补充。',
     display_policy: { user_visible: true, show_for_ordinary_conversation: false, technical_details_default_collapsed: true, hide_internal_protocols: true },
+  },
+  open_qa_count: 0,
+  blockers: [],
+  needs: [],
+  updated_at: now,
+}
+
+const mainAgentArchivedTodoStatus = {
+  schema: 'ccm-group-main-agent-status-v1',
+  phase: 'completed',
+  label: '已完成',
+  task_id: 'task-archived-current-todo',
+  latest_task_title: '主 Agent 与 TestAgent 对接',
+  active_task_count: 0,
+  running_child_agents: [],
+  current_todo_summary: {
+    schema: 'ccm-group-main-agent-current-todo-v1',
+    title: '群聊主 Agent 当前计划',
+    task_id: 'task-archived-current-todo',
+    task_title: '主 Agent 与 TestAgent 对接',
+    step_id: 'summarize',
+    label: '总结交付',
+    active_form: '正在总结交付',
+    detail: '计划已全部完成，主视图应只保留最终总结。',
+    status: 'completed',
+    status_label: '已完成',
+    progress_label: '4/4',
+    completed_count: 4,
+    total_count: 4,
+    next_action: '可以继续补充新要求，主 Agent 会重新形成新的计划。',
+    display_policy: {
+      user_visible: true,
+      technical_details_default_collapsed: true,
+      hide_internal_protocols: true,
+      archive_completed_todo: true,
+      visible_when_completed: false,
+    },
+  },
+  completion_summary: {
+    status: 'completed',
+    status_label: '已完成',
+    headline: '主 Agent 与 TestAgent 的连接闭环已经完成，Todo 已归档。',
+    file_change_count: 0,
+    verification_count: 1,
+    risk_count: 0,
+    next_action: '可以继续补充新要求。',
+  },
+  latest_progress_checkpoint: {
+    id: 'cp-archived-current-todo',
+    label: '已整理本轮总结',
+    detail: '已完成计划、执行、TestAgent 复核和最终总结。',
+    status: 'done',
+    phase: 'completed',
+    task_id: 'task-archived-current-todo',
   },
   open_qa_count: 0,
   blockers: [],
@@ -1210,6 +1877,33 @@ const setupGlobalAgentFixtureState = () => {
     ],
     next_step: '继续执行计划，并在完成后给出总结。',
   }
+  const globalCompletedArchivedTodoPlan = {
+    schema: 'ccm-main-agent-workchain-todo-v1',
+    source: 'global-stream',
+    title: '全局主 Agent 当前计划',
+    steps: [
+      { id: 'understand', label: '确认目标和影响范围', active_form: '正在确认目标和影响范围', status: 'completed' },
+      { id: 'dispatch', label: '派发群聊主 Agent', active_form: '正在派发群聊主 Agent', status: 'completed' },
+      { id: 'verify', label: '核对 TestAgent 复核和验证结果', active_form: '正在核对 TestAgent 复核和验证结果', status: 'completed' },
+      { id: 'summary', label: '整理最终总结', active_form: '正在整理最终总结', status: 'completed' },
+    ],
+    visible_steps: [],
+    visibleSteps: [],
+    completed_count: 4,
+    total_count: 4,
+    progress_label: '4/4',
+    verification: ['TestAgent 独立复核已通过'],
+    independent_review: ['TestAgent：已通过'],
+    display_policy: {
+      user_visible: true,
+      technical_default_collapsed: true,
+      hide_internal_protocols: true,
+      archive_completed_todo: true,
+      archiveCompletedTodo: true,
+      visible_when_completed: false,
+      visibleWhenCompleted: false,
+    },
+  }
   globalAgentFixtureSessions = [
     {
       id: 'global-stream-fixture',
@@ -1324,6 +2018,232 @@ const setupGlobalAgentFixtureState = () => {
             display_policy: { user_visible: true, show_for_ordinary_conversation: false, technical_details_default_collapsed: true, hide_internal_protocols: true },
           },
         },
+        {
+          role: 'user',
+          content: '继续让 TestAgent 独立复核这次交付',
+          timestamp: now,
+        },
+        {
+          role: 'assistant',
+          type: 'global_stream',
+          streaming: true,
+          content: '✅ TestAgent 复核计划：TestAgent 复核计划预检未通过，主 Agent 会先修复交接信息再执行。',
+          timestamp: now,
+          streamEvents: [
+            { tone: 'running', icon: '🧭', title: '形成行动计划', text: '已判断需要 TestAgent 做独立复核。' },
+            { tone: 'waiting', icon: '✅', title: 'TestAgent 复核计划', text: 'TestAgent 复核计划预检未通过，主 Agent 会先修复交接信息再执行。' },
+          ],
+          agenticRun: {
+            id: 'global-test-agent-plan-stream-run',
+            status: 'running',
+            phase: 'execute',
+            user_message: '继续让 TestAgent 独立复核这次交付',
+            original_user_message: '继续让 TestAgent 独立复核这次交付',
+            final_reply: '',
+            tool_calls: 1,
+            test_agent_execution_plan_summary: 'TestAgent 复核计划：1 个项目，0 个命令，0 个 HTTP 检查，0 个浏览器检查；预期证据：结构化报告、证据清单、复核结论',
+            testAgentExecutionPlanSummary: 'TestAgent 复核计划：1 个项目，0 个命令，0 个 HTTP 检查，0 个浏览器检查；预期证据：结构化报告、证据清单、复核结论',
+            test_agent_execution_plan: testAgentBlockedExecutionPlanFixture,
+            testAgentExecutionPlan: testAgentBlockedExecutionPlanFixture,
+          },
+        },
+        {
+          role: 'user',
+          content: 'TestAgent 复核完成后把结论同步给我',
+          timestamp: now,
+        },
+        {
+          role: 'assistant',
+          type: 'global_stream',
+          streaming: true,
+          content: '✅ 独立复核：TestAgent/独立复核已检查交付证据，主 Agent 可以继续做最终验收。',
+          timestamp: now,
+          streamEvents: [
+            { tone: 'running', icon: '✅', title: 'TestAgent 复核计划', text: 'TestAgent 已生成复核计划，主 Agent 会按计划启动独立复核。' },
+            { tone: 'ok', icon: '✅', title: '独立复核', text: 'TestAgent/独立复核已检查交付证据，主 Agent 可以继续做最终验收。' },
+          ],
+          agenticRun: {
+            id: 'global-test-agent-review-stream-run',
+            status: 'running',
+            phase: 'execute',
+            user_message: 'TestAgent 复核完成后把结论同步给我',
+            original_user_message: 'TestAgent 复核完成后把结论同步给我',
+            final_reply: '',
+            tool_calls: 1,
+            test_agent_execution_plan_summary: testAgentExecutionPlanTextSummary,
+            testAgentExecutionPlanSummary: testAgentExecutionPlanTextSummary,
+            test_agent_execution_plan: testAgentExecutionPlanFixture,
+            testAgentExecutionPlan: testAgentExecutionPlanFixture,
+            independent_review_summary: {
+              schema: 'ccm-main-agent-independent-review-summary-v1',
+              title: '独立复核',
+              status: 'passed',
+              status_label: '已通过',
+              headline: 'TestAgent/独立复核已检查交付证据，主 Agent 可以继续做最终验收。',
+              rows: ['TestAgent：已通过', '验证证据：npm run test:login-state', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
+              next_action: '继续核对交付总结、改动和验证结果。',
+              display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+            },
+            independentReviewSummary: {
+              schema: 'ccm-main-agent-independent-review-summary-v1',
+              title: '独立复核',
+              status: 'passed',
+              status_label: '已通过',
+              headline: 'TestAgent/独立复核已检查交付证据，主 Agent 可以继续做最终验收。',
+              rows: ['TestAgent：已通过', '验证证据：npm run test:login-state', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
+              next_action: '继续核对交付总结、改动和验证结果。',
+              display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+            },
+            independent_review: ['TestAgent：已通过 - 已复核登录恢复逻辑和验证记录，未发现阻塞风险。', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
+            independentReview: ['TestAgent：已通过 - 已复核登录恢复逻辑和验证记录，未发现阻塞风险。', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
+          },
+        },
+        {
+          role: 'user',
+          content: '如果 TestAgent 发现没通过，要告诉我怎么返工',
+          timestamp: now,
+        },
+        {
+          role: 'assistant',
+          type: 'global_stream',
+          streaming: false,
+          content: '⚠️ 独立复核未通过：TestAgent 发现待处理缺口，我会先安排返工，再重新验收。',
+          timestamp: now,
+          streamEvents: [
+            { tone: 'running', icon: '✅', title: '读取独立复核', text: 'TestAgent 已返回复核结论。' },
+            { tone: 'warning', icon: '⚠️', title: '需要返工', text: '独立复核发现待处理缺口，我会先安排返工，再重新验收。' },
+          ],
+          agenticRun: {
+            id: 'global-test-agent-review-failed-run',
+            status: 'failed',
+            phase: 'failed',
+            user_message: '如果 TestAgent 发现没通过，要告诉我怎么返工',
+            original_user_message: '如果 TestAgent 发现没通过，要告诉我怎么返工',
+            final_reply: 'TestAgent 独立复核未通过，我会先把失败检查项带回给原实现成员返工，返工后重新运行 TestAgent 复核。',
+            tool_calls: 1,
+            independent_review_summary: testAgentFailedReviewSummary,
+            independentReviewSummary: testAgentFailedReviewSummary,
+            test_agent_review_summary: testAgentFailedReviewSummary,
+            testAgentReviewSummary: testAgentFailedReviewSummary,
+            independent_review: testAgentFailedReviewSummary.rows,
+            independentReview: testAgentFailedReviewSummary.rows,
+            final_report: {
+              summary: 'TestAgent 独立复核未通过，需要先返工。',
+              risks: ['命令验证未通过', '登录恢复验收条件未通过'],
+              independent_review_summary: testAgentFailedReviewSummary,
+              independentReviewSummary: testAgentFailedReviewSummary,
+              independent_review: testAgentFailedReviewSummary.rows,
+              independentReview: testAgentFailedReviewSummary.rows,
+              acceptance_gate_passed: false,
+              technical: {
+                verdict: 'failed',
+                recommendation: 'rework',
+                report_json: 'C:/tmp/test-agent-artifacts/failed/report.json',
+                verdict_json: 'C:/tmp/test-agent-artifacts/failed/verdict.json',
+                artifact_manifest: 'C:/tmp/test-agent-artifacts/failed/artifact-manifest.json',
+              },
+            },
+          },
+        },
+        {
+          role: 'assistant',
+          type: 'global_stream',
+          streaming: true,
+          content: '📨 派发状态：web 正在处理现有工作，下一项会继续等待。',
+          timestamp: now,
+          streamEvents: [
+            { tone: 'waiting', icon: '📨', title: '派发状态', text: 'web 正在处理现有工作，下一项会继续等待。' },
+          ],
+          agenticRun: {
+            id: 'global-work-item-claim-waiting-run',
+            status: 'running',
+            phase: 'execute',
+            user_message: '继续派发前端筛选工作项',
+            original_user_message: '继续派发前端筛选工作项',
+            final_reply: '',
+            tool_calls: 1,
+            work_items: [
+              { id: 'global-wi-login', subject: '修复登录状态恢复', activeForm: '正在修复登录状态恢复', owner: 'web', target: 'web', status: 'in_progress', blockedBy: [], attempt: 1 },
+              { id: 'global-wi-filter', subject: '接入 owner 筛选 UI', activeForm: '等待接入 owner 筛选 UI', owner: 'web', target: 'web-filter', status: 'pending', blockedBy: [], attempt: 1 },
+            ],
+            work_item_summary: {
+              total: 2,
+              counts: { in_progress: 1, pending: 1 },
+              next_claimable: [{ id: 'global-wi-filter', target: 'web-filter', subject: '接入 owner 筛选 UI', activeForm: '等待接入 owner 筛选 UI' }],
+              all_completed: false,
+            },
+            work_item_unlock_summary: {
+              schema: 'ccm-main-agent-work-item-unlock-summary-v1',
+              title: '前置完成，下一步已解锁',
+              status: 'auto_dispatch_deferred',
+              status_label: '已自动接上',
+              headline: 'api 完成后，“接入 owner 筛选 UI”已经解锁，主 Agent 已自动接上派发。',
+              rows: [{ id: 'global-wi-filter', target: 'web-filter', owner: 'web', subject: '接入 owner 筛选 UI', label: 'web-filter 的前置依赖已完成，可以进入下一步' }],
+              next_claimable: [{ id: 'global-wi-filter', target: 'web-filter', owner: 'web', subject: '接入 owner 筛选 UI', activeForm: '等待接入 owner 筛选 UI' }],
+              next_action: '当前执行轮结束后，主 Agent 会继续派发这个已解锁工作项。',
+              display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+              technical: { completed_agent: 'api', unlocked_work_item_ids: ['global-wi-filter'], auto_dispatch: { deferred: true } },
+            },
+            work_item_claim_summary: {
+              schema: 'ccm-main-agent-work-item-claim-summary-v1',
+              title: '派发状态',
+              status: 'agent_busy',
+              status_label: '继续等待',
+              headline: 'web 正在处理“修复登录状态恢复”，“接入 owner 筛选 UI”会继续等待。',
+              next_action: '当前工作完成后，主 Agent 会重新检查并派发这个工作项。',
+              display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+              technical: { reason_code: 'agent_busy', work_item_id: 'global-wi-filter', busy_work_item_id: 'global-wi-login' },
+            },
+            completion_readiness_summary: {
+              schema: 'ccm-main-agent-completion-readiness-v1',
+              title: '完成前收尾',
+              status: 'blocked',
+              status_label: '尚未收尾',
+              headline: '还有 1 个工作项未完成，1 个子 Agent 会话仍在处理，主 Agent 不会提前宣布完成。',
+              rows: [{ target: 'web-filter', subject: '接入 owner 筛选 UI', status: 'pending', status_label: '等待开始' }],
+              open_session_count: 1,
+              unresolved_work_item_count: 1,
+              next_action: '先完成或处理这些工作项；全部收敛后再做最终总结。',
+              display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+              technical: { unresolved_work_item_ids: ['global-wi-filter'], open_session_ids: ['global-session-hidden'] },
+            },
+          },
+        },
+        {
+          role: 'assistant',
+          type: 'global_stream',
+          streaming: false,
+          content: '✅ 全局 Todo 已归档：最终总结已整理。',
+          timestamp: now,
+          streamEvents: [
+            { tone: 'ok', icon: '✅', title: '全局 Todo 已归档', text: '计划、执行、TestAgent 复核和总结都已完成。' },
+          ],
+          todo_plan: globalCompletedArchivedTodoPlan,
+          todoPlan: globalCompletedArchivedTodoPlan,
+          agenticRun: {
+            id: 'global-completed-archived-todo-run',
+            status: 'completed',
+            phase: 'completed',
+            user_message: '完成后把全局 Todo 收起，只保留总结',
+            original_user_message: '完成后把全局 Todo 收起，只保留总结',
+            final_reply: '全局主 Agent 已完成本轮处理，Todo 已归档，最终总结已整理。',
+            todo_plan: globalCompletedArchivedTodoPlan,
+            todoPlan: globalCompletedArchivedTodoPlan,
+            final_report: {
+              summary: '全局主 Agent 已完成本轮处理，Todo 已归档，最终总结已整理。',
+              verification: ['TestAgent 独立复核已通过'],
+              independent_review: ['TestAgent：已通过', '文件上传：已验证 2 个上传文件（notes.txt、meta.json）', '文件下载：已验证 1 个下载文件（tasks.csv）', '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤', '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误'],
+              acceptance_gate_passed: true,
+            },
+            final_delivery_report: {
+              headline: '全局主 Agent 已完成本轮处理，Todo 已归档，最终总结已整理。',
+              status: 'done',
+              status_label: '已完成',
+              verification: ['TestAgent 独立复核已通过'],
+              acceptance: ['主 Agent 已纳入复核结论。'],
+            },
+          },
+        },
       ],
     },
   ]
@@ -1418,7 +2338,7 @@ const FixtureApp = {
     setupGlobalAgentFixtureState()
     window.__ccmLastTaskAction = null
     const childSummary = computed(() => summarizeWorkEvents(childEvents))
-    const compactWorkText = (text) => sanitizeUserFacingAgentText(text, '子 Agent 正在执行。', 220)
+    const compactWorkText = (text) => sanitizeUserFacingAgentText(text, '执行成员正在执行。', 220)
     const codeDrawer = ref({
       visible: false,
       title: '',
@@ -1445,7 +2365,7 @@ const FixtureApp = {
     const closeCodeDrawer = () => {
       codeDrawer.value = { ...codeDrawer.value, visible: false }
     }
-    return { conversationDecision, taskDecision, taskMissingVerificationDecision, taskCard, groupIntakeMessage, workQueueCard, workItemVerificationReminderCard, receiptResolvedCard, goalRevisionContinuationCard, planRevisionCard, confirmedPlanFollowupCard, mainAgentStatus, mainAgentActiveStatus, globalHistoryCard, globalDirectDispatchCard, globalFailedHistoryCard, globalCancelledHistoryCard, childEvents, childSummary, compactWorkText, codeDrawer, handleTaskAction, closeCodeDrawer }
+    return { conversationDecision, taskDecision, taskCompletedDecision, taskMissingVerificationDecision, taskCard, planGapDeliveryCard, groupIntakeMessage, workQueueCard, workchainTodoCard, workchainCompletedArchivedCard, workchainQualityFollowupCard, ordinaryWorkchainTodoCard, testAgentBlockedPlanCard, testAgentFailedReviewCard, workItemVerificationReminderCard, receiptResolvedCard, goalRevisionContinuationCard, planRevisionCard, confirmedPlanFollowupCard, mainAgentStatus, mainAgentActiveStatus, mainAgentArchivedTodoStatus, globalHistoryCard, globalDirectDispatchCard, globalFailedHistoryCard, globalCancelledHistoryCard, childEvents, childSummary, compactWorkText, codeDrawer, handleTaskAction, closeCodeDrawer }
   },
   template: `
     <main class="visual-fixture">
@@ -1468,6 +2388,34 @@ const FixtureApp = {
         <h2>任务卡</h2>
         <GroupMainAgentStatusCard :status="mainAgentStatus" :latestDecision="taskDecision" />
         <TaskExperienceCard :card="taskCard" @action="handleTaskAction" />
+        <div id="case-delivery-plan-gap" style="margin-top:14px">
+          <h2>交付总结计划缺口</h2>
+          <TaskExperienceCard :card="planGapDeliveryCard" @action="handleTaskAction" />
+        </div>
+        <div id="case-workchain-todo-card" style="margin-top:14px">
+          <h2>Workchain Todo 桥接</h2>
+          <TaskExperienceCard :card="workchainTodoCard" @action="handleTaskAction" />
+        </div>
+        <div id="case-workchain-completed-archived" style="margin-top:14px">
+          <h2>Workchain Todo 完成归档</h2>
+          <TaskExperienceCard :card="workchainCompletedArchivedCard" @action="handleTaskAction" />
+        </div>
+        <div id="case-workchain-quality-followup" style="margin-top:14px">
+          <h2>Workchain 总结补齐</h2>
+          <TaskExperienceCard :card="workchainQualityFollowupCard" @action="handleTaskAction" />
+        </div>
+        <div id="case-workchain-ordinary-hidden" style="margin-top:14px">
+          <h2>普通问话 Workchain Todo 隐藏</h2>
+          <TaskExperienceCard :card="ordinaryWorkchainTodoCard" @action="handleTaskAction" />
+        </div>
+        <div id="case-test-agent-plan-blocked" style="margin-top:14px">
+          <h2>TestAgent 计划预检受阻</h2>
+          <TaskExperienceCard :card="testAgentBlockedPlanCard" @action="handleTaskAction" />
+        </div>
+        <div id="case-test-agent-review-failed" style="margin-top:14px">
+          <h2>TestAgent 复核返工</h2>
+          <TaskExperienceCard :card="testAgentFailedReviewCard" @action="handleTaskAction" />
+        </div>
         <div id="case-work-item-next" style="margin-top:14px">
           <h2>执行队列后续派发</h2>
           <TaskExperienceCard :card="workQueueCard" @action="handleTaskAction" />
@@ -1508,8 +2456,12 @@ const FixtureApp = {
       </section>
 
       <section id="case-group-main-current-todo" class="fixture-case">
-        <h2>群聊主 Agent 当前步骤</h2>
+        <h2>协作群当前步骤</h2>
         <GroupMainAgentStatusCard :status="mainAgentActiveStatus" :latestDecision="taskDecision" />
+        <div id="case-group-main-current-todo-archived" style="margin-top:14px">
+          <h2>群聊当前 Todo 完成归档</h2>
+          <GroupMainAgentStatusCard :status="mainAgentArchivedTodoStatus" :latestDecision="taskCompletedDecision" />
+        </div>
       </section>
 
       <section id="case-group-task-intake-plan" class="fixture-case">
@@ -1520,12 +2472,12 @@ const FixtureApp = {
       </section>
 
       <section id="case-child-agent" class="fixture-case">
-        <h2>子 Agent 摘要</h2>
+        <h2>执行成员摘要</h2>
         <details class="agent-work-events running" style="--agent-accent:#2563eb">
           <summary class="work-events-head">
             <div class="work-head-main">
               <span class="work-agent-dot"></span>
-              <span class="work-title">子 Agent 执行摘要</span>
+              <span class="work-title">执行成员执行摘要</span>
               <span class="work-state-pill running">执行中</span>
             </div>
             <div class="work-head-meta">

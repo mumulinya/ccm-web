@@ -12,6 +12,8 @@ import {
   WorkOrderIssue,
 } from "./types";
 import { buildAcceptanceCoverage } from "./coverage";
+import { buildBrowserInteractionSummary } from "./browser/interaction-summary";
+import { buildBrowserNetworkSummary } from "./browser/network-summary";
 import { buildRequiredCheckCoverage } from "./required-checks";
 import { makeRunId, nowIso } from "./utils";
 
@@ -95,6 +97,24 @@ function buildEvidence(commandResults: CommandRunResult[], devServerResults: Dev
         path: result.consoleLogPath,
       });
     }
+    if (result.dialogLogPath) {
+      evidence.push({
+        type: "artifact",
+        project: result.project,
+        title: `Dialog log: ${result.name}`,
+        status: resultStatusToAgent(result.status),
+        path: result.dialogLogPath,
+      });
+    }
+    if (result.popupLogPath) {
+      evidence.push({
+        type: "artifact",
+        project: result.project,
+        title: `Popup log: ${result.name}`,
+        status: resultStatusToAgent(result.status),
+        path: result.popupLogPath,
+      });
+    }
     if (result.networkLogPath) {
       evidence.push({
         type: "artifact",
@@ -145,6 +165,8 @@ export function buildTestAgentReport(input: {
   const httpResults = input.httpResults || [];
   const browserToolCalls = input.browserToolCalls || [];
   const finishedAt = nowIso();
+  const browserInteractionSummary = buildBrowserInteractionSummary(browserResults);
+  const browserNetworkSummary = buildBrowserNetworkSummary(browserResults);
   const requiredCheckCoverage = buildRequiredCheckCoverage({
     workOrder,
     commandResults,
@@ -212,6 +234,8 @@ export function buildTestAgentReport(input: {
     httpResults,
     browserResults,
     browserToolCalls,
+    browserNetworkSummary,
+    browserInteractionSummary,
     requiredCheckCoverage,
     acceptanceCoverage,
     evidence,

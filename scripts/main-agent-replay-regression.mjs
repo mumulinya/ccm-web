@@ -96,13 +96,13 @@ async function run() {
 
     const child = page.locator('#replay-msg-replay-child-agent')
     const childDetails = child.locator('details.agent-work-events')
-    await expectVisible(child.getByText('子 Agent 执行摘要'), 'replayed child agent summary')
+    await expectVisible(child.getByText('执行成员执行摘要'), 'replayed child agent summary')
     if (await childDetails.evaluate(el => el.open)) throw new Error('replayed child agent details should be folded by default')
     await expectHidden(child.locator('.work-events-list'), 'replayed child event list before expand')
     await textDoesNotLeak(child, [/trace_id/i, /session_secret/i, /CCM_AGENT_RECEIPT/i], 'child summary before expand')
     await childDetails.locator('summary').click()
     await expectVisible(child.locator('.work-events-list'), 'replayed child event list after expand')
-    await expectVisible(child.getByText('Agent 已提交结构化完成信息，主 Agent 正在汇总验收。'), 'replayed sanitized child internal output')
+    await expectVisible(child.getByText('执行成员已提交结构化完成信息，我正在汇总验收。'), 'replayed sanitized child internal output')
     await textDoesNotLeak(child, [/trace_id/i, /session_secret/i, /CCM_AGENT_RECEIPT/i], 'child expanded output')
     await child.screenshot({ path: path.join(outputDir, '04-replay-child-expanded-sanitized.png') })
 

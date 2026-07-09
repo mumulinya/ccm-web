@@ -8,7 +8,7 @@ import {
   mainDecisionPlanSummary,
   mainDecisionTone,
 } from '../../composables/useMainAgentDisplay.js'
-import { sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
+import { sanitizeUserFacingPlanStructure } from '../../utils/agentDisplay.js'
 
 const props = defineProps({
   status: { type: Object, default: null },
@@ -17,6 +17,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['open-pipeline', 'locate-decision'])
+const displayStatusValue = (value, fallback = '状态已整理。', max = 260) => sanitizeUserFacingPlanStructure(value, { fallback, max })
 
 const openQaCount = computed(() => {
   const statusCount = Number(props.status?.open_qa_count || 0)
@@ -49,7 +50,27 @@ const checkpointStatusText = (status) => ({
   failed: '失败',
   pending: '等待',
 }[status] || '更新')
-const currentTodoSummary = computed(() => props.status?.current_todo_summary || props.status?.currentTodoSummary || null)
+const rawCurrentTodoSummary = computed(() => props.status?.current_todo_summary || props.status?.currentTodoSummary || null)
+const currentTodoSummary = computed(() => {
+  const summary = rawCurrentTodoSummary.value
+  const policy = summary?.display_policy || summary?.displayPolicy || {}
+  if (!summary || policy.user_visible === false) return null
+  const total = Number(summary.total_count || summary.totalCount || 0)
+  const completed = Number(summary.completed_count || summary.completedCount || 0)
+  const status = String(summary.status || '').toLowerCase()
+  const terminalPhase = ['done', 'completed', 'failed', 'cancelled', 'canceled'].includes(String(props.status?.phase || '').toLowerCase())
+  const archiveCompleted = policy.archive_completed_todo === true
+    || policy.archiveCompletedTodo === true
+    || policy.archived_when_complete === true
+    || policy.archivedWhenComplete === true
+    || policy.visible_when_completed === false
+    || policy.visibleWhenCompleted === false
+    || terminalPhase
+  const hasVerificationReminder = Boolean(summary.verification_reminder || summary.verificationReminder)
+  const allDone = total > 0 && completed >= total && ['completed', 'done', 'success', 'succeeded'].includes(status)
+  if (archiveCompleted && allDone && !hasVerificationReminder) return null
+  return displayStatusValue(summary, '当前步骤已整理。', 260)
+})
 const currentTodoTone = computed(() => {
   const status = String(currentTodoSummary.value?.status || '').toLowerCase()
   if (['failed', 'error'].includes(status)) return 'failed'
@@ -66,7 +87,7 @@ const progressRefreshSummary = computed(() => {
     || null
   const policy = summary?.display_policy || summary?.displayPolicy || {}
   if (!summary || policy.user_visible === false) return null
-  return sanitizeUserFacingStructure(summary, {
+  return sanitizeUserFacingPlanStructure(summary, {
     fallback: '进度刷新提醒已整理，技术细节已放入技术详情。',
     max: 260,
   })
@@ -84,7 +105,10 @@ const progressRefreshTone = computed(() => {
   if (['needs_refresh', 'stalled', 'blocked', 'waiting'].includes(status)) return 'warning'
   return 'active'
 })
-const childAgentStatusSummary = computed(() => props.status?.child_agent_status_summary || props.status?.childAgentStatusSummary || null)
+const childAgentStatusSummary = computed(() => {
+  const summary = props.status?.child_agent_status_summary || props.status?.childAgentStatusSummary || null
+  return summary ? displayStatusValue(summary, '执行成员状态已整理。', 260) : null
+})
 const childAgentStatusTone = computed(() => {
   const status = String(childAgentStatusSummary.value?.status || '').toLowerCase()
   if (['needs_attention', 'failed', 'blocked'].includes(status)) return 'warning'
@@ -123,7 +147,7 @@ const pickupSummary = computed(() => {
     || null
   const policy = summary?.display_policy || summary?.displayPolicy || {}
   if (!summary || policy.user_visible === false) return null
-  return sanitizeUserFacingStructure(summary, {
+  return sanitizeUserFacingPlanStructure(summary, {
     fallback: '回来继续看的摘要已整理，技术细节已放入技术详情。',
     max: 260,
   })
@@ -144,9 +168,9 @@ const pickupTone = computed(() => {
 })
 const completionSummary = computed(() => {
   const summary = props.status?.completion_summary || props.status?.completionSummary || props.status?.latest_delivery_summary?.completion_summary || props.status?.latestDeliverySummary?.completionSummary || null
-  if (summary) return summary
+  if (summary) return displayStatusValue(summary, '交付结果已整理。', 260)
   if (!deliveryReport.value) return null
-  return {
+  return displayStatusValue({
     status: deliveryReport.value.status,
     status_label: deliveryReport.value.status_label,
     headline: deliveryReport.value.headline,
@@ -154,7 +178,7 @@ const completionSummary = computed(() => {
     verification_count: deliveryReport.value.verification?.length || 0,
     risk_count: deliveryReport.value.risks?.length || 0,
     next_action: Array.isArray(deliveryReport.value.next_action) ? deliveryReport.value.next_action[0] : deliveryReport.value.next_action,
-  }
+  }, '交付结果已整理。', 260)
 })
 const completionMeta = computed(() => {
   const summary = completionSummary.value || {}
@@ -177,7 +201,7 @@ const sessionContinuityText = computed(() => {
 })
 const failedGateText = computed(() => {
   const gates = props.status?.failed_gates || props.status?.failedGates || []
-  return sanitizeUserFacingStructure(
+  return sanitizeUserFacingPlanStructure(
     gates.map(g => g?.label || g?.reason || g?.id || g).join('、'),
     { fallback: '仍有验收检查需要补齐。', max: 220 }
   )
@@ -188,7 +212,7 @@ const failedGateText = computed(() => {
   <div class="main-agent-status-card">
     <div class="main-agent-status-head">
       <div>
-        <span class="main-agent-status-title" title="群聊主 Agent 只负责当前群聊内的计划、派发、结果验收和交付报告；规则兜底协调器是本地运行时，不是新的群成员。">主 Agent 状态</span>
+        <span class="main-agent-status-title" title="当前群聊内的计划、任务安排、结果验收和交付报告状态。">协作状态</span>
         <span class="main-agent-phase">{{ status?.label || '空闲' }}</span>
       </div>
       <button v-if="status?.latest_delivery_summary" class="btn btn-outline btn-xs" @click="emit('open-pipeline')">协作看板</button>
@@ -207,6 +231,10 @@ const failedGateText = computed(() => {
         <span class="item-label">当前步骤</span>
         <span class="item-value">{{ currentTodoSummary.active_form || currentTodoSummary.label }}</span>
         <small v-if="currentTodoSummary.detail">{{ currentTodoSummary.detail }}</small>
+        <div v-if="currentTodoSummary.recent_action || currentTodoSummary.recentAction || currentTodoSummary.needs_action || currentTodoSummary.needsAction" class="todo-post-turn">
+          <span v-if="currentTodoSummary.recent_action || currentTodoSummary.recentAction">最近：{{ currentTodoSummary.recent_action || currentTodoSummary.recentAction }}</span>
+          <span v-if="currentTodoSummary.needs_action || currentTodoSummary.needsAction">需要：{{ currentTodoSummary.needs_action || currentTodoSummary.needsAction }}</span>
+        </div>
         <small v-if="currentTodoSummary.next_action" class="todo-next">下一步：{{ currentTodoSummary.next_action }}</small>
         <div class="todo-progress">
           <span>{{ currentTodoSummary.status_label || '进行中' }}</span>
@@ -215,7 +243,7 @@ const failedGateText = computed(() => {
       </div>
       <div v-if="progressRefreshSummary" class="main-agent-status-item progress-refresh-summary" :class="progressRefreshTone">
         <span class="item-label">{{ progressRefreshSummary.title || '进度刷新提醒' }}</span>
-        <span class="item-value">{{ progressRefreshSummary.current_state || progressRefreshSummary.currentState || progressRefreshSummary.headline || '主 Agent 已整理当前进度刷新状态。' }}</span>
+        <span class="item-value">{{ progressRefreshSummary.current_state || progressRefreshSummary.currentState || progressRefreshSummary.headline || '我已整理当前进度刷新状态。' }}</span>
         <div v-if="progressRefreshItems.length" class="progress-refresh-list">
           <span v-for="item in progressRefreshItems" :key="item">{{ item }}</span>
         </div>
@@ -223,8 +251,8 @@ const failedGateText = computed(() => {
         <em>{{ progressRefreshSummary.status_label || progressRefreshSummary.statusLabel || '已整理' }}</em>
       </div>
       <div v-if="childAgentStatusSummary" class="main-agent-status-item child-agent-summary" :class="childAgentStatusTone">
-        <span class="item-label">子 Agent 状态</span>
-        <span class="item-value">{{ childAgentStatusSummary.summary_text || childAgentStatusSummary.summaryText || childAgentStatusSummary.title || '子 Agent 状态已整理。' }}</span>
+        <span class="item-label">执行成员状态</span>
+        <span class="item-value">{{ childAgentStatusSummary.summary_text || childAgentStatusSummary.summaryText || childAgentStatusSummary.title || '执行成员状态已整理。' }}</span>
         <small v-if="childAgentStatusSummary.next_action || childAgentStatusSummary.nextAction" class="child-agent-next">下一步：{{ childAgentStatusSummary.next_action || childAgentStatusSummary.nextAction }}</small>
         <div v-if="childAgentRows.length" class="child-agent-rows">
           <span v-for="row in childAgentRows" :key="row.agent" :class="row.status">
@@ -246,14 +274,14 @@ const failedGateText = computed(() => {
       </div>
       <div v-if="completionSummary" class="main-agent-status-item completion-summary" :class="completionSummary.status">
         <span class="item-label">交付总结</span>
-        <span class="item-value">{{ completionSummary.headline || '主 Agent 已整理本轮交付结果。' }}</span>
+        <span class="item-value">{{ completionSummary.headline || '我已整理本轮交付结果。' }}</span>
         <small>{{ completionMeta }}</small>
         <small v-if="completionSummary.next_action">下一步：{{ completionSummary.next_action }}</small>
         <em>{{ completionSummary.status_label || '已整理' }}</em>
       </div>
       <div v-if="pickupSummary" class="main-agent-status-item pickup-summary" :class="pickupTone">
         <span class="item-label">{{ pickupSummary.title || '回来继续看这里' }}</span>
-        <span class="item-value">{{ pickupSummary.current_state || pickupSummary.currentState || pickupSummary.headline || '主 Agent 已整理当前任务状态。' }}</span>
+        <span class="item-value">{{ pickupSummary.current_state || pickupSummary.currentState || pickupSummary.headline || '我已整理当前任务状态。' }}</span>
         <div v-if="pickupReviewItems.length" class="pickup-review-list">
           <span v-for="item in pickupReviewItems" :key="item">{{ item }}</span>
         </div>
@@ -329,6 +357,8 @@ const failedGateText = computed(() => {
 .main-agent-status-item.current-todo.warning { border-color:rgba(245,158,11,.26); background:rgba(255,251,235,.78); }
 .main-agent-status-item.current-todo.failed { border-color:rgba(239,68,68,.22); background:rgba(254,242,242,.78); }
 .main-agent-status-item.current-todo .item-value { white-space:normal; line-height:1.4; }
+.todo-post-turn { display:grid; gap:3px; margin-top:7px; }
+.todo-post-turn span { color:var(--text-muted); font-size:10.5px; font-weight:800; line-height:1.35; overflow-wrap:anywhere; }
 .todo-next { color:var(--accent-blue) !important; font-weight:800; }
 .todo-progress { position:absolute; right:10px; top:10px; display:grid; gap:2px; justify-items:end; }
 .todo-progress span { color:var(--text-muted); font-size:10px; font-weight:900; white-space:nowrap; }

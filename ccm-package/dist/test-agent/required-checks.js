@@ -210,6 +210,8 @@ function coverageFor(check, input) {
         signal = browserArtifactSignal(input.browserResults, "har");
     else if (/browser_video|video/.test(normalized))
         signal = browserArtifactSignal(input.browserResults, "video");
+    else if (/browser_download|download/.test(normalized))
+        signal = browserArtifactSignal(input.browserResults, "download");
     else if (/browser_artifacts?|evidence_artifacts?/.test(normalized))
         signal = browserArtifactSignal(input.browserResults, "any");
     else if (/browser_snapshot|dom_snapshot|page_snapshot|snapshots?/.test(normalized))

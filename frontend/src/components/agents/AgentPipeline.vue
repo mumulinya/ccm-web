@@ -25,7 +25,7 @@ const props = defineProps({
   },
   title: {
     type: String,
-    default: 'Agent 协作看板'
+    default: '协作看板'
   },
   deliverySummary: {
     type: Object,
@@ -97,7 +97,7 @@ const overviewItems = computed(() => [
   { key: 'plan', label: '主计划', value: planPhases.value.length || summary.value.coordination_plan_count || 0 },
   { key: 'assign', label: '已派发', value: assignmentRows.value.length || summary.value.assignment_count || 0 },
   { key: 'sandbox', label: '沙盘', value: sandboxRehearsal.value ? 1 : 0 },
-  { key: 'notify', label: '子 Agent', value: notificationRows.value.length || assignmentRows.value.length || 0 },
+  { key: 'notify', label: '执行成员', value: notificationRows.value.length || assignmentRows.value.length || 0 },
   { key: 'qa', label: '问答', value: agentQaRows.value.length || summary.value.agent_qa_count || 0 },
   { key: 'receipt', label: '结果说明', value: receiptRows.value.length || summary.value.receipt_count || 0 },
   { key: 'verify', label: '已验证', value: executedVerification.value.length },
@@ -130,7 +130,7 @@ const workerRows = computed(() => {
   return [...receiptRows.value, ...notificationRows.value].map((item, index) => {
     const status = item.status || inferPendingStatus()
     return {
-      project: item.agent || item.project || `子 Agent ${index + 1}`,
+      project: item.agent || item.project || `执行成员 ${index + 1}`,
       task: item.task || item.summary || '等待任务描述',
       status,
       statusLabel: statusText(status),
@@ -168,7 +168,7 @@ function normalizePhase(item, index) {
 function normalizeAssignment(item, index) {
   const reworkRoute = item.reworkRoute || item.rework_route || item.routing || null
   return {
-    project: item.project || item.agent || item.target_project || `子 Agent ${index + 1}`,
+    project: item.project || item.agent || item.target_project || `执行成员 ${index + 1}`,
     task: item.task || item.summary || item.description || '',
     userTaskPreview: item.userTaskPreview || item.user_task_preview || '',
     reason: item.reason || '',
@@ -190,7 +190,7 @@ function reworkRouteLabel(item = {}) {
   const route = item.reworkRoute || item.rework_route || item.routing || {}
   const strategy = String(route.user_label || route.userLabel || item.continuationStrategy || item.continuation_strategy || '').trim()
   if (!strategy) return ''
-  if (strategy === 'same_worker_scratchpad' || strategy === 'continue_same_worker') return '继续同一子 Agent'
+  if (strategy === 'same_worker_scratchpad' || strategy === 'continue_same_worker') return '继续同一执行成员'
   if (strategy === 'fresh_verification_worker' || strategy === 'independent_verification') return '独立验证复核'
   if (strategy === 'spawn_fresh_worker') return '重新派发'
   if (strategy === 'stop_wrong_direction_then_continue') return '停止旧方向后继续'
@@ -384,7 +384,7 @@ function formatListItem(item) {
           <ul v-if="asArray(sandboxRehearsal.agent_plan).length" class="fact-list">
             <li v-for="agent in sandboxRehearsal.agent_plan.slice(0, 5)" :key="`${agent.order}-${agent.project}`">{{ agent.project }}：{{ compactText(agent.task, 90) }}</li>
           </ul>
-          <p v-else class="empty-note small">等待主 Agent 生成可执行分工。</p>
+          <p v-else class="empty-note small">等待我生成可执行分工。</p>
         </div>
         <div>
           <span class="section-label">门禁要求</span>
@@ -401,7 +401,7 @@ function formatListItem(item) {
     <div class="workboard-grid">
       <section class="panel main-plan">
         <div class="panel-head">
-          <h5>主 Agent 生成计划</h5>
+          <h5>生成执行计划</h5>
           <span v-if="mainPlan.strategy" class="subtle">{{ mainPlan.strategy }}</span>
         </div>
         <div v-if="planPhases.length" class="phase-list">
@@ -417,12 +417,12 @@ function formatListItem(item) {
             </div>
           </div>
         </div>
-        <p v-else class="empty-note">还没有拿到主 Agent 的计划证据。</p>
+        <p v-else class="empty-note">还没有拿到计划证据。</p>
       </section>
 
       <section class="panel">
         <div class="panel-head">
-          <h5>派发给子 Agent</h5>
+          <h5>安排给执行成员</h5>
           <span class="subtle">{{ assignmentRows.length }} 个任务</span>
         </div>
         <div v-if="assignmentRows.length" class="assignment-list">
@@ -443,13 +443,13 @@ function formatListItem(item) {
             </div>
           </div>
         </div>
-        <p v-else class="empty-note">等待主 Agent 派发子任务。</p>
+        <p v-else class="empty-note">等待我安排子任务。</p>
       </section>
     </div>
 
     <section class="panel">
       <div class="panel-head">
-        <h5>子 Agent 执行状态</h5>
+        <h5>执行成员状态</h5>
         <span class="subtle">按结果说明和通知合并</span>
       </div>
       <div v-if="workerRows.length" class="worker-list">
@@ -472,7 +472,7 @@ function formatListItem(item) {
           </div>
         </div>
       </div>
-      <p v-else class="empty-note">暂未收到子 Agent 通知或结果说明。</p>
+      <p v-else class="empty-note">暂未收到执行成员通知或结果说明。</p>
     </section>
 
     <section class="panel agent-qa-panel">
@@ -489,7 +489,7 @@ function formatListItem(item) {
           <p class="muted-line">{{ qa.summary }}</p>
           <p v-if="qa.questionPreview" class="muted-line">问：{{ compactText(qa.questionPreview, 180) }}</p>
           <p v-if="qa.answerPreview" class="muted-line">答：{{ compactText(qa.answerPreview, 220) }}</p>
-          <p v-if="qa.acceptance?.reason" class="muted-line">主 Agent 结论：{{ compactText(sanitizeUserFacingAgentText(qa.acceptance.reason, '主 Agent 已完成问答仲裁。', 180), 180) }}</p>
+          <p v-if="qa.acceptance?.reason" class="muted-line">仲裁结论：{{ compactText(sanitizeUserFacingAgentText(qa.acceptance.reason, '问答仲裁已完成。', 180), 180) }}</p>
           <p v-if="qa.nextAction" class="muted-line">下一步：{{ qa.nextAction }}</p>
           <div v-if="qa.badges?.length" class="assignment-meta">
             <span v-for="badge in qa.badges" :key="badge">{{ badge }}</span>
@@ -505,11 +505,11 @@ function formatListItem(item) {
           </details>
         </div>
       </div>
-      <p v-else class="empty-note">本次任务暂无子 Agent 工作中问答。</p>
+      <p v-else class="empty-note">本次任务暂无执行成员工作中问答。</p>
     </section>
     <section class="panel reasoning-panel">
       <div class="panel-head">
-        <h5>主 Agent 推理—验证闭环</h5>
+        <h5>推理—验证闭环</h5>
         <span class="subtle">计划 v{{ reasoningLoop?.plan_version || 0 }} · 偏差 {{ reasoningLoop?.deviations?.length || 0 }}</span>
       </div>
       <div v-if="reasoningLoop" class="delivery-grid">
@@ -553,7 +553,7 @@ function formatListItem(item) {
           <small v-if="session.reason">{{ session.reason }}</small>
         </div>
       </div>
-      <p v-else class="empty-note">本任务尚未建立项目 Agent 会话。</p>
+      <p v-else class="empty-note">本任务尚未建立项目执行成员会话。</p>
     </section>
     <section class="panel delivery-panel">
       <div class="panel-head">

@@ -145,15 +145,16 @@ function setAgentQaManualTakeover(id, reason = "") {
 const AGENT_QA_USER_PREVIEW_INTERNAL_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|<\s*\/?\s*task-notification|task-notification|receipt[-_\s]*status|trace_id|session_id|native_session|task_agent_session|WorkerContextPacket|raw\s+receipt|raw\s+payload|raw_report|execution_id|permission_contract|routing|acceptance|qa_id|原始回执/i;
 function sanitizeAgentQaPreviewText(value, fallback = "", max = 220) {
     const text = (0, memory_2.compactMemoryText)(value || "", max);
+    const safeFallback = (0, display_1.sanitizeMainAgentUserText)(fallback, fallback || "协作问答信息已整理，技术细节已放入技术详情。", max);
     if (!text)
-        return fallback;
+        return safeFallback;
     if (AGENT_QA_USER_PREVIEW_INTERNAL_PATTERN.test(text))
-        return fallback;
+        return safeFallback;
     return (0, display_1.sanitizeMainAgentUserText)(text, fallback || "Agent 问答信息已整理，技术细节已放入技术详情。", max);
 }
 function buildAgentQaUserPreview(qa = {}, kind = "") {
-    const from = sanitizeAgentQaPreviewText(qa.from_agent || "子 Agent", "子 Agent", 80);
-    const to = sanitizeAgentQaPreviewText(qa.to_agent || qa.target || "目标 Agent", "目标 Agent", 80);
+    const from = sanitizeAgentQaPreviewText(qa.from_agent || "执行成员", "执行成员", 80);
+    const to = sanitizeAgentQaPreviewText(qa.to_agent || qa.target || "目标执行成员", "目标执行成员", 80);
     const status = String(kind === "question" ? "waiting" : qa.status || (qa.answer ? "answered" : "waiting")).toLowerCase();
     const accepted = qa.acceptance?.accepted === true || status === "resumed" || !!qa.resumed_at;
     const waiting = ["waiting", "asking", "queued"].includes(status);
@@ -185,16 +186,16 @@ function buildAgentQaUserPreview(qa = {}, kind = "") {
                         ? `${to} 已回答 ${from} 的问题，主 Agent 正在核对证据后决定是否采用。`
                         : `${from} 与 ${to} 的协作问题已记录。`;
     const nextAction = accepted
-        ? "继续原任务执行，后续由主 Agent 汇总验收。"
+        ? "继续原任务执行，后续由我汇总验收。"
         : waiting
             ? "等待目标 Agent 回答；回答到达后会自动唤醒原 Agent。"
             : needsUser
-                ? "需要用户或主 Agent 人工确认后再继续。"
+                ? "需要你或我人工确认后再继续。"
                 : failed
-                    ? "主 Agent 会根据缺口重试、换人或提示人工接管。"
+                    ? "我会根据缺口重试、换人或提示人工接管。"
                     : answer
-                        ? "主 Agent 正在检查回答是否有足够证据。"
-                        : "等待主 Agent 判断下一步。";
+                        ? "我正在检查回答是否有足够证据。"
+                        : "等待我判断下一步。";
     const badges = [
         typeLabel,
         qa.blocking !== false ? "影响续跑" : "",
@@ -213,7 +214,7 @@ function buildAgentQaUserPreview(qa = {}, kind = "") {
         summary: sanitizeAgentQaPreviewText(summary, "Agent 协作问答进展已更新。", 260),
         question,
         answer,
-        next_action: nextAction,
+        next_action: sanitizeAgentQaPreviewText(nextAction, "等待下一步处理。", 260),
         badges,
         display_policy: {
             user_text_first: true,

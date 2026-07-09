@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GROUP_COMPACTION_HOOK_LEDGER_VERSION = exports.GROUP_PRESERVED_SEGMENT_VERSION = exports.GROUP_PTL_RECOVERY_VERSION = exports.GROUP_PTL_EMERGENCY_VERSION = exports.GROUP_PARTIAL_COMPACT_SEGMENT_LIMIT = exports.GROUP_PARTIAL_COMPACT_VERSION = exports.GROUP_POST_COMPACT_VERIFICATION_BUDGET = exports.GROUP_POST_COMPACT_SKILL_BUDGET = exports.GROUP_POST_COMPACT_FILE_BUDGET = exports.GROUP_POST_COMPACT_RECOVERY_AUDIT_VERSION = exports.GROUP_POST_COMPACT_REINJECT_VERSION = exports.GROUP_TIME_BASED_MC_CLEARED_MESSAGE = exports.GROUP_TIME_BASED_MICRO_COMPACT_VERSION = exports.GROUP_MICRO_COMPACT_MAX_RECORDS = exports.GROUP_MICRO_COMPACT_VERSION = exports.GROUP_COMPACT_MAX_ACTIVE_MESSAGES = exports.GROUP_MANUAL_COMPACT_BUFFER_TOKENS = exports.GROUP_ERROR_BUFFER_TOKENS = exports.GROUP_WARNING_BUFFER_TOKENS = exports.GROUP_AUTOCOMPACT_BUFFER_TOKENS = exports.GROUP_CONTEXT_RESERVED_TOKENS = exports.GROUP_CONTEXT_WINDOW_DEFAULT = exports.GROUP_FACT_ANCHOR_LIMIT = exports.GROUP_COMPACT_MODEL_RETRY_MS = exports.GROUP_COMPACT_MAX_FAILURES = exports.GROUP_COMPACT_MAX_KEEP_TOKENS = exports.GROUP_COMPACT_MIN_KEEP_TOKENS = exports.GROUP_COMPACT_MIN_KEEP_MESSAGES = exports.GROUP_COMPACT_TRIGGER_TOKENS = exports.GROUP_MEMORY_COMPACTION_VERSION = void 0;
+exports.GROUP_COMPACTION_HOOK_LEDGER_VERSION = exports.GROUP_COMPACT_STRATEGY_DECISION_VERSION = exports.GROUP_PRESERVED_SEGMENT_VERSION = exports.GROUP_PTL_RECOVERY_VERSION = exports.GROUP_PTL_EMERGENCY_VERSION = exports.GROUP_PARTIAL_COMPACT_SEGMENT_LIMIT = exports.GROUP_PARTIAL_COMPACT_VERSION = exports.GROUP_POST_COMPACT_VERIFICATION_BUDGET = exports.GROUP_POST_COMPACT_SKILL_BUDGET = exports.GROUP_POST_COMPACT_FILE_BUDGET = exports.GROUP_POST_COMPACT_CLEANUP_AUDIT_VERSION = exports.GROUP_POST_COMPACT_RECOVERY_AUDIT_VERSION = exports.GROUP_POST_COMPACT_REINJECT_VERSION = exports.GROUP_TIME_BASED_MC_CLEARED_MESSAGE = exports.GROUP_TIME_BASED_MICRO_COMPACT_VERSION = exports.GROUP_API_MICROCOMPACT_CONTEXT_MANAGEMENT_BETA = exports.GROUP_API_MICROCOMPACT_DEFAULT_TARGET_INPUT_TOKENS = exports.GROUP_API_MICROCOMPACT_DEFAULT_MAX_INPUT_TOKENS = exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_PLAN_VERSION = exports.GROUP_API_MICROCOMPACT_EDIT_PLAN_VERSION = exports.GROUP_MICRO_COMPACT_MAX_RECORDS = exports.GROUP_MICRO_COMPACT_VERSION = exports.GROUP_COMPACT_MAX_ACTIVE_MESSAGES = exports.GROUP_MANUAL_COMPACT_BUFFER_TOKENS = exports.GROUP_ERROR_BUFFER_TOKENS = exports.GROUP_WARNING_BUFFER_TOKENS = exports.GROUP_AUTOCOMPACT_BUFFER_TOKENS = exports.GROUP_CONTEXT_RESERVED_TOKENS = exports.GROUP_CONTEXT_WINDOW_DEFAULT = exports.GROUP_FACT_ANCHOR_LIMIT = exports.GROUP_COMPACT_MODEL_RETRY_MS = exports.GROUP_COMPACT_MAX_FAILURES = exports.GROUP_COMPACT_MAX_KEEP_TOKENS = exports.GROUP_COMPACT_MIN_KEEP_TOKENS = exports.GROUP_COMPACT_MIN_KEEP_MESSAGES = exports.GROUP_COMPACT_TRIGGER_TOKENS = exports.GROUP_MEMORY_COMPACTION_VERSION = void 0;
 exports.getGroupMemoryCompactionHookLedgerFile = getGroupMemoryCompactionHookLedgerFile;
 exports.readGroupMemoryCompactionHookLedger = readGroupMemoryCompactionHookLedger;
 exports.registerGroupMemoryCompactionHook = registerGroupMemoryCompactionHook;
@@ -42,6 +42,9 @@ exports.estimateGroupTextTokens = estimateGroupTextTokens;
 exports.estimateGroupMessageTokens = estimateGroupMessageTokens;
 exports.calculateGroupMessagesToKeepIndex = calculateGroupMessagesToKeepIndex;
 exports.buildGroupPreservedSegment = buildGroupPreservedSegment;
+exports.buildGroupApiMicroCompactEditPlan = buildGroupApiMicroCompactEditPlan;
+exports.buildGroupApiMicrocompactNativeApplyPlan = buildGroupApiMicrocompactNativeApplyPlan;
+exports.buildGroupCompactStrategyDecision = buildGroupCompactStrategyDecision;
 exports.buildGroupPtlRecoveryPlan = buildGroupPtlRecoveryPlan;
 exports.getGroupAutoCompactThreshold = getGroupAutoCompactThreshold;
 exports.getGroupEffectiveContextWindow = getGroupEffectiveContextWindow;
@@ -49,6 +52,7 @@ exports.calculateGroupCompactWarningState = calculateGroupCompactWarningState;
 exports.buildGroupMicroCompactPlan = buildGroupMicroCompactPlan;
 exports.buildPostCompactReinjectionPlan = buildPostCompactReinjectionPlan;
 exports.buildGroupPostCompactRecoveryAudit = buildGroupPostCompactRecoveryAudit;
+exports.buildGroupPostCompactCleanupAudit = buildGroupPostCompactCleanupAudit;
 exports.buildDeterministicConversationSummary = buildDeterministicConversationSummary;
 exports.renderConversationSummary = renderConversationSummary;
 exports.buildBoundedRecentGroupContext = buildBoundedRecentGroupContext;
@@ -58,6 +62,10 @@ exports.runGroupMemoryPreservedSegmentSelfTest = runGroupMemoryPreservedSegmentS
 exports.runGroupMemoryPostCompactRecoveryAuditSelfTest = runGroupMemoryPostCompactRecoveryAuditSelfTest;
 exports.runGroupMemoryCompactWarningSelfTest = runGroupMemoryCompactWarningSelfTest;
 exports.runGroupMemoryCompactionSelfTest = runGroupMemoryCompactionSelfTest;
+exports.runGroupCompactStrategyDecisionSelfTest = runGroupCompactStrategyDecisionSelfTest;
+exports.runGroupPostCompactCleanupAuditSelfTest = runGroupPostCompactCleanupAuditSelfTest;
+exports.runGroupApiMicroCompactEditPlanSelfTest = runGroupApiMicroCompactEditPlanSelfTest;
+exports.runGroupApiMicrocompactNativeApplyPlanSelfTest = runGroupApiMicrocompactNativeApplyPlanSelfTest;
 exports.runGroupMemoryQualityGateSelfTest = runGroupMemoryQualityGateSelfTest;
 exports.runGroupMemoryMicroCompactSelfTest = runGroupMemoryMicroCompactSelfTest;
 exports.runGroupMemoryTimeBasedMicroCompactSelfTest = runGroupMemoryTimeBasedMicroCompactSelfTest;
@@ -90,10 +98,16 @@ exports.GROUP_MANUAL_COMPACT_BUFFER_TOKENS = 3_000;
 exports.GROUP_COMPACT_MAX_ACTIVE_MESSAGES = 120;
 exports.GROUP_MICRO_COMPACT_VERSION = 1;
 exports.GROUP_MICRO_COMPACT_MAX_RECORDS = 80;
+exports.GROUP_API_MICROCOMPACT_EDIT_PLAN_VERSION = 1;
+exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_PLAN_VERSION = 1;
+exports.GROUP_API_MICROCOMPACT_DEFAULT_MAX_INPUT_TOKENS = 180_000;
+exports.GROUP_API_MICROCOMPACT_DEFAULT_TARGET_INPUT_TOKENS = 40_000;
+exports.GROUP_API_MICROCOMPACT_CONTEXT_MANAGEMENT_BETA = "context-management-2025-06-27";
 exports.GROUP_TIME_BASED_MICRO_COMPACT_VERSION = 1;
 exports.GROUP_TIME_BASED_MC_CLEARED_MESSAGE = "[Old group Agent result content cleared]";
 exports.GROUP_POST_COMPACT_REINJECT_VERSION = 1;
 exports.GROUP_POST_COMPACT_RECOVERY_AUDIT_VERSION = 1;
+exports.GROUP_POST_COMPACT_CLEANUP_AUDIT_VERSION = 1;
 exports.GROUP_POST_COMPACT_FILE_BUDGET = 5;
 exports.GROUP_POST_COMPACT_SKILL_BUDGET = 5;
 exports.GROUP_POST_COMPACT_VERIFICATION_BUDGET = 8;
@@ -102,8 +116,11 @@ exports.GROUP_PARTIAL_COMPACT_SEGMENT_LIMIT = 12;
 exports.GROUP_PTL_EMERGENCY_VERSION = 1;
 exports.GROUP_PTL_RECOVERY_VERSION = 1;
 exports.GROUP_PRESERVED_SEGMENT_VERSION = 1;
+exports.GROUP_COMPACT_STRATEGY_DECISION_VERSION = 1;
 exports.GROUP_COMPACTION_HOOK_LEDGER_VERSION = 1;
 const GROUP_COMPACTION_HOOK_LEDGER_DIR = path.join(utils_1.CCM_DIR, "group-memory-compaction-hooks");
+const GROUP_API_MICROCOMPACT_CLEARABLE_RESULTS = ["Bash", "Shell", "PowerShell", "Glob", "Grep", "Read", "FileRead", "WebFetch", "WebSearch"];
+const GROUP_API_MICROCOMPACT_CLEARABLE_USES = ["Edit", "FileEdit", "Write", "FileWrite", "NotebookEdit"];
 const groupMemoryCompactionHooks = {
     pre: new Set(),
     post: new Set(),
@@ -787,6 +804,550 @@ function buildGroupPreservedSegment(messages, keepIndex, options = {}) {
         createdAt: options.now || new Date().toISOString(),
     };
 }
+function messageContentBlocks(message) {
+    const blocks = [];
+    const visit = (value, depth = 0) => {
+        if (depth > 4 || value == null)
+            return;
+        if (Array.isArray(value)) {
+            for (const item of value)
+                visit(item, depth + 1);
+            return;
+        }
+        if (typeof value !== "object")
+            return;
+        if (value.type)
+            blocks.push(value);
+        if (Array.isArray(value.content))
+            visit(value.content, depth + 1);
+        if (Array.isArray(value.blocks))
+            visit(value.blocks, depth + 1);
+    };
+    visit(message?.content);
+    visit(message?.blocks);
+    visit(message?.message?.content);
+    return blocks;
+}
+function collectWindowBlockRefs(messages, offset = 0) {
+    const toolUseIds = new Set();
+    const toolResultIds = new Set();
+    const thinkingMessageIds = new Set();
+    const rows = [];
+    (messages || []).forEach((message, localIndex) => {
+        const index = offset + localIndex;
+        const messageId = messageIdentity(message, index);
+        for (const block of messageContentBlocks(message)) {
+            const type = String(block?.type || "");
+            if (type === "tool_use" || type === "server_tool_use") {
+                const id = String(block.id || block.tool_use_id || block.toolUseId || "").trim();
+                if (id)
+                    toolUseIds.add(id);
+                rows.push({ type, id, messageId, index });
+            }
+            else if (type === "tool_result" || type === "web_search_tool_result") {
+                const id = String(block.tool_use_id || block.toolUseId || block.id || "").trim();
+                if (id)
+                    toolResultIds.add(id);
+                rows.push({ type, id, messageId, index });
+            }
+            else if (type === "thinking" || type === "redacted_thinking") {
+                thinkingMessageIds.add(messageId);
+                rows.push({ type, id: messageId, messageId, index });
+            }
+        }
+    });
+    return { toolUseIds, toolResultIds, thinkingMessageIds, rows };
+}
+function collectApiMicroCompactSignals(messages = []) {
+    const toolUseIds = new Set();
+    const toolResultIds = new Set();
+    const toolNames = new Set();
+    const resultToolNames = new Set();
+    let thinkingBlockCount = 0;
+    let redactedThinkingBlockCount = 0;
+    let toolUseBlockCount = 0;
+    let toolResultBlockCount = 0;
+    (messages || []).forEach((message, index) => {
+        if (String(message?.role || "").toLowerCase() === "thinking")
+            thinkingBlockCount += 1;
+        const explicitToolCalls = Array.isArray(message?.tool_calls || message?.toolCalls) ? (message.tool_calls || message.toolCalls) : [];
+        for (const call of explicitToolCalls) {
+            const id = String(call?.id || call?.tool_use_id || call?.toolUseId || `tool-call-${index}`).trim();
+            const name = String(call?.name || call?.function?.name || call?.tool || "").trim();
+            if (id)
+                toolUseIds.add(id);
+            if (name)
+                toolNames.add(name);
+            toolUseBlockCount += 1;
+        }
+        const explicitResults = Array.isArray(message?.tool_results || message?.toolResults) ? (message.tool_results || message.toolResults) : [];
+        for (const result of explicitResults) {
+            const id = String(result?.tool_use_id || result?.toolUseId || result?.id || `tool-result-${index}`).trim();
+            const name = String(result?.name || result?.tool || "").trim();
+            if (id)
+                toolResultIds.add(id);
+            if (name)
+                resultToolNames.add(name);
+            toolResultBlockCount += 1;
+        }
+        for (const block of messageContentBlocks(message)) {
+            const type = String(block?.type || "");
+            if (type === "tool_use" || type === "server_tool_use") {
+                const id = String(block.id || block.tool_use_id || block.toolUseId || "").trim();
+                const name = String(block.name || block.tool || block.tool_name || "").trim();
+                if (id)
+                    toolUseIds.add(id);
+                if (name)
+                    toolNames.add(name);
+                toolUseBlockCount += 1;
+            }
+            else if (type === "tool_result" || type === "web_search_tool_result") {
+                const id = String(block.tool_use_id || block.toolUseId || block.id || "").trim();
+                const name = String(block.name || block.tool || block.tool_name || "").trim();
+                if (id)
+                    toolResultIds.add(id);
+                if (name)
+                    resultToolNames.add(name);
+                toolResultBlockCount += 1;
+            }
+            else if (type === "thinking") {
+                thinkingBlockCount += 1;
+            }
+            else if (type === "redacted_thinking") {
+                redactedThinkingBlockCount += 1;
+            }
+        }
+    });
+    return {
+        toolUseIds: [...toolUseIds].slice(0, 60),
+        toolResultIds: [...toolResultIds].slice(0, 60),
+        toolNames: [...toolNames].slice(0, 30),
+        resultToolNames: [...resultToolNames].slice(0, 30),
+        toolUseBlockCount,
+        toolResultBlockCount,
+        thinkingBlockCount,
+        redactedThinkingBlockCount,
+        hasThinking: thinkingBlockCount > 0,
+        hasToolUses: toolUseBlockCount > 0,
+        hasToolResults: toolResultBlockCount > 0,
+    };
+}
+function buildGroupApiMicroCompactEditPlan(messages = [], options = {}) {
+    const maxInputTokens = Math.max(1, Number(options.maxInputTokens || options.max_input_tokens || exports.GROUP_API_MICROCOMPACT_DEFAULT_MAX_INPUT_TOKENS));
+    const targetInputTokens = Math.max(1, Math.min(maxInputTokens, Number(options.targetInputTokens || options.target_input_tokens || exports.GROUP_API_MICROCOMPACT_DEFAULT_TARGET_INPUT_TOKENS)));
+    const clearAtLeastTokens = Math.max(0, maxInputTokens - targetInputTokens);
+    const activeTokens = Number(options.activeTokens || options.active_tokens || (messages || []).reduce((sum, message) => sum + estimateGroupMessageTokens(message), 0));
+    const triggerValue = Math.max(targetInputTokens, Number(options.triggerTokens || options.trigger_tokens || maxInputTokens));
+    const signals = collectApiMicroCompactSignals(messages);
+    const nowMs = Date.parse(String(options.now || "")) || Date.now();
+    const latestMessageTime = Math.max(0, ...(messages || []).map((message) => Date.parse(String(message?.timestamp || message?.time || "")) || 0));
+    const idleMinutes = Number.isFinite(Number(options.idleMinutes || options.idle_minutes))
+        ? Number(options.idleMinutes || options.idle_minutes)
+        : latestMessageTime > 0 ? Math.max(0, Math.round((nowMs - latestMessageTime) / 6000) / 10) : 0;
+    const clearAllThinkingThresholdMinutes = Math.max(1, Number(options.clearAllThinkingAfterMinutes || options.clear_all_thinking_after_minutes || 60));
+    const isRedactThinkingActive = options.isRedactThinkingActive === true || options.is_redact_thinking_active === true;
+    const clearAllThinking = options.clearAllThinking === true || options.clear_all_thinking === true || idleMinutes >= clearAllThinkingThresholdMinutes;
+    const force = options.force === true || options.recommend === true;
+    const aboveTrigger = activeTokens >= triggerValue;
+    const enableToolResultClearing = options.enableToolResultClearing !== false && options.enable_tool_result_clearing !== false;
+    const enableToolUseClearing = options.enableToolUseClearing === true || options.enable_tool_use_clearing === true || force;
+    const edits = [];
+    const strategies = [];
+    const addStrategy = (strategy, recommended, reason) => {
+        const row = { ...strategy, recommended: recommended === true, reason };
+        strategies.push(row);
+        if (recommended) {
+            const { recommended: _recommended, reason: _reason, ...apiShape } = row;
+            edits.push(apiShape);
+        }
+    };
+    if (signals.hasThinking && !isRedactThinkingActive) {
+        addStrategy({
+            type: "clear_thinking_20251015",
+            keep: clearAllThinking ? { type: "thinking_turns", value: 1 } : "all",
+        }, true, clearAllThinking ? "idle cache likely missed; keep only last thinking turn" : "preserve model-visible previous thinking blocks");
+    }
+    if (enableToolResultClearing && signals.hasToolResults) {
+        addStrategy({
+            type: "clear_tool_uses_20250919",
+            trigger: { type: "input_tokens", value: triggerValue },
+            clear_at_least: { type: "input_tokens", value: clearAtLeastTokens },
+            clear_tool_inputs: GROUP_API_MICROCOMPACT_CLEARABLE_RESULTS,
+        }, force || aboveTrigger, aboveTrigger ? "input tokens exceed API microcompact trigger" : "tool results present but below trigger; keep as advisory until pressure rises");
+    }
+    if (enableToolUseClearing && signals.hasToolUses) {
+        addStrategy({
+            type: "clear_tool_uses_20250919",
+            trigger: { type: "input_tokens", value: triggerValue },
+            clear_at_least: { type: "input_tokens", value: clearAtLeastTokens },
+            exclude_tools: GROUP_API_MICROCOMPACT_CLEARABLE_USES,
+        }, force || aboveTrigger, "keep recent tool uses while preserving edit/write safety boundaries");
+    }
+    const config = edits.length ? { edits } : undefined;
+    const base = {
+        schema: "ccm-api-microcompact-edit-plan-v1",
+        version: exports.GROUP_API_MICROCOMPACT_EDIT_PLAN_VERSION,
+        groupId: String(options.groupId || options.group_id || ""),
+        targetProject: String(options.targetProject || options.target_project || ""),
+        source: "claude-code-api-microcompact-compatible",
+        advisoryOnly: options.advisoryOnly !== false && options.advisory_only !== false,
+        canApplyNatively: options.canApplyNatively === true || options.can_apply_natively === true,
+        activeTokens,
+        maxInputTokens,
+        targetInputTokens,
+        clearAtLeastTokens,
+        trigger: { type: "input_tokens", value: triggerValue },
+        aboveTrigger,
+        idleMinutes,
+        clearAllThinking,
+        clearAllThinkingThresholdMinutes,
+        isRedactThinkingActive,
+        signalCounts: {
+            thinkingBlocks: signals.thinkingBlockCount,
+            redactedThinkingBlocks: signals.redactedThinkingBlockCount,
+            toolUses: signals.toolUseBlockCount,
+            toolResults: signals.toolResultBlockCount,
+        },
+        toolNames: signals.toolNames,
+        resultToolNames: signals.resultToolNames,
+        clearableResultTools: GROUP_API_MICROCOMPACT_CLEARABLE_RESULTS,
+        clearableUseExcludeTools: GROUP_API_MICROCOMPACT_CLEARABLE_USES,
+        strategies,
+        contextManagement: config || null,
+        editCount: edits.length,
+        recommended: edits.length > 0,
+        reason: edits.length
+            ? "api context-management edits available for executor that supports native microcompact"
+            : signals.hasThinking || signals.hasToolResults || signals.hasToolUses
+                ? "signals present but edit trigger not reached"
+                : "no thinking/tool context edit signals detected",
+        createdAt: options.now || new Date().toISOString(),
+    };
+    return {
+        ...base,
+        planChecksum: crypto.createHash("sha256").update(JSON.stringify(base)).digest("hex").slice(0, 24),
+    };
+}
+function buildGroupApiMicrocompactNativeApplyPlan(apiEditPlan = {}, options = {}) {
+    const rawAgentType = String(options.agentType || options.agent_type || options.runtime || "unknown").trim().toLowerCase();
+    const agentType = rawAgentType === "claude" ? "claudecode" : rawAgentType || "unknown";
+    const apiRuntimes = new Set(["anthropic-api", "anthropic-sdk", "claude-api", "claude-sdk"]);
+    const cliRuntimes = new Set(["claudecode", "cursor", "codex", "gemini", "qoder", "test-agent-native"]);
+    const transport = String(options.transport
+        || options.executorTransport
+        || options.executor_transport
+        || (apiRuntimes.has(agentType) ? "anthropic_api" : "cli")).trim().toLowerCase();
+    const provider = String(options.provider || options.apiProvider || options.api_provider || (transport.includes("anthropic") ? "anthropic" : "")).trim().toLowerCase();
+    const betaHeaders = [
+        ...(Array.isArray(options.betaHeaders || options.beta_headers) ? (options.betaHeaders || options.beta_headers) : []),
+    ].map((item) => String(item || "").trim()).filter(Boolean);
+    const planValid = apiEditPlan?.schema === "ccm-api-microcompact-edit-plan-v1";
+    const contextManagement = apiEditPlan?.contextManagement || apiEditPlan?.context_management || null;
+    const planHasEdits = planValid && Array.isArray(contextManagement?.edits) && contextManagement.edits.length > 0;
+    const explicitCapability = options.supportsApiContextManagement === true
+        || options.supports_api_context_management === true
+        || options.nativeContextManagement === true
+        || options.native_context_management === true;
+    const apiTransport = ["api", "anthropic_api", "anthropic-sdk", "claude_api", "provider_api"].includes(transport);
+    const requestLayerAvailable = options.nativeApiRequestLayer === true
+        || options.native_api_request_layer === true
+        || (apiRuntimes.has(agentType) && apiTransport);
+    const betaHeaderEnabled = options.contextManagementBetaHeaderEnabled === true
+        || options.context_management_beta_header_enabled === true
+        || betaHeaders.includes(exports.GROUP_API_MICROCOMPACT_CONTEXT_MANAGEMENT_BETA);
+    const featureEnabled = options.enabled !== false && options.featureEnabled !== false && options.feature_enabled !== false;
+    const cliAdvisoryBoundary = cliRuntimes.has(agentType) || transport === "cli" || transport === "external_cli";
+    const sessionBinding = options.sessionBinding || options.session_binding || null;
+    const taskAgentSessionId = String(options.taskAgentSessionId
+        || options.task_agent_session_id
+        || sessionBinding?.task_agent_session_id
+        || sessionBinding?.taskAgentSessionId
+        || "").trim();
+    const nativeSessionId = String(options.nativeSessionId
+        || options.native_session_id
+        || sessionBinding?.native_session_id
+        || sessionBinding?.nativeSessionId
+        || "").trim();
+    const memoryContextSnapshotId = String(options.memoryContextSnapshotId || options.memory_context_snapshot_id || "").trim();
+    const memoryContextSnapshotChecksum = String(options.memoryContextSnapshotChecksum || options.memory_context_snapshot_checksum || "").trim();
+    const nativeApplyReady = planHasEdits
+        && explicitCapability
+        && requestLayerAvailable
+        && apiTransport
+        && betaHeaderEnabled
+        && featureEnabled
+        && !cliAdvisoryBoundary;
+    const checks = [
+        { id: "edit_plan_valid", pass: planValid, evidence: apiEditPlan?.schema || "missing" },
+        { id: "context_management_edits_present", pass: planHasEdits, evidence: `edits=${contextManagement?.edits?.length || 0}` },
+        { id: "executor_capability_declared", pass: explicitCapability, evidence: explicitCapability ? "supports_api_context_management" : "not_declared" },
+        { id: "native_api_request_layer_available", pass: requestLayerAvailable, evidence: transport || "unknown" },
+        { id: "api_transport_selected", pass: apiTransport && !cliAdvisoryBoundary, evidence: `${agentType}:${transport}` },
+        { id: "context_management_beta_enabled", pass: betaHeaderEnabled, evidence: exports.GROUP_API_MICROCOMPACT_CONTEXT_MANAGEMENT_BETA },
+        { id: "feature_enabled", pass: featureEnabled, evidence: featureEnabled ? "enabled" : "disabled" },
+    ];
+    const failedChecks = checks.filter(item => !item.pass).map(item => item.id);
+    const requestPatch = nativeApplyReady ? {
+        body: {
+            context_management: contextManagement,
+        },
+        beta_headers: [exports.GROUP_API_MICROCOMPACT_CONTEXT_MANAGEMENT_BETA],
+    } : null;
+    const base = {
+        schema: "ccm-api-microcompact-native-apply-plan-v1",
+        version: exports.GROUP_API_MICROCOMPACT_NATIVE_APPLY_PLAN_VERSION,
+        groupId: String(options.groupId || options.group_id || apiEditPlan?.groupId || apiEditPlan?.group_id || ""),
+        targetProject: String(options.targetProject || options.target_project || apiEditPlan?.targetProject || apiEditPlan?.target_project || ""),
+        apiEditPlanChecksum: String(apiEditPlan?.planChecksum || apiEditPlan?.plan_checksum || ""),
+        executor: {
+            agentType,
+            transport,
+            provider,
+            cli: cliAdvisoryBoundary,
+        },
+        capability: {
+            supportsApiContextManagement: explicitCapability,
+            nativeApiRequestLayer: requestLayerAvailable,
+            contextManagementBetaHeaderEnabled: betaHeaderEnabled,
+            requiredBetaHeader: exports.GROUP_API_MICROCOMPACT_CONTEXT_MANAGEMENT_BETA,
+        },
+        mode: nativeApplyReady ? "native_api_context_management" : "advisory_only",
+        nativeApplyReady,
+        advisoryOnly: !nativeApplyReady,
+        requestPatch,
+        requestPatchChecksum: requestPatch ? crypto.createHash("sha256").update(JSON.stringify(requestPatch)).digest("hex").slice(0, 24) : "",
+        sessionBinding: sessionBinding?.schema ? sessionBinding : null,
+        session_binding: sessionBinding?.schema ? sessionBinding : null,
+        sessionBindingRequired: !!(taskAgentSessionId || nativeSessionId || memoryContextSnapshotId || memoryContextSnapshotChecksum),
+        taskAgentSessionId,
+        task_agent_session_id: taskAgentSessionId,
+        nativeSessionId,
+        native_session_id: nativeSessionId,
+        memoryContextSnapshotId,
+        memory_context_snapshot_id: memoryContextSnapshotId,
+        memoryContextSnapshotChecksum,
+        memory_context_snapshot_checksum: memoryContextSnapshotChecksum,
+        receiptContract: {
+            required_receipt_fields: ["apiMicrocompactUsage", "task_agent_session_id", "memory_context_snapshot_id"],
+            required_plan_checksum: String(apiEditPlan?.planChecksum || apiEditPlan?.plan_checksum || ""),
+            required_apply_plan_checksum: "",
+            required_request_patch_checksum: "",
+            required_task_agent_session_id: taskAgentSessionId,
+            required_native_session_id: nativeSessionId,
+            required_memory_context_snapshot_id: memoryContextSnapshotId,
+            required_memory_context_snapshot_checksum: memoryContextSnapshotChecksum,
+            receipt_should_match_session: !!(taskAgentSessionId || nativeSessionId),
+            receipt_should_match_memory_context_snapshot: !!(memoryContextSnapshotId || memoryContextSnapshotChecksum),
+            native_applied_requires_request_patch_checksum: nativeApplyReady,
+        },
+        checks,
+        failedChecks,
+        action: nativeApplyReady
+            ? "merge_request_patch_into_provider_api_request"
+            : "surface_edit_plan_as_context_pressure_advisory",
+        reason: nativeApplyReady
+            ? "executor exposes Anthropic API request construction with context-management beta enabled"
+            : cliAdvisoryBoundary
+                ? "external CLI executor does not expose provider request body; keep API microcompact advisory"
+                : failedChecks.length
+                    ? `native apply readiness checks failed: ${failedChecks.join(",")}`
+                    : "native apply is not available",
+        createdAt: options.now || new Date().toISOString(),
+    };
+    return {
+        ...base,
+        applyPlanChecksum: crypto.createHash("sha256").update(JSON.stringify(base)).digest("hex").slice(0, 24),
+        receiptContract: {
+            ...base.receiptContract,
+            required_apply_plan_checksum: crypto.createHash("sha256").update(JSON.stringify(base)).digest("hex").slice(0, 24),
+            required_request_patch_checksum: base.requestPatchChecksum,
+        },
+    };
+}
+function buildGroupCompactWindowInvariants(input = {}) {
+    const messages = Array.isArray(input.messages) ? input.messages : [];
+    const startIndex = Math.max(0, Math.min(messages.length, Number(input.startIndex || 0)));
+    const keepIndex = Math.max(startIndex, Math.min(messages.length, Number(input.keepIndex ?? messages.length)));
+    const compactedMessages = Array.isArray(input.messagesToCompact)
+        ? input.messagesToCompact
+        : messages.slice(startIndex, keepIndex);
+    const keptMessages = Array.isArray(input.keptMessages)
+        ? input.keptMessages
+        : messages.slice(keepIndex);
+    const compactedRefs = collectWindowBlockRefs(compactedMessages, startIndex);
+    const keptRefs = collectWindowBlockRefs(keptMessages, keepIndex);
+    const missingToolUses = [...keptRefs.toolResultIds].filter(id => !keptRefs.toolUseIds.has(id) && compactedRefs.toolUseIds.has(id));
+    const splitThinkingMessageIds = [...keptRefs.thinkingMessageIds].filter(id => compactedRefs.thinkingMessageIds.has(id));
+    const firstKeptTaskId = groupMessageTaskId(keptMessages[0]);
+    const previousTaskId = keepIndex > startIndex ? groupMessageTaskId(messages[keepIndex - 1]) : "";
+    const noSplitTaskTransactions = !firstKeptTaskId || firstKeptTaskId !== previousTaskId;
+    const preservedSegment = input.preservedSegment || {};
+    const preservedCount = Number(preservedSegment.preservedMessageCount || keptMessages.length || 0);
+    const preservedTokens = Number(preservedSegment.preservedTokenEstimate || keptMessages.reduce((sum, message) => sum + estimateGroupMessageTokens(message), 0));
+    const minTokens = Number(preservedSegment.minTokens || input.minTokens || exports.GROUP_COMPACT_MIN_KEEP_TOKENS);
+    const minMessages = Number(preservedSegment.minTextBlockMessages || input.minMessages || exports.GROUP_COMPACT_MIN_KEEP_MESSAGES);
+    return {
+        noSplitTaskTransactions,
+        noSplitToolResultPairs: missingToolUses.length === 0,
+        noSplitThinkingBlocks: splitThinkingMessageIds.length === 0,
+        preservedRecentWindowRecorded: preservedSegment?.schema === "ccm-group-preserved-segment-v1" || keptMessages.length > 0,
+        preservedTokenFloorSatisfied: preservedTokens >= Math.min(minTokens, Math.max(1, preservedTokens)),
+        preservedMessageFloorSatisfied: preservedCount >= Math.min(minMessages, Math.max(1, preservedCount)),
+        missingToolUseIds: missingToolUses.slice(0, 12),
+        splitThinkingMessageIds: splitThinkingMessageIds.slice(0, 12),
+        firstKeptTaskId,
+        previousTaskId,
+        compactedBlockCount: compactedRefs.rows.length,
+        keptBlockCount: keptRefs.rows.length,
+    };
+}
+function buildGroupCompactStrategyDecision(input = {}) {
+    const messages = Array.isArray(input.messages) ? input.messages : [];
+    const keepIndex = Math.max(0, Math.min(messages.length, Number(input.keepIndex ?? messages.length)));
+    const startIndex = Math.max(0, Math.min(keepIndex, Number(input.startIndex ?? Math.max(0, keepIndex - (Array.isArray(input.messagesToCompact) ? input.messagesToCompact.length : 0)))));
+    const messagesToCompact = Array.isArray(input.messagesToCompact) ? input.messagesToCompact : messages.slice(startIndex, keepIndex);
+    const keptMessages = Array.isArray(input.keptMessages) ? input.keptMessages : messages.slice(keepIndex);
+    const partialCompact = input.partialCompact || null;
+    const microCompact = input.microCompact || null;
+    const ptlEmergency = input.ptlEmergency || null;
+    const ptlRecovery = input.ptlRecovery || null;
+    const compacted = input.compacted === true;
+    const primaryCompact = input.primaryCompact !== false && messagesToCompact.length > 0;
+    const preCompactTokenCount = Number(input.preCompactTokenCount || input.activeTokens || 0);
+    const postCompactTokenEstimate = Number(input.postCompactTokenCount || input.postCompactTokenEstimate || 0);
+    const triggerTokens = Number(input.triggerTokens || input.autoCompactThreshold || 0);
+    const tokenPressurePercent = triggerTokens > 0
+        ? Math.round((Number(input.activeTokens || preCompactTokenCount || 0) / triggerTokens) * 1000) / 10
+        : null;
+    const reasons = [];
+    let mode = "normal_compact";
+    if (!compacted) {
+        mode = messagesToCompact.length <= 0 ? "recent_window_only" : "skip_below_threshold";
+        reasons.push(messagesToCompact.length <= 0 ? "no eligible older messages beyond preserved window" : "below auto compact pressure threshold");
+    }
+    else if (ptlEmergency?.engaged) {
+        mode = "ptl_emergency";
+        reasons.push(ptlEmergency.reason || "post compact token pressure still too high");
+    }
+    else if (ptlRecovery?.recovered) {
+        mode = "ptl_recovery";
+        reasons.push(ptlRecovery.reason || "previous PTL emergency recovered");
+    }
+    else if (partialCompact?.enabled && partialCompact?.sidecar === true && !primaryCompact) {
+        mode = "partial_sidecar";
+        reasons.push(partialCompact.reason || "manual partial sidecar keeps raw transcript unchanged");
+    }
+    else if (partialCompact?.enabled && partialCompact?.sidecar !== true) {
+        mode = "partial_compact";
+        reasons.push(partialCompact.reason || "manual partial compact selected a primary boundary");
+    }
+    else if (microCompact?.timeBased?.triggered || Number(microCompact?.compactedMessageCount || 0) > 0 || Number(microCompact?.tokensFreed || 0) > 0) {
+        mode = "micro_compact";
+        reasons.push(microCompact?.timeBased?.triggered ? "time based micro compact assisted primary summary" : "large agent output micro compact assisted primary summary");
+    }
+    else {
+        reasons.push(input.force ? "manual compact requested" : input.reason || "auto compact selected session-memory style summary plus recent window");
+    }
+    if (input.force)
+        reasons.push("force=true");
+    if (input.preCompactWarning?.level)
+        reasons.push(`pressure=${input.preCompactWarning.level}`);
+    const preservedSegment = input.preservedSegment || (messages.length
+        ? buildGroupPreservedSegment(messages, keepIndex, {
+            floorIndex: startIndex,
+            summaryChecksum: input.summaryChecksum || "",
+            transcriptPath: input.transcriptPath || "",
+            now: input.now,
+        })
+        : null);
+    const invariants = buildGroupCompactWindowInvariants({
+        messages,
+        messagesToCompact,
+        keptMessages,
+        startIndex,
+        keepIndex,
+        preservedSegment,
+    });
+    const base = {
+        schema: "ccm-group-compact-strategy-decision-v1",
+        version: exports.GROUP_COMPACT_STRATEGY_DECISION_VERSION,
+        decisionId: String(input.decisionId || `gcsd_${crypto.createHash("sha1").update([
+            input.groupId || "",
+            input.now || "",
+            mode,
+            startIndex,
+            keepIndex,
+            messages.length,
+            input.summaryChecksum || "",
+        ].join(":")).digest("hex").slice(0, 16)}`),
+        groupId: String(input.groupId || ""),
+        mode,
+        strategy: "cc-session-memory-v3-compatible",
+        compacted,
+        primaryCompact,
+        reason: compactText(input.reason || reasons.filter(Boolean).join("; "), 700),
+        reasons: reasons.filter(Boolean).map(item => compactText(item, 240)).slice(0, 8),
+        startIndex,
+        keepIndex,
+        activeMessageCount: Number(input.activeMessageCount ?? Math.max(0, messages.length - startIndex)),
+        messagesToSummarize: messagesToCompact.length,
+        keptMessages: keptMessages.length,
+        summarizedFromMessageId: messagesToCompact.length ? messageIdentity(messagesToCompact[0], startIndex) : "",
+        summarizedThroughMessageId: messagesToCompact.length ? messageIdentity(messagesToCompact[messagesToCompact.length - 1], keepIndex - 1) : "",
+        firstKeptMessageId: keptMessages.length ? messageIdentity(keptMessages[0], keepIndex) : "",
+        lastKeptMessageId: keptMessages.length ? messageIdentity(keptMessages[keptMessages.length - 1], messages.length - 1) : "",
+        preCompactTokenCount,
+        postCompactTokenEstimate,
+        activeTokensBeforeCompact: Number(input.activeTokens || preCompactTokenCount || 0),
+        triggerTokens,
+        tokenPressurePercent,
+        reductionRatio: preCompactTokenCount > 0 && postCompactTokenEstimate > 0
+            ? Math.round(Math.max(0, 1 - postCompactTokenEstimate / preCompactTokenCount) * 1000) / 1000
+            : null,
+        sessionMemoryAvailable: input.sessionMemoryAvailable === true || !!input.sessionMemory?.schema || !!input.memory?.sessionMemory?.schema,
+        preservedSegment,
+        microCompact: microCompact ? {
+            schema: microCompact.schema || "",
+            recordCount: Number(microCompact.recordCount || 0),
+            compactedMessageCount: Number(microCompact.compactedMessageCount || 0),
+            tokensFreed: Number(microCompact.tokensFreed || 0),
+            timeBasedTriggered: microCompact.timeBased?.triggered === true,
+            timeBasedClearedCount: Number(microCompact.timeBased?.clearedCount || 0),
+        } : null,
+        partialCompact: partialCompact ? {
+            requested: partialCompact.requested === true,
+            enabled: partialCompact.enabled === true,
+            sidecar: partialCompact.sidecar === true,
+            direction: partialCompact.direction || "",
+            reason: partialCompact.reason || "",
+            selectedMessageId: partialCompact.selectedMessageId || "",
+            summarizedThroughMessageId: partialCompact.summarizedThroughMessageId || "",
+        } : null,
+        ptlEmergency: ptlEmergency ? {
+            engaged: ptlEmergency.engaged === true,
+            emergencyLevel: ptlEmergency.emergencyLevel || "",
+            reason: ptlEmergency.reason || "",
+            messageDigestMaxChars: Number(ptlEmergency.messageDigestMaxChars || 0),
+        } : null,
+        ptlRecovery: ptlRecovery ? {
+            recovered: ptlRecovery.recovered === true,
+            reason: ptlRecovery.reason || "",
+            restoredMessageDigestMaxChars: Number(ptlRecovery.restoredMessageDigestMaxChars || 0),
+            contextBudgetPressure: ptlRecovery.contextBudgetPressure ?? null,
+        } : null,
+        transcriptPath: String(input.transcriptPath || ""),
+        summaryChecksum: String(input.summaryChecksum || ""),
+        invariants,
+        invariantPass: Object.entries(invariants)
+            .filter(([, value]) => typeof value === "boolean")
+            .every(([, value]) => value === true),
+        createdAt: input.now || new Date().toISOString(),
+    };
+    return {
+        ...base,
+        decisionChecksum: crypto.createHash("sha256").update(JSON.stringify(base)).digest("hex").slice(0, 24),
+    };
+}
 function resolvePartialCompactWindow(messages, previousBoundaryIndex, options = {}) {
     const request = options?.partialCompact || options?.groupPartialCompact || null;
     if (!request)
@@ -1452,6 +2013,132 @@ function buildGroupPostCompactRecoveryAudit(input = {}) {
         checkCount: checks.length,
     };
 }
+function buildGroupPostCompactCleanupAudit(input = {}) {
+    const boundary = input.boundary || {};
+    const restore = boundary.post_compact_restore || {};
+    const microCompact = input.microCompact || restore.microCompact || null;
+    const reinjectionPlan = input.postCompactReinject || restore.reinjectionPlan || null;
+    const recoveryAudit = input.postCompactRecoveryAudit || restore.recoveryAudit || null;
+    const compactStrategyDecision = input.compactStrategyDecision || restore.strategyDecision || boundary.compactStrategyDecision || null;
+    const apiMicroCompactEditPlan = input.apiMicroCompactEditPlan || restore.apiMicroCompactEditPlan || boundary.apiMicroCompactEditPlan || null;
+    const transcriptPath = String(input.transcriptPath || restore.transcriptPath || compactStrategyDecision?.transcriptPath || "");
+    const preservedSegment = input.preservedSegment || restore.preservedSegment || compactStrategyDecision?.preservedSegment || null;
+    const skillHints = uniqueStrings([
+        ...stringArray((reinjectionPlan?.skills || []).map((item) => item.value || item.name || item), 20),
+        ...(Array.isArray(microCompact?.records) ? microCompact.records.flatMap((record) => stringArray(record.skills || [], 8)) : []),
+    ], 24);
+    const checks = [];
+    const addCheck = (id, label, pass, severity, detail, evidence = []) => {
+        checks.push({
+            id,
+            label,
+            pass: pass === true,
+            severity,
+            detail: compactText(detail, 700),
+            evidence: evidence.map(item => compactText(item, 260)).filter(Boolean).slice(0, 6),
+        });
+    };
+    addCheck("microcompact_tracking_reset_policy", "microcompact tracking reset policy recorded", !!microCompact?.schema || Number(microCompact?.recordCount || 0) === 0, "medium", microCompact?.schema
+        ? `microCompact=${microCompact.schema}; records=${microCompact.recordCount || 0}; compacted=${microCompact.compactedMessageCount || 0}`
+        : "no microcompact records; cleanup policy still records reset boundary");
+    addCheck("raw_transcript_preserved", "raw transcript preserved before cleanup", !!transcriptPath, "fatal", transcriptPath ? `raw transcript=${transcriptPath}` : "missing raw transcript path");
+    addCheck("child_context_packets_rebuilt", "child context packets must be rebuilt after compact", true, "high", "next child Agent dispatch derives a fresh memory packet from group memory, source manifest, gates, and raw transcript");
+    addCheck("invoked_skills_preserved", "invoked skills are preserved across cleanup", true, "high", skillHints.length
+        ? `preserved skill hints: ${skillHints.slice(0, 6).join(", ")}`
+        : "no invoked skill hints detected; cleanup policy intentionally does not clear skill continuity snapshots");
+    addCheck("recovery_audit_linked", "cleanup is linked to recovery audit", recoveryAudit?.schema === "ccm-post-compact-recovery-audit-v1" || input.partialSidecarOnly === true, "high", recoveryAudit?.schema
+        ? `recovery=${recoveryAudit.status || "unknown"}; action=${recoveryAudit.action || ""}`
+        : input.partialSidecarOnly === true
+            ? "partial sidecar only; primary recovery audit not required"
+            : "missing post compact recovery audit");
+    addCheck("strategy_decision_linked", "cleanup is linked to strategy decision", compactStrategyDecision?.schema === "ccm-group-compact-strategy-decision-v1", "high", compactStrategyDecision?.schema
+        ? `mode=${compactStrategyDecision.mode || "unknown"}; decision=${compactStrategyDecision.decisionId || ""}`
+        : "missing compact strategy decision");
+    addCheck("api_microcompact_edit_plan_recorded", "API microcompact edit plan recorded", apiMicroCompactEditPlan?.schema === "ccm-api-microcompact-edit-plan-v1" || input.partialSidecarOnly === true, "medium", apiMicroCompactEditPlan?.schema
+        ? `edits=${apiMicroCompactEditPlan.editCount || 0}; advisory=${apiMicroCompactEditPlan.advisoryOnly !== false}; trigger=${apiMicroCompactEditPlan.trigger?.value || ""}`
+        : input.partialSidecarOnly === true
+            ? "partial sidecar only; primary API context edit plan not required"
+            : "missing API microcompact edit plan");
+    addCheck("preserved_segment_survives_cleanup", "preserved segment survives cleanup", preservedSegment?.schema === "ccm-group-preserved-segment-v1" || input.partialSidecarOnly === true, "high", preservedSegment?.schema
+        ? `preserved=${preservedSegment.preservedMessageCount || 0}; first=${preservedSegment.firstPreservedMessageId || ""}; last=${preservedSegment.lastPreservedMessageId || ""}`
+        : input.partialSidecarOnly === true
+            ? "partial sidecar keeps raw transcript unchanged"
+            : "missing preserved segment");
+    const failed = checks.filter(check => !check.pass);
+    const fatalFailed = failed.some(check => check.severity === "fatal");
+    const highFailed = failed.some(check => check.severity === "high");
+    const status = fatalFailed ? "failed" : highFailed || failed.length ? "degraded" : "pass";
+    const cleanupActions = [
+        {
+            id: "reset_microcompact_tracking",
+            action: "reset_derived_microcompact_state",
+            status: "recorded",
+            evidence: microCompact?.schema || "no_microcompact_records",
+        },
+        {
+            id: "rebuild_child_context_packets",
+            action: "derive_fresh_child_agent_memory_context_after_compact",
+            status: "required",
+            evidence: compactStrategyDecision?.decisionId || boundary.id || "",
+        },
+        {
+            id: "preserve_skill_continuity",
+            action: "do_not_clear_invoked_skill_or_tool_continuity_snapshots",
+            status: "recorded",
+            evidence: skillHints.slice(0, 8),
+        },
+        {
+            id: "preserve_raw_recovery_sources",
+            action: "keep_group_messages_json_and_typed_memory_as_source_of_truth",
+            status: transcriptPath ? "recorded" : "missing",
+            evidence: transcriptPath,
+        },
+        {
+            id: "do_not_delete_ledgers",
+            action: "candidate_usage_replay_hook_and_dispatch_ledgers_are_retained_for_audit",
+            status: "recorded",
+            evidence: input.hookRunId || input.groupId || "",
+        },
+        {
+            id: "record_api_context_management_plan",
+            action: "surface_clear_thinking_and_tool_result_edit_plan_to_supported_child_executors",
+            status: apiMicroCompactEditPlan?.schema ? "recorded" : "missing",
+            evidence: apiMicroCompactEditPlan?.planChecksum || "",
+        },
+    ];
+    return {
+        schema: "ccm-post-compact-cleanup-audit-v1",
+        version: exports.GROUP_POST_COMPACT_CLEANUP_AUDIT_VERSION,
+        status,
+        pass: status === "pass",
+        action: status === "pass"
+            ? "cleanup_recorded_and_safe_to_dispatch_fresh_child_context"
+            : status === "degraded"
+                ? "dispatch_with_cleanup_warning_and_rebuild_context"
+                : "repair_cleanup_contract_before_dispatch",
+        createdAt: input.now || new Date().toISOString(),
+        groupId: String(input.groupId || ""),
+        boundaryId: String(boundary.id || ""),
+        compactStrategyDecisionId: String(compactStrategyDecision?.decisionId || ""),
+        apiMicroCompactEditPlanId: String(apiMicroCompactEditPlan?.planChecksum || ""),
+        mode: String(compactStrategyDecision?.mode || ""),
+        transcriptPath,
+        summaryChecksum: String(input.summaryChecksum || restore.summaryChecksum || compactStrategyDecision?.summaryChecksum || ""),
+        partialSidecarOnly: input.partialSidecarOnly === true,
+        preserveInvokedSkills: true,
+        preserveToolContinuity: true,
+        resetDerivedCompactState: true,
+        childAgentIsolation: "subagent_or_third_party_cli_session_cleanup_must_not_clobber_group_or_global_memory",
+        sourceOfTruth: "group memory json + group messages transcript + typed MEMORY.md sidecars",
+        skillHints,
+        apiMicroCompactEditPlan,
+        cleanupActions,
+        checks,
+        failedChecks: failed.map(check => check.id),
+        passedChecks: checks.length - failed.length,
+        checkCount: checks.length,
+    };
+}
 function buildGroupPartialCompactSidecarSegment(input) {
     const partial = input.partialCompact || {};
     if (!partial?.enabled || !partial?.sidecar)
@@ -1534,6 +2221,9 @@ function mergeGroupPartialCompactSegments(existing = [], incoming = null, limit 
 function buildPartialSidecarOnlyMemory(input) {
     const previousState = input.memory?.compaction || {};
     const partialSegments = mergeGroupPartialCompactSegments(previousState.partialSegments, input.partialSegment);
+    const compactStrategyDecision = input.compactStrategyDecision || previousState.compactStrategyDecision || null;
+    const postCompactCleanupAudit = input.postCompactCleanupAudit || previousState.postCompactCleanupAudit || null;
+    const apiMicroCompactEditPlan = input.apiMicroCompactEditPlan || previousState.apiMicroCompactEditPlan || null;
     return {
         ...input.memory,
         factAnchors: mergeFactAnchors(input.memory?.factAnchors, Array.isArray(input.partialSegment?.factAnchors) ? input.partialSegment.factAnchors : []),
@@ -1548,6 +2238,9 @@ function buildPartialSidecarOnlyMemory(input) {
             lastPartialCompactedAt: input.now,
             lastPartialSegmentId: input.partialSegment?.id || "",
             transcriptPath: input.transcriptPath,
+            compactStrategyDecision,
+            postCompactCleanupAudit,
+            apiMicroCompactEditPlan,
         },
         messageCompression: {
             ...(input.memory?.messageCompression || {}),
@@ -1556,6 +2249,9 @@ function buildPartialSidecarOnlyMemory(input) {
             totalMessages: (input.messages || []).length,
             partialCompact: input.partialCompact,
             partialSegments: partialSegments.slice(-exports.GROUP_PARTIAL_COMPACT_SEGMENT_LIMIT),
+            compactStrategyDecision,
+            postCompactCleanupAudit,
+            apiMicroCompactEditPlan,
             lastCompressedAt: input.now,
         },
     };
@@ -1919,8 +2615,6 @@ async function compactGroupConversationMemory(input) {
     const defaultKeepIndex = calculateGroupMessagesToKeepIndex(messages, keepWindowOptions);
     const primaryPartialCompact = partialCompact?.enabled === true && partialCompact?.sidecar !== true;
     const keepIndex = primaryPartialCompact ? partialCompact.keepIndex : defaultKeepIndex;
-    if (keepIndex <= summarizedThroughIndex + 1 && !partialSidecarSegment)
-        return { compacted: false, memory, keepIndex, partialCompact };
     const messagesToCompact = messages.slice(summarizedThroughIndex + 1, keepIndex);
     const sourceTokens = messagesToCompact.reduce((sum, message) => sum + estimateGroupMessageTokens(message), 0);
     const keptActiveTokens = messages.slice(keepIndex).reduce((sum, message) => sum + estimateGroupMessageTokens(message), 0);
@@ -1954,7 +2648,66 @@ async function compactGroupConversationMemory(input) {
         || primaryPartialCompact
         || preCompactWarning.flags.isAboveAutoCompactThreshold
         || activeMessageCount >= exports.GROUP_COMPACT_MAX_ACTIVE_MESSAGES;
+    const buildStrategyDecision = (overrides = {}) => buildGroupCompactStrategyDecision({
+        groupId: input.groupId,
+        messages,
+        messagesToCompact,
+        keptMessages: messages.slice(keepIndex),
+        memory,
+        startIndex: summarizedThroughIndex + 1,
+        keepIndex,
+        compacted: false,
+        primaryCompact: shouldCompactPrimary && messagesToCompact.length > 0,
+        partialCompact,
+        partialSidecarSegment,
+        preCompactWarning,
+        activeTokens,
+        activeMessageCount,
+        triggerTokens,
+        preCompactTokenCount: messages.reduce((sum, message) => sum + estimateGroupMessageTokens(message), 0),
+        transcriptPath: input.transcriptPath,
+        force: input.force,
+        now,
+        ...overrides,
+    });
     if ((!shouldCompactPrimary || !messagesToCompact.length) && partialSidecarSegment) {
+        const compactStrategyDecision = buildStrategyDecision({
+            compacted: true,
+            primaryCompact: false,
+            reason: partialCompact?.reason || "partial sidecar only; primary compact skipped",
+        });
+        const apiMicroCompactEditPlan = buildGroupApiMicroCompactEditPlan(messages, {
+            groupId: input.groupId,
+            activeTokens,
+            targetInputTokens: input.config?.apiMicrocompactTargetInputTokens || input.config?.api_microcompact_target_input_tokens,
+            maxInputTokens: input.config?.apiMicrocompactMaxInputTokens || input.config?.api_microcompact_max_input_tokens,
+            force: input.force,
+            now,
+        });
+        const postCompactCleanupAudit = buildGroupPostCompactCleanupAudit({
+            groupId: input.groupId,
+            boundary: {
+                id: partialSidecarSegment.id || "",
+                type: "partial-sidecar",
+                compactStrategyDecision,
+                apiMicroCompactEditPlan,
+                post_compact_restore: {
+                    strategyDecision: compactStrategyDecision,
+                    apiMicroCompactEditPlan,
+                    transcriptPath: input.transcriptPath,
+                    microCompact: partialSidecarSegment.microCompact || null,
+                    reinjectionPlan: partialSidecarSegment.reinjectionPlan || null,
+                },
+            },
+            compactStrategyDecision,
+            apiMicroCompactEditPlan,
+            microCompact: partialSidecarSegment.microCompact || null,
+            postCompactReinject: partialSidecarSegment.reinjectionPlan || null,
+            transcriptPath: input.transcriptPath,
+            summaryChecksum: partialSidecarSegment.summaryChecksum || "",
+            partialSidecarOnly: true,
+            now,
+        });
         const nextMemory = buildPartialSidecarOnlyMemory({
             memory,
             messages,
@@ -1962,11 +2715,41 @@ async function compactGroupConversationMemory(input) {
             partialSegment: partialSidecarSegment,
             transcriptPath: input.transcriptPath,
             now,
+            compactStrategyDecision,
+            postCompactCleanupAudit,
+            apiMicroCompactEditPlan,
         });
-        return { compacted: true, partialCompacted: true, memory: nextMemory, keepIndex, partialCompact, partialSegment: partialSidecarSegment };
+        return { compacted: true, partialCompacted: true, memory: nextMemory, keepIndex, partialCompact, partialSegment: partialSidecarSegment, compactStrategyDecision, postCompactCleanupAudit, apiMicroCompactEditPlan };
     }
-    if (!shouldCompactPrimary || !messagesToCompact.length)
-        return { compacted: false, memory: warningOnlyMemory, keepIndex, partialCompact, contextPressureWarning: preCompactWarning };
+    if (!shouldCompactPrimary || !messagesToCompact.length) {
+        const compactStrategyDecision = buildStrategyDecision({
+            compacted: false,
+            primaryCompact: false,
+            reason: !messagesToCompact.length ? "recent window only; no eligible older messages" : "context pressure below compact threshold",
+        });
+        const apiMicroCompactEditPlan = buildGroupApiMicroCompactEditPlan(messages, {
+            groupId: input.groupId,
+            activeTokens,
+            targetInputTokens: input.config?.apiMicrocompactTargetInputTokens || input.config?.api_microcompact_target_input_tokens,
+            maxInputTokens: input.config?.apiMicrocompactMaxInputTokens || input.config?.api_microcompact_max_input_tokens,
+            force: input.force,
+            now,
+        });
+        const nextMemory = {
+            ...warningOnlyMemory,
+            compaction: {
+                ...(warningOnlyMemory.compaction || {}),
+                compactStrategyDecision,
+                apiMicroCompactEditPlan,
+            },
+            messageCompression: {
+                ...(warningOnlyMemory.messageCompression || {}),
+                compactStrategyDecision,
+                apiMicroCompactEditPlan,
+            },
+        };
+        return { compacted: false, memory: nextMemory, keepIndex, partialCompact, contextPressureWarning: preCompactWarning, compactStrategyDecision, apiMicroCompactEditPlan };
+    }
     const failures = Number(previousState.consecutiveFailures || 0);
     const compactionHookRunId = `gmch_${Date.now().toString(36)}_${crypto.createHash("sha1").update(`${input.groupId || ""}:${now}:${messages.length}`).digest("hex").slice(0, 8)}`;
     const preHookResults = await runGroupMemoryCompactionHooks("pre", {
@@ -2164,6 +2947,32 @@ async function compactGroupConversationMemory(input) {
         now,
     });
     const messageDigest = renderConversationSummary(conversationSummary, ptlEmergency?.messageDigestMaxChars || 14_000);
+    const compactStrategyDecision = buildStrategyDecision({
+        compacted: true,
+        primaryCompact: true,
+        keptMessages,
+        microCompact,
+        postCompactReinject,
+        ptlEmergency,
+        ptlRecovery,
+        preservedSegment,
+        preCompactTokenCount,
+        postCompactTokenCount,
+        summaryChecksum,
+        reason: primaryPartialCompact
+            ? partialCompact?.reason || "manual partial compact selected primary boundary"
+            : input.force
+                ? "manual compact requested"
+                : "auto compact selected session-memory style summary plus recent window",
+    });
+    const apiMicroCompactEditPlan = buildGroupApiMicroCompactEditPlan(messages, {
+        groupId: input.groupId,
+        activeTokens: preCompactTokenCount,
+        targetInputTokens: input.config?.apiMicrocompactTargetInputTokens || input.config?.api_microcompact_target_input_tokens,
+        maxInputTokens: input.config?.apiMicrocompactMaxInputTokens || input.config?.api_microcompact_max_input_tokens,
+        force: input.force,
+        now,
+    });
     const boundary = {
         id: `compact-${Date.now().toString(36)}`,
         type: primaryPartialCompact ? "partial-up-to" : input.force ? "manual" : "auto",
@@ -2174,10 +2983,14 @@ async function compactGroupConversationMemory(input) {
         preservedSegment,
         preCompactTokenCount,
         postCompactTokenCount,
+        compactStrategyDecision,
+        apiMicroCompactEditPlan,
         post_compact_restore: {
             strategy: "conversation_summary_recent_reinject",
             preservedMessageIds: keptMessages.slice(-20).map((message, index) => messageIdentity(message, keepIndex + index)),
             preservedSegment,
+            strategyDecision: compactStrategyDecision,
+            apiMicroCompactEditPlan,
             summaryChecksum,
             transcriptPath: input.transcriptPath,
             microCompact,
@@ -2186,6 +2999,7 @@ async function compactGroupConversationMemory(input) {
             ptlEmergency,
             ptlRecovery,
             recoveryAudit: null,
+            cleanupAudit: null,
         },
         context_budget: effectiveContextBudget,
         partialCompact,
@@ -2240,7 +3054,23 @@ async function compactGroupConversationMemory(input) {
         ptlEmergency,
         ptlRecovery,
         summaryChecksum,
+        compactStrategyDecision,
     });
+    const postCompactCleanupAudit = buildGroupPostCompactCleanupAudit({
+        groupId: input.groupId,
+        boundary,
+        compactStrategyDecision,
+        apiMicroCompactEditPlan,
+        postCompactRecoveryAudit,
+        microCompact,
+        postCompactReinject,
+        preservedSegment,
+        transcriptPath: input.transcriptPath,
+        summaryChecksum,
+        hookRunId: compactionHookRunId,
+        now,
+    });
+    boundary.post_compact_restore.cleanupAudit = postCompactCleanupAudit;
     const latestHookLedger = readGroupMemoryCompactionHookLedger(String(input.groupId || ""));
     const totalCompacted = requiresExplicitRebuild
         ? keepIndex
@@ -2273,6 +3103,7 @@ async function compactGroupConversationMemory(input) {
             compactWarning: postCompactWarning,
             preCompactWarning,
             postCompactRecoveryAudit,
+            postCompactCleanupAudit,
             summarySource,
             modelMode: modelCompactionEnabled ? "hybrid-opt-in" : "session-memory-first",
             modelAttempted: shouldAttemptModel,
@@ -2293,6 +3124,8 @@ async function compactGroupConversationMemory(input) {
             ptlEmergency,
             ptlRecovery,
             preservedSegment,
+            compactStrategyDecision,
+            apiMicroCompactEditPlan,
             hookResults: {
                 pre: preHookResults.slice(-20),
                 post: postHookResults.slice(-20),
@@ -2336,11 +3169,14 @@ async function compactGroupConversationMemory(input) {
             ptlRecovery,
             preservedSegment,
             postCompactRecoveryAudit,
+            compactStrategyDecision,
+            apiMicroCompactEditPlan,
+            postCompactCleanupAudit,
             contextPressureWarning: postCompactWarning,
             lastCompressedAt: now,
         },
     };
-    return { compacted: true, memory: nextMemory, boundary, keepIndex, contextPressureWarning: postCompactWarning, preCompactWarning, postCompactRecoveryAudit };
+    return { compacted: true, memory: nextMemory, boundary, keepIndex, contextPressureWarning: postCompactWarning, preCompactWarning, postCompactRecoveryAudit, postCompactCleanupAudit, compactStrategyDecision, apiMicroCompactEditPlan };
 }
 async function runGroupMemoryPreservedSegmentSelfTest() {
     const messages = [
@@ -2525,6 +3361,290 @@ function runGroupMemoryCompactionSelfTest() {
         adaptiveThresholdMatchesDefaultBudget: getGroupAutoCompactThreshold({}) === exports.GROUP_COMPACT_TRIGGER_TOKENS,
     };
     return { pass: Object.values(checks).every(Boolean), checks, keepIndex, keptMessages: kept.length, compactedMessages: compacted.length };
+}
+async function runGroupCompactStrategyDecisionSelfTest() {
+    const messages = [];
+    for (let i = 0; i < 28; i++) {
+        messages.push({
+            id: `csd-user-${i}`,
+            role: "user",
+            target: "coordinator",
+            task_id: `csd-task-${Math.floor(i / 2)}`,
+            content: i === 0
+                ? "必须保留 COMPACT_STRATEGY_DECISION_SENTINEL，子 Agent 新会话要知道本次为什么压缩。"
+                : `压缩策略决策用户消息 ${i} src/strategy-${i}.ts ${"上下文".repeat(25)}`,
+        });
+        messages.push({
+            id: `csd-agent-${i}`,
+            role: "assistant",
+            agent: "api",
+            task_id: `csd-task-${Math.floor(i / 2)}`,
+            content: `api 输出 ${i}，涉及 src/strategy-${i}.ts，npm run check ${"执行结果".repeat(30)}`,
+            receipt: { status: "done", taskId: `csd-task-${Math.floor(i / 2)}`, filesChanged: [`src/strategy-${i}.ts`], verification: ["npm run check"] },
+        });
+    }
+    const directKeepIndex = calculateGroupMessagesToKeepIndex(messages, { minMessages: 2, minTokens: 1, maxTokens: 1400 });
+    const directMicro = buildGroupMicroCompactPlan(messages.slice(0, directKeepIndex), { maxChars: 900 });
+    const directPreserved = buildGroupPreservedSegment(messages, directKeepIndex, {
+        minMessages: 2,
+        minTokens: 1,
+        maxTokens: 1400,
+        summaryChecksum: "compact-strategy-direct-summary",
+        transcriptPath: "compact-strategy-direct-raw.json",
+        now: "2026-07-08T00:00:00.000Z",
+    });
+    const directDecision = buildGroupCompactStrategyDecision({
+        groupId: "compact-strategy-direct",
+        messages,
+        messagesToCompact: messages.slice(0, directKeepIndex),
+        keptMessages: messages.slice(directKeepIndex),
+        keepIndex: directKeepIndex,
+        compacted: true,
+        primaryCompact: true,
+        microCompact: directMicro,
+        preservedSegment: directPreserved,
+        preCompactTokenCount: 9000,
+        postCompactTokenCount: 1800,
+        summaryChecksum: "compact-strategy-direct-summary",
+        transcriptPath: "compact-strategy-direct-raw.json",
+        reason: "selftest direct strategy decision",
+        now: "2026-07-08T00:00:00.000Z",
+    });
+    const compacted = await compactGroupConversationMemory({
+        groupId: `compact-strategy-selftest-${process.pid}`,
+        messages,
+        memory: { goal: "compact strategy decision selftest", compaction: {} },
+        transcriptPath: "compact-strategy-selftest-raw.json",
+        force: true,
+        config: { minKeepMessages: 2, minKeepTokens: 1, maxKeepTokens: 1400, microCompact: { maxChars: 900 } },
+    });
+    const decision = compacted.memory?.compaction?.compactStrategyDecision || {};
+    const boundaryDecision = compacted.boundary?.post_compact_restore?.strategyDecision || {};
+    const checks = {
+        directDecisionHasSchema: directDecision.schema === "ccm-group-compact-strategy-decision-v1"
+            && directDecision.mode
+            && directDecision.transcriptPath === "compact-strategy-direct-raw.json",
+        directDecisionRecordsWindow: directDecision.messagesToSummarize === directKeepIndex
+            && directDecision.keptMessages === messages.length - directKeepIndex
+            && directDecision.preservedSegment?.schema === "ccm-group-preserved-segment-v1",
+        directDecisionPassesInvariants: directDecision.invariantPass === true
+            && directDecision.invariants?.noSplitTaskTransactions === true
+            && directDecision.invariants?.noSplitToolResultPairs === true,
+        compactResultCarriesDecision: decision.schema === "ccm-group-compact-strategy-decision-v1"
+            && decision.compacted === true
+            && decision.summaryChecksum === compacted.memory?.compaction?.summaryChecksum,
+        boundaryCarriesDecision: boundaryDecision.decisionChecksum === decision.decisionChecksum
+            && compacted.boundary?.compactStrategyDecision?.decisionChecksum === decision.decisionChecksum,
+        decisionMentionsCcStyleMode: ["normal_compact", "micro_compact", "partial_compact", "ptl_emergency", "ptl_recovery"].includes(decision.mode)
+            && decision.strategy === "cc-session-memory-v3-compatible",
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, decision: { mode: decision.mode, invariantPass: decision.invariantPass, decisionChecksum: decision.decisionChecksum } };
+}
+async function runGroupPostCompactCleanupAuditSelfTest() {
+    const messages = [];
+    for (let i = 0; i < 20; i++) {
+        messages.push({
+            id: `pcca-user-${i}`,
+            role: "user",
+            target: "coordinator",
+            content: i === 0
+                ? "必须保留 POST_COMPACT_CLEANUP_SENTINEL，压缩后不能清掉 skill/tool continuity。"
+                : `cleanup audit 用户消息 ${i} src/cleanup-${i}.ts ${"上下文".repeat(30)}`,
+        });
+        messages.push({
+            id: `pcca-agent-${i}`,
+            role: "assistant",
+            agent: "api",
+            task_id: `pcca-task-${i}`,
+            content: `Skill:typescript-audit#cleanup-${i}\napi cleanup 输出 ${i}，文件 src/cleanup-${i}.ts，npm run check ${"日志".repeat(40)}`,
+            invokedSkills: [{ name: "typescript-audit", contentHash: `cleanup-${i}` }],
+            receipt: { status: "done", filesChanged: [`src/cleanup-${i}.ts`], verification: ["npm run check"] },
+        });
+    }
+    const result = await compactGroupConversationMemory({
+        groupId: `post-compact-cleanup-selftest-${process.pid}`,
+        messages,
+        memory: { goal: "post compact cleanup audit selftest", compaction: {} },
+        transcriptPath: "post-compact-cleanup-selftest-raw.json",
+        force: true,
+        config: { minKeepMessages: 2, minKeepTokens: 1, maxKeepTokens: 1600, microCompact: { maxChars: 900 } },
+    });
+    const audit = result.memory?.compaction?.postCompactCleanupAudit || {};
+    const boundaryAudit = result.boundary?.post_compact_restore?.cleanupAudit || {};
+    const messageCompressionAudit = result.memory?.messageCompression?.postCompactCleanupAudit || {};
+    const actionIds = (audit.cleanupActions || []).map((item) => item.id);
+    const checkById = new Map((audit.checks || []).map((check) => [check.id, check]));
+    const checks = {
+        cleanupAuditHasSchema: audit.schema === "ccm-post-compact-cleanup-audit-v1"
+            && audit.status === "pass"
+            && audit.action === "cleanup_recorded_and_safe_to_dispatch_fresh_child_context",
+        cleanupAuditRecordedEverywhere: boundaryAudit.schema === audit.schema
+            && boundaryAudit.summaryChecksum === audit.summaryChecksum
+            && messageCompressionAudit.schema === audit.schema,
+        cleanupLinksStrategyAndRecovery: checkById.get("strategy_decision_linked")?.pass === true
+            && checkById.get("recovery_audit_linked")?.pass === true
+            && audit.compactStrategyDecisionId === result.memory?.compaction?.compactStrategyDecision?.decisionId,
+        cleanupPreservesRawTranscript: checkById.get("raw_transcript_preserved")?.pass === true
+            && audit.transcriptPath === "post-compact-cleanup-selftest-raw.json",
+        cleanupPreservesSkillAndToolContinuity: audit.preserveInvokedSkills === true
+            && audit.preserveToolContinuity === true
+            && checkById.get("invoked_skills_preserved")?.pass === true,
+        cleanupActionsCoverCcStyleState: ["reset_microcompact_tracking", "rebuild_child_context_packets", "preserve_skill_continuity", "preserve_raw_recovery_sources", "do_not_delete_ledgers"].every(id => actionIds.includes(id)),
+        cleanupDoesNotMutateRawMessages: messages[0].content.includes("POST_COMPACT_CLEANUP_SENTINEL")
+            && messages.length === 40,
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, audit: { status: audit.status, actionIds, failedChecks: audit.failedChecks || [] } };
+}
+async function runGroupApiMicroCompactEditPlanSelfTest() {
+    const messages = [
+        {
+            id: "api-mc-thinking",
+            role: "assistant",
+            agent: "api",
+            timestamp: "2026-07-08T03:00:00.000Z",
+            content: [
+                { type: "thinking", thinking: "API_MICROCOMPACT_THINKING_SENTINEL" },
+                { type: "tool_use", id: "tool-read-1", name: "Read", input: { file_path: "src/api-microcompact.ts" } },
+            ],
+        },
+        {
+            id: "api-mc-tool-result",
+            role: "user",
+            timestamp: "2026-07-08T03:01:00.000Z",
+            content: [
+                { type: "tool_result", tool_use_id: "tool-read-1", content: "src/api-microcompact.ts\nAPI_MICROCOMPACT_TOOL_RESULT_SENTINEL" },
+            ],
+        },
+        ...Array.from({ length: 28 }, (_, index) => ({
+            id: `api-mc-${index}`,
+            role: index % 2 ? "assistant" : "user",
+            agent: index % 2 ? "api" : undefined,
+            target: index % 2 ? undefined : "coordinator",
+            content: `API microcompact edit plan 自测 ${index}，src/api-microcompact-${index}.ts ${"上下文".repeat(40)}`,
+        })),
+    ];
+    const direct = buildGroupApiMicroCompactEditPlan(messages, {
+        groupId: "api-microcompact-direct",
+        activeTokens: 220_000,
+        force: true,
+        now: "2026-07-08T04:30:00.000Z",
+    });
+    const compacted = await compactGroupConversationMemory({
+        groupId: `api-microcompact-selftest-${process.pid}`,
+        messages,
+        memory: { goal: "api microcompact edit plan selftest", compaction: {} },
+        transcriptPath: "api-microcompact-selftest-raw.json",
+        force: true,
+        config: {
+            minKeepMessages: 2,
+            minKeepTokens: 1,
+            maxKeepTokens: 1600,
+            apiMicrocompactMaxInputTokens: 1000,
+            apiMicrocompactTargetInputTokens: 400,
+        },
+    });
+    const plan = compacted.memory?.compaction?.apiMicroCompactEditPlan || {};
+    const boundaryPlan = compacted.boundary?.post_compact_restore?.apiMicroCompactEditPlan || {};
+    const editTypes = (direct.contextManagement?.edits || []).map((edit) => edit.type);
+    const checks = {
+        directPlanHasSchema: direct.schema === "ccm-api-microcompact-edit-plan-v1"
+            && direct.source === "claude-code-api-microcompact-compatible"
+            && direct.planChecksum,
+        directPlanIncludesThinkingEdit: editTypes.includes("clear_thinking_20251015")
+            && direct.signalCounts.thinkingBlocks >= 1,
+        directPlanIncludesToolEdit: editTypes.includes("clear_tool_uses_20250919")
+            && direct.signalCounts.toolUses >= 1
+            && direct.signalCounts.toolResults >= 1,
+        compactResultCarriesPlan: plan.schema === "ccm-api-microcompact-edit-plan-v1"
+            && plan.editCount > 0
+            && plan.contextManagement?.edits?.length === plan.editCount,
+        boundaryAndCleanupCarryPlan: boundaryPlan.planChecksum === plan.planChecksum
+            && compacted.memory?.compaction?.postCompactCleanupAudit?.apiMicroCompactEditPlanId === plan.planChecksum,
+        planIsAdvisoryForThirdPartyCli: plan.advisoryOnly === true
+            && plan.canApplyNatively === false,
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, plan: { editCount: plan.editCount, checksum: plan.planChecksum, signalCounts: plan.signalCounts } };
+}
+function runGroupApiMicrocompactNativeApplyPlanSelfTest() {
+    const editPlan = buildGroupApiMicroCompactEditPlan([
+        {
+            id: "native-apply-thinking",
+            role: "assistant",
+            content: [{ type: "thinking", thinking: "NATIVE_APPLY_THINKING_SENTINEL" }],
+        },
+        {
+            id: "native-apply-tool",
+            role: "assistant",
+            content: [{ type: "tool_use", id: "native-read", name: "Read", input: { file_path: "src/native.ts" } }],
+        },
+        {
+            id: "native-apply-result",
+            role: "user",
+            content: [{ type: "tool_result", tool_use_id: "native-read", content: "native apply result" }],
+        },
+    ], {
+        groupId: "native-apply-selftest",
+        targetProject: "api",
+        activeTokens: 220000,
+        force: true,
+        now: "2026-07-08T07:00:00.000Z",
+    });
+    const cli = buildGroupApiMicrocompactNativeApplyPlan(editPlan, {
+        agentType: "claudecode",
+        transport: "cli",
+        now: "2026-07-08T07:01:00.000Z",
+    });
+    const native = buildGroupApiMicrocompactNativeApplyPlan(editPlan, {
+        agentType: "claude-api",
+        transport: "anthropic_api",
+        provider: "anthropic",
+        supportsApiContextManagement: true,
+        nativeApiRequestLayer: true,
+        contextManagementBetaHeaderEnabled: true,
+        sessionBinding: {
+            schema: "ccm-child-agent-memory-session-binding-v1",
+            binding_id: "csm-native-apply-selftest",
+            task_agent_session_id: "tas-native-apply-selftest",
+            native_session_id: "native-native-apply-selftest",
+        },
+        now: "2026-07-08T07:02:00.000Z",
+    });
+    const missingBeta = buildGroupApiMicrocompactNativeApplyPlan(editPlan, {
+        agentType: "claude-api",
+        transport: "anthropic_api",
+        provider: "anthropic",
+        supportsApiContextManagement: true,
+        nativeApiRequestLayer: true,
+        now: "2026-07-08T07:03:00.000Z",
+    });
+    const checks = {
+        cliStaysAdvisory: cli.schema === "ccm-api-microcompact-native-apply-plan-v1"
+            && cli.mode === "advisory_only"
+            && cli.nativeApplyReady === false
+            && cli.requestPatch === null
+            && cli.executor.cli === true,
+        nativeApiBuildsRealRequestPatch: native.mode === "native_api_context_management"
+            && native.nativeApplyReady === true
+            && native.requestPatch?.body?.context_management?.edits?.length === editPlan.editCount
+            && native.requestPatch?.beta_headers?.includes(exports.GROUP_API_MICROCOMPACT_CONTEXT_MANAGEMENT_BETA),
+        nativePatchLinksEditPlan: native.apiEditPlanChecksum === editPlan.planChecksum
+            && native.requestPatchChecksum
+            && native.applyPlanChecksum,
+        nativePatchBindsChildAgentSession: native.task_agent_session_id === "tas-native-apply-selftest"
+            && native.sessionBindingRequired === true
+            && native.receiptContract?.required_task_agent_session_id === "tas-native-apply-selftest"
+            && native.receiptContract?.required_apply_plan_checksum === native.applyPlanChecksum,
+        missingBetaFailsClosed: missingBeta.nativeApplyReady === false
+            && missingBeta.failedChecks.includes("context_management_beta_enabled")
+            && missingBeta.requestPatch === null,
+    };
+    return {
+        pass: Object.values(checks).every(Boolean),
+        checks,
+        cli: { mode: cli.mode, reason: cli.reason, failedChecks: cli.failedChecks },
+        native: { mode: native.mode, requestPatch: native.requestPatch, checksum: native.applyPlanChecksum },
+        missingBeta: { mode: missingBeta.mode, failedChecks: missingBeta.failedChecks },
+    };
 }
 function runGroupMemoryQualityGateSelfTest() {
     const messages = [

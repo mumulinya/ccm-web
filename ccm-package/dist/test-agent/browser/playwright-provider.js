@@ -37,10 +37,14 @@ exports.PlaywrightBrowserProvider = void 0;
 exports.checkPlaywrightAvailability = checkPlaywrightAvailability;
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
+const zlib = __importStar(require("zlib"));
 const utils_1 = require("../utils");
 const provider_types_1 = require("./provider-types");
 const semantic_locator_1 = require("./semantic-locator");
 const shared_1 = require("./shared");
+const network_assertions_1 = require("./network-assertions");
+const console_assertions_1 = require("./console-assertions");
+const accessibility_assertions_1 = require("./accessibility-assertions");
 const PLAYWRIGHT_LAUNCH_ATTEMPTS = [
     { label: "bundled-chromium", options: {} },
     { label: "msedge-channel", options: { channel: "msedge" } },
@@ -134,7 +138,344 @@ function valuesEqual(actual, expected) {
         return String(actual) === String(expected);
     }
 }
+function cookieName(assertion) {
+    return String(assertion.key || assertion.name || assertion.text || assertion.value || "").trim();
+}
+function cookieAssertionDetail(assertion) {
+    const name = cookieName(assertion);
+    const expected = assertion.type === "cookieValueIncludes" ? String(assertion.value ?? assertion.text ?? "") : "";
+    return `cookie=${name || "(missing)"}${expected ? `; expected substring length=${expected.length}` : ""}`;
+}
+function inputValueAssertionDetail(assertion) {
+    const expected = String(assertion.value ?? assertion.text ?? "");
+    const expectation = assertion.type === "inputValueIncludes" ? "expected substring length" : "expected length";
+    return `${(0, semantic_locator_1.browserTargetDetail)(assertion)}${expected ? `; ${expectation}=${expected.length}` : ""}`;
+}
+function attributeName(assertion) {
+    return String(assertion.attribute || assertion.attributeName || assertion.attribute_name || assertion.key || "").trim();
+}
+function attributeAssertionDetail(assertion) {
+    const expected = String(assertion.value ?? assertion.text ?? "");
+    const expectation = assertion.type === "attributeIncludes" ? "expected substring length" : "expected length";
+    const name = attributeName(assertion);
+    return `${(0, semantic_locator_1.browserTargetDetail)(assertion)}; attribute=${name || "(missing)"}${expected ? `; ${expectation}=${expected.length}` : ""}`;
+}
+function computedStylePropertyName(assertion) {
+    const raw = String(assertion.property || assertion.cssProperty || assertion.css_property || assertion.styleProperty || assertion.style_property || assertion.attribute || assertion.key || "").trim();
+    if (!raw || raw.startsWith("--"))
+        return raw;
+    return raw.replace(/[A-Z]/g, match => `-${match.toLowerCase()}`).replace(/^ms-/, "-ms-").toLowerCase();
+}
+function computedStyleExpected(assertion) {
+    const hasExpected = assertion.value !== undefined || assertion.text !== undefined;
+    return {
+        hasExpected,
+        value: String(assertion.value ?? assertion.text ?? ""),
+    };
+}
+function computedStyleAssertionDetail(assertion) {
+    const expected = computedStyleExpected(assertion);
+    const expectation = assertion.type === "computedStyleIncludes" ? "expected substring length" : "expected length";
+    return `${(0, semantic_locator_1.browserTargetDetail)(assertion)}; property=${computedStylePropertyName(assertion) || "(missing)"}${expected.hasExpected ? `; ${expectation}=${expected.value.length}` : ""}`;
+}
+function optionalCountValue(value) {
+    if (value === undefined || value === null || value === "")
+        return undefined;
+    const count = Number(value);
+    return Number.isFinite(count) ? count : undefined;
+}
+function elementCountExpected(assertion) {
+    if (assertion.type === "elementCountAtLeast") {
+        return optionalCountValue(assertion.minCount ?? assertion.min_count ?? assertion.count ?? assertion.value ?? assertion.text);
+    }
+    if (assertion.type === "elementCountAtMost") {
+        return optionalCountValue(assertion.maxCount ?? assertion.max_count ?? assertion.count ?? assertion.value ?? assertion.text);
+    }
+    return optionalCountValue(assertion.count ?? assertion.expectedCount ?? assertion.expected_count ?? assertion.value ?? assertion.text);
+}
+function elementCountAssertionDetail(assertion) {
+    const expected = elementCountExpected(assertion);
+    const comparator = assertion.type === "elementCountAtLeast"
+        ? "min count"
+        : assertion.type === "elementCountAtMost"
+            ? "max count"
+            : "expected count";
+    return `${(0, semantic_locator_1.browserTargetDetail)(assertion)}; ${comparator}=${expected === undefined ? "(missing)" : expected}`;
+}
+function dialogExpectedType(assertion) {
+    const raw = assertion.dialogType || assertion.dialog_type || (assertion.type === "dialogTypeEquals" ? assertion.value ?? assertion.text : "");
+    return String(raw || "").trim().toLowerCase();
+}
+function dialogExpectedMessage(assertion) {
+    const raw = assertion.type === "dialogTypeEquals"
+        ? assertion.messageIncludes || assertion.message_includes || assertion.message || ""
+        : assertion.messageIncludes || assertion.message_includes || assertion.message || assertion.value || assertion.text || "";
+    return String(raw || "").trim();
+}
+function dialogAssertionDetail(assertion) {
+    const expectedType = dialogExpectedType(assertion);
+    const expectedMessage = dialogExpectedMessage(assertion);
+    const parts = [
+        expectedType ? `dialogType=${expectedType}` : "",
+        expectedMessage ? `message substring length=${expectedMessage.length}` : "",
+    ].filter(Boolean);
+    return parts.join("; ") || "any browser dialog";
+}
+function popupExpectedUrl(assertion) {
+    return String(assertion.urlIncludes || assertion.url_includes || assertion.url || assertion.value || assertion.text || "").trim();
+}
+function popupExpectedText(assertion) {
+    return String(assertion.value || assertion.text || "").trim();
+}
+function popupExpectedTitle(assertion) {
+    return String(assertion.title || assertion.value || assertion.text || "").trim();
+}
+function popupIndex(assertion) {
+    const value = assertion.popupIndex ?? assertion.popup_index;
+    if (value === undefined || value === null)
+        return undefined;
+    if (String(value).trim() === "")
+        return undefined;
+    const index = Number(value);
+    return Number.isInteger(index) && index >= 0 ? index : undefined;
+}
+function popupAssertionDetail(assertion) {
+    const index = popupIndex(assertion);
+    const target = index === undefined ? "any popup" : `popupIndex=${index}`;
+    if (assertion.type === "popupUrlIncludes") {
+        const expected = popupExpectedUrl(assertion);
+        return `${target}${expected ? `; expected URL substring length=${expected.length}` : ""}`;
+    }
+    if (assertion.type === "popupTextIncludes") {
+        const expected = popupExpectedText(assertion);
+        return `${target}${expected ? `; expected text substring length=${expected.length}` : ""}`;
+    }
+    if (assertion.type === "popupTitleIncludes") {
+        const expected = popupExpectedTitle(assertion);
+        return `${target}${expected ? `; expected title substring length=${expected.length}` : ""}`;
+    }
+    return target;
+}
+function clipboardExpectedText(assertion) {
+    return String(assertion.value ?? assertion.text ?? "");
+}
+function clipboardAssertionDetail(assertion) {
+    const expected = clipboardExpectedText(assertion);
+    const expectation = assertion.type === "clipboardTextIncludes" ? "expected substring length" : "expected length";
+    return expected ? `${expectation}=${expected.length}` : "clipboard text";
+}
+function firstNonEmptyStringList(...values) {
+    for (const value of values) {
+        if (Array.isArray(value)) {
+            const list = value.map(item => String(item ?? "").trim()).filter(Boolean);
+            if (list.length)
+                return list;
+            continue;
+        }
+        const text = String(value ?? "").trim();
+        if (text)
+            return [text];
+    }
+    return [];
+}
+function optionalTableIndex(...values) {
+    for (const value of values) {
+        if (value === undefined || value === null || value === "")
+            continue;
+        const index = Number(value);
+        if (Number.isInteger(index) && index >= 0)
+            return index;
+    }
+    return undefined;
+}
+function tableExpectedTexts(assertion) {
+    return firstNonEmptyStringList(assertion.expectedTexts, assertion.expected_texts, assertion.texts, assertion.values, assertion.value, assertion.text);
+}
+function textOrderExpectedTexts(assertion) {
+    return firstNonEmptyStringList(assertion.expectedTexts, assertion.expected_texts, assertion.texts, assertion.values);
+}
+function tableRowText(assertion) {
+    return String(assertion.rowText || assertion.row_text || "").trim();
+}
+function tableColumnName(assertion) {
+    return String(assertion.columnName || assertion.column_name || assertion.columnHeader || assertion.column_header || "").trim();
+}
+function tableAssertionDetail(assertion) {
+    const expectedTexts = tableExpectedTexts(assertion);
+    const rowText = tableRowText(assertion);
+    const rowIndex = optionalTableIndex(assertion.rowIndex, assertion.row_index);
+    const rowNumber = optionalTableIndex(assertion.rowNumber, assertion.row_number);
+    const columnName = tableColumnName(assertion);
+    const columnIndex = optionalTableIndex(assertion.columnIndex, assertion.column_index);
+    const columnNumber = optionalTableIndex(assertion.columnNumber, assertion.column_number);
+    const target = String(assertion.tableSelector
+        || assertion.table_selector
+        || assertion.tableLocator
+        || assertion.table_locator
+        || assertion.selector
+        || assertion.locator
+        || assertion.testId
+        || assertion.test_id
+        || assertion.dataTestId
+        || assertion.data_testid
+        || (assertion.role ? `role=${assertion.role}${assertion.name ? `; name=${assertion.name}` : ""}` : "")
+        || "first table").trim();
+    const parts = [
+        `table=${target}`,
+        rowText ? `row text length=${rowText.length}` : "",
+        rowIndex !== undefined ? `rowIndex=${rowIndex}` : "",
+        rowNumber !== undefined ? `rowNumber=${rowNumber}` : "",
+        columnName ? `column=${columnName}` : "",
+        columnIndex !== undefined ? `columnIndex=${columnIndex}` : "",
+        columnNumber !== undefined ? `columnNumber=${columnNumber}` : "",
+        expectedTexts.length ? `expected text count=${expectedTexts.length}` : "",
+    ].filter(Boolean);
+    return parts.join("; ");
+}
+function optionalVisualNumber(value) {
+    if (value === undefined || value === null || value === "")
+        return undefined;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : undefined;
+}
+function visualAssertionDetail(assertion) {
+    const minUniqueColors = optionalVisualNumber(assertion.minUniqueColors ?? assertion.min_unique_colors);
+    const minNonWhitePixels = optionalVisualNumber(assertion.minNonWhitePixels ?? assertion.min_non_white_pixels) ?? 1;
+    return `${(0, semantic_locator_1.browserTargetDetail)(assertion)}; minNonWhitePixels=${minNonWhitePixels}${minUniqueColors ? `; minUniqueColors=${minUniqueColors}` : ""}`;
+}
+function textOrderAssertionDetail(assertion) {
+    const expected = textOrderExpectedTexts(assertion);
+    const target = String(assertion.selector
+        || assertion.locator
+        || assertion.testId
+        || assertion.test_id
+        || assertion.dataTestId
+        || assertion.data_testid
+        || (assertion.role ? `role=${assertion.role}${assertion.name ? `; name=${assertion.name}` : ""}` : "")
+        || "body").trim();
+    return `${target}; expected text count=${expected.length}`;
+}
+function urlAssertionExpected(assertion) {
+    return String(assertion.url || assertion.urlIncludes || assertion.url_includes || assertion.value || assertion.text || "").trim();
+}
+function comparableUrl(actualUrl, expected) {
+    if (!expected.startsWith("/"))
+        return actualUrl;
+    try {
+        const url = new URL(actualUrl);
+        return `${url.pathname}${url.search}${url.hash}`;
+    }
+    catch {
+        return actualUrl;
+    }
+}
+function titleAssertionExpected(assertion) {
+    return String(assertion.value || assertion.text || assertion.title || "").trim();
+}
+function urlTitleAssertionDetail(assertion) {
+    if (assertion.type.startsWith("url"))
+        return `expected=${urlAssertionExpected(assertion) || "(missing)"}`;
+    return `expected=${titleAssertionExpected(assertion) || "(missing)"}`;
+}
+function expectedOnlineState(assertion) {
+    if (assertion.type === "browserOnline")
+        return true;
+    if (assertion.type === "browserOffline")
+        return false;
+    const raw = String(assertion.value
+        ?? assertion.text
+        ?? assertion.state
+        ?? assertion.status
+        ?? "").trim().toLowerCase();
+    if (["online", "true", "connected", "up"].includes(raw))
+        return true;
+    if (["offline", "false", "disconnected", "down"].includes(raw))
+        return false;
+    return undefined;
+}
+function onlineStateAssertionDetail(assertion) {
+    const expected = expectedOnlineState(assertion);
+    return expected === undefined ? "navigator.onLine expected state=(missing)" : `navigator.onLine expected=${expected ? "online" : "offline"}`;
+}
+async function waitForTitleMatch(page, predicate, timeout) {
+    const deadline = Date.now() + Math.max(1, timeout);
+    let title = "";
+    while (Date.now() <= deadline) {
+        title = await page.title();
+        if (predicate(title))
+            return title;
+        await delay(100);
+    }
+    return await page.title().catch(() => title);
+}
+async function waitForOnlineState(page, expected, timeout) {
+    const deadline = Date.now() + Math.max(1, timeout);
+    let actual = true;
+    while (Date.now() <= deadline) {
+        actual = await page.evaluate("navigator.onLine === true").catch(() => true);
+        if (actual === expected)
+            return actual;
+        await delay(100);
+    }
+    return await page.evaluate("navigator.onLine === true").catch(() => actual);
+}
 function stateAssertionDetail(assertion) {
+    if (assertion.type === "pageNotBlank")
+        return "visible user-facing page content";
+    if (assertion.type === "noHorizontalOverflow")
+        return "document has no horizontal overflow";
+    if (assertion.type === "inViewport")
+        return `${(0, semantic_locator_1.browserTargetDetail)(assertion)} within viewport`;
+    if (assertion.type === "urlEquals" || assertion.type === "urlIncludes" || assertion.type === "urlNotIncludes" || assertion.type === "titleEquals" || assertion.type === "titleIncludes" || assertion.type === "titleNotIncludes")
+        return urlTitleAssertionDetail(assertion);
+    if (assertion.type === "onlineState" || assertion.type === "browserOnline" || assertion.type === "browserOffline")
+        return onlineStateAssertionDetail(assertion);
+    if (assertion.type === "accessibleNameEquals"
+        || assertion.type === "accessibleNameIncludes"
+        || assertion.type === "accessibleDescriptionEquals"
+        || assertion.type === "accessibleDescriptionIncludes"
+        || assertion.type === "ariaSnapshotIncludes")
+        return (0, accessibility_assertions_1.browserAccessibilityAssertionDetail)(assertion);
+    if (assertion.type === "focused" || assertion.type === "notFocused")
+        return (0, semantic_locator_1.browserTargetDetail)(assertion);
+    if (assertion.type === "enabled" || assertion.type === "disabled")
+        return (0, semantic_locator_1.browserTargetDetail)(assertion);
+    if (assertion.type === "cookieExists" || assertion.type === "cookieValueIncludes")
+        return cookieAssertionDetail(assertion);
+    if (assertion.type === "inputValueEquals" || assertion.type === "inputValueIncludes")
+        return inputValueAssertionDetail(assertion);
+    if (assertion.type === "attributeEquals" || assertion.type === "attributeIncludes")
+        return attributeAssertionDetail(assertion);
+    if (assertion.type === "computedStyleEquals" || assertion.type === "computedStyleIncludes")
+        return computedStyleAssertionDetail(assertion);
+    if (assertion.type === "elementCountEquals" || assertion.type === "elementCountAtLeast" || assertion.type === "elementCountAtMost")
+        return elementCountAssertionDetail(assertion);
+    if (assertion.type === "dialogAppeared" || assertion.type === "dialogMessageIncludes" || assertion.type === "dialogTypeEquals")
+        return dialogAssertionDetail(assertion);
+    if (assertion.type === "popupOpened" || assertion.type === "popupUrlIncludes" || assertion.type === "popupTextIncludes" || assertion.type === "popupTitleIncludes")
+        return popupAssertionDetail(assertion);
+    if (assertion.type === "tableRowIncludes" || assertion.type === "tableCellTextIncludes" || assertion.type === "tableCellTextEquals")
+        return tableAssertionDetail(assertion);
+    if (assertion.type === "clipboardTextEquals" || assertion.type === "clipboardTextIncludes")
+        return clipboardAssertionDetail(assertion);
+    if (assertion.type === "elementScreenshotNotBlank")
+        return visualAssertionDetail(assertion);
+    if (assertion.type === "textOrder")
+        return textOrderAssertionDetail(assertion);
+    if (assertion.type === "downloadedFile")
+        return downloadedFileDetail(assertion);
+    if (assertion.type === "consoleIncludes" || assertion.type === "consoleNotIncludes" || assertion.type === "consoleNoWarnings")
+        return (0, console_assertions_1.browserConsoleAssertionDetail)(assertion);
+    if (assertion.type === "selectedValue" || assertion.type === "selectedTextIncludes") {
+        const target = (0, semantic_locator_1.browserTargetDetail)(assertion);
+        const expected = String(assertion.value ?? assertion.text ?? "");
+        return `${target}${target ? "; " : ""}expected=${expected}`;
+    }
+    if (assertion.type === "networkRequest"
+        || assertion.type === "networkResponse"
+        || assertion.type === "networkRequestNot"
+        || assertion.type === "networkResponseNot")
+        return (0, network_assertions_1.browserNetworkAssertionDetail)(assertion);
     if (assertion.expression)
         return `expression=${assertion.expression}`;
     if (assertion.key)
@@ -165,6 +506,655 @@ async function capturePageFinalState(page) {
         ...(title ? { title: (0, utils_1.compactText)(title, 500) } : {}),
         ...(pageText ? { pageTextPreview: (0, utils_1.compactText)(pageText, 2000) } : {}),
     };
+}
+async function evaluatePageNotBlank(page) {
+    return await page.evaluate(`(() => {
+    const body = globalThis.document && globalThis.document.body;
+    if (!body) return { ok: false, reason: "document.body is missing" };
+    const text = String(body.innerText || body.textContent || "").replace(/\s+/g, " ").trim();
+    if (text.length >= 2) return { ok: true, reason: "visible text length=" + text.length };
+
+    const visible = (element) => {
+      const style = globalThis.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none"
+        && style.visibility !== "hidden"
+        && Number(style.opacity || "1") !== 0
+        && rect.width > 0
+        && rect.height > 0;
+    };
+    const candidates = Array.from(body.querySelectorAll("img,svg,canvas,video,iframe,button,input,select,textarea,[role='button'],[role='link'],[aria-label]"));
+    const matched = candidates.find(element => visible(element));
+    if (matched) {
+      const tag = matched.tagName.toLowerCase();
+      const descriptor = matched.getAttribute("aria-label") || matched.getAttribute("role") || matched.getAttribute("alt") || tag;
+      return { ok: true, reason: "visible " + descriptor };
+    }
+    return { ok: false, reason: "no visible text, media, form control, or labeled interactive element" };
+  })()`);
+}
+async function evaluateNoHorizontalOverflow(page, expectedViewportWidth = 0) {
+    return await page.evaluate(`((expectedViewportWidth) => {
+    const doc = globalThis.document && globalThis.document.documentElement;
+    const body = globalThis.document && globalThis.document.body;
+    const viewportWidth = Math.ceil(expectedViewportWidth || globalThis.visualViewport?.width || globalThis.innerWidth || doc?.clientWidth || 0);
+    const documentWidth = Math.ceil(Math.max(doc?.scrollWidth || 0, body?.scrollWidth || 0, doc?.clientWidth || 0, body?.clientWidth || 0));
+    let maxElementRight = documentWidth;
+    let offender = "";
+    const visible = (element) => {
+      const style = globalThis.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== "none"
+        && style.visibility !== "hidden"
+        && Number(style.opacity || "1") !== 0
+        && rect.width > 0
+        && rect.height > 0;
+    };
+    for (const element of Array.from((body || doc).querySelectorAll("*"))) {
+      if (!visible(element)) continue;
+      const rect = element.getBoundingClientRect();
+      const right = Math.ceil(rect.right + (globalThis.scrollX || 0));
+      if (right > maxElementRight) {
+        maxElementRight = right;
+        offender = element.tagName.toLowerCase()
+          + (element.id ? "#" + element.id : "")
+          + (typeof element.className === "string" && element.className ? "." + element.className.trim().replace(/\\s+/g, ".") : "");
+      }
+    }
+    const measuredWidth = Math.max(documentWidth, maxElementRight);
+    const overflowPx = measuredWidth - viewportWidth;
+    return {
+      ok: overflowPx <= 1,
+      viewportWidth,
+      documentWidth,
+      maxElementRight,
+      measuredWidth,
+      overflowPx,
+      offender,
+    };
+  })(${Number(expectedViewportWidth || 0)})`);
+}
+async function evaluateElementInViewport(locator, expectedViewportWidth = 0, expectedViewportHeight = 0) {
+    return await locator.evaluate((element, expected) => {
+        const win = globalThis;
+        const doc = win.document && win.document.documentElement;
+        const viewportWidth = Math.ceil(expected?.width || win.visualViewport?.width || win.innerWidth || doc?.clientWidth || 0);
+        const viewportHeight = Math.ceil(expected?.height || win.visualViewport?.height || win.innerHeight || doc?.clientHeight || 0);
+        const style = win.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        const visible = style.display !== "none"
+            && style.visibility !== "hidden"
+            && Number(style.opacity || "1") !== 0
+            && rect.width > 0
+            && rect.height > 0;
+        const ok = visible
+            && rect.left >= -1
+            && rect.top >= -1
+            && rect.right <= viewportWidth + 1
+            && rect.bottom <= viewportHeight + 1;
+        return {
+            ok,
+            visible,
+            viewportWidth,
+            viewportHeight,
+            rect: {
+                left: Math.round(rect.left),
+                top: Math.round(rect.top),
+                right: Math.round(rect.right),
+                bottom: Math.round(rect.bottom),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height),
+            },
+        };
+    }, {
+        width: expectedViewportWidth,
+        height: expectedViewportHeight,
+    });
+}
+async function readBrowserCookie(page, assertion) {
+    const name = cookieName(assertion);
+    if (!name)
+        throw new Error(`${assertion.type} requires key/name/text/value as the cookie name.`);
+    const cookies = await page.context().cookies(page.url());
+    return cookies.find((cookie) => cookie && cookie.name === name);
+}
+async function waitForComputedStyle(page, assertion, timeout) {
+    const property = computedStylePropertyName(assertion);
+    const expected = computedStyleExpected(assertion);
+    if (!property)
+        throw new Error(`${assertion.type} requires property/cssProperty/styleProperty/key.`);
+    if (!expected.hasExpected)
+        throw new Error(`${assertion.type} requires value/text.`);
+    if (assertion.type === "computedStyleIncludes" && !expected.value)
+        throw new Error("computedStyleIncludes requires value/text as the expected substring.");
+    const locator = (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first();
+    await locator.waitFor({ state: "attached", timeout });
+    const deadline = Date.now() + Math.max(1, timeout);
+    let actual = "";
+    while (Date.now() <= deadline) {
+        actual = await locator.evaluate((element, cssProperty) => {
+            return String(globalThis.getComputedStyle(element).getPropertyValue(cssProperty) || "").trim();
+        }, property);
+        const passed = assertion.type === "computedStyleEquals" ? actual === expected.value : actual.includes(expected.value);
+        if (passed)
+            return { passed: true, actualLength: actual.length, expectedLength: expected.value.length };
+        await delay(100);
+    }
+    return { passed: false, actualLength: actual.length, expectedLength: expected.value.length };
+}
+async function waitForFocusedState(locator, expectedFocused, timeout) {
+    const deadline = Date.now() + Math.max(1, timeout);
+    let lastFocused = false;
+    await locator.waitFor({ state: "attached", timeout });
+    while (Date.now() <= deadline) {
+        lastFocused = await locator.evaluate((element) => {
+            return element === globalThis.document?.activeElement;
+        }).catch(() => false);
+        if (lastFocused === expectedFocused)
+            return { focused: lastFocused };
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return { focused: lastFocused };
+}
+async function waitForElementCount(locator, assertion, timeout) {
+    const expected = elementCountExpected(assertion);
+    if (expected === undefined)
+        throw new Error(`${assertion.type} requires count/expectedCount/minCount/value/text.`);
+    const deadline = Date.now() + Math.max(1, timeout);
+    let actual = 0;
+    while (Date.now() <= deadline) {
+        actual = await locator.count();
+        const matched = assertion.type === "elementCountAtLeast"
+            ? actual >= expected
+            : assertion.type === "elementCountAtMost"
+                ? actual <= expected
+                : actual === expected;
+        if (matched) {
+            return { actual, expected };
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    actual = await locator.count().catch(() => actual);
+    return { actual, expected };
+}
+function browserDialogMatch(record, assertion) {
+    const expectedType = dialogExpectedType(assertion);
+    if (expectedType && record.type !== expectedType) {
+        return { ok: false, reason: `type ${record.type || "(unknown)"} did not equal ${expectedType}` };
+    }
+    const expectedMessage = dialogExpectedMessage(assertion);
+    if (assertion.type === "dialogMessageIncludes" && !expectedMessage) {
+        return { ok: false, reason: "dialogMessageIncludes requires message/messageIncludes/text/value." };
+    }
+    if (expectedMessage && !record.message.includes(expectedMessage)) {
+        return { ok: false, reason: `message length=${record.message.length} did not include expected substring length=${expectedMessage.length}` };
+    }
+    if (assertion.type === "dialogTypeEquals" && !expectedType) {
+        return { ok: false, reason: "dialogTypeEquals requires dialogType/dialog_type/text/value." };
+    }
+    return { ok: true, reason: "" };
+}
+async function waitForBrowserDialog(signals, assertion, timeout) {
+    const deadline = Date.now() + Math.max(1, timeout);
+    let lastReasons = [];
+    while (Date.now() <= deadline) {
+        lastReasons = signals.dialogs.map(record => `${record.type || "(dialog)"}: ${browserDialogMatch(record, assertion).reason || "matched"}`);
+        const matched = signals.dialogs.find(record => browserDialogMatch(record, assertion).ok);
+        if (matched)
+            return matched;
+        await delay(100);
+    }
+    const observed = lastReasons.length ? ` Observed dialogs: ${lastReasons.join(" | ")}.` : " No browser dialogs observed.";
+    throw new Error(`Expected browser dialog matching ${dialogAssertionDetail(assertion)}.${observed}`);
+}
+function browserPopupLogLine(record) {
+    const parts = [
+        `popup url=${record.url || "(unknown)"}`,
+        record.title ? `title=${record.title}` : "",
+        record.textPreview ? `text=${record.textPreview}` : "",
+        record.error ? `error=${record.error}` : "",
+    ].filter(Boolean);
+    return parts.join("; ");
+}
+async function captureBrowserPopup(popup) {
+    const record = {
+        url: "",
+        title: "",
+        textPreview: "",
+        openedAt: (0, utils_1.nowIso)(),
+    };
+    try {
+        await popup.waitForLoadState?.("domcontentloaded", { timeout: 5_000 });
+    }
+    catch { }
+    try {
+        record.url = String(popup.url?.() || "");
+    }
+    catch { }
+    try {
+        record.title = (0, utils_1.compactText)(String(await popup.title?.() || ""), 500);
+    }
+    catch { }
+    try {
+        const body = popup.locator?.("body");
+        record.textPreview = body ? (0, utils_1.compactText)(String(await body.innerText({ timeout: 1_000 }) || ""), 2000) : "";
+    }
+    catch (error) {
+        record.error = error.message || String(error);
+    }
+    return record;
+}
+function browserPopupMatch(record, assertion) {
+    if (assertion.type === "popupOpened")
+        return true;
+    if (assertion.type === "popupUrlIncludes") {
+        const expected = popupExpectedUrl(assertion);
+        if (!expected)
+            throw new Error("popupUrlIncludes requires url/urlIncludes/text/value.");
+        return record.url.includes(expected);
+    }
+    if (assertion.type === "popupTextIncludes") {
+        const expected = popupExpectedText(assertion);
+        if (!expected)
+            throw new Error("popupTextIncludes requires text/value.");
+        return record.textPreview.includes(expected);
+    }
+    if (assertion.type === "popupTitleIncludes") {
+        const expected = popupExpectedTitle(assertion);
+        if (!expected)
+            throw new Error("popupTitleIncludes requires title/text/value.");
+        return record.title.includes(expected);
+    }
+    return false;
+}
+async function waitForBrowserPopup(signals, assertion, timeout) {
+    const deadline = Date.now() + Math.max(1, timeout);
+    const index = popupIndex(assertion);
+    while (Date.now() <= deadline) {
+        const candidates = index === undefined ? signals.popups : signals.popups[index] ? [signals.popups[index]] : [];
+        for (const popup of candidates) {
+            if (browserPopupMatch(popup, assertion))
+                return popup;
+        }
+        await delay(100);
+    }
+    throw new Error(`Expected browser popup matching ${popupAssertionDetail(assertion)}. Observed popups: ${signals.popups.length}.`);
+}
+async function readClipboardText(page) {
+    return await page.evaluate(async () => {
+        const clipboard = globalThis.navigator?.clipboard;
+        if (!clipboard?.readText)
+            throw new Error("navigator.clipboard.readText is unavailable.");
+        return String(await clipboard.readText());
+    });
+}
+async function writeClipboardText(page, value) {
+    await page.evaluate(async (text) => {
+        const clipboard = globalThis.navigator?.clipboard;
+        if (!clipboard?.writeText)
+            throw new Error("navigator.clipboard.writeText is unavailable.");
+        await clipboard.writeText(text);
+    }, value);
+}
+async function waitForClipboardText(page, assertion, timeout) {
+    const expected = clipboardExpectedText(assertion);
+    if (!expected && assertion.type === "clipboardTextIncludes")
+        throw new Error("clipboardTextIncludes requires value/text as the expected substring.");
+    if (assertion.type === "clipboardTextEquals" && assertion.value === undefined && assertion.text === undefined)
+        throw new Error("clipboardTextEquals requires value/text.");
+    const deadline = Date.now() + Math.max(1, timeout);
+    let actual = "";
+    while (Date.now() <= deadline) {
+        actual = await readClipboardText(page);
+        const passed = assertion.type === "clipboardTextEquals" ? actual === expected : actual.includes(expected);
+        if (passed)
+            return { passed: true, actualLength: actual.length, expectedLength: expected.length };
+        await delay(100);
+    }
+    actual = await readClipboardText(page).catch(() => actual);
+    return { passed: false, actualLength: String(actual || "").length, expectedLength: expected.length };
+}
+function pngChannelCount(colorType) {
+    if (colorType === 0)
+        return 1;
+    if (colorType === 2)
+        return 3;
+    if (colorType === 4)
+        return 2;
+    if (colorType === 6)
+        return 4;
+    return 0;
+}
+function pngPaeth(left, up, upperLeft) {
+    const p = left + up - upperLeft;
+    const pa = Math.abs(p - left);
+    const pb = Math.abs(p - up);
+    const pc = Math.abs(p - upperLeft);
+    if (pa <= pb && pa <= pc)
+        return left;
+    if (pb <= pc)
+        return up;
+    return upperLeft;
+}
+function readPngPixelStats(buffer) {
+    const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    if (buffer.length < 33 || !buffer.subarray(0, 8).equals(signature))
+        throw new Error("Invalid PNG signature.");
+    let offset = 8;
+    let width = 0;
+    let height = 0;
+    let bitDepth = 0;
+    let colorType = 0;
+    let interlace = 0;
+    let sawIhdr = false;
+    let sawIdat = false;
+    let sawIend = false;
+    const idatChunks = [];
+    while (offset + 12 <= buffer.length) {
+        const length = buffer.readUInt32BE(offset);
+        const type = buffer.toString("ascii", offset + 4, offset + 8);
+        const dataOffset = offset + 8;
+        const nextOffset = dataOffset + length + 4;
+        if (nextOffset > buffer.length)
+            throw new Error(`PNG chunk ${type || "(unknown)"} exceeds file length.`);
+        if (!sawIhdr && type !== "IHDR")
+            throw new Error("PNG IHDR chunk must be first.");
+        if (type === "IHDR") {
+            if (length !== 13)
+                throw new Error(`PNG IHDR chunk has invalid length ${length}.`);
+            width = buffer.readUInt32BE(dataOffset);
+            height = buffer.readUInt32BE(dataOffset + 4);
+            bitDepth = buffer[dataOffset + 8];
+            colorType = buffer[dataOffset + 9];
+            interlace = buffer[dataOffset + 12];
+            sawIhdr = true;
+        }
+        else if (type === "IDAT") {
+            sawIdat = true;
+            idatChunks.push(buffer.subarray(dataOffset, dataOffset + length));
+        }
+        else if (type === "IEND") {
+            sawIend = true;
+            break;
+        }
+        offset = nextOffset;
+    }
+    if (!sawIhdr || !sawIdat || !sawIend)
+        throw new Error("PNG is missing IHDR, IDAT, or IEND chunks.");
+    if (width <= 0 || height <= 0)
+        throw new Error(`PNG dimensions must be positive, got ${width}x${height}.`);
+    if (bitDepth !== 8)
+        throw new Error(`PNG visual assertion supports bit depth 8 only, got ${bitDepth}.`);
+    if (interlace !== 0)
+        throw new Error("PNG visual assertion does not support interlaced images.");
+    const channels = pngChannelCount(colorType);
+    if (!channels)
+        throw new Error(`PNG visual assertion does not support color type ${colorType}.`);
+    const bytesPerPixel = channels;
+    const rowBytes = width * bytesPerPixel;
+    const inflated = zlib.inflateSync(Buffer.concat(idatChunks));
+    const expectedBytes = (rowBytes + 1) * height;
+    if (inflated.length < expectedBytes)
+        throw new Error(`PNG pixel data is truncated: expected at least ${expectedBytes} bytes, got ${inflated.length}.`);
+    let readOffset = 0;
+    let previous = Buffer.alloc(rowBytes);
+    const uniqueColors = new Set();
+    let nonTransparentPixels = 0;
+    let nonWhitePixels = 0;
+    for (let y = 0; y < height; y += 1) {
+        const filter = inflated[readOffset];
+        readOffset += 1;
+        const row = Buffer.from(inflated.subarray(readOffset, readOffset + rowBytes));
+        readOffset += rowBytes;
+        for (let i = 0; i < rowBytes; i += 1) {
+            const left = i >= bytesPerPixel ? row[i - bytesPerPixel] : 0;
+            const up = previous[i] || 0;
+            const upperLeft = i >= bytesPerPixel ? previous[i - bytesPerPixel] || 0 : 0;
+            if (filter === 1)
+                row[i] = (row[i] + left) & 0xff;
+            else if (filter === 2)
+                row[i] = (row[i] + up) & 0xff;
+            else if (filter === 3)
+                row[i] = (row[i] + Math.floor((left + up) / 2)) & 0xff;
+            else if (filter === 4)
+                row[i] = (row[i] + pngPaeth(left, up, upperLeft)) & 0xff;
+            else if (filter !== 0)
+                throw new Error(`PNG uses unsupported filter type ${filter}.`);
+        }
+        for (let x = 0; x < rowBytes; x += bytesPerPixel) {
+            let r = 0;
+            let g = 0;
+            let b = 0;
+            let a = 255;
+            if (colorType === 0) {
+                r = g = b = row[x];
+            }
+            else if (colorType === 2) {
+                r = row[x];
+                g = row[x + 1];
+                b = row[x + 2];
+            }
+            else if (colorType === 4) {
+                r = g = b = row[x];
+                a = row[x + 1];
+            }
+            else if (colorType === 6) {
+                r = row[x];
+                g = row[x + 1];
+                b = row[x + 2];
+                a = row[x + 3];
+            }
+            uniqueColors.add(`${r},${g},${b},${a}`);
+            if (a > 0)
+                nonTransparentPixels += 1;
+            if (a > 0 && !(r >= 250 && g >= 250 && b >= 250))
+                nonWhitePixels += 1;
+        }
+        previous = row;
+    }
+    return { width, height, uniqueColors: uniqueColors.size, nonTransparentPixels, nonWhitePixels };
+}
+async function evaluateElementScreenshotNotBlank(page, assertion, timeout) {
+    const locator = (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first();
+    await locator.waitFor({ state: "visible", timeout });
+    const png = await locator.screenshot({ type: "png", timeout });
+    const stats = readPngPixelStats(Buffer.isBuffer(png) ? png : Buffer.from(png));
+    const minUniqueColors = optionalVisualNumber(assertion.minUniqueColors ?? assertion.min_unique_colors);
+    const minNonWhitePixels = optionalVisualNumber(assertion.minNonWhitePixels ?? assertion.min_non_white_pixels) ?? 1;
+    const ok = stats.nonWhitePixels >= minNonWhitePixels
+        && (minUniqueColors === undefined || stats.uniqueColors >= minUniqueColors);
+    return { ok, stats, minUniqueColors, minNonWhitePixels };
+}
+function textOrderHasExplicitContainer(assertion) {
+    return !!(assertion.selector
+        || assertion.locator
+        || assertion.testId
+        || assertion.test_id
+        || assertion.dataTestId
+        || assertion.data_testid
+        || assertion.label
+        || assertion.placeholder
+        || assertion.role
+        || assertion.altText
+        || assertion.alt_text
+        || assertion.title);
+}
+function resolveTextOrderLocator(page, assertion) {
+    return textOrderHasExplicitContainer(assertion)
+        ? (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first()
+        : page.locator("body").first();
+}
+function normalizeVisibleText(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+}
+async function waitForTextOrder(page, assertion, timeout) {
+    const expected = textOrderExpectedTexts(assertion).map(normalizeVisibleText).filter(Boolean);
+    if (expected.length < 2)
+        throw new Error("textOrder requires at least two values in texts/values/expectedTexts.");
+    const locator = resolveTextOrderLocator(page, assertion);
+    await locator.waitFor({ state: "attached", timeout });
+    const deadline = Date.now() + Math.max(1, timeout);
+    let lastFoundCount = 0;
+    let lastMissingIndex = 0;
+    while (Date.now() <= deadline) {
+        const text = normalizeVisibleText(await locator.innerText({ timeout: Math.min(1000, timeout) }).catch(async () => String(await locator.textContent({ timeout: Math.min(1000, timeout) }) || "")));
+        let cursor = 0;
+        let ok = true;
+        const positions = [];
+        for (let i = 0; i < expected.length; i += 1) {
+            const index = text.indexOf(expected[i], cursor);
+            if (index < 0) {
+                ok = false;
+                lastMissingIndex = i;
+                break;
+            }
+            positions.push(index);
+            cursor = index + expected[i].length;
+        }
+        lastFoundCount = positions.length;
+        if (ok)
+            return { ok: true, expectedCount: expected.length, positions };
+        await delay(100);
+    }
+    return { ok: false, expectedCount: expected.length, foundCount: lastFoundCount, missingIndex: lastMissingIndex };
+}
+function resolvePlaywrightTableLocator(page, assertion) {
+    const tableLocator = String(assertion.tableLocator || assertion.table_locator || assertion.tableSelector || assertion.table_selector || "").trim();
+    if (tableLocator)
+        return page.locator(tableLocator);
+    const hasExplicitTarget = assertion.selector
+        || assertion.locator
+        || assertion.testId
+        || assertion.test_id
+        || assertion.dataTestId
+        || assertion.data_testid
+        || assertion.label
+        || assertion.placeholder
+        || assertion.role
+        || assertion.name
+        || assertion.altText
+        || assertion.alt_text
+        || assertion.title;
+    if (hasExplicitTarget)
+        return (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion);
+    return page.locator("table, [role='table'], [role='grid']").first();
+}
+function tableAssertionInput(assertion) {
+    return {
+        type: assertion.type,
+        expectedTexts: tableExpectedTexts(assertion),
+        rowText: tableRowText(assertion),
+        rowIndex: optionalTableIndex(assertion.rowIndex, assertion.row_index),
+        rowNumber: optionalTableIndex(assertion.rowNumber, assertion.row_number),
+        columnName: tableColumnName(assertion),
+        columnIndex: optionalTableIndex(assertion.columnIndex, assertion.column_index),
+        columnNumber: optionalTableIndex(assertion.columnNumber, assertion.column_number),
+        exact: assertion.exact === true,
+    };
+}
+async function waitForTableAssertion(page, assertion, timeout) {
+    const locator = resolvePlaywrightTableLocator(page, assertion).first();
+    await locator.waitFor({ state: "attached", timeout });
+    const input = tableAssertionInput(assertion);
+    const deadline = Date.now() + Math.max(1, timeout);
+    let lastResult = null;
+    while (Date.now() <= deadline) {
+        lastResult = await locator.evaluate((root, current) => {
+            const win = globalThis;
+            const normalize = (value) => String(value ?? "").replace(/\s+/g, " ").trim();
+            const includesOrEquals = (actual, expected, exact) => exact ? actual === expected : actual.includes(expected);
+            const isRowRoot = root.matches?.("tr,[role='row']");
+            const rowElements = (isRowRoot ? [root] : Array.from(root.querySelectorAll?.("tr,[role='row']") || []));
+            const rows = rowElements.map((row, index) => {
+                const cellElements = Array.from(row.querySelectorAll?.("th,td,[role='cell'],[role='gridcell'],[role='columnheader'],[role='rowheader']") || []);
+                const cells = cellElements.map((cell) => normalize(cell.innerText || cell.textContent || ""));
+                const headerOnly = cellElements.length > 0 && cellElements.every((cell) => {
+                    const tag = String(cell.tagName || "").toLowerCase();
+                    const role = String(cell.getAttribute?.("role") || "").toLowerCase();
+                    return tag === "th" || role === "columnheader";
+                });
+                return {
+                    index,
+                    text: normalize(row.innerText || row.textContent || ""),
+                    cells: cells.length ? cells : [normalize(row.innerText || row.textContent || "")].filter(Boolean),
+                    headerOnly,
+                };
+            }).filter((row) => row.text || row.cells.length);
+            if (!rows.length) {
+                const rootText = normalize(root.innerText || root.textContent || "");
+                return { ok: false, reason: rootText ? "No table rows were found under the target." : "Target table has no readable text.", rowCount: 0, headerCount: 0 };
+            }
+            const headerRow = rows.find((row) => row.headerOnly) || rows[0];
+            const headers = headerRow?.cells || [];
+            const dataRows = rows.filter((row) => !row.headerOnly);
+            const searchableRows = dataRows.length ? dataRows : rows;
+            const expectedTexts = Array.isArray(current.expectedTexts) ? current.expectedTexts.map(normalize).filter(Boolean) : [];
+            const rowMatchesLocator = (row) => {
+                if (current.rowText && !row.text.includes(normalize(current.rowText)))
+                    return false;
+                return true;
+            };
+            if (current.type === "tableRowIncludes") {
+                if (!expectedTexts.length)
+                    return { ok: false, reason: "tableRowIncludes requires text/value/texts/values/expectedTexts.", rowCount: searchableRows.length, headerCount: headers.length };
+                const rowIndex = Number.isInteger(current.rowIndex) ? current.rowIndex : Number.isInteger(current.rowNumber) ? current.rowNumber - 1 : undefined;
+                const candidates = Number.isInteger(rowIndex)
+                    ? [searchableRows[rowIndex]].filter(Boolean)
+                    : searchableRows.filter(rowMatchesLocator);
+                if (!candidates.length) {
+                    return { ok: false, reason: current.rowText ? "No row matched the requested row text." : "No candidate table row was found.", rowCount: searchableRows.length, headerCount: headers.length };
+                }
+                const matched = candidates.find((row) => expectedTexts.every((expected) => row.text.includes(expected)));
+                return matched
+                    ? { ok: true, rowCount: searchableRows.length, headerCount: headers.length, matchedRowIndex: matched.index, expectedTextCount: expectedTexts.length }
+                    : { ok: false, reason: `Candidate rows did not include all ${expectedTexts.length} expected text value(s).`, rowCount: searchableRows.length, headerCount: headers.length };
+            }
+            if (!expectedTexts.length)
+                return { ok: false, reason: `${current.type} requires text/value.`, rowCount: searchableRows.length, headerCount: headers.length };
+            const expected = expectedTexts[0];
+            const rowIndex = Number.isInteger(current.rowIndex) ? current.rowIndex : Number.isInteger(current.rowNumber) ? current.rowNumber - 1 : undefined;
+            const candidateRows = Number.isInteger(rowIndex)
+                ? [searchableRows[rowIndex]].filter(Boolean)
+                : current.rowText
+                    ? searchableRows.filter(rowMatchesLocator)
+                    : searchableRows.slice(0, 1);
+            if (!candidateRows.length) {
+                return { ok: false, reason: current.rowText ? "No row matched the requested row text." : "No candidate table row was found.", rowCount: searchableRows.length, headerCount: headers.length };
+            }
+            let columnIndex = Number.isInteger(current.columnIndex) ? current.columnIndex : Number.isInteger(current.columnNumber) ? current.columnNumber - 1 : undefined;
+            if (!Number.isInteger(columnIndex) && current.columnName) {
+                const expectedColumn = normalize(current.columnName);
+                columnIndex = headers.findIndex((header) => includesOrEquals(header, expectedColumn, current.exact));
+            }
+            if (!Number.isInteger(columnIndex) || columnIndex < 0) {
+                return { ok: false, reason: "No table column matched the requested column name/index.", rowCount: searchableRows.length, headerCount: headers.length };
+            }
+            const actuals = candidateRows.map((row) => normalize(row.cells[columnIndex] || ""));
+            const matchedIndex = actuals.findIndex((actual) => current.type === "tableCellTextEquals" ? actual === expected : actual.includes(expected));
+            if (matchedIndex >= 0) {
+                return {
+                    ok: true,
+                    rowCount: searchableRows.length,
+                    headerCount: headers.length,
+                    matchedRowIndex: candidateRows[matchedIndex].index,
+                    columnIndex,
+                    actualLength: actuals[matchedIndex].length,
+                };
+            }
+            return {
+                ok: false,
+                reason: `Cell text did not ${current.type === "tableCellTextEquals" ? "equal" : "include"} the expected value.`,
+                rowCount: searchableRows.length,
+                headerCount: headers.length,
+                columnIndex,
+                actualLengths: actuals.map((actual) => actual.length),
+            };
+        }, input);
+        if (lastResult?.ok)
+            return lastResult;
+        await delay(100);
+    }
+    return lastResult || { ok: false, reason: "Timed out waiting for table assertion." };
 }
 async function writePlaywrightPageSnapshots(page, artifactDir, projectName, checkName, index) {
     if (!page)
@@ -197,13 +1187,55 @@ function writeBrowserTelemetryLogs(input) {
     const telemetryDir = (0, utils_1.ensureDir)(path.join(input.artifactDir, "browser-telemetry"));
     const base = `${(0, utils_1.safeSegment)(input.projectName)}-${(0, utils_1.safeSegment)(input.checkName)}-${input.index + 1}`;
     const consoleLogPath = path.join(telemetryDir, `${base}.console.log`);
+    const dialogLogPath = path.join(telemetryDir, `${base}.dialogs.log`);
+    const popupLogPath = path.join(telemetryDir, `${base}.popups.log`);
     const networkLogPath = path.join(telemetryDir, `${base}.network.log`);
     fs.writeFileSync(consoleLogPath, `${input.consoleMessages.length ? input.consoleMessages.join("\n") : "(none observed)"}\n`, "utf-8");
+    fs.writeFileSync(dialogLogPath, `${input.dialogMessages.length ? input.dialogMessages.join("\n") : "(none observed)"}\n`, "utf-8");
+    fs.writeFileSync(popupLogPath, `${input.popupMessages?.length ? input.popupMessages.join("\n") : "(none observed)"}\n`, "utf-8");
     fs.writeFileSync(networkLogPath, `${input.networkRequests.length ? input.networkRequests.join("\n") : "(none observed)"}\n`, "utf-8");
-    return { consoleLogPath, networkLogPath };
+    return { consoleLogPath, dialogLogPath, popupLogPath, networkLogPath };
 }
 function browserArtifactBase(projectName, checkName, index) {
     return `${(0, utils_1.safeSegment)(projectName)}-${(0, utils_1.safeSegment)(checkName)}-${index + 1}`;
+}
+function browserCheckViewport(check) {
+    const width = Number(check.viewportWidth || check.viewport_width || check.viewport?.width || 1366);
+    const height = Number(check.viewportHeight || check.viewport_height || check.viewport?.height || 900);
+    const deviceScaleFactor = Number(check.deviceScaleFactor || check.device_scale_factor || 1);
+    return {
+        width: Number.isFinite(width) && width > 0 ? Math.round(width) : 1366,
+        height: Number.isFinite(height) && height > 0 ? Math.round(height) : 900,
+        isMobile: check.isMobile === true || check.is_mobile === true,
+        deviceScaleFactor: Number.isFinite(deviceScaleFactor) && deviceScaleFactor > 0 ? deviceScaleFactor : 1,
+    };
+}
+function browserCheckContextOptions(check) {
+    const userAgent = String(check.userAgent || check.user_agent || "").trim();
+    const locale = String(check.locale || "").trim();
+    const timezoneId = String(check.timezoneId || check.timezone_id || "").trim();
+    const colorScheme = String(check.colorScheme || check.color_scheme || "").trim();
+    const reducedMotion = String(check.reducedMotion || check.reduced_motion || "").trim();
+    const permissions = Array.isArray(check.permissions) ? check.permissions.map(item => String(item || "").trim()).filter(Boolean) : [];
+    const latitude = Number(check.geolocation?.latitude);
+    const longitude = Number(check.geolocation?.longitude);
+    const accuracy = Number(check.geolocation?.accuracy);
+    const geolocation = Number.isFinite(latitude) && Number.isFinite(longitude)
+        ? {
+            latitude,
+            longitude,
+            ...(Number.isFinite(accuracy) ? { accuracy } : {}),
+        }
+        : undefined;
+    return {
+        ...(userAgent ? { userAgent } : {}),
+        ...(locale ? { locale } : {}),
+        ...(timezoneId ? { timezoneId } : {}),
+        ...(colorScheme ? { colorScheme } : {}),
+        ...(reducedMotion ? { reducedMotion } : {}),
+        ...(permissions.length ? { permissions } : {}),
+        ...(geolocation ? { geolocation } : {}),
+    };
 }
 function browserEvidenceArtifact(type, title, artifactPath, source, mediaType = "") {
     if (!artifactPath || !fs.existsSync(artifactPath))
@@ -215,6 +1247,333 @@ function browserEvidenceArtifact(type, title, artifactPath, source, mediaType = 
         source,
         ...(mediaType ? { mediaType } : {}),
     };
+}
+function browserDialogLogLine(record) {
+    const parts = [
+        `dialog ${record.type || "(unknown)"}`,
+        `message=${JSON.stringify((0, utils_1.compactText)(record.message || "", 500))}`,
+        record.defaultValue !== undefined ? `defaultValue=${JSON.stringify((0, utils_1.compactText)(record.defaultValue, 200))}` : "",
+        `accepted=${record.accepted ? "yes" : "no"}`,
+        record.error ? `error=${JSON.stringify((0, utils_1.compactText)(record.error, 500))}` : "",
+        `at=${record.occurredAt}`,
+    ].filter(Boolean);
+    return parts.join(" ");
+}
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+function mediaTypeForDownload(fileName) {
+    const ext = path.extname(fileName || "").toLowerCase();
+    if (ext === ".csv")
+        return "text/csv";
+    if (ext === ".txt")
+        return "text/plain";
+    if (ext === ".json")
+        return "application/json";
+    if (ext === ".pdf")
+        return "application/pdf";
+    if (ext === ".zip")
+        return "application/zip";
+    if (ext === ".xlsx")
+        return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    return "application/octet-stream";
+}
+async function savePlaywrightDownload(download, downloadDir, artifactBase, index) {
+    const suggestedFilename = String(download.suggestedFilename?.() || `download-${index + 1}.bin`);
+    const downloadUrl = String(download.url?.() || "");
+    const fileName = `${artifactBase}-download-${index + 1}-${(0, utils_1.safeSegment)(suggestedFilename) || "download.bin"}`;
+    const targetPath = path.join(downloadDir, fileName);
+    try {
+        await download.saveAs(targetPath);
+        const failure = String(await download.failure?.() || "");
+        const sizeBytes = fs.existsSync(targetPath) ? fs.statSync(targetPath).size : 0;
+        return {
+            suggestedFilename,
+            path: targetPath,
+            url: downloadUrl,
+            ...(failure ? { failure } : {}),
+            sizeBytes,
+            mediaType: mediaTypeForDownload(suggestedFilename),
+        };
+    }
+    catch (error) {
+        return {
+            suggestedFilename,
+            path: targetPath,
+            url: downloadUrl,
+            failure: error.message || String(error),
+            mediaType: mediaTypeForDownload(suggestedFilename),
+        };
+    }
+}
+function downloadFileName(assertion) {
+    return String(assertion.fileName || assertion.file_name || assertion.filename || "").trim();
+}
+function downloadFileNameIncludes(assertion) {
+    return String(assertion.fileNameIncludes || assertion.file_name_includes || assertion.filenameIncludes || assertion.filename_includes || "").trim();
+}
+function downloadContentIncludes(assertion) {
+    return String(assertion.contentIncludes || assertion.content_includes || "").trim();
+}
+function downloadMinBytes(assertion) {
+    const raw = assertion.minBytes ?? assertion.min_bytes;
+    const value = raw === undefined || raw === null ? 0 : Number(raw);
+    return Number.isFinite(value) ? value : 0;
+}
+function downloadedFileDetail(assertion) {
+    const parts = [
+        downloadFileName(assertion) ? `filename=${downloadFileName(assertion)}` : "",
+        downloadFileNameIncludes(assertion) ? `filenameIncludes=${downloadFileNameIncludes(assertion)}` : "",
+        downloadContentIncludes(assertion) ? `contentIncludes=${downloadContentIncludes(assertion)}` : "",
+        downloadMinBytes(assertion) ? `minBytes=${downloadMinBytes(assertion)}` : "",
+    ].filter(Boolean);
+    return parts.join("; ") || "downloaded file";
+}
+function downloadedFileMatch(record, assertion) {
+    if (record.failure)
+        return { ok: false, reason: `download failed: ${record.failure}` };
+    if (!record.path || !fs.existsSync(record.path))
+        return { ok: false, reason: "download file was not saved" };
+    const expectedName = downloadFileName(assertion);
+    if (expectedName && record.suggestedFilename !== expectedName) {
+        return { ok: false, reason: `filename ${record.suggestedFilename} did not equal ${expectedName}` };
+    }
+    const expectedNameIncludes = downloadFileNameIncludes(assertion);
+    if (expectedNameIncludes && !record.suggestedFilename.includes(expectedNameIncludes)) {
+        return { ok: false, reason: `filename ${record.suggestedFilename} did not include ${expectedNameIncludes}` };
+    }
+    const minBytes = downloadMinBytes(assertion);
+    const sizeBytes = record.sizeBytes ?? fs.statSync(record.path).size;
+    if (minBytes && sizeBytes < minBytes)
+        return { ok: false, reason: `download size ${sizeBytes} was smaller than ${minBytes}` };
+    const expectedContent = downloadContentIncludes(assertion);
+    if (expectedContent) {
+        const content = fs.readFileSync(record.path).toString("utf-8");
+        if (!content.includes(expectedContent))
+            return { ok: false, reason: `download content did not include ${expectedContent}` };
+    }
+    return { ok: true, reason: record.path };
+}
+async function waitForDownloadedFile(signals, assertion, timeout) {
+    const deadline = Date.now() + timeout;
+    let lastReasons = [];
+    while (Date.now() <= deadline) {
+        for (const record of signals.downloads) {
+            const match = downloadedFileMatch(record, assertion);
+            if (match.ok)
+                return record;
+        }
+        lastReasons = signals.downloads.map(record => `${record.suggestedFilename || "(download)"}: ${downloadedFileMatch(record, assertion).reason}`);
+        await delay(100);
+    }
+    const pending = Math.max(0, signals.downloadPromises.length - signals.downloads.length);
+    const observed = signals.downloads.length ? ` Observed: ${lastReasons.join(" | ")}` : " No downloads were observed.";
+    throw new Error(`Expected downloaded file matching ${downloadedFileDetail(assertion)}.${pending > 0 ? ` Pending downloads: ${pending}.` : ""}${observed}`);
+}
+function downloadArtifacts(downloads) {
+    return downloads
+        .filter(download => download.path && fs.existsSync(download.path))
+        .map(download => ({
+        type: "download",
+        title: `Download: ${download.suggestedFilename}`,
+        path: download.path,
+        source: "playwright:download",
+        ...(download.mediaType ? { mediaType: download.mediaType } : {}),
+    }));
+}
+function uploadFilePath(action) {
+    return String(action.filePath || action.file_path || action.path || "").trim();
+}
+function uploadFileName(action) {
+    return String(action.fileName || action.file_name || action.filename || "upload.txt").trim();
+}
+function uploadMediaType(action) {
+    return String(action.mediaType || action.media_type || "text/plain").trim();
+}
+function uploadFileContent(action) {
+    if (action.fileContent !== undefined)
+        return String(action.fileContent);
+    if (action.file_content !== undefined)
+        return String(action.file_content);
+    if (action.content !== undefined)
+        return String(action.content);
+    return "";
+}
+function uploadFileActionDetail(action) {
+    const target = (0, semantic_locator_1.browserTargetDetail)(action);
+    const filePath = uploadFilePath(action);
+    const fileNames = uploadFileItems(action).map(item => {
+        const itemPath = String(item.filePath || item.file_path || item.path || "").trim();
+        return itemPath ? path.basename(itemPath) : uploadFileName(item);
+    });
+    const fallback = filePath ? path.basename(filePath) : uploadFileName(action);
+    return `${target || "file input"}; file=${fileNames.length ? fileNames.join(", ") : fallback}`;
+}
+function uploadFileItems(action) {
+    const filePaths = Array.isArray(action.filePaths) && action.filePaths.length ? action.filePaths : Array.isArray(action.file_paths) ? action.file_paths : [];
+    const files = Array.isArray(action.files) ? action.files : [];
+    if (files.length || filePaths.length) {
+        return [
+            ...filePaths.map(filePath => ({ filePath, file_path: filePath, path: filePath })),
+            ...files,
+        ];
+    }
+    return [action];
+}
+function uploadFilePayloadForItem(project, item) {
+    const filePath = String(item.filePath || item.file_path || item.path || "").trim();
+    if (filePath) {
+        const resolved = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(project.workDir || process.cwd(), filePath);
+        if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile())
+            throw new Error(`Upload file does not exist: ${resolved}`);
+        return resolved;
+    }
+    const content = uploadFileContent(item);
+    if (content === "" && item.fileContent === undefined && item.file_content === undefined && item.content === undefined) {
+        throw new Error("uploadFile requires filePath/file_path/path or fileContent/file_content/content.");
+    }
+    return {
+        name: uploadFileName(item),
+        mimeType: uploadMediaType(item),
+        buffer: Buffer.from(content, "utf-8"),
+    };
+}
+function uploadFilePayload(project, action) {
+    const payloads = uploadFileItems(action).map(item => uploadFilePayloadForItem(project, item));
+    return payloads.length === 1 ? payloads[0] : payloads;
+}
+function originOf(rawUrl) {
+    try {
+        return new URL(rawUrl).origin;
+    }
+    catch {
+        return "";
+    }
+}
+function pathnameOf(rawUrl) {
+    try {
+        return new URL(rawUrl).pathname.toLowerCase();
+    }
+    catch {
+        return "";
+    }
+}
+function responseResourceType(response) {
+    try {
+        return String(response.request?.()?.resourceType?.() || "");
+    }
+    catch {
+        return "";
+    }
+}
+function isIgnorableHttpResourceError(responseUrl, resourceType) {
+    const pathname = pathnameOf(responseUrl);
+    if (pathname === "/favicon.ico" || pathname.endsWith("/favicon.ico"))
+        return true;
+    if (resourceType === "other" && pathname.endsWith(".map"))
+        return true;
+    return false;
+}
+function playwrightNetworkErrorForResponse(input) {
+    const kind = input.resourceType || "resource";
+    if (input.status >= 500)
+        return `http_error ${input.status} ${kind} ${input.responseUrl}`;
+    if (input.status < 400 || !input.failOnHttpResourceError)
+        return "";
+    const origin = originOf(input.responseUrl);
+    if (!origin || !input.monitoredOrigins.has(origin))
+        return "";
+    if (isIgnorableHttpResourceError(input.responseUrl, input.resourceType))
+        return "";
+    return `http_resource_error ${input.status} ${kind} ${input.responseUrl}`;
+}
+async function grantClipboardPermissions(browserContext, origins) {
+    if (!browserContext?.grantPermissions)
+        return;
+    const permissions = ["clipboard-read", "clipboard-write"];
+    const originList = Array.from(origins).filter(Boolean);
+    if (!originList.length) {
+        try {
+            await browserContext.grantPermissions(permissions);
+        }
+        catch { }
+        return;
+    }
+    for (const origin of originList) {
+        try {
+            await browserContext.grantPermissions(permissions, { origin });
+        }
+        catch { }
+    }
+}
+async function grantBrowserContextPermissions(browserContext, origins, permissions) {
+    if (!browserContext?.grantPermissions || !permissions.length)
+        return;
+    const originList = Array.from(origins).filter(Boolean);
+    if (!originList.length) {
+        try {
+            await browserContext.grantPermissions(permissions);
+        }
+        catch { }
+        return;
+    }
+    for (const origin of originList) {
+        try {
+            await browserContext.grantPermissions(permissions, { origin });
+        }
+        catch { }
+    }
+}
+function compactNetworkPayload(value, max = 1000) {
+    return (0, utils_1.compactText)(value, max).replace(/\s+/g, " ").trim();
+}
+function redactRequestHeaders(headers) {
+    const redacted = {};
+    const sensitive = /^(authorization|cookie|set-cookie|x-api-key|x-auth-token|proxy-authorization)$/i;
+    for (const [key, value] of Object.entries(headers || {})) {
+        const name = String(key || "").toLowerCase();
+        redacted[name] = sensitive.test(name) ? "[redacted]" : compactNetworkPayload(value, 500);
+    }
+    return redacted;
+}
+function requestDetailsLine(request) {
+    const method = request.method?.() || "GET";
+    const requestUrl = request.url?.() || "";
+    let headers = {};
+    let body = "";
+    try {
+        headers = request.headers?.() || {};
+    }
+    catch { }
+    try {
+        body = request.postData?.() || "";
+    }
+    catch { }
+    const headersText = JSON.stringify(redactRequestHeaders(headers));
+    return `request_details ${method} ${requestUrl} headers=${headersText}${body ? ` body=${compactNetworkPayload(body, 2000)}` : ""}`;
+}
+function shouldCaptureResponseBody(resourceType, headers) {
+    const contentType = String(headers["content-type"] || headers["Content-Type"] || "").toLowerCase();
+    return resourceType === "fetch"
+        || resourceType === "xhr"
+        || contentType.includes("application/json")
+        || contentType.startsWith("text/");
+}
+async function responseDetailsLine(response, status, resourceType, responseUrl) {
+    let headers = {};
+    let body = "";
+    try {
+        headers = response.headers?.() || {};
+    }
+    catch { }
+    if (shouldCaptureResponseBody(resourceType, headers)) {
+        try {
+            body = await response.text();
+        }
+        catch { }
+    }
+    const headersText = JSON.stringify(redactRequestHeaders(headers));
+    return `response_details ${status} ${resourceType || "unknown"} ${responseUrl} headers=${headersText}${body ? ` body=${compactNetworkPayload(body, 4000)}` : ""}`;
 }
 async function finalizePlaywrightBrowserArtifacts(input) {
     const artifacts = [];
@@ -250,6 +1609,247 @@ async function finalizePlaywrightBrowserArtifacts(input) {
     }
     return artifacts;
 }
+function dragDestinationTarget(action) {
+    return {
+        selector: action.destinationSelector || action.destination_selector || action.destinationLocator || action.destination_locator,
+        locator: action.destinationLocator || action.destination_locator || action.destinationSelector || action.destination_selector,
+        testId: action.destinationTestId || action.destination_test_id || action.destinationDataTestId || action.destination_data_testid,
+        test_id: action.destination_test_id || action.destinationTestId || action.destinationDataTestId || action.destination_data_testid,
+        dataTestId: action.destinationDataTestId || action.destination_data_testid || action.destinationTestId || action.destination_test_id,
+        data_testid: action.destination_data_testid || action.destinationDataTestId || action.destinationTestId || action.destination_test_id,
+        label: action.destinationLabel || action.destination_label,
+        placeholder: action.destinationPlaceholder || action.destination_placeholder,
+        role: action.destinationRole || action.destination_role,
+        name: action.destinationName || action.destination_name || action.destinationText || action.destination_text,
+        text: action.destinationText || action.destination_text,
+        altText: action.destinationAltText || action.destination_alt_text,
+        alt_text: action.destination_alt_text || action.destinationAltText,
+        title: action.destinationTitle || action.destination_title,
+        exact: action.destinationExact === undefined && action.destination_exact === undefined ? action.exact : action.destinationExact !== false && action.destination_exact !== false,
+    };
+}
+function dragActionDetail(action) {
+    const destination = dragDestinationTarget(action);
+    return `${(0, semantic_locator_1.browserTargetDetail)(action) || "source"} -> ${(0, semantic_locator_1.browserTargetDetail)(destination) || "destination"}`;
+}
+function clipboardActionDetail(action) {
+    const value = clipboardExpectedText(action);
+    return value ? `clipboard text length=${value.length}` : "clipboard text";
+}
+function cookieActionName(action) {
+    return String(action.key || "").trim();
+}
+function cookieActionNames(action) {
+    const names = Array.isArray(action.keys) ? action.keys.map(name => String(name || "").trim()).filter(Boolean) : [];
+    const single = cookieActionName(action);
+    return names.length ? names : single ? [single] : [];
+}
+function cookieActionValue(action) {
+    return String(action.value ?? action.text ?? action.content ?? "");
+}
+function cookieActionHasValue(action) {
+    return action.value !== undefined || action.text !== undefined || action.content !== undefined;
+}
+function cookieActionPath(action) {
+    return String(action.cookiePath || action.cookie_path || "/").trim() || "/";
+}
+function cookieActionSameSite(action) {
+    const raw = String(action.sameSite || action.same_site || "").trim().toLowerCase();
+    if (raw === "strict")
+        return "Strict";
+    if (raw === "lax")
+        return "Lax";
+    if (raw === "none")
+        return "None";
+    return undefined;
+}
+function cookieActionBoolean(value) {
+    return value === undefined ? undefined : value === true || String(value).toLowerCase() === "true";
+}
+function cookieActionUrl(page, project, action) {
+    const currentUrl = String(page?.url?.() || "");
+    const rawUrl = action.url || (currentUrl && currentUrl !== "about:blank" ? currentUrl : "") || project.targetUrl;
+    return (0, utils_1.resolveUrl)(project.targetUrl, rawUrl);
+}
+function cookieActionDetail(action) {
+    const names = cookieActionNames(action);
+    if (action.type === "clearCookies") {
+        return `${names.length ? `cookie count=${names.length}` : "all cookies"}${action.domain ? `; domain=${action.domain}` : ""}`;
+    }
+    return `cookie=${cookieActionName(action) || "(missing)"}; value length=${cookieActionValue(action).length}${action.domain ? `; domain=${action.domain}` : ""}`;
+}
+function buildPlaywrightCookie(page, project, action) {
+    const name = cookieActionName(action);
+    if (!name)
+        throw new Error("setCookie requires key/cookieName/name.");
+    if (!cookieActionHasValue(action))
+        throw new Error("setCookie requires value/text/content.");
+    const cookie = {
+        name,
+        value: cookieActionValue(action),
+    };
+    const domain = String(action.domain || "").trim();
+    if (domain) {
+        cookie.domain = domain;
+        cookie.path = cookieActionPath(action);
+    }
+    else {
+        cookie.url = cookieActionUrl(page, project, action);
+        if (action.cookiePath || action.cookie_path)
+            cookie.path = cookieActionPath(action);
+    }
+    const expires = Number(action.expires);
+    if (Number.isFinite(expires))
+        cookie.expires = expires;
+    const httpOnly = cookieActionBoolean(action.httpOnly ?? action.http_only);
+    if (httpOnly !== undefined)
+        cookie.httpOnly = httpOnly;
+    const secure = cookieActionBoolean(action.secure);
+    if (secure !== undefined)
+        cookie.secure = secure;
+    const sameSite = cookieActionSameSite(action);
+    if (sameSite)
+        cookie.sameSite = sameSite;
+    return cookie;
+}
+function sanitizePlaywrightCookie(cookie) {
+    const sanitized = {
+        name: String(cookie.name || ""),
+        value: String(cookie.value || ""),
+        domain: cookie.domain,
+        path: cookie.path || "/",
+    };
+    if (cookie.expires !== undefined)
+        sanitized.expires = cookie.expires;
+    if (cookie.httpOnly !== undefined)
+        sanitized.httpOnly = cookie.httpOnly;
+    if (cookie.secure !== undefined)
+        sanitized.secure = cookie.secure;
+    if (cookie.sameSite !== undefined)
+        sanitized.sameSite = cookie.sameSite;
+    return sanitized.name && sanitized.domain ? sanitized : null;
+}
+async function clearBrowserCookies(page, action) {
+    const names = new Set(cookieActionNames(action));
+    const browserContext = page.context();
+    if (!names.size) {
+        await browserContext.clearCookies();
+        return;
+    }
+    const existing = await browserContext.cookies();
+    const kept = existing
+        .filter((cookie) => cookie && !names.has(String(cookie.name || "")))
+        .map(sanitizePlaywrightCookie)
+        .filter(Boolean);
+    await browserContext.clearCookies();
+    if (kept.length)
+        await browserContext.addCookies(kept);
+}
+function storageActionValue(action) {
+    return String(action.value ?? action.text ?? action.content ?? "");
+}
+function storageActionHasValue(action) {
+    return action.value !== undefined || action.text !== undefined || action.content !== undefined;
+}
+function storageActionKey(action) {
+    return String(action.key || "").trim();
+}
+function storageActionKeys(action) {
+    const keys = Array.isArray(action.keys) ? action.keys.map(key => String(key || "").trim()).filter(Boolean) : [];
+    const single = storageActionKey(action);
+    return keys.length ? keys : single ? [single] : [];
+}
+function storageActionArea(action) {
+    if (action.type === "setLocalStorage")
+        return "localStorage";
+    if (action.type === "setSessionStorage")
+        return "sessionStorage";
+    const raw = String(action.storage || action.storageArea || action.storage_area || "").trim().toLowerCase();
+    if (raw === "local" || raw === "localstorage" || raw === "local_storage")
+        return "localStorage";
+    if (raw === "session" || raw === "sessionstorage" || raw === "session_storage")
+        return "sessionStorage";
+    return "both";
+}
+function storageActionDetail(action) {
+    const area = storageActionArea(action);
+    const keys = storageActionKeys(action);
+    if (action.type === "clearStorage") {
+        return `${area}; ${keys.length ? `key count=${keys.length}` : "clear all"}`;
+    }
+    return `${area}; key=${storageActionKey(action) || "(missing)"}; value length=${storageActionValue(action).length}`;
+}
+function scrollAmount(action) {
+    const amount = Number(action.amount ?? action.value ?? action.text ?? 600);
+    return Number.isFinite(amount) && amount !== 0 ? Math.abs(amount) : 600;
+}
+function scrollDirection(action) {
+    return action.direction === "up" || action.direction === "left" || action.direction === "right" ? action.direction : "down";
+}
+function scrollDelta(action) {
+    const amount = scrollAmount(action);
+    const direction = scrollDirection(action);
+    if (direction === "up")
+        return { deltaX: 0, deltaY: -amount };
+    if (direction === "left")
+        return { deltaX: -amount, deltaY: 0 };
+    if (direction === "right")
+        return { deltaX: amount, deltaY: 0 };
+    return { deltaX: 0, deltaY: amount };
+}
+function scrollHasExplicitTarget(action) {
+    return !!(action.selector
+        || action.locator
+        || action.testId
+        || action.test_id
+        || action.dataTestId
+        || action.data_testid
+        || action.label
+        || action.placeholder
+        || action.role
+        || action.name
+        || action.altText
+        || action.alt_text
+        || action.title);
+}
+function scrollActionDetail(action) {
+    const target = scrollHasExplicitTarget(action) ? (0, semantic_locator_1.browserTargetDetail)(action) : "page";
+    return `${target}; ${scrollDirection(action)} ${scrollAmount(action)}px`;
+}
+function typeTextValue(action) {
+    return String(action.value ?? action.text ?? "");
+}
+function typeTextDelay(action) {
+    const delay = Number(action.delay ?? action.delayMs ?? action.delay_ms ?? 0);
+    return Number.isFinite(delay) && delay > 0 ? delay : 0;
+}
+function typeTextActionDetail(action) {
+    const target = (0, semantic_locator_1.browserTargetDetail)(action) || "focused element";
+    const delay = typeTextDelay(action);
+    return `${target}; text length=${typeTextValue(action).length}${delay ? `; delay=${delay}ms` : ""}`;
+}
+function browserNetworkStateActionDetail(action) {
+    return action.type === "setOffline" ? "browser network offline" : "browser network online";
+}
+function browserActionDetail(action) {
+    if (action.type === "uploadFile")
+        return uploadFileActionDetail(action);
+    if (action.type === "dragTo")
+        return dragActionDetail(action);
+    if (action.type === "setClipboard")
+        return clipboardActionDetail(action);
+    if (action.type === "setCookie" || action.type === "clearCookies")
+        return cookieActionDetail(action);
+    if (action.type === "setLocalStorage" || action.type === "setSessionStorage" || action.type === "clearStorage")
+        return storageActionDetail(action);
+    if (action.type === "setOffline" || action.type === "setOnline")
+        return browserNetworkStateActionDetail(action);
+    if (action.type === "scroll")
+        return scrollActionDetail(action);
+    if (action.type === "typeText")
+        return typeTextActionDetail(action);
+    return (0, semantic_locator_1.browserTargetDetail)(action);
+}
 async function runAction(page, project, action, defaultTimeout) {
     const timeout = Number(action.timeoutMs || action.timeout_ms || defaultTimeout);
     const name = `action:${action.type}`;
@@ -270,11 +1870,28 @@ async function runAction(page, project, action, defaultTimeout) {
         else if (action.type === "click") {
             await (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).click({ timeout });
         }
+        else if (action.type === "doubleClick") {
+            await (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).dblclick({ timeout });
+        }
+        else if (action.type === "rightClick") {
+            await (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).click({ button: "right", timeout });
+        }
         else if (action.type === "fill") {
             await (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).fill(String(action.value ?? action.text ?? ""), { timeout });
         }
         else if (action.type === "selectOption") {
-            await (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).selectOption(String(action.value ?? action.text ?? ""), { timeout });
+            const expected = String(action.value ?? action.text ?? "");
+            const locator = (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).first();
+            try {
+                await locator.waitFor({ state: "attached", timeout });
+                const matchesValue = await locator.evaluate((element, candidate) => {
+                    return Array.from(element.options || []).some((option) => String(option.value) === candidate);
+                }, expected);
+                await locator.selectOption(matchesValue ? { value: expected } : { label: expected }, { timeout });
+            }
+            catch (error) {
+                throw new Error(`Could not select option value or label ${JSON.stringify(expected)}: ${error.message || String(error)}`);
+            }
         }
         else if (action.type === "check") {
             await (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).check({ timeout });
@@ -282,11 +1899,100 @@ async function runAction(page, project, action, defaultTimeout) {
         else if (action.type === "uncheck") {
             await (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).uncheck({ timeout });
         }
+        else if (action.type === "uploadFile") {
+            const payload = uploadFilePayload(project, action);
+            await (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).first().setInputFiles(payload, { timeout });
+        }
+        else if (action.type === "dragTo") {
+            const source = (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).first();
+            const destinationTarget = dragDestinationTarget(action);
+            const destination = (0, semantic_locator_1.resolvePlaywrightLocator)(page, destinationTarget).first();
+            await source.waitFor({ state: "visible", timeout });
+            await destination.waitFor({ state: "visible", timeout });
+            await source.dragTo(destination, { timeout });
+        }
+        else if (action.type === "setClipboard") {
+            await writeClipboardText(page, clipboardExpectedText(action));
+        }
+        else if (action.type === "setCookie") {
+            await page.context().addCookies([buildPlaywrightCookie(page, project, action)]);
+        }
+        else if (action.type === "clearCookies") {
+            await clearBrowserCookies(page, action);
+        }
+        else if (action.type === "setLocalStorage" || action.type === "setSessionStorage") {
+            const storageName = storageActionArea(action);
+            const key = storageActionKey(action);
+            if (storageName === "both")
+                throw new Error(`${action.type} requires a single storage area.`);
+            if (!key)
+                throw new Error(`${action.type} requires key/storageKey/text.`);
+            if (!storageActionHasValue(action))
+                throw new Error(`${action.type} requires value/text/content.`);
+            await page.evaluate(({ storageName, key, value }) => {
+                globalThis[storageName].setItem(key, value);
+            }, { storageName, key, value: storageActionValue(action) });
+        }
+        else if (action.type === "clearStorage") {
+            const area = storageActionArea(action);
+            const keys = storageActionKeys(action);
+            const storageNames = area === "both" ? ["localStorage", "sessionStorage"] : [area];
+            await page.evaluate(({ storageNames, keys }) => {
+                for (const storageName of storageNames) {
+                    const storage = globalThis[storageName];
+                    if (!storage)
+                        continue;
+                    if (keys.length) {
+                        for (const key of keys)
+                            storage.removeItem(key);
+                    }
+                    else {
+                        storage.clear();
+                    }
+                }
+            }, { storageNames, keys });
+        }
+        else if (action.type === "setOffline" || action.type === "setOnline") {
+            await page.context().setOffline(action.type === "setOffline");
+        }
         else if (action.type === "hover") {
             await (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).hover({ timeout });
         }
+        else if (action.type === "focus") {
+            await (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).focus({ timeout });
+        }
+        else if (action.type === "typeText") {
+            const value = typeTextValue(action);
+            if (!value)
+                throw new Error("typeText requires value/text.");
+            const locatorPlan = (0, semantic_locator_1.buildSemanticLocatorPlan)(action);
+            if (locatorPlan)
+                await (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).focus({ timeout });
+            await page.keyboard.type(value, { delay: typeTextDelay(action) });
+        }
+        else if (action.type === "scroll") {
+            const delta = scrollDelta(action);
+            if (action.coordinate) {
+                await page.mouse.move(Number(action.coordinate[0]), Number(action.coordinate[1]));
+            }
+            if (scrollHasExplicitTarget(action)) {
+                const locator = (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).first();
+                await locator.waitFor({ state: "attached", timeout });
+                await locator.evaluate((element, current) => {
+                    element.scrollBy({ left: current.deltaX, top: current.deltaY, behavior: "instant" });
+                }, delta);
+            }
+            else if (!action.coordinate) {
+                await page.evaluate((current) => {
+                    globalThis.scrollBy({ left: current.deltaX, top: current.deltaY, behavior: "instant" });
+                }, delta);
+            }
+            else {
+                await page.mouse.wheel(delta.deltaX, delta.deltaY);
+            }
+        }
         else if (action.type === "press") {
-            const key = String(action.key || "Enter");
+            const key = String(action.key || action.value || action.text || "Enter");
             const locatorPlan = (0, semantic_locator_1.buildSemanticLocatorPlan)(action);
             if (locatorPlan)
                 await (0, semantic_locator_1.resolvePlaywrightLocator)(page, action).press(key, { timeout });
@@ -299,16 +2005,25 @@ async function runAction(page, project, action, defaultTimeout) {
         else if (action.type === "waitForText") {
             await page.getByText(String(action.text || action.value || "")).first().waitFor({ state: "visible", timeout });
         }
+        else if (action.type === "waitForUrl") {
+            const expected = String(action.url || action.text || action.value || "");
+            if (!expected)
+                throw new Error("waitForUrl requires url/text/value.");
+            await page.waitForURL((url) => url.toString().includes(expected), { timeout });
+        }
         else if (action.type === "waitForTimeout") {
             await page.waitForTimeout(Math.min(timeout, Number(action.value || action.text || 1000)));
         }
         else if (action.type === "evaluate") {
             await page.evaluate(String(action.text || action.value || "undefined"));
         }
-        return { kind: "action", name, status: "passed", detail: (0, semantic_locator_1.browserTargetDetail)(action) };
+        else {
+            throw new Error(`Action ${action.type} is not mapped for Playwright.`);
+        }
+        return { kind: "action", name, status: "passed", detail: browserActionDetail(action) };
     }
     catch (error) {
-        return { kind: "action", name, status: "failed", detail: (0, semantic_locator_1.browserTargetDetail)(action), error: error.message || String(error) };
+        return { kind: "action", name, status: "failed", detail: browserActionDetail(action), error: error.message || String(error) };
     }
 }
 async function runAssertion(page, assertion, signals, defaultTimeout) {
@@ -323,25 +2038,256 @@ async function runAssertion(page, assertion, signals, defaultTimeout) {
             if (visible)
                 throw new Error(`Expected target to be hidden: ${(0, semantic_locator_1.browserTargetDetail)(assertion)}`);
         }
+        else if (assertion.type === "focused" || assertion.type === "notFocused") {
+            const locator = (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first();
+            const expectedFocused = assertion.type === "focused";
+            const result = await waitForFocusedState(locator, expectedFocused, timeout);
+            if (result.focused !== expectedFocused) {
+                throw new Error(`Expected target to be ${expectedFocused ? "focused" : "not focused"}: ${(0, semantic_locator_1.browserTargetDetail)(assertion)}.`);
+            }
+        }
+        else if (assertion.type === "enabled" || assertion.type === "disabled") {
+            const enabled = await (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first().isEnabled({ timeout });
+            if (assertion.type === "enabled" && !enabled)
+                throw new Error(`Expected target to be enabled: ${(0, semantic_locator_1.browserTargetDetail)(assertion)}`);
+            if (assertion.type === "disabled" && enabled)
+                throw new Error(`Expected target to be disabled: ${(0, semantic_locator_1.browserTargetDetail)(assertion)}`);
+        }
+        else if (assertion.type === "checked" || assertion.type === "notChecked") {
+            const checked = await (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first().isChecked({ timeout });
+            if (assertion.type === "checked" && !checked)
+                throw new Error(`Expected target to be checked: ${(0, semantic_locator_1.browserTargetDetail)(assertion)}`);
+            if (assertion.type === "notChecked" && checked)
+                throw new Error(`Expected target to be unchecked: ${(0, semantic_locator_1.browserTargetDetail)(assertion)}`);
+        }
+        else if (assertion.type === "selectedValue") {
+            const expected = String(assertion.value ?? assertion.text ?? "");
+            const actual = await (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first().inputValue({ timeout });
+            if (actual !== expected)
+                throw new Error(`Expected selected value ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}.`);
+        }
+        else if (assertion.type === "selectedTextIncludes") {
+            const expected = String(assertion.value ?? assertion.text ?? "");
+            const actual = await (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first().evaluate((element) => {
+                const options = Array.from(element.selectedOptions || []);
+                return options.map(option => String(option.textContent || option.label || option.value || "").trim()).join(" | ");
+            });
+            if (!actual.includes(expected))
+                throw new Error(`Expected selected option text to include ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}.`);
+        }
+        else if (assertion.type === "inputValueEquals" || assertion.type === "inputValueIncludes") {
+            const expected = String(assertion.value ?? assertion.text ?? "");
+            if (!expected && assertion.type === "inputValueIncludes")
+                throw new Error("inputValueIncludes requires value/text as the expected substring.");
+            const actual = await (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first().inputValue({ timeout });
+            if (assertion.type === "inputValueEquals" && actual !== expected) {
+                throw new Error(`Expected input value to equal requested value: ${inputValueAssertionDetail(assertion)}; actual length=${String(actual || "").length}.`);
+            }
+            if (assertion.type === "inputValueIncludes" && !actual.includes(expected)) {
+                throw new Error(`Expected input value to include requested substring: ${inputValueAssertionDetail(assertion)}; actual length=${String(actual || "").length}.`);
+            }
+        }
+        else if (assertion.type === "attributeEquals" || assertion.type === "attributeIncludes") {
+            const attr = attributeName(assertion);
+            const expected = String(assertion.value ?? assertion.text ?? "");
+            if (!attr)
+                throw new Error(`${assertion.type} requires attribute/attributeName/attribute_name/key.`);
+            if (!expected && assertion.type === "attributeIncludes")
+                throw new Error("attributeIncludes requires value/text as the expected substring.");
+            const actual = await (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first().getAttribute(attr, { timeout });
+            if (actual === null || actual === undefined)
+                throw new Error(`Expected attribute to exist: ${attributeAssertionDetail(assertion)}.`);
+            if (assertion.type === "attributeEquals" && actual !== expected) {
+                throw new Error(`Expected attribute to equal requested value: ${attributeAssertionDetail(assertion)}; actual length=${String(actual || "").length}.`);
+            }
+            if (assertion.type === "attributeIncludes" && !actual.includes(expected)) {
+                throw new Error(`Expected attribute to include requested substring: ${attributeAssertionDetail(assertion)}; actual length=${String(actual || "").length}.`);
+            }
+        }
+        else if (assertion.type === "computedStyleEquals" || assertion.type === "computedStyleIncludes") {
+            const result = await waitForComputedStyle(page, assertion, timeout);
+            if (!result.passed) {
+                throw new Error(`Expected computed style to ${assertion.type === "computedStyleEquals" ? "equal" : "include"} requested value: ${computedStyleAssertionDetail(assertion)}; actual length=${result.actualLength}.`);
+            }
+        }
+        else if (assertion.type === "elementCountEquals" || assertion.type === "elementCountAtLeast" || assertion.type === "elementCountAtMost") {
+            const locator = (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion);
+            const result = await waitForElementCount(locator, assertion, timeout);
+            if (assertion.type === "elementCountEquals" && result.actual !== result.expected) {
+                throw new Error(`Expected element count to equal ${result.expected}, got actual count=${result.actual}: ${(0, semantic_locator_1.browserTargetDetail)(assertion)}.`);
+            }
+            if (assertion.type === "elementCountAtLeast" && result.actual < result.expected) {
+                throw new Error(`Expected element count to be at least ${result.expected}, got actual count=${result.actual}: ${(0, semantic_locator_1.browserTargetDetail)(assertion)}.`);
+            }
+            if (assertion.type === "elementCountAtMost" && result.actual > result.expected) {
+                throw new Error(`Expected element count to be at most ${result.expected}, got actual count=${result.actual}: ${(0, semantic_locator_1.browserTargetDetail)(assertion)}.`);
+            }
+        }
+        else if (assertion.type === "dialogAppeared" || assertion.type === "dialogMessageIncludes" || assertion.type === "dialogTypeEquals") {
+            await waitForBrowserDialog(signals, assertion, timeout);
+        }
+        else if (assertion.type === "popupOpened" || assertion.type === "popupUrlIncludes" || assertion.type === "popupTextIncludes" || assertion.type === "popupTitleIncludes") {
+            await waitForBrowserPopup(signals, assertion, timeout);
+        }
+        else if (assertion.type === "tableRowIncludes" || assertion.type === "tableCellTextIncludes" || assertion.type === "tableCellTextEquals") {
+            const result = await waitForTableAssertion(page, assertion, timeout);
+            if (!result?.ok) {
+                throw new Error(`Expected table assertion to pass: ${tableAssertionDetail(assertion)}; ${result?.reason || "condition was not met"}; rows=${result?.rowCount ?? "unknown"}; headers=${result?.headerCount ?? "unknown"}.`);
+            }
+        }
+        else if (assertion.type === "clipboardTextEquals" || assertion.type === "clipboardTextIncludes") {
+            const result = await waitForClipboardText(page, assertion, timeout);
+            if (assertion.type === "clipboardTextEquals" && !result.passed) {
+                throw new Error(`Expected clipboard text to equal requested value: ${clipboardAssertionDetail(assertion)}; actual length=${result.actualLength}.`);
+            }
+            if (assertion.type === "clipboardTextIncludes" && !result.passed) {
+                throw new Error(`Expected clipboard text to include requested substring: ${clipboardAssertionDetail(assertion)}; actual length=${result.actualLength}.`);
+            }
+        }
+        else if (assertion.type === "elementScreenshotNotBlank") {
+            const result = await evaluateElementScreenshotNotBlank(page, assertion, timeout);
+            if (!result.ok) {
+                throw new Error(`Expected element screenshot to be visually non-blank: ${visualAssertionDetail(assertion)}; size=${result.stats.width}x${result.stats.height}; uniqueColors=${result.stats.uniqueColors}; nonWhitePixels=${result.stats.nonWhitePixels}; nonTransparentPixels=${result.stats.nonTransparentPixels}.`);
+            }
+        }
+        else if (assertion.type === "textOrder") {
+            const result = await waitForTextOrder(page, assertion, timeout);
+            if (!result.ok) {
+                throw new Error(`Expected text order to match: ${textOrderAssertionDetail(assertion)}; foundCount=${result.foundCount ?? 0}; missingIndex=${result.missingIndex ?? "unknown"}.`);
+            }
+        }
         else if (assertion.type === "text") {
             await page.getByText(String(assertion.text || assertion.value || "")).first().waitFor({ state: "visible", timeout });
         }
+        else if (assertion.type === "urlEquals") {
+            const expected = urlAssertionExpected(assertion);
+            if (!expected)
+                throw new Error("urlEquals requires url/text/value.");
+            const matches = (rawUrl) => {
+                const actual = comparableUrl(rawUrl.toString(), expected);
+                return actual === expected;
+            };
+            if (!matches(page.url()))
+                await page.waitForURL((url) => matches(url), { timeout }).catch(() => { });
+            if (!matches(page.url()))
+                throw new Error(`Expected URL to equal "${expected}", got "${comparableUrl(page.url(), expected)}".`);
+        }
         else if (assertion.type === "urlIncludes") {
-            const value = String(assertion.value || assertion.text || "");
+            const value = urlAssertionExpected(assertion);
+            if (!value)
+                throw new Error("urlIncludes requires text/value.");
+            if (!page.url().includes(value)) {
+                await page.waitForURL((url) => url.toString().includes(value), { timeout }).catch(() => { });
+            }
             if (!page.url().includes(value))
                 throw new Error(`Expected URL to include "${value}", got "${page.url()}".`);
         }
+        else if (assertion.type === "urlNotIncludes") {
+            const value = urlAssertionExpected(assertion);
+            if (!value)
+                throw new Error("urlNotIncludes requires text/value.");
+            if (page.url().includes(value)) {
+                await page.waitForURL((url) => !url.toString().includes(value), { timeout }).catch(() => { });
+            }
+            if (page.url().includes(value))
+                throw new Error(`Expected URL not to include "${value}", got "${page.url()}".`);
+        }
+        else if (assertion.type === "titleEquals") {
+            const value = titleAssertionExpected(assertion);
+            if (!value)
+                throw new Error("titleEquals requires text/value/title.");
+            const title = await waitForTitleMatch(page, current => current === value, timeout);
+            if (title !== value)
+                throw new Error(`Expected title to equal "${value}", got "${title}".`);
+        }
         else if (assertion.type === "titleIncludes") {
-            const value = String(assertion.value || assertion.text || "");
-            const title = await page.title();
+            const value = titleAssertionExpected(assertion);
+            if (!value)
+                throw new Error("titleIncludes requires text/value/title.");
+            const title = await waitForTitleMatch(page, current => current.includes(value), timeout);
             if (!title.includes(value))
                 throw new Error(`Expected title to include "${value}", got "${title}".`);
+        }
+        else if (assertion.type === "titleNotIncludes") {
+            const value = titleAssertionExpected(assertion);
+            if (!value)
+                throw new Error("titleNotIncludes requires text/value/title.");
+            const title = await waitForTitleMatch(page, current => !current.includes(value), timeout);
+            if (title.includes(value))
+                throw new Error(`Expected title not to include "${value}", got "${title}".`);
         }
         else if (assertion.type === "elementTextIncludes") {
             const value = String(assertion.value || assertion.text || "");
             const actual = await (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first().innerText({ timeout });
             if (!actual.includes(value))
                 throw new Error(`Expected element text to include "${value}", got "${actual}".`);
+        }
+        else if (assertion.type === "accessibleNameEquals"
+            || assertion.type === "accessibleNameIncludes"
+            || assertion.type === "accessibleDescriptionEquals"
+            || assertion.type === "accessibleDescriptionIncludes"
+            || assertion.type === "ariaSnapshotIncludes") {
+            const locator = (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first();
+            const result = await (0, accessibility_assertions_1.waitForBrowserAccessibilityAssertion)(locator, assertion, timeout);
+            if (!result.passed) {
+                throw new Error(`Expected accessibility assertion to pass: ${(0, accessibility_assertions_1.browserAccessibilityAssertionDetail)(assertion)}; actual length=${result.actualLength}.`);
+            }
+        }
+        else if (assertion.type === "inViewport") {
+            const locator = (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first();
+            await locator.waitFor({ state: "visible", timeout });
+            const result = await evaluateElementInViewport(locator, signals.viewport?.width || 0, signals.viewport?.height || 0);
+            if (!result?.ok) {
+                throw new Error(`Expected target to be within viewport, got rect=${JSON.stringify(result?.rect)}, viewport=${result?.viewportWidth}x${result?.viewportHeight}, visible=${result?.visible}.`);
+            }
+        }
+        else if (assertion.type === "pageNotBlank") {
+            const result = await evaluatePageNotBlank(page);
+            if (!result?.ok)
+                throw new Error(`Expected page to have visible user-facing content, but found ${result?.reason || "no content"}.`);
+        }
+        else if (assertion.type === "noHorizontalOverflow") {
+            const result = await evaluateNoHorizontalOverflow(page, signals.viewport?.width || 0);
+            if (!result?.ok)
+                throw new Error(`Expected no horizontal overflow, got documentWidth=${result?.documentWidth}, viewportWidth=${result?.viewportWidth}, overflowPx=${result?.overflowPx}.`);
+        }
+        else if (assertion.type === "onlineState" || assertion.type === "browserOnline" || assertion.type === "browserOffline") {
+            const expected = expectedOnlineState(assertion);
+            if (expected === undefined)
+                throw new Error("onlineState requires value/text/state of online or offline.");
+            const actual = await waitForOnlineState(page, expected, timeout);
+            if (actual !== expected)
+                throw new Error(`Expected browser to be ${expected ? "online" : "offline"}, got ${actual ? "online" : "offline"}.`);
+        }
+        else if (assertion.type === "cookieExists") {
+            const cookie = await readBrowserCookie(page, assertion);
+            if (!cookie)
+                throw new Error(`Expected browser cookie to exist: ${cookieAssertionDetail(assertion)}.`);
+        }
+        else if (assertion.type === "cookieValueIncludes") {
+            const expected = String(assertion.value ?? assertion.text ?? "");
+            if (!expected)
+                throw new Error("cookieValueIncludes requires value/text as the expected substring.");
+            const cookie = await readBrowserCookie(page, assertion);
+            if (!cookie)
+                throw new Error(`Expected browser cookie to exist: ${cookieAssertionDetail(assertion)}.`);
+            if (!String(cookie.value || "").includes(expected))
+                throw new Error(`Expected browser cookie value to include requested substring: ${cookieAssertionDetail(assertion)}.`);
+        }
+        else if (assertion.type === "consoleIncludes" || assertion.type === "consoleNotIncludes" || assertion.type === "consoleNoWarnings") {
+            if (!(0, console_assertions_1.browserConsoleAssertionHasExpectation)(assertion))
+                throw new Error(`${assertion.type} requires text/value/message/messageIncludes.`);
+            if ((0, console_assertions_1.browserConsoleAssertionIsNegative)(assertion)) {
+                const settleMs = (0, console_assertions_1.browserConsoleAssertionSettleMs)(assertion, timeout);
+                const matched = await (0, console_assertions_1.waitForAbsentBrowserConsoleLine)(signals.consoleMessages, assertion, settleMs);
+                if (matched)
+                    throw new Error(`Unexpected browser console telemetry matched ${(0, console_assertions_1.browserConsoleAssertionDetail)(assertion)}: ${matched}`);
+            }
+            else {
+                const matched = await (0, console_assertions_1.waitForBrowserConsoleLine)(signals.consoleMessages, assertion, timeout);
+                if (!matched)
+                    throw new Error(`Expected browser console telemetry to match ${(0, console_assertions_1.browserConsoleAssertionDetail)(assertion)}.`);
+            }
         }
         else if (assertion.type === "consoleNoErrors") {
             if (signals.consoleErrors.length)
@@ -350,6 +2296,31 @@ async function runAssertion(page, assertion, signals, defaultTimeout) {
         else if (assertion.type === "networkNoErrors") {
             if (signals.networkErrors.length)
                 throw new Error(`Network errors observed: ${signals.networkErrors.slice(0, 3).join(" | ")}`);
+        }
+        else if (assertion.type === "networkRequestIncludes"
+            || assertion.type === "networkResponseIncludes"
+            || assertion.type === "networkRequest"
+            || assertion.type === "networkResponse"
+            || assertion.type === "networkRequestNotIncludes"
+            || assertion.type === "networkResponseNotIncludes"
+            || assertion.type === "networkRequestNot"
+            || assertion.type === "networkResponseNot") {
+            if (!(0, network_assertions_1.browserNetworkAssertionHasExpectation)(assertion))
+                throw new Error(`${assertion.type} requires text/value or structured network fields.`);
+            if ((0, network_assertions_1.browserNetworkAssertionIsNegative)(assertion)) {
+                const settleMs = (0, network_assertions_1.browserNetworkAssertionSettleMs)(assertion, timeout);
+                const matched = await (0, network_assertions_1.waitForAbsentBrowserNetworkLine)(signals.networkRequests, assertion, settleMs);
+                if (matched)
+                    throw new Error(`Unexpected browser network telemetry matched ${(0, network_assertions_1.browserNetworkAssertionDetail)(assertion) || assertion.type}: ${matched}`);
+            }
+            else {
+                const matched = await (0, network_assertions_1.waitForBrowserNetworkLine)(signals.networkRequests, assertion, timeout);
+                if (!matched)
+                    throw new Error(`Expected browser network telemetry to match ${(0, network_assertions_1.browserNetworkAssertionDetail)(assertion) || assertion.type}.`);
+            }
+        }
+        else if (assertion.type === "downloadedFile") {
+            await waitForDownloadedFile(signals, assertion, timeout);
         }
         else if (assertion.type === "jsTruthy") {
             const expression = assertion.expression || assertion.text || assertion.value || "";
@@ -394,10 +2365,17 @@ async function runBrowserCheck(browser, context, project, check, index) {
     const timeout = Number(check.timeoutMs || check.timeout_ms || workOrder.options.browserTimeoutMs);
     const screenshots = [];
     const consoleMessages = [];
+    const dialogMessages = [];
+    const popupMessages = [];
     const consoleErrors = [];
     const pageErrors = [];
     const networkRequests = [];
     const networkErrors = [];
+    const downloads = [];
+    const downloadPromises = [];
+    const dialogs = [];
+    const popups = [];
+    const popupCapturePromises = [];
     const pageSnapshots = [];
     const browserArtifacts = [];
     const steps = [];
@@ -409,15 +2387,30 @@ async function runBrowserCheck(browser, context, project, check, index) {
     const collectBrowserArtifacts = workOrder.options.collectBrowserArtifacts;
     const collectBrowserVideo = workOrder.options.collectBrowserVideo;
     const evidenceDir = collectBrowserArtifacts ? (0, utils_1.ensureDir)(path.join(workOrder.options.artifactDir, "browser-artifacts")) : "";
+    const downloadDir = (0, utils_1.ensureDir)(path.join(workOrder.options.artifactDir, "browser-artifacts", "downloads"));
     const artifactBase = browserArtifactBase(project.name, name, index);
+    const viewport = browserCheckViewport(check);
+    const contextOptions = browserCheckContextOptions(check);
     const tracePath = collectBrowserArtifacts ? path.join(evidenceDir, `${artifactBase}.trace.zip`) : "";
     const harPath = collectBrowserArtifacts ? path.join(evidenceDir, `${artifactBase}.har`) : "";
+    const monitoredOrigins = new Set([originOf(project.targetUrl), originOf(url)].filter(Boolean));
     try {
         browserContext = await browser.newContext({
-            viewport: { width: 1366, height: 900 },
+            viewport: { width: viewport.width, height: viewport.height },
+            isMobile: viewport.isMobile,
+            deviceScaleFactor: viewport.deviceScaleFactor,
+            ...(contextOptions.userAgent ? { userAgent: contextOptions.userAgent } : {}),
+            ...(contextOptions.locale ? { locale: contextOptions.locale } : {}),
+            ...(contextOptions.timezoneId ? { timezoneId: contextOptions.timezoneId } : {}),
+            ...(contextOptions.colorScheme ? { colorScheme: contextOptions.colorScheme } : {}),
+            ...(contextOptions.reducedMotion ? { reducedMotion: contextOptions.reducedMotion } : {}),
+            ...(contextOptions.geolocation ? { geolocation: contextOptions.geolocation } : {}),
+            acceptDownloads: true,
             ...(collectBrowserArtifacts ? { recordHar: { path: harPath, content: "attach" } } : {}),
             ...(collectBrowserVideo ? { recordVideo: { dir: (0, utils_1.ensureDir)(path.join(workOrder.options.artifactDir, "browser-videos")), size: { width: 1366, height: 900 } } } : {}),
         });
+        await grantClipboardPermissions(browserContext, monitoredOrigins);
+        await grantBrowserContextPermissions(browserContext, monitoredOrigins, contextOptions.permissions || []);
         if (collectBrowserArtifacts && browserContext.tracing?.start) {
             try {
                 await browserContext.tracing.start({ screenshots: true, snapshots: true, sources: true });
@@ -426,6 +2419,29 @@ async function runBrowserCheck(browser, context, project, check, index) {
             catch { }
         }
         page = await browserContext.newPage();
+        page.on("popup", (popup) => {
+            const popupRecordIndex = popups.length;
+            const pendingRecord = {
+                url: "",
+                title: "",
+                textPreview: "",
+                openedAt: (0, utils_1.nowIso)(),
+            };
+            popups.push(pendingRecord);
+            popupMessages.push(browserPopupLogLine(pendingRecord));
+            const promise = captureBrowserPopup(popup)
+                .then(record => {
+                popups[popupRecordIndex] = record;
+                popupMessages[popupRecordIndex] = browserPopupLogLine(record);
+                return record;
+            })
+                .catch((error) => {
+                pendingRecord.error = error.message || String(error);
+                popupMessages[popupRecordIndex] = browserPopupLogLine(pendingRecord);
+                return pendingRecord;
+            });
+            popupCapturePromises.push(promise);
+        });
         page.on("console", (message) => {
             const type = message.type?.() || "console";
             const text = message.text?.() || "";
@@ -435,7 +2451,40 @@ async function runBrowserCheck(browser, context, project, check, index) {
                 consoleErrors.push(text);
         });
         page.on("pageerror", (error) => pageErrors.push(error.message || String(error)));
-        page.on("request", (request) => networkRequests.push(`request ${request.method?.() || "GET"} ${request.url?.() || ""}`));
+        page.on("dialog", (dialog) => {
+            const record = {
+                type: String(dialog.type?.() || "dialog"),
+                message: String(dialog.message?.() || ""),
+                defaultValue: dialog.defaultValue ? String(dialog.defaultValue()) : undefined,
+                accepted: false,
+                occurredAt: (0, utils_1.nowIso)(),
+            };
+            const dialogIndex = dialogs.length;
+            dialogs.push(record);
+            dialogMessages.push(browserDialogLogLine(record));
+            Promise.resolve(dialog.accept?.())
+                .then(() => {
+                record.accepted = true;
+                dialogMessages[dialogIndex] = browserDialogLogLine(record);
+            })
+                .catch((error) => {
+                record.error = error.message || String(error);
+                dialogMessages[dialogIndex] = browserDialogLogLine(record);
+            });
+        });
+        page.on("download", (download) => {
+            const downloadIndex = downloadPromises.length;
+            const promise = savePlaywrightDownload(download, downloadDir, artifactBase, downloadIndex)
+                .then(record => {
+                downloads.push(record);
+                return record;
+            });
+            downloadPromises.push(promise);
+        });
+        page.on("request", (request) => {
+            networkRequests.push(`request ${request.method?.() || "GET"} ${request.url?.() || ""}`);
+            networkRequests.push(requestDetailsLine(request));
+        });
         page.on("requestfailed", (request) => {
             const line = `failed ${request.method?.() || "GET"} ${request.url?.() || ""}: ${request.failure?.()?.errorText || "request failed"}`;
             networkRequests.push(line);
@@ -443,10 +2492,27 @@ async function runBrowserCheck(browser, context, project, check, index) {
         });
         page.on("response", (response) => {
             const status = Number(response.status?.() || 0);
-            const line = `response ${status} ${response.url?.() || ""}`;
+            const responseUrl = response.url?.() || "";
+            const resourceType = responseResourceType(response);
+            const line = `response ${status}${resourceType ? ` ${resourceType}` : ""} ${responseUrl}`;
             networkRequests.push(line);
-            if (status >= 500)
-                networkErrors.push(`${status} ${response.url?.() || ""}`);
+            responseDetailsLine(response, status, resourceType, responseUrl)
+                .then(detailLine => networkRequests.push(detailLine))
+                .catch(() => { });
+            if (resourceType === "document" && status < 400) {
+                const origin = originOf(responseUrl);
+                if (origin)
+                    monitoredOrigins.add(origin);
+            }
+            const networkError = playwrightNetworkErrorForResponse({
+                status,
+                responseUrl,
+                resourceType,
+                monitoredOrigins,
+                failOnHttpResourceError: workOrder.options.failOnHttpResourceError,
+            });
+            if (networkError)
+                networkErrors.push(networkError);
         });
         const actions = check.actions?.length ? check.actions : [{ type: "goto", url, waitUntil: "domcontentloaded" }];
         for (const action of actions) {
@@ -457,7 +2523,7 @@ async function runBrowserCheck(browser, context, project, check, index) {
         }
         if (!steps.some(step => step.status === "failed")) {
             for (const assertion of check.assertions || []) {
-                const step = await runAssertion(page, assertion, { consoleErrors, networkErrors }, timeout);
+                const step = await runAssertion(page, assertion, { consoleMessages, consoleErrors, networkErrors, networkRequests, downloads, downloadPromises, dialogs, popups, viewport }, timeout);
                 steps.push(step);
             }
         }
@@ -476,6 +2542,8 @@ async function runBrowserCheck(browser, context, project, check, index) {
             await page.screenshot({ path: screenshotPath, fullPage: true });
             screenshots.push(screenshotPath);
         }
+        if (popupCapturePromises.length)
+            await Promise.all(popupCapturePromises);
         pageSnapshots.push(...await writePlaywrightPageSnapshots(page, workOrder.options.artifactDir, project.name, name, index));
         const finalState = await capturePageFinalState(page);
         const telemetryLogs = writeBrowserTelemetryLogs({
@@ -484,8 +2552,13 @@ async function runBrowserCheck(browser, context, project, check, index) {
             checkName: name,
             index,
             consoleMessages,
+            dialogMessages,
+            popupMessages,
             networkRequests,
         });
+        if (downloadPromises.length)
+            await Promise.all(downloadPromises);
+        browserArtifacts.push(...downloadArtifacts(downloads));
         browserArtifacts.push(...await finalizePlaywrightBrowserArtifacts({
             browserContext,
             page,
@@ -501,6 +2574,8 @@ async function runBrowserCheck(browser, context, project, check, index) {
             name,
             url,
             ...finalState,
+            viewport,
+            contextOptions,
             status: failed ? "failed" : "passed",
             startedAt,
             finishedAt: (0, utils_1.nowIso)(),
@@ -509,6 +2584,8 @@ async function runBrowserCheck(browser, context, project, check, index) {
             screenshots,
             pageSnapshots,
             consoleMessages,
+            dialogMessages,
+            popupMessages,
             consoleErrors,
             pageErrors,
             networkRequests,
@@ -521,6 +2598,8 @@ async function runBrowserCheck(browser, context, project, check, index) {
     }
     catch (error) {
         const finalState = await capturePageFinalState(page);
+        if (popupCapturePromises.length)
+            await Promise.all(popupCapturePromises).catch(() => []);
         pageSnapshots.push(...await writePlaywrightPageSnapshots(page, context.workOrder.options.artifactDir, project.name, name, index).catch(() => []));
         const telemetryLogs = writeBrowserTelemetryLogs({
             artifactDir: context.workOrder.options.artifactDir,
@@ -528,9 +2607,14 @@ async function runBrowserCheck(browser, context, project, check, index) {
             checkName: name,
             index,
             consoleMessages,
+            dialogMessages,
+            popupMessages,
             networkRequests,
         });
         if (browserContext) {
+            if (downloadPromises.length)
+                await Promise.all(downloadPromises);
+            browserArtifacts.push(...downloadArtifacts(downloads));
             browserArtifacts.push(...await finalizePlaywrightBrowserArtifacts({
                 browserContext,
                 page,
@@ -552,6 +2636,8 @@ async function runBrowserCheck(browser, context, project, check, index) {
             name,
             url,
             ...finalState,
+            viewport,
+            contextOptions,
             status: "blocked",
             startedAt,
             finishedAt: (0, utils_1.nowIso)(),
@@ -560,6 +2646,8 @@ async function runBrowserCheck(browser, context, project, check, index) {
             screenshots,
             pageSnapshots,
             consoleMessages,
+            dialogMessages,
+            popupMessages,
             consoleErrors,
             pageErrors,
             networkRequests,

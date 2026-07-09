@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GLOBAL_AGENT_TOOL_SPECS = void 0;
+exports.buildGlobalVisibleReplyContent = buildGlobalVisibleReplyContent;
 exports.buildGlobalClarificationSummary = buildGlobalClarificationSummary;
 exports.buildGlobalConfirmationSummary = buildGlobalConfirmationSummary;
 exports.getGlobalAgentRun = getGlobalAgentRun;
@@ -64,6 +65,7 @@ const reasoning_loop_1 = require("../reasoning-loop");
 const runtime_1 = require("./runtime");
 const workchain_1 = require("../workchain");
 const delivery_report_1 = require("../delivery-report");
+const user_facing_text_1 = require("../user-facing-text");
 const STORE_DIR = path.join(utils_1.CCM_DIR, "global-agent-runs");
 const STORE_FILE = path.join(STORE_DIR, "runs.json");
 const STORE_BACKUP = `${STORE_FILE}.bak`;
@@ -118,11 +120,88 @@ function stripNonExecutionReportSections(value) {
         .replace(/\n{3,}/g, "\n\n")
         .trim();
 }
-const GLOBAL_USER_SUMMARY_INTERNAL_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|task-notification|receipt[-_\s]*status|trace_id|session_id|WorkerContextPacket|raw\s+payload|raw\s+receipt|Runtime Kernel|workflow_timeline|native_session|scratchpad/i;
+const GLOBAL_USER_SUMMARY_INTERNAL_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|<\s*\/?\s*task-notification|task-notification|receipt[-_\s]*status|trace_id|session_id|run_id|WorkerContextPacket|raw[_\s-]*payload|raw[_\s-]*receipt|raw_report|Runtime Kernel|workflow_timeline|native_session|task_agent_session|scratchpad|execution_lease|workchain|shouldDelegate|Trace Replay|回执要求/i;
+const GLOBAL_USER_SUMMARY_TECHNICAL_EVIDENCE_PATTERN = /(?:[A-Za-z]:[\\/][^\r\n]*(?:test-agent-artifacts|artifact-manifest\.json|report\.md|report\.json|verdict\.json))|(?:test-agent-artifacts|artifact-manifest\.json|verdict\.json|raw[_\s-]*stack|stack\s+trace)/i;
+function hasGlobalUserSummaryTechnicalDetails(value) {
+    const text = String(value || "");
+    return GLOBAL_USER_SUMMARY_INTERNAL_PATTERN.test(text) || GLOBAL_USER_SUMMARY_TECHNICAL_EVIDENCE_PATTERN.test(text);
+}
 function compactGlobalUserSummaryText(value, fallback = "信息已整理。", max = 320) {
     const raw = String(value || "").replace(/\s+/g, " ").trim();
-    const text = raw && !GLOBAL_USER_SUMMARY_INTERNAL_PATTERN.test(raw) ? raw : fallback;
-    return text.length > max ? `${text.slice(0, max)}...` : text;
+    const text = raw && !hasGlobalUserSummaryTechnicalDetails(raw) ? raw : fallback;
+    const sanitized = (0, user_facing_text_1.sanitizeMainAgentUserFacingText)(text);
+    return sanitized.length > max ? `${sanitized.slice(0, max)}...` : sanitized;
+}
+function uniqueGlobalStrings(values) {
+    const seen = new Set();
+    const rows = [];
+    for (const value of values || []) {
+        const text = String(value || "").trim();
+        if (!text || seen.has(text))
+            continue;
+        seen.add(text);
+        rows.push(text);
+    }
+    return rows;
+}
+function sanitizeGlobalVisibleReplyTerminology(value) {
+    return (0, user_facing_text_1.sanitizeMainAgentUserFacingText)(String(value || "")
+        .replace(/\bCoordinator\b/g, "我")
+        .replace(/\bPipeline\b/g, "协作看板")
+        .replace(/\bRuntime Kernel\b/g, "技术运行信息")
+        .replace(/\bTrace Replay\b/g, "技术回放"));
+}
+function globalVisibleReplyFallback(status) {
+    if (status === "failed")
+        return "这次处理没有完成；原因和排障信息已放在技术详情里。";
+    if (status === "cancelled")
+        return "本次处理已停止，不会继续执行。";
+    if (status === "supervising")
+        return "已受理并进入持续跟踪；最终交付通过验收后，我会再给你完整总结。";
+    return "我已整理处理结果，技术细节已放入技术详情。";
+}
+function buildGlobalVisibleReplyContent(input = {}) {
+    const max = Math.max(80, Number(input.max || 8000));
+    const fallback = input.fallback || globalVisibleReplyFallback(input.status);
+    const rawVisible = String(input.value || "").replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
+    const rawSource = String(input.rawSource === undefined ? input.value || "" : input.rawSource || "").replace(/\r/g, "").trim();
+    let text = rawVisible || fallback;
+    const hiddenForProtocol = hasGlobalUserSummaryTechnicalDetails(text);
+    if (hiddenForProtocol)
+        text = fallback;
+    text = sanitizeGlobalVisibleReplyTerminology(text).trim() || fallback;
+    if (text.length > max)
+        text = `${text.slice(0, max)}...`;
+    const sourceHasProtocol = hasGlobalUserSummaryTechnicalDetails(rawSource);
+    const visibleChanged = !!rawSource && rawSource !== text;
+    const technicalContent = (sourceHasProtocol || hiddenForProtocol || visibleChanged) ? rawSource.slice(0, 20_000) : "";
+    return {
+        text,
+        user_text: text,
+        technical_content: technicalContent,
+        changed: !!technicalContent,
+        hidden_protocol: sourceHasProtocol || hiddenForProtocol,
+        hidden_visible_protocol: hiddenForProtocol,
+    };
+}
+function attachGlobalReplyTechnicalContent(target, content) {
+    const text = String(content || "").trim();
+    if (!target || !text)
+        return;
+    target.technical_content = text;
+    target.technicalContent = text;
+    if (!Array.isArray(target.technical_details))
+        target.technical_details = [];
+    let section = target.technical_details.find((item) => item?.id === "raw_global_reply");
+    if (!section) {
+        section = { id: "raw_global_reply", title: "原始回复", items: [] };
+        target.technical_details.push(section);
+    }
+    if (!Array.isArray(section.items))
+        section.items = [];
+    if (!section.items.some((item) => item?.label === "原始回复")) {
+        section.items.push({ label: "原始回复", value: text.slice(0, 1600) });
+    }
 }
 function getGlobalToolUserLabel(toolName) {
     const labels = {
@@ -141,8 +220,8 @@ function getGlobalToolUserLabel(toolName) {
         orchestrate_development: "创建跨项目开发任务",
         manage_supervision: "管理异步监工",
         create_task: "创建开发任务",
-        send_project_cmd: "发送项目 Agent 指令",
-        send_group_cmd: "发送群聊主 Agent 指令",
+        send_project_cmd: "发送项目执行指令",
+        send_group_cmd: "发送协作群指令",
         manage_cron: "管理定时任务",
         manage_group: "管理群聊",
         manage_project: "管理项目",
@@ -176,7 +255,7 @@ function buildGlobalClarificationSummary(input) {
         title: "需要你补充信息",
         status: "waiting_user",
         status_label: "等待你回复",
-        headline: "全局主 Agent 已停在需要你补充信息的位置，不会猜测目标或擅自执行。",
+        headline: "我已停在需要你补充信息的位置，不会猜测目标或擅自执行。",
         question,
         reason,
         answer_suggestions: [
@@ -184,7 +263,7 @@ function buildGlobalClarificationSummary(input) {
             "说明允许的范围：只分析、创建任务、修改代码或执行管理操作。",
             "说明你希望看到的验收结果：例如改动文件、验证命令或最终效果。",
         ],
-        next_action: "你回复后，全局主 Agent 会沿用同一个运行继续规划、执行和总结。",
+        next_action: "你回复后，我会沿用同一个运行继续规划、执行和总结。",
         display_policy: {
             user_text_first: true,
             technical_default_collapsed: true,
@@ -212,12 +291,12 @@ function buildGlobalConfirmationSummary(input) {
         title: "等待授权确认",
         status: "waiting_user",
         status_label: riskLabel,
-        headline: `全局主 Agent 已准备执行“${action}”，确认前不会执行这一步。`,
+        headline: `我已准备执行“${action}”，确认前不会执行这一步。`,
         action,
         risk: pending?.risk || "write",
         risk_label: riskLabel,
         target,
-        question: "是否允许全局主 Agent 继续执行这一步？",
+        question: "是否允许我继续执行这一步？",
         reason,
         answer_suggestions: [
             "确认并继续：执行这一步，然后继续检查结果并总结。",
@@ -261,17 +340,23 @@ function buildGlobalPlanSteps(decision, toolName = "") {
         status: index === 0 ? "in_progress" : "pending",
     }));
 }
-function buildGlobalPlanExecutionFollowup(planMode = {}, at = nowIso()) {
+function buildGlobalPlanExecutionFollowup(planMode = {}, at = nowIso(), feedback = "") {
     const toolLabel = compactGlobalUserSummaryText(planMode.action || "", "", 120);
+    const acceptedFeedback = compactGlobalUserSummaryText(feedback || planMode.accepted_feedback || planMode.acceptedFeedback || "", "", 320);
     return {
         schema: "ccm-main-agent-plan-execution-followup-v1",
         status: "confirmed_tracking",
         title: "计划已确认，正在按计划执行",
         headline: toolLabel
-            ? `全局主 Agent 会按已确认的计划继续执行「${toolLabel}」，并在最终总结前逐项核对验收标准。`
-            : "全局主 Agent 会按已确认的计划继续执行，并在最终总结前逐项核对验收标准。",
+            ? acceptedFeedback
+                ? `我会带着你的补充要求继续执行「${toolLabel}」，并在最终总结前逐项核对验收标准。`
+                : `我会按已确认的计划继续执行「${toolLabel}」，并在最终总结前逐项核对验收标准。`
+            : acceptedFeedback
+                ? "我会带着你的补充要求继续执行，并在最终总结前逐项核对验收标准。"
+                : "我会按已确认的计划继续执行，并在最终总结前逐项核对验收标准。",
         accepted_at: at,
-        next_action: "等待下游 Agent、工具结果或验证证据；如有偏离，主 Agent 会先返工或说明原因再总结。",
+        accepted_feedback: acceptedFeedback,
+        next_action: "等待下游执行目标、工具结果或验证证据；如有偏离，我会先返工或说明原因再总结。",
         display_policy: {
             user_text_first: true,
             technical_default_collapsed: true,
@@ -297,7 +382,7 @@ function buildGlobalPlanModeSummary(input) {
         ? impactScope.map(item => compactGlobalUserSummaryText(item, "", 100)).filter(Boolean).slice(0, 6)
         : [
             /project|项目|代码|修复|实现|send_project_cmd/i.test(`${pending?.name || ""} ${input.run.user_message}`) ? "项目代码与验证结果" : "",
-            /group|群聊|任务|派发|create_task|send_group_cmd|orchestrate/i.test(`${pending?.name || ""} ${input.run.user_message}`) ? "群聊协作与子 Agent 派发" : "",
+            /group|群聊|任务|派发|create_task|send_group_cmd|orchestrate/i.test(`${pending?.name || ""} ${input.run.user_message}`) ? "群聊协作与执行成员派发" : "",
             /delete|remove|清理|删除|manage/i.test(`${pending?.name || ""} ${input.run.user_message}`) ? "系统管理与数据状态" : "",
         ].filter(Boolean);
     if (!areas.length)
@@ -319,7 +404,7 @@ function buildGlobalPlanModeSummary(input) {
                 : `${toolLabel}会在当前授权范围内继续执行。`,
             reasons: [
                 input.risk === "high" ? "高风险操作" : input.risk === "write" ? "会改变系统状态" : "只读或低风险动作",
-                compactGlobalUserSummaryText(intent.reason || input.decision.message, "主 Agent 已形成执行判断。", 180),
+                compactGlobalUserSummaryText(intent.reason || input.decision.message, "我已形成执行判断。", 180),
             ],
         },
         impact_scope: {
@@ -337,7 +422,7 @@ function buildGlobalPlanModeSummary(input) {
         },
         acceptance: [
             "执行后必须检查工具返回结果，不能把已派发当成已完成。",
-            "涉及子 Agent 或项目改动时，最终总结必须说明完成内容、验证结果、风险和下一步。",
+            "涉及执行成员或项目改动时，最终总结必须说明完成内容、验证结果、风险和下一步。",
             "底层参数、Trace 和原始执行记录默认只放在技术详情里。",
         ],
         permission_boundaries: requiresConfirmation
@@ -359,19 +444,39 @@ function buildGlobalPlanModeSummary(input) {
         ? planMode
         : { ...planMode, plan_execution_followup: buildGlobalPlanExecutionFollowup(planMode, generatedAt) };
 }
-function updateGlobalPlanModeStatus(planMode, status, at) {
+function updateGlobalPlanModeStatus(planMode, status, at, feedback = "") {
     if (!planMode)
         return planMode;
     const terminal = ["completed", "cancelled", "failed"].includes(status);
+    const acceptedFeedback = status === "confirmed"
+        ? compactGlobalUserSummaryText(feedback, "", 720)
+        : compactGlobalUserSummaryText(planMode.accepted_feedback || planMode.acceptedFeedback || planMode.last_accept_feedback || "", "", 720);
+    const acceptedFeedbackHistory = acceptedFeedback && status === "confirmed"
+        ? [
+            ...(Array.isArray(planMode.accepted_feedback_history) ? planMode.accepted_feedback_history : []),
+            { feedback: acceptedFeedback, at, status: "accepted" },
+        ].slice(-10)
+        : Array.isArray(planMode.accepted_feedback_history) ? planMode.accepted_feedback_history : [];
+    const acceptance = Array.isArray(planMode.acceptance) ? planMode.acceptance : [];
     return {
         ...planMode,
         requires_confirmation: status === "confirmed" ? false : planMode.requires_confirmation === true && !terminal,
         auto_continue: status === "confirmed" ? true : planMode.auto_continue,
         confirmation_status: status === "confirmed" ? "confirmed" : status,
         accepted_at: status === "confirmed" ? at : planMode.accepted_at || "",
+        confirmed_at: status === "confirmed" ? at : planMode.confirmed_at || "",
+        accepted_feedback: acceptedFeedback,
+        acceptedFeedback,
+        last_accept_feedback: acceptedFeedback,
+        accepted_feedback_history: acceptedFeedbackHistory,
+        acceptance: status === "confirmed" && acceptedFeedback
+            ? uniqueGlobalStrings([...acceptance, `执行时纳入用户补充要求：${acceptedFeedback}`]).slice(0, 8)
+            : acceptance,
         completed_at: terminal ? at : planMode.completed_at || "",
         next_step: status === "confirmed"
-            ? "计划已确认，主 Agent 会继续执行并总结结果。"
+            ? acceptedFeedback
+                ? "计划已确认，我会带着补充要求继续执行并总结结果。"
+                : "计划已确认，我会继续执行并总结结果。"
             : status === "completed"
                 ? "计划已执行完成，可以查看最终总结和技术详情。"
                 : status === "cancelled"
@@ -384,7 +489,7 @@ function updateGlobalPlanModeStatus(planMode, status, at) {
             status: status === "confirmed" ? (index === 0 ? "completed" : index === 1 ? "in_progress" : step.status || "pending") : terminal ? status : step.status,
         })) : planMode.steps,
         plan_execution_followup: status === "confirmed"
-            ? buildGlobalPlanExecutionFollowup(planMode, at)
+            ? buildGlobalPlanExecutionFollowup(planMode, at, acceptedFeedback)
             : planMode.plan_execution_followup || planMode.planExecutionFollowup || null,
     };
 }
@@ -435,11 +540,36 @@ function normalizeRun(run) {
         final_report: run?.final_report || null,
         display_stream: run?.display_stream || null,
         workchain: run?.workchain || null,
+        test_agent_execution_plan: run?.test_agent_execution_plan || run?.testAgentExecutionPlan || null,
+        testAgentExecutionPlan: run?.testAgentExecutionPlan || run?.test_agent_execution_plan || null,
+        test_agent_execution_plan_summary: run?.test_agent_execution_plan_summary || run?.testAgentExecutionPlanSummary || null,
+        testAgentExecutionPlanSummary: run?.testAgentExecutionPlanSummary || run?.test_agent_execution_plan_summary || null,
+        test_agent_execution_plan_detail: String(run?.test_agent_execution_plan_detail || run?.testAgentExecutionPlanDetail || ""),
+        testAgentExecutionPlanDetail: String(run?.testAgentExecutionPlanDetail || run?.test_agent_execution_plan_detail || ""),
+        test_agent_review_summary: run?.test_agent_review_summary || run?.testAgentReviewSummary || run?.independent_review_summary || run?.independentReviewSummary || null,
+        testAgentReviewSummary: run?.testAgentReviewSummary || run?.test_agent_review_summary || run?.independentReviewSummary || run?.independent_review_summary || null,
+        independent_review_summary: run?.independent_review_summary || run?.independentReviewSummary || run?.test_agent_review_summary || run?.testAgentReviewSummary || null,
+        independentReviewSummary: run?.independentReviewSummary || run?.independent_review_summary || run?.testAgentReviewSummary || run?.test_agent_review_summary || null,
+        independent_review: Array.isArray(run?.independent_review) ? run.independent_review : Array.isArray(run?.independentReview) ? run.independentReview : [],
+        independentReview: Array.isArray(run?.independentReview) ? run.independentReview : Array.isArray(run?.independent_review) ? run.independent_review : [],
+        test_agent_report: run?.test_agent_report || run?.testAgentReport || null,
+        testAgentReport: run?.testAgentReport || run?.test_agent_report || null,
         decision_summary: run?.decision_summary || null,
         clarification_question: String(run?.clarification_question || ""),
         clarification_summary: run?.clarification_summary || run?.clarificationSummary || null,
         confirmation_summary: run?.confirmation_summary || run?.confirmationSummary || null,
         plan_mode: run?.plan_mode || run?.planMode || null,
+        plan_accept_feedback: String(run?.plan_accept_feedback || run?.planAcceptFeedback || ""),
+        last_plan_accept_feedback: String(run?.last_plan_accept_feedback || run?.lastPlanAcceptFeedback || ""),
+        last_plan_accept_feedback_at: String(run?.last_plan_accept_feedback_at || run?.lastPlanAcceptFeedbackAt || ""),
+        resume_feedback: String(run?.resume_feedback || run?.resumeFeedback || ""),
+        resumeFeedback: String(run?.resumeFeedback || run?.resume_feedback || ""),
+        last_resume_feedback: String(run?.last_resume_feedback || run?.lastResumeFeedback || ""),
+        lastResumeFeedback: String(run?.lastResumeFeedback || run?.last_resume_feedback || ""),
+        last_resume_feedback_at: String(run?.last_resume_feedback_at || run?.lastResumeFeedbackAt || ""),
+        lastResumeFeedbackAt: String(run?.lastResumeFeedbackAt || run?.last_resume_feedback_at || ""),
+        resume_feedback_history: Array.isArray(run?.resume_feedback_history) ? run.resume_feedback_history.slice(-20) : Array.isArray(run?.resumeFeedbackHistory) ? run.resumeFeedbackHistory.slice(-20) : [],
+        resumeFeedbackHistory: Array.isArray(run?.resumeFeedbackHistory) ? run.resumeFeedbackHistory.slice(-20) : Array.isArray(run?.resume_feedback_history) ? run.resume_feedback_history.slice(-20) : [],
         shadow_mode: run?.shadow_mode === true,
         original_user_message: String(run?.original_user_message || run?.user_message || "").slice(0, 50_000),
         reasoning_loop: (0, reasoning_loop_1.normalizeAgentReasoningState)(run?.reasoning_loop, run?.original_user_message || run?.user_message || ""),
@@ -521,7 +651,27 @@ function completeGlobalAgentSupervision(id, report, outcome = "completed") {
         workchain.completion_summary.delivery_report = deliveryReport;
     run.workchain = workchain;
     run.display_stream = buildGlobalDisplayStreamFromWorkchain(workchain);
-    run.final_reply = (0, delivery_report_1.formatMainAgentDeliveryReply)(deliveryReport);
+    const visibleReply = buildGlobalVisibleReplyContent({
+        value: (0, delivery_report_1.formatMainAgentDeliveryReply)(deliveryReport),
+        rawSource: report?.formatted || report?.summary || deliveryReport.markdown || "",
+        status: outcome,
+        max: 8000,
+    });
+    if (visibleReply.technical_content) {
+        attachGlobalReplyTechnicalContent(deliveryReport, visibleReply.technical_content);
+        attachGlobalReplyTechnicalContent(finalReport, visibleReply.technical_content);
+        attachGlobalReplyTechnicalContent(workchain, visibleReply.technical_content);
+        attachGlobalReplyTechnicalContent(run.display_stream, visibleReply.technical_content);
+    }
+    if (visibleReply.hidden_visible_protocol) {
+        deliveryReport.headline = visibleReply.text;
+        deliveryReport.user_text = visibleReply.text;
+        deliveryReport.markdown = visibleReply.text;
+        finalReport.summary = visibleReply.text;
+        finalReport.user_text = visibleReply.text;
+        finalReport.formatted = visibleReply.text;
+    }
+    run.final_reply = visibleReply.text;
     run.error = outcome === "failed" ? String(report?.error || "mission_supervision_failed") : "";
     run.completed_at = completedAt;
     run.updated_at = completedAt;
@@ -529,16 +679,96 @@ function completeGlobalAgentSupervision(id, report, outcome = "completed") {
     (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:supervision:${outcome}:${completedAt}`, type: `global_agent.supervision_${outcome}`, status: outcome === "completed" ? "ok" : "warning", task_id: run.mission_id || "", message: run.final_reply.slice(0, 1000), data: report || {} });
     return run;
 }
+function globalSupervisionStateVisibleSummary(state) {
+    const value = String(state || "monitoring").trim().toLowerCase();
+    if (value === "waiting_user" || value === "needs_user" || value === "blocked") {
+        return {
+            status: "supervising",
+            phase: "needs_confirmation",
+            reply: "全局任务暂时等你处理一个阻塞点；这还不是完成结果。我会保留当前上下文，等阻塞解除后继续跟踪执行、验收和最终总结。",
+            summary: "全局任务暂时等你处理一个阻塞点。",
+            next_action: "请先处理子任务提示里的阻塞点；处理后我会继续监督返工、复核和最终总结。",
+            timelineType: "global_agent.supervision_waiting_user",
+            timelineStatus: "warning",
+        };
+    }
+    if (/rework|reworking|repair|retry|返工|修复/.test(value)) {
+        return {
+            status: "supervising",
+            phase: "execute",
+            reply: "全局任务已进入返工跟踪；这还不是完成结果。我会继续盯住原实现成员修复、重新复核和最终交付总结。",
+            summary: "全局任务正在按验收缺口返工。",
+            next_action: "等待原实现成员修复缺口，并在修复后重新运行 TestAgent/独立复核。",
+            timelineType: "global_agent.supervision_rework",
+            timelineStatus: "info",
+        };
+    }
+    if (value === "paused") {
+        return {
+            status: "paused",
+            phase: "execute",
+            reply: "全局任务已暂停；当前上下文和执行记录已保留。恢复后我会继续跟踪执行、验收和最终总结。",
+            summary: "全局任务已暂停，等待恢复。",
+            next_action: "需要继续时点恢复，我会从当前上下文接上。",
+            timelineType: "global_agent.supervision_paused",
+            timelineStatus: "warning",
+        };
+    }
+    return {
+        status: "supervising",
+        phase: "execute",
+        reply: "全局任务仍在持续跟踪；这还不是完成结果。等执行、验收和复核都通过后，我会给你最终交付总结。",
+        summary: "全局任务正在持续跟踪执行和验收。",
+        next_action: "继续等待子任务结果、验收和最终总结。",
+        timelineType: "global_agent.supervision_monitoring",
+        timelineStatus: "info",
+    };
+}
 function updateGlobalAgentSupervisionState(id, state) {
     const stored = getGlobalAgentRun(id);
     if (!stored)
         return null;
     const run = normalizeRun(stored);
     run.supervision_state = String(state || run.supervision_state || "monitoring");
-    if (!["completed", "failed", "cancelled"].includes(run.status))
-        run.status = state === "paused" ? "paused" : "supervising";
+    const visible = globalSupervisionStateVisibleSummary(run.supervision_state);
+    if (!["completed", "failed", "cancelled"].includes(run.status)) {
+        run.status = visible.status;
+        run.phase = visible.phase;
+    }
+    const needsReviewRework = /rework|reworking|repair|retry|返工|修复/.test(run.supervision_state);
+    const report = {
+        summary: visible.summary,
+        next_action: visible.next_action,
+        risks: visible.status === "paused" || run.supervision_state === "waiting_user" ? [visible.summary] : [],
+        independent_review_required: needsReviewRework,
+        independent_review_gate_passed: needsReviewRework ? false : undefined,
+        independent_review_gate: needsReviewRework ? {
+            required: true,
+            status: "failed",
+            failed_count: 1,
+            failed_evidence: [{
+                    reviewer: "TestAgent",
+                    verdict: "failed",
+                    summary: visible.summary,
+                    evidence: [visible.next_action],
+                }],
+        } : undefined,
+    };
+    run.final_reply = visible.reply;
+    run.final_report = { ...(run.final_report && typeof run.final_report === "object" ? run.final_report : {}), ...report };
+    run.workchain = buildGlobalRunWorkchain(run, run.status, visible.reply, report);
+    run.display_stream = buildGlobalDisplayStreamFromWorkchain(run.workchain);
     run.updated_at = new Date().toISOString();
     saveRun(run, !volatileRuns.has(id));
+    (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "supervision_state", state: run.supervision_state, status: run.status, reply: run.final_reply });
+    (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, {
+        id: `${run.id}:supervision-state:${run.supervision_state}:${run.updated_at}`,
+        type: visible.timelineType,
+        status: visible.timelineStatus,
+        task_id: run.mission_id || "",
+        message: run.final_reply,
+        data: { state: run.supervision_state, mission_id: run.mission_id, supervisor_id: run.supervisor_id },
+    });
     return run;
 }
 function listGlobalAgentRuns(options = {}) {
@@ -601,10 +831,10 @@ const GLOBAL_DISPATCH_VISIBLE_TEXT_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUES
 function sanitizeGlobalDispatchVisibleText(value, fallback = "派发信息已整理，技术细节已放入技术详情。", max = 260) {
     let text = String(value || "").replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
     if (!text)
-        return fallback;
+        return (0, user_facing_text_1.sanitizeMainAgentRoleLanguage)(fallback);
     if (GLOBAL_DISPATCH_VISIBLE_TEXT_PATTERN.test(text))
-        return fallback;
-    text = text.replace(/回执/g, "结果说明").replace(/结构化完成信息/g, "结构化结果说明").trim();
+        return (0, user_facing_text_1.sanitizeMainAgentRoleLanguage)(fallback);
+    text = (0, user_facing_text_1.sanitizeMainAgentUserFacingText)(text.replace(/结构化完成信息/g, "结构化结果说明")).trim();
     return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 function normalizeDispatchDependency(item) {
@@ -620,9 +850,9 @@ function buildGlobalDispatchRow(input) {
         id: sanitizeGlobalDispatchVisibleText(input.id || `${input.kind}:${agent}:${task}`, `${input.kind}:${agent}`, 120),
         kind: input.kind,
         agent,
-        role: sanitizeGlobalDispatchVisibleText(input.role, "执行 Agent", 80),
+        role: sanitizeGlobalDispatchVisibleText(input.role, "执行成员", 80),
         task,
-        reason: sanitizeGlobalDispatchVisibleText(input.reason, "全局主 Agent 已根据当前目标完成派发。", 180),
+        reason: sanitizeGlobalDispatchVisibleText(input.reason, "我已根据当前目标完成派发。", 180),
         depends_on: (input.dependsOn || []).map(normalizeDispatchDependency).filter(Boolean).slice(0, 4),
         status: input.status || "dispatched",
         status_label: input.statusLabel || "已派发",
@@ -708,11 +938,11 @@ function buildGlobalDispatchLaunchSummary(run, status, stepsOverride) {
         source: "global-agent-direct-dispatch",
         title: "已派发的工作",
         count_label: `${uniqueRows.length} 个执行目标`,
-        headline: `全局主 Agent 已把这次需求交给 ${uniqueRows.length} 个执行目标：${agents}。`,
+        headline: `我已把这次需求交给 ${uniqueRows.length} 个执行目标：${agents}。`,
         rows: uniqueRows,
         acceptance: [
-            "下游 Agent 需要给出用户能看懂的处理结果、验证情况和风险。",
-            "全局主 Agent 会继续区分已派发、执行中和最终完成，不能把派发当成交付。",
+            "下游执行目标需要给出用户能看懂的处理结果、验证情况和风险。",
+            "我会继续区分已派发、执行中和最终完成，不能把派发当成交付。",
         ],
         next_action: status === "supervising"
             ? "等待下游任务卡更新执行、验收和最终总结。"
@@ -745,7 +975,7 @@ function emitGlobalDispatchLaunchProgress(runtime, run, step) {
             schema: "ccm-main-agent-live-checkpoint-v1",
             id: `${run.id}:dispatch-launch:${step.index}`,
             label: dispatchLaunchSummary.title || "已派发的工作",
-            detail: dispatchLaunchSummary.headline || "全局主 Agent 已完成派发，正在跟踪后续结果。",
+            detail: dispatchLaunchSummary.headline || "我已完成派发，正在跟踪后续结果。",
             status: "done",
             phase: "dispatching",
             at: nowIso(runtime),
@@ -852,10 +1082,50 @@ function emit(runtime, event, run) {
     }
     catch { }
 }
+function applyGlobalResumeFeedback(run, runtime, value, options = {}) {
+    const feedback = compactGlobalUserSummaryText(value, "", 720);
+    if (!feedback)
+        return "";
+    const at = nowIso(runtime);
+    const source = compactGlobalUserSummaryText(options.source || "user", "user", 80);
+    const item = { feedback, at, status: String(run.status || "") };
+    run.resume_feedback = feedback;
+    run.resumeFeedback = feedback;
+    run.last_resume_feedback = feedback;
+    run.lastResumeFeedback = feedback;
+    run.last_resume_feedback_at = at;
+    run.lastResumeFeedbackAt = at;
+    run.resume_feedback_history = [...(Array.isArray(run.resume_feedback_history) ? run.resume_feedback_history : []), item].slice(-20);
+    run.resumeFeedbackHistory = run.resume_feedback_history;
+    run.history.push({ role: "user", content: `继续处理时补充要求：${feedback}` });
+    run.history = run.history.slice(-12);
+    (0, reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, "resume_feedback", { feedback, source, at, status: run.status, phase: run.phase });
+    (0, reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, {
+        id: "resume_feedback",
+        label: "继续处理时的补充要求已纳入下一轮",
+        kind: "intent",
+        status: "passed",
+        evidence: [feedback],
+        reason: "用户在继续运行时补充了要求",
+    });
+    (0, reasoning_loop_1.explainReasoningDecision)(run.reasoning_loop, "resume_with_feedback", "用户在继续运行时补充了要求，下一轮决策必须合并这条上下文。");
+    (0, runtime_1.recordGlobalAgentRuntimeOutput)(run, { type: "resume_feedback", feedback, source, at });
+    (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, {
+        id: `${run.id}:resume-feedback:${run.resume_count + 1}:${Date.parse(at) || Date.now()}`,
+        type: "global_agent.resume_feedback",
+        status: "ok",
+        message: "继续处理时的补充要求已记录",
+        data: { source, feedback },
+    });
+    emit(runtime, { type: "resume_feedback", feedback, source, message: "继续处理时的补充要求已记录" }, run);
+    return feedback;
+}
 function buildGlobalRunWorkchain(run, status, reply = "", report = null) {
     const actionIds = run.steps.map(step => step.tool?.name || step.state).filter(Boolean);
     const deliveryReport = report?.schema === "ccm-main-agent-delivery-report-v1" ? report : report?.delivery_report || null;
     const dispatchLaunchSummary = buildGlobalDispatchLaunchSummary(run, status);
+    const visibleReply = buildGlobalVisibleReplyContent({ value: reply || run.final_reply, rawSource: reply || run.final_reply, status, max: 1200 });
+    const technicalContent = visibleReply.technical_content || report?.technical_content || report?.technicalContent || "";
     const stepRows = run.steps.map(step => ({
         id: `step-${step.index}`,
         content: step.message || step.tool?.name || step.state,
@@ -871,7 +1141,7 @@ function buildGlobalRunWorkchain(run, status, reply = "", report = null) {
         mode: run.phase,
         status,
         phase: run.phase,
-        userText: reply || run.final_reply,
+        userText: visibleReply.text,
         goal: run.original_user_message || run.user_message,
         actionIds,
         steps: stepRows,
@@ -885,7 +1155,7 @@ function buildGlobalRunWorkchain(run, status, reply = "", report = null) {
             risks: report?.risks || report?.remaining_items || deliveryReport?.risks || [],
         },
         completion: { summary: report?.summary || deliveryReport?.headline || reply, evidence: [...assertionEvidence, ...(report?.evidence || [])], risks: report?.risks || deliveryReport?.risks || [], next_action: report?.next_action || deliveryReport?.next_action || "" },
-        technical: { blockers: run.error ? [run.error] : [], execution_ids: [], session_ids: [] },
+        technical: { blockers: run.error ? [run.error] : [], execution_ids: [], session_ids: [], technical_content: technicalContent },
         traceId: run.trace_id,
         runId: run.id,
         missionId: run.mission_id,
@@ -920,10 +1190,10 @@ function buildGlobalDisplayStreamFromWorkchain(workchain) {
             selected_actions: ["dispatch_child_agent", "read_child_agent_receipts", "generate_final_reply"],
             dispatch_policy: {
                 action: "delegate",
-                reason: dispatchLaunchSummary.headline || "全局主 Agent 已完成派发。",
-                nextStep: dispatchLaunchSummary.next_action || "等待下游 Agent 更新结果。",
+                reason: dispatchLaunchSummary.headline || "我已完成派发。",
+                nextStep: dispatchLaunchSummary.next_action || "等待下游执行目标更新结果。",
             },
-            reason: dispatchLaunchSummary.headline || "全局主 Agent 已完成派发。",
+            reason: dispatchLaunchSummary.headline || "我已完成派发。",
         },
         display_stream: null,
         dispatch_launch_summary: dispatchLaunchSummary,
@@ -936,7 +1206,7 @@ function buildGlobalDisplayStreamFromWorkchain(workchain) {
             steps: [
                 { id: "understand_intent", content: "理解你的需求和目标范围", activeForm: "已理解需求目标", status: "completed" },
                 { id: "dispatch_child_agent", content: `派发给 ${dispatchLaunchSummary.count_label || `${dispatchLaunchSummary.rows?.length || 0} 个执行目标`}`, activeForm: "已派发执行目标", status: "completed" },
-                { id: "track_delivery", content: "跟踪执行、验收和最终总结", activeForm: dispatchLaunchSummary.next_action || "等待下游 Agent 更新结果", status: workchain.status === "completed" ? "completed" : "in_progress" },
+                { id: "track_delivery", content: "跟踪执行、验收和最终总结", activeForm: dispatchLaunchSummary.next_action || "等待下游执行目标更新结果", status: workchain.status === "completed" ? "completed" : "in_progress" },
             ],
         },
         user_plan_steps: [],
@@ -995,7 +1265,7 @@ function completeRun(run, runtime, status, reply, error = "") {
         run.status = "supervising";
         run.phase = "execute";
         run.supervision_state = run.supervision_state || "monitoring";
-        run.final_reply = `全局任务已派发，持久监工正在跟踪执行与验收。\n\n任务 ID：${run.mission_id || "未知"}\n监工 ID：${run.supervisor_id}\n\n这只是已受理/监督中，不代表任务已经完成。只有文件变更、验证和合并门禁全部通过后才会发送最终交付报告。`;
+        run.final_reply = "全局任务已派发，持久监工正在跟踪执行与验收。\n\n这只是已受理和监督中，不代表任务已经完成。只有文件变更、验证和交付验收都通过后，才会发送最终交付报告。";
         run.workchain = buildGlobalRunWorkchain(run, "supervising", run.final_reply, null);
         run.display_stream = buildGlobalDisplayStreamFromWorkchain(run.workchain);
         run.error = "";
@@ -1052,9 +1322,33 @@ function completeRun(run, runtime, status, reply, error = "") {
     run.display_stream = buildGlobalDisplayStreamFromWorkchain(workchain);
     if (!includeDetails)
         run.final_report = run.final_report || workchain.completion_summary;
-    run.final_reply = includeDetails && run.final_delivery_report
+    const finalReplyCandidate = includeDetails && run.final_delivery_report
         ? (0, delivery_report_1.formatMainAgentDeliveryReply)(run.final_delivery_report)
         : (0, workchain_1.formatMainAgentCompletionReply)({ reply: rawReply, workchain, includeDetails: false });
+    const visibleReply = buildGlobalVisibleReplyContent({
+        value: finalReplyCandidate,
+        rawSource: rawReply,
+        status,
+        max: 8000,
+    });
+    if (visibleReply.technical_content) {
+        run.final_report = run.final_report || {};
+        attachGlobalReplyTechnicalContent(run.final_report, visibleReply.technical_content);
+        attachGlobalReplyTechnicalContent(run.final_delivery_report, visibleReply.technical_content);
+        attachGlobalReplyTechnicalContent(workchain, visibleReply.technical_content);
+        attachGlobalReplyTechnicalContent(run.display_stream, visibleReply.technical_content);
+    }
+    if (visibleReply.hidden_visible_protocol && run.final_delivery_report) {
+        run.final_delivery_report.headline = visibleReply.text;
+        run.final_delivery_report.user_text = visibleReply.text;
+        run.final_delivery_report.markdown = visibleReply.text;
+        if (run.final_report) {
+            run.final_report.summary = visibleReply.text;
+            run.final_report.user_text = visibleReply.text;
+            run.final_report.formatted = visibleReply.text;
+        }
+    }
+    run.final_reply = visibleReply.text;
     run.completed_at = completedAt;
     run.updated_at = run.completed_at;
     run.pending_tool = null;
@@ -1553,9 +1847,26 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
             throw new Error("等待确认的工具信息不完整");
         const pending = run.pending_tool;
         const confirmedAt = nowIso(runtime);
+        const acceptFeedback = compactGlobalUserSummaryText(options.feedback || options.acceptFeedback || "", "", 720);
         run.approved_tool_signatures.push(pending.signature);
         if (run.plan_mode)
-            run.plan_mode = updateGlobalPlanModeStatus(run.plan_mode, "confirmed", confirmedAt);
+            run.plan_mode = updateGlobalPlanModeStatus(run.plan_mode, "confirmed", confirmedAt, acceptFeedback);
+        run.plan_accept_feedback = acceptFeedback;
+        run.last_plan_accept_feedback = acceptFeedback;
+        run.last_plan_accept_feedback_at = acceptFeedback ? confirmedAt : "";
+        if (acceptFeedback) {
+            run.history.push({ role: "user", content: `确认执行前计划时补充要求：${acceptFeedback}` });
+            run.history = run.history.slice(-12);
+            (0, reasoning_loop_1.captureReasoningFacts)(run.reasoning_loop, "plan_accept_feedback", acceptFeedback);
+            (0, reasoning_loop_1.setReasoningAssertion)(run.reasoning_loop, {
+                id: "plan_accept_feedback",
+                label: "用户确认计划时补充要求已纳入执行",
+                kind: "intent",
+                status: "passed",
+                evidence: [acceptFeedback],
+                reason: "用户在确认执行前计划时补充了执行要求",
+            });
+        }
         run.status = "running";
         run.phase = "execute";
         run.confirmation_summary = null;
@@ -1563,7 +1874,7 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
         run.resume_count += 1;
         run.updated_at = confirmedAt;
         saveRun(run, runtime.persist !== false);
-        (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:confirmed:${pending.signature}`, type: "global_agent.confirmed", status: "ok", message: "用户已确认待执行工具", data: { tool: pending.name } });
+        (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:confirmed:${pending.signature}`, type: "global_agent.confirmed", status: "ok", message: acceptFeedback ? "用户已确认待执行工具，并补充执行要求" : "用户已确认待执行工具", data: { tool: pending.name, has_accept_feedback: !!acceptFeedback } });
         const step = [...run.steps].reverse().find(item => item.tool?.signature === pending.signature && item.observation === undefined);
         const started = runtime.now ? runtime.now() : Date.now();
         try {
@@ -1626,8 +1937,12 @@ async function resumeGlobalAgentRun(id, runtime, options = {}) {
         saveRun(run, runtime.persist !== false);
     }
     else {
+        const resumedAt = nowIso(runtime);
+        applyGlobalResumeFeedback(run, runtime, options.feedback || options.acceptFeedback || "", { source: options.source || options.resumeSource || "user" });
         run.status = "running";
         run.resume_count += 1;
+        run.updated_at = resumedAt;
+        saveRun(run, runtime.persist !== false);
     }
     return continueLoop(run, runtime);
 }
@@ -1757,6 +2072,8 @@ async function runGlobalAgentLoopSelfTest() {
         },
         onEvent: event => supervisedEvents.push(event),
     });
+    const supervisedWaiting = updateGlobalAgentSupervisionState(supervised.id, "waiting_user");
+    const supervisedReworking = updateGlobalAgentSupervisionState(supervised.id, "reworking");
     const supervisedCompleted = completeGlobalAgentSupervision(supervised.id, { summary: "最终交付", acceptance_gate_passed: true }, "completed");
     const consultationEvents = [];
     const consultation = await startGlobalAgentRun({ message: "知识库压缩是怎么实现的" }, {
@@ -1764,6 +2081,26 @@ async function runGlobalAgentLoopSelfTest() {
         callModel: async () => ({ state: "answer", message: "这是原理说明，不执行任务", tool: null }),
         executeTool: async () => { throw new Error("不应调用工具"); },
         onEvent: event => consultationEvents.push(event),
+    });
+    const protocolLeak = await startGlobalAgentRun({ message: "普通问话：解释一下任务状态" }, {
+        persist: false,
+        callModel: async () => ({
+            state: "answer",
+            message: "CCM_AGENT_RECEIPT status=done trace_id=trace-secret <task-notification>raw payload</task-notification>",
+            intent: { category: "question", goal: "解释任务状态", action_required: false, confidence: .96, authorization_basis: "none", reason: "普通问话" },
+            tool: null,
+        }),
+        executeTool: async () => { throw new Error("不应调用工具"); },
+    });
+    const artifactLeak = await startGlobalAgentRun({ message: "普通问话：复核报告在哪里" }, {
+        persist: false,
+        callModel: async () => ({
+            state: "answer",
+            message: "TestAgent passed. Report: C:/Users/admin/.cc-connect/test-agent-artifacts/run-1/report.md; manifest: C:/Users/admin/.cc-connect/test-agent-artifacts/run-1/artifact-manifest.json; verdict: C:/Users/admin/.cc-connect/test-agent-artifacts/run-1/verdict.json",
+            intent: { category: "question", goal: "查看复核报告", action_required: false, confidence: .96, authorization_basis: "none", reason: "普通问话" },
+            tool: null,
+        }),
+        executeTool: async () => { throw new Error("不应调用工具"); },
     });
     const waitingEvents = [];
     const waiting = await startGlobalAgentRun({ message: "支付功能怎么做" }, {
@@ -1821,7 +2158,7 @@ async function runGlobalAgentLoopSelfTest() {
         onEvent: event => destructiveEvents.push(event),
     };
     const destructive = await startGlobalAgentRun({ message: "删除任务 t1", explicitWriteAuthorization: true }, destructiveRuntime);
-    const confirmed = await resumeGlobalAgentRun(destructive.id, destructiveRuntime, { approved: true });
+    const confirmed = await resumeGlobalAgentRun(destructive.id, destructiveRuntime, { approved: true, feedback: "保留任务归档记录" });
     const invalidDecisions = [
         { state: "execute", message: "错误工具", tool: { name: "not_registered", arguments: {} } },
         { state: "execute", message: "仍然错误", tool: { name: "not_registered", arguments: {} } },
@@ -1844,10 +2181,14 @@ async function runGlobalAgentLoopSelfTest() {
     let pausedRunId = "";
     let releaseFirstDecision = null;
     const pauseDecisions = [{ state: "complete", message: "恢复后完成", tool: null }];
+    const pauseEvents = [];
     const pauseRuntime = {
         persist: false,
-        onEvent: event => { if (event.type === "started")
-            pausedRunId = event.run_id; },
+        onEvent: event => {
+            pauseEvents.push(event);
+            if (event.type === "started")
+                pausedRunId = event.run_id;
+        },
         callModel: async () => {
             if (!releaseFirstDecision)
                 return new Promise(resolve => { releaseFirstDecision = resolve; });
@@ -1861,7 +2202,8 @@ async function runGlobalAgentLoopSelfTest() {
     pauseGlobalAgentRun(pausedRunId);
     releaseFirstDecision({ state: "investigate", message: "暂停前读取", tool: { name: "inspect_system", arguments: {} } });
     const paused = await pausingPromise;
-    const resumed = await resumeGlobalAgentRun(paused.id, pauseRuntime);
+    const resumeFeedback = "继续时补齐交付证据、验证结果和验收结论";
+    const resumed = await resumeGlobalAgentRun(paused.id, pauseRuntime, { feedback: resumeFeedback, source: "quality_followup" });
     const parsedFence = parseGlobalAgentDecision("```json\n{\"state\":\"answer\",\"message\":\"ok\",\"tool\":null}\n```");
     let shadowExecutions = 0;
     const shadow = await startGlobalAgentRun({ message: "请给 demo 修复登录问题", explicitWriteAuthorization: true }, {
@@ -1890,9 +2232,36 @@ async function runGlobalAgentLoopSelfTest() {
     const checks = {
         multiStepCompletes: multi.status === "completed",
         dispatchIsNotDeliveryCompletion: supervised.status === "supervising" && supervised.final_reply.includes("不代表任务已经完成"),
+        supervisingVisibleReplyHidesTechnicalIds: !/任务 ID|监工 ID|mission-supervised|supervisor-1/i.test(supervised.final_reply)
+            && JSON.stringify(supervised.display_stream?.technical_details || []).includes("mission-supervised")
+            && JSON.stringify(supervised.display_stream?.technical_details || []).includes("supervisor-1"),
         finalGateCompletesOriginalRun: supervisedCompleted?.status === "completed" && supervisedCompleted?.supervision_state === "completed",
+        globalSupervisionWaitingRefreshesVisibleWorkchain: supervisedWaiting?.status === "supervising"
+            && supervisedWaiting?.supervision_state === "waiting_user"
+            && supervisedWaiting?.phase === "needs_confirmation"
+            && supervisedWaiting?.final_reply.includes("等你处理")
+            && supervisedWaiting?.final_reply.includes("不是完成结果")
+            && supervisedWaiting?.display_stream?.workchain?.user_visible_text?.includes("等你处理")
+            && JSON.stringify(supervisedWaiting?.display_stream?.technical_details || []).includes("supervisor-1")
+            && !/supervisor-1|mission-supervised|trace_id|run_id/.test(supervisedWaiting?.final_reply || ""),
+        globalSupervisionReworkRefreshesVisibleWorkchain: supervisedReworking?.status === "supervising"
+            && supervisedReworking?.supervision_state === "reworking"
+            && supervisedReworking?.phase === "execute"
+            && supervisedReworking?.final_reply.includes("返工")
+            && supervisedReworking?.final_reply.includes("重新复核")
+            && supervisedReworking?.display_stream?.workchain?.completion_summary?.next_action?.includes("重新运行 TestAgent"),
         modelObservesAndContinues: calls.join(",") === "inspect_system,orchestrate_development",
         consultationDoesNotDispatch: consultation.tool_calls === 0,
+        globalVisibleReplySanitizesProtocol: !GLOBAL_USER_SUMMARY_INTERNAL_PATTERN.test(protocolLeak.final_reply)
+            && protocolLeak.final_reply.length > 0,
+        globalVisibleReplyStoresRawTechnicalContent: String(protocolLeak.final_report?.technical_content || "").includes("CCM_AGENT_RECEIPT")
+            && JSON.stringify(protocolLeak.display_stream?.technical_details || []).includes("CCM_AGENT_RECEIPT"),
+        globalProtocolLeakAnswerHasNoPlanMode: !protocolLeak.plan_mode && !protocolLeak.display_stream?.main_agent_decision,
+        globalVisibleReplyHidesArtifactPaths: !/test-agent-artifacts|artifact-manifest\.json|report\.md|verdict\.json/i.test(artifactLeak.final_reply)
+            && /技术详情/.test(artifactLeak.final_reply)
+            && String(artifactLeak.final_report?.technical_content || "").includes("artifact-manifest.json")
+            && JSON.stringify(artifactLeak.display_stream?.technical_details || []).includes("report.md"),
+        globalArtifactLeakAnswerHasNoPlanMode: !artifactLeak.plan_mode && !artifactLeak.display_stream?.main_agent_decision,
         ambiguousConsultationNeedsClarification: waiting.status === "waiting_clarification" && waiting.tool_calls === 0,
         clarificationContinuesSameRun: clarified.id === waiting.id && clarified.status === "completed" && clarified.reasoning_loop.clarification_chain.length === 1,
         clarificationPreservesOriginalGoal: clarified.reasoning_loop.original_goal === "支付功能怎么做" && clarified.reasoning_loop.effective_goal.includes("demo"),
@@ -1907,11 +2276,25 @@ async function runGlobalAgentLoopSelfTest() {
             && confirmed.plan_mode?.steps?.every((item) => item.status === "completed"),
         globalConfirmedPlanHasExecutionFollowup: confirmed.plan_mode?.plan_execution_followup?.schema === "ccm-main-agent-plan-execution-followup-v1"
             && confirmed.plan_mode?.plan_execution_followup?.headline?.includes("最终总结前逐项核对验收标准"),
+        globalConfirmedPlanCarriesAcceptFeedback: confirmed.plan_accept_feedback === "保留任务归档记录"
+            && confirmed.plan_mode?.accepted_feedback === "保留任务归档记录"
+            && confirmed.plan_mode?.accepted_feedback_history?.some((item) => item.feedback === "保留任务归档记录")
+            && confirmed.plan_mode?.acceptance?.some((item) => item.includes("保留任务归档记录"))
+            && confirmed.plan_mode?.plan_execution_followup?.headline?.includes("补充要求")
+            && confirmed.reasoning_loop.assertions.some(item => item.id === "plan_accept_feedback" && item.status === "passed"),
         globalOrdinaryAnswerHasNoPlanMode: !consultation.plan_mode && !consultation.display_stream?.plan_mode,
         confirmationExecutesExactPendingToolOnce: confirmed.status === "completed" && destructiveExecutions === 1,
         invalidToolsConvergeToFailure: invalid.status === "failed" && invalid.error.includes("未注册工具"),
         duplicateLoopIsStopped: duplicate.status === "failed" && duplicate.error === "duplicate_tool_loop",
         pauseAndResumeWorks: paused.status === "paused" && resumed.status === "completed",
+        globalResumeCarriesFeedback: resumed.last_resume_feedback === resumeFeedback
+            && resumed.lastResumeFeedback === resumeFeedback
+            && resumed.resume_feedback_history?.some((item) => item.feedback === resumeFeedback && item.status === "paused")
+            && resumed.resumeFeedbackHistory?.some((item) => item.feedback === resumeFeedback)
+            && resumed.history.some(item => item.role === "user" && item.content.includes(resumeFeedback))
+            && resumed.reasoning_loop.fact_snapshots.some(item => item.source === "resume_feedback" && item.summary.includes(resumeFeedback))
+            && resumed.reasoning_loop.assertions.some(item => item.id === "resume_feedback" && item.status === "passed")
+            && pauseEvents.some(event => event.type === "resume_feedback" && event.feedback === resumeFeedback && event.source === "quality_followup"),
         fencedJsonParses: parsedFence.state === "answer",
         shadowModeHasNoSideEffect: shadow.status === "completed" && shadow.shadow_mode === true && shadow.tool_calls === 0 && shadowExecutions === 0,
         completedRunsHaveWorkchain: !!multi.display_stream?.workchain && !!supervisedCompleted?.display_stream?.workchain,
@@ -1936,8 +2319,8 @@ async function runGlobalAgentLoopSelfTest() {
             && event.plan_mode?.plan_execution_followup?.next_action?.includes("验证证据")),
         globalOrdinaryAnswerHasNoPlanModeEvent: !consultationEvents.some(event => event.type === "plan_mode_ready" || event.plan_mode || event.planMode),
         globalProjectDispatchLaunchSummaryVisible: clarifiedDispatchSummary?.schema === "ccm-main-agent-dispatch-launch-summary-v1"
-            && clarifiedDispatchSummary?.rows?.some((row) => row.agent === "demo" && row.role === "项目 Agent"),
-        globalProjectDispatchLaunchSummaryStreamsLive: clarifiedDispatchEvent?.dispatch_launch_summary?.rows?.some((row) => row.agent === "demo" && row.role === "项目 Agent"),
+            && clarifiedDispatchSummary?.rows?.some((row) => row.agent === "demo" && row.role === "项目执行成员"),
+        globalProjectDispatchLaunchSummaryStreamsLive: clarifiedDispatchEvent?.dispatch_launch_summary?.rows?.some((row) => row.agent === "demo" && row.role === "项目执行成员"),
         globalOrdinaryAnswerHasNoDispatchLaunchSummary: !consultation.display_stream?.dispatch_launch_summary && !consultation.display_stream?.dispatchLaunchSummary,
         globalOrdinaryAnswerHasNoDispatchLaunchEvent: !consultationEvents.some(event => event.type === "dispatch_launch_summary"),
         globalDispatchLaunchSummaryHidesProtocol: !/CCM_AGENT_RECEIPT|task-notification|receipt-status|trace_id|session_id|raw payload/i.test(dispatchSummaryText),

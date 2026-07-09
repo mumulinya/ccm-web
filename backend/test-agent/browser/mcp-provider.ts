@@ -102,10 +102,15 @@ async function runMcpCheck(context: BrowserProviderContext, tools: string[], pro
       if (step.status === "failed") break;
     }
 
+    const readConsoleMessages = (adapter as any).readConsoleMessages;
+    if (typeof readConsoleMessages === "function") {
+      consoleMessages.push(...await readConsoleMessages.call(adapter).catch((error: any) => [`console read failed: ${error.message || String(error)}`]));
+    }
     consoleErrors.push(...await adapter.readConsoleErrors().catch((error: any) => [`console read failed: ${error.message || String(error)}`]));
+    networkRequests.push(...await adapter.readNetworkRequests().catch((error: any) => [`network read failed: ${error.message || String(error)}`]));
     networkErrors.push(...await adapter.readNetworkErrors().catch((error: any) => [`network read failed: ${error.message || String(error)}`]));
-    consoleMessages.push(...consoleErrors.map(item => `error: ${item}`));
-    networkRequests.push(...networkErrors.map(item => `error: ${item}`));
+    if (!consoleMessages.length) consoleMessages.push(...consoleErrors.map(item => `error: ${item}`));
+    if (!networkRequests.length) networkRequests.push(...networkErrors.map(item => `error: ${item}`));
     const pageText = await (adapter as any).pageText?.().catch((error: any) => {
       pageErrors.push(`page text read failed: ${error.message || String(error)}`);
       return "";
@@ -113,7 +118,7 @@ async function runMcpCheck(context: BrowserProviderContext, tools: string[], pro
 
     if (!steps.some(step => step.status === "failed")) {
       for (const assertion of check.assertions || []) {
-        const step = await adapter.runAssertion(assertion, { pageText, consoleErrors, networkErrors }, Number(assertion.timeoutMs || assertion.timeout_ms || context.workOrder.options.browserTimeoutMs));
+        const step = await adapter.runAssertion(assertion, { pageText, consoleMessages, consoleErrors, networkRequests, networkErrors }, Number(assertion.timeoutMs || assertion.timeout_ms || context.workOrder.options.browserTimeoutMs));
         steps.push(step);
       }
     }

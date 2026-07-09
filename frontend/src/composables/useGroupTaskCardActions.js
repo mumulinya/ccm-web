@@ -37,10 +37,10 @@ export function createGroupTaskCardActionHandler(options = {}) {
           }).filter(item => item.path)
           return openCodeChangeDrawer?.(
             { files, count: files.length },
-            { title: card?.title || '群聊 Agent 代码改动', subtitle: card?.goal || '', project: action.project || files.find(item => item.project)?.project || msg.agent || msg.project || '', files, selectedPath: action.selectedPath || files[0]?.path || '' }
+            { title: card?.title || '群聊代码改动', subtitle: card?.goal || '', project: action.project || files.find(item => item.project)?.project || msg.agent || msg.project || '', files, selectedPath: action.selectedPath || files[0]?.path || '' }
           )
         }
-        if (msg?.fileChanges?.files?.length) return openCodeChangeDrawer?.(msg.fileChanges, { title: card?.title || '群聊 Agent 代码改动', subtitle: card?.goal || '', project: msg.agent || msg.project || '' })
+        if (msg?.fileChanges?.files?.length) return openCodeChangeDrawer?.(msg.fileChanges, { title: card?.title || '群聊代码改动', subtitle: card?.goal || '', project: msg.agent || msg.project || '' })
         return openPipelineViewer?.(msg)
       }
       if (action.kind === 'save_knowledge') {
@@ -58,17 +58,17 @@ export function createGroupTaskCardActionHandler(options = {}) {
         return
       }
       if (action.kind === 'cancel') {
-        if (!await confirmDialog(`确定取消任务“${card?.title || id}”？运行中的 Agent 会被安全终止。`)) return
+        if (!await confirmDialog(`确定取消任务“${card?.title || id}”？运行中的执行会被安全终止。`)) return
         await postTaskCardAction('/api/tasks/cancel', { id, reason: '用户从群聊任务卡取消任务' })
       } else if (action.kind === 'confirm_plan') {
         const acceptFeedback = String(action.accept_feedback || action.acceptFeedback || action.feedback || '').trim()
         const confirmText = acceptFeedback
-          ? `确认执行“${card?.title || id}”？主 Agent 会带着你的补充要求派发子 Agent。`
-          : `确认执行“${card?.title || id}”？确认后主 Agent 才会派发子 Agent 开始修改。`
+          ? `确认执行“${card?.title || id}”？我会带着你的补充要求安排执行成员处理。`
+          : `确认执行“${card?.title || id}”？确认后我才会安排执行成员开始修改。`
         if (!await confirmDialog(confirmText)) return
         await postTaskCardAction('/api/usability/intake/confirm', { id, ...(acceptFeedback ? { accept_feedback: acceptFeedback } : {}) })
       } else if (action.kind === 'revise_plan') {
-        const feedback = window.prompt('希望主 Agent 怎么调整这份执行前计划？', action.feedback || '')
+        const feedback = window.prompt('希望我怎么调整这份执行前计划？', action.feedback || '')
         if (!feedback?.trim()) return
         await postTaskCardAction('/api/usability/intake/revise', { id, feedback: feedback.trim() })
       } else if (action.kind === 'pause') {
@@ -87,17 +87,25 @@ export function createGroupTaskCardActionHandler(options = {}) {
       } else if (action.kind === 'gap_continue') {
         await postTaskCardAction('/api/tasks/continue-from-gaps', { id, source: 'user_gap_rework', auto_execute: true })
       } else if (action.kind === 'continue_work_item') {
-        if (!await confirmDialog(`继续派发“${action.reason || action.target || '已解锁工作项'}”？主 Agent 会复用当前任务上下文，只推进这个工作项。`)) return
-        await postTaskCardAction('/api/tasks/continue-from-gaps', {
+        if (!await confirmDialog(`继续安排“${action.reason || action.target || '已解锁工作项'}”？我会复用当前任务上下文，只推进这个工作项。`)) return
+        const actionResult = await postTaskCardAction('/api/tasks/continue-from-gaps', {
           id,
           source: 'user_next_work_item',
           auto_execute: true,
           rework_kind: 'next_claimable_work_item',
+          work_item_id: action.work_item_id || '',
           target: action.target || '',
           reason: action.reason || '',
           title: action.label || '继续派发已解锁工作项',
           request_id: `next-work-item:${id}:${action.work_item_id || action.target || action.reason || Date.now()}`,
         })
+        const claimSummary = actionResult.work_item_claim_summary || actionResult.workItemClaimSummary || null
+        if (claimSummary?.headline) {
+          if (actionResult.waiting === true || claimSummary.status !== 'claimed') toast.info(claimSummary.headline)
+          else toast.success(claimSummary.headline)
+          await loadMessages?.()
+          return
+        }
       } else if (action.kind === 'targeted_rework') {
         if (!await confirmDialog(`按“${action.title || action.label || '精准返工'}”继续任务？系统会复用原任务上下文，只处理这个缺口。`)) return
         await postTaskCardAction('/api/tasks/continue-from-gaps', {
@@ -113,9 +121,10 @@ export function createGroupTaskCardActionHandler(options = {}) {
         if (!await confirmDialog(`确定把任务“${card?.title || id}”标记为已处理？系统仍会执行后端验收校验。`)) return
         await postTaskCardAction('/api/tasks/update', { id, status: 'done', status_detail: '用户从 Todo 步骤确认已处理', completed_at: new Date().toISOString() })
       } else if (action.kind === 'continue') {
-        const prompt = action.id === 'replan' ? '请重新检查目标、当前事实和验收标准，只调整未完成部分。' : window.prompt(card?.status === 'done' ? '继续修改什么？' : '追加要求：', '')
+        const preset = String(action.message || action.prompt || '').trim()
+        const prompt = preset || (action.id === 'replan' ? '请重新检查目标、当前事实和验收标准，只调整未完成部分。' : window.prompt(card?.status === 'done' ? '继续修改什么？' : '追加要求：', ''))
         if (!prompt) return
-        await postTaskCardAction('/api/tasks/continue', { id, message: prompt, source: 'user', auto_execute: true })
+        await postTaskCardAction('/api/tasks/continue', { id, message: prompt, source: action.source || 'user', auto_execute: true })
       } else if (action.kind === 'rollback') {
         if (!await confirmDialog(`确定安全撤销任务“${card?.title || id}”的最近一轮改动？`)) return
         await postTaskCardAction('/api/tasks/rollback', { id, reason: '用户从群聊任务卡安全撤销' })

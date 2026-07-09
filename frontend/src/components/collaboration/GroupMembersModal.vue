@@ -17,7 +17,7 @@ const emit = defineEmits(['close', 'add-member', 'remove-member'])
       <div class="member-section">
         <div class="section-label">当前成员</div>
         <div class="tag-list">
-          <span class="tag coordinator">🎯 协调者（主 Agent，不可移除）</span>
+          <span class="tag coordinator">🎯 协调者（不可移除）</span>
           <template v-for="member in members" :key="member.project">
             <span class="tag removable">
               {{ member.project }}

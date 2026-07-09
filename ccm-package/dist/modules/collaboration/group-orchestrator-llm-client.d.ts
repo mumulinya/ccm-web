@@ -10,6 +10,10 @@ type LlmCallOptions = {
     defaultTimeoutMs?: number;
     httpErrorPrefix?: string;
     invalidJsonMessage?: string;
+    apiMicrocompactNativeApplyPlan?: any;
+    api_microcompact_native_apply_plan?: any;
+    apiMicrocompactNativeApplyTelemetry?: any;
+    api_microcompact_native_apply_telemetry?: any;
 };
 export declare function normalizeChatCompletionsUrl(apiUrl: string): string;
 export declare function normalizeAnthropicMessagesUrl(apiUrl: string): string;
@@ -19,4 +23,23 @@ export declare function callOpenAiCompatibleChat(config: any, options: LlmCallOp
 export declare function callAnthropicCompatibleChat(config: any, options: LlmCallOptions): Promise<any>;
 export declare function callOpenAiCompatibleJson(config: any, options: LlmCallOptions): Promise<any>;
 export declare function callAnthropicCompatibleJson(config: any, options: LlmCallOptions): Promise<any>;
+export declare function runGroupOrchestratorApiMicrocompactNativeAdapterTelemetrySelfTest(): Promise<{
+    pass: boolean;
+    checks: {
+        modelReturned: boolean;
+        requestBodyIncludesContextManagement: boolean;
+        requestHeaderIncludesBeta: boolean;
+        ledgerRecordedAdapterTelemetry: boolean;
+        ledgerBindsSessionAndSnapshot: boolean;
+    };
+    captured: {
+        hasContextManagement: boolean;
+        beta: any;
+    };
+    entry: {
+        telemetryStatus: any;
+        telemetrySource: any;
+        requestPatchChecksum: any;
+    };
+}>;
 export {};

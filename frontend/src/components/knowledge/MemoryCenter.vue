@@ -19,6 +19,10 @@ const qualityReport = ref(null)
 const qualityLoading = ref(false)
 const targetedQualityLoading = ref('')
 const qualityTargetedSummary = ref(null)
+const selftestResidueArchiveLoading = ref(false)
+const selftestResidueArchiveResult = ref(null)
+const taskAgentSnapshotRetentionLoading = ref(false)
+const taskAgentSnapshotRetentionResult = ref(null)
 
 const scopes = computed(() => [
   ...(overview.value.globals || []).map(item => ({ ...item, scope: 'global' })),
@@ -78,12 +82,249 @@ const qualityRunMeta = computed(() => {
   if (qualityReport.value.durationMs !== undefined) return `耗时 ${Number(qualityReport.value.durationMs || 0)}ms`
   return ''
 })
+const qualityCheckById = id => qualityChecks.value.find(check => check.id === id) || null
+const globalBridgeCheck = computed(() => qualityCheckById('child_global_agent_memory_bridge'))
+const crossGroupSuppressionCheck = computed(() => qualityCheckById('global_memory_cross_group_suppression'))
+const crossGroupFreshnessCheck = computed(() => qualityCheckById('global_memory_cross_group_suppression_freshness'))
+const globalSelftestContaminationCheck = computed(() => qualityCheckById('global_memory_selftest_contamination'))
+const taskAgentMemoryContextSnapshotCheck = computed(() => qualityCheckById('task_agent_memory_context_snapshots'))
+const taskAgentSnapshotReport = computed(() => taskAgentMemoryContextSnapshotCheck.value?.report || overview.value.taskAgentMemoryContextSnapshotReport || {})
+const taskAgentSnapshotState = computed(() => taskAgentSnapshotReport.value?.overall?.status || taskAgentMemoryContextSnapshotCheck.value?.status || 'empty')
+const taskAgentSnapshotCards = computed(() => {
+  const overall = taskAgentSnapshotReport.value?.overall || {}
+  const retention = taskAgentSnapshotReport.value?.retention || {}
+  const result = taskAgentSnapshotRetentionResult.value || {}
+  return [
+    { label: 'snapshots', value: overall.snapshotCount || 0, note: `${overall.sessionCount || 0} sessions` },
+    { label: 'healthy', value: overall.okCount || 0, note: `warn ${overall.warnCount || 0} / fail ${overall.failCount || 0}` },
+    { label: 'orphan', value: overall.orphanFileCount || 0, note: `missing ${overall.missingFileCount || 0}` },
+    { label: 'packet gaps', value: overall.missingPacketCount || 0, note: `gate gaps ${overall.missingGateCount || 0}` },
+    { label: 'prunable', value: overall.prunableCount ?? retention.candidateCount ?? 0, note: `stale ${overall.staleCount || 0}` },
+    { label: result.dryRun ? 'preview' : 'pruned', value: result.prunedCount ?? '—', note: result.schema ? `skipped ${result.skippedCount || 0}` : 'no operation' }
+  ]
+})
+const taskAgentSnapshotRows = computed(() => {
+  const report = taskAgentSnapshotReport.value || {}
+  const rows = report.weakRows?.length ? report.weakRows : report.rows || []
+  return rows.slice(0, 8)
+})
+const taskAgentSnapshotHasPrunable = computed(() => Number(taskAgentSnapshotReport.value?.overall?.prunableCount ?? taskAgentSnapshotReport.value?.retention?.candidateCount ?? 0) > 0)
+const globalSelftestScan = computed(() => globalSelftestContaminationCheck.value?.report || {})
+const globalSelftestArchiveState = computed(() => {
+  const scan = globalSelftestScan.value
+  if (Number(scan.active_contamination_count || 0) > 0) return 'fail'
+  if (Number(scan.residue_contamination_count || 0) > 0) return 'warn'
+  return globalSelftestContaminationCheck.value ? 'ok' : 'waiting'
+})
+const globalSelftestArchiveCards = computed(() => {
+  const scan = globalSelftestScan.value
+  const result = selftestResidueArchiveResult.value || {}
+  return [
+    { label: 'active', value: scan.active_contamination_count || 0, note: 'memory.json + bak' },
+    { label: 'residue', value: scan.residue_contamination_count || 0, note: 'tmp / old backup' },
+    { label: result.dryRun ? 'preview' : 'archived', value: result.archivedCount ?? '—', note: result.schema ? `skipped ${result.skippedCount || 0}` : 'no operation' },
+    { label: 'status', value: globalSelftestArchiveState.value, note: scan.generatedAt ? formatTime(scan.generatedAt) : 'not sampled' }
+  ]
+})
+const globalSelftestResidueRows = computed(() => {
+  const check = globalSelftestContaminationCheck.value || {}
+  const residueGaps = Array.isArray(check.residueGaps) ? check.residueGaps : []
+  const rows = residueGaps.length ? residueGaps : (globalSelftestScan.value.rows || []).filter(row => row.active !== true)
+  return rows.slice(0, 8)
+})
+const globalSelftestHasResidue = computed(() => Number(globalSelftestScan.value.residue_contamination_count || 0) > 0)
+const globalSelftestHasActivePollution = computed(() => Number(globalSelftestScan.value.active_contamination_count || 0) > 0)
+const crossGroupQualityAvailable = computed(() => {
+  const ids = qualityReport.value?.availableCheckIds || []
+  return ids.includes('global_memory_cross_group_suppression') || ids.includes('global_memory_cross_group_suppression_freshness') || !!crossGroupSuppressionCheck.value || !!crossGroupFreshnessCheck.value
+})
+const globalMemoryArbitrationAvailable = computed(() => {
+  const ids = qualityReport.value?.availableCheckIds || []
+  return crossGroupQualityAvailable.value || ids.includes('child_global_agent_memory_bridge') || !!globalBridgeCheck.value
+})
+const ignoreMemoryReceiptComplianceCheck = computed(() => qualityCheckById('worker_context_packet_ignore_memory_receipt_compliance'))
+const ignoreMemoryReceiptRepairCheck = computed(() => qualityCheckById('worker_context_packet_ignore_memory_receipt_repair_work_items'))
+const ignoreMemoryReceiptCandidateCheck = computed(() => qualityCheckById('worker_context_packet_ignore_memory_receipt_repair_dispatch_candidates'))
+const ignoreMemoryReceiptBriefCheck = computed(() => qualityCheckById('worker_context_packet_ignore_memory_receipt_repair_dispatch_briefs'))
+const ignoreMemoryReceiptTypedMemoryCheck = computed(() => qualityCheckById('worker_context_packet_ignore_memory_receipt_repair_typed_memory'))
+const ignoreMemoryReceiptComplianceReport = computed(() => ignoreMemoryReceiptComplianceCheck.value?.report || {})
+const ignoreMemoryReceiptRepairReport = computed(() => ignoreMemoryReceiptRepairCheck.value?.report || {})
+const ignoreMemoryReceiptCandidateReport = computed(() => ignoreMemoryReceiptCandidateCheck.value?.report || {})
+const ignoreMemoryReceiptBriefReport = computed(() => ignoreMemoryReceiptBriefCheck.value?.report || {})
+const ignoreMemoryReceiptTypedMemoryReport = computed(() => ignoreMemoryReceiptTypedMemoryCheck.value?.report || {})
+const ignoreMemoryReceiptAvailable = computed(() => {
+  const ids = qualityReport.value?.availableCheckIds || []
+  return ids.includes('worker_context_packet_ignore_memory_receipt_compliance')
+    || ids.includes('worker_context_packet_ignore_memory_receipt_repair_work_items')
+    || ids.includes('worker_context_packet_ignore_memory_receipt_repair_dispatch_candidates')
+    || ids.includes('worker_context_packet_ignore_memory_receipt_repair_dispatch_briefs')
+    || ids.includes('worker_context_packet_ignore_memory_receipt_repair_typed_memory')
+    || !!ignoreMemoryReceiptComplianceCheck.value
+    || !!ignoreMemoryReceiptRepairCheck.value
+    || !!ignoreMemoryReceiptCandidateCheck.value
+    || !!ignoreMemoryReceiptBriefCheck.value
+    || !!ignoreMemoryReceiptTypedMemoryCheck.value
+})
+const ignoreMemoryReceiptState = computed(() => {
+  const statuses = [
+    ignoreMemoryReceiptComplianceCheck.value?.status,
+    ignoreMemoryReceiptRepairCheck.value?.status,
+    ignoreMemoryReceiptCandidateCheck.value?.status,
+    ignoreMemoryReceiptBriefCheck.value?.status,
+    ignoreMemoryReceiptTypedMemoryCheck.value?.status,
+    ignoreMemoryReceiptComplianceReport.value?.overall?.status,
+    ignoreMemoryReceiptRepairReport.value?.overall?.status,
+    ignoreMemoryReceiptCandidateReport.value?.overall?.status,
+    ignoreMemoryReceiptBriefReport.value?.overall?.status,
+    ignoreMemoryReceiptTypedMemoryReport.value?.overall?.status
+  ].filter(Boolean)
+  if (statuses.includes('fail')) return 'fail'
+  if (statuses.includes('warn')) return 'warn'
+  if (statuses.includes('ok')) return 'ok'
+  return 'waiting'
+})
+const ignoreMemoryReceiptCards = computed(() => {
+  const compliance = ignoreMemoryReceiptComplianceReport.value?.overall || {}
+  const repair = ignoreMemoryReceiptRepairReport.value?.overall || {}
+  const candidates = ignoreMemoryReceiptCandidateReport.value?.overall || {}
+  const briefs = ignoreMemoryReceiptBriefReport.value?.overall || {}
+  const typed = ignoreMemoryReceiptTypedMemoryReport.value?.overall || {}
+  return [
+    { label: 'coverage', value: compliance.coverageRate ?? '—', suffix: compliance.coverageRate !== null && compliance.coverageRate !== undefined ? '%' : '', note: `${compliance.groupsCovered || 0}/${compliance.checkedGroupCount || 0} groups` },
+    { label: 'bindings', value: compliance.ignoredPolicyBindingCount || 0, note: `${compliance.compliantReceiptCount || 0} compliant` },
+    { label: 'missing receipt', value: compliance.missingReceiptCount || 0, note: `${compliance.missingMemoryIgnoredCount || 0} memoryIgnored gaps` },
+    { label: 'wrong used', value: compliance.memoryUsedViolationCount || 0, note: 'memoryUsed violation' },
+    { label: 'repair open', value: repair.openItemCount || 0, note: `${repair.currentOpenItemCount || 0} current` },
+    { label: 'stale repair', value: repair.staleOpenItemCount || 0, note: `${repair.total || 0} total items` },
+    { label: 'candidates', value: candidates.candidateCount || 0, note: `${candidates.packetBoundCandidateCount || 0} packet bound` },
+    { label: 'briefs', value: briefs.readyBriefCount || 0, note: `${briefs.memoryIgnoredPromptBriefCount || 0} corrected prompts` },
+    { label: 'typed memory', value: typed.typedMemoryDocCount || 0, note: `${typed.recallMatchCount || 0} recall hits` }
+  ]
+})
+const ignoreMemoryReceiptRows = computed(() => {
+  const complianceRows = (ignoreMemoryReceiptComplianceReport.value?.groups || [])
+    .filter(row => Number(row.ignoredPolicyBindingCount || 0) > 0 || row.status === 'fail' || row.status === 'warn')
+    .slice(0, 8)
+    .map(row => ({
+      key: `receipt:${row.groupId || 'group'}`,
+      type: 'receipt',
+      status: row.status || 'waiting',
+      title: row.groupId || 'group',
+      detail: `${row.compliantReceiptCount || 0}/${row.ignoredPolicyBindingCount || 0} compliant · missing ${row.missingReceiptCount || 0} · reason ${row.missingReasonCount || 0} · used ${row.memoryUsedViolationCount || 0}`,
+      code: row.file || 'binding ledger'
+    }))
+  const repairRows = (ignoreMemoryReceiptRepairReport.value?.groups || [])
+    .filter(row => Number(row.requiredActionCount || 0) > 0 || Number(row.openItemCount || 0) > 0 || row.status === 'fail' || row.status === 'warn')
+    .slice(0, 8)
+    .map(row => ({
+      key: `repair:${row.groupId || 'group'}`,
+      type: 'repair',
+      status: row.status || 'waiting',
+      title: row.groupId || 'group',
+      detail: `required ${row.requiredActionCount || 0} · open ${row.openItemCount || 0} · current ${row.currentOpenItemCount || 0} · stale ${row.staleOpenItemCount || 0}`,
+      code: row.file || 'work items'
+    }))
+  const candidateRows = (ignoreMemoryReceiptCandidateReport.value?.groups || [])
+    .filter(row => Number(row.expectedCandidateCount || 0) > 0 || Number(row.candidateCount || 0) > 0 || row.status === 'fail' || row.status === 'warn')
+    .slice(0, 8)
+    .map(row => ({
+      key: `candidate:${row.groupId || 'group'}`,
+      type: 'candidate',
+      status: row.status || 'waiting',
+      title: row.groupId || 'group',
+      detail: `expected ${row.expectedCandidateCount || 0} · covered ${row.coveredCandidateCount || 0} · packet ${row.packetBoundCandidateCount || 0} · prompt ${row.promptPatchCandidateCount || 0}`,
+      code: row.file || 'dispatch candidates'
+    }))
+  const briefRows = (ignoreMemoryReceiptBriefReport.value?.groups || [])
+    .filter(row => Number(row.expectedBriefCount || 0) > 0 || Number(row.readyBriefCount || 0) > 0 || row.status === 'fail' || row.status === 'warn')
+    .slice(0, 8)
+    .map(row => ({
+      key: `brief:${row.groupId || 'group'}`,
+      type: 'brief',
+      status: row.status || 'waiting',
+      title: row.groupId || 'group',
+      detail: `expected ${row.expectedBriefCount || 0} · ready ${row.readyBriefCount || 0} · memoryIgnored ${row.memoryIgnoredPromptBriefCount || 0}`,
+      code: row.file || 'dispatch briefs'
+    }))
+  const typedRows = (ignoreMemoryReceiptTypedMemoryReport.value?.groups || [])
+    .filter(row => Number(row.inputRowCount || 0) > 0 || Number(row.typedMemoryDocCount || 0) > 0 || row.status === 'fail' || row.status === 'warn')
+    .slice(0, 8)
+    .map(row => ({
+      key: `typed-memory:${row.groupId || 'group'}`,
+      type: 'typed',
+      status: row.status || 'waiting',
+      title: row.groupId || 'group',
+      detail: `rows ${row.inputRowCount || 0} · docs ${row.typedMemoryDocCount || 0} · archive ${row.archivedCount || 0} · recall ${row.recallMatchCount || 0}`,
+      code: row.typedMemoryLedgerFile || 'typed MEMORY.md'
+    }))
+  return [...complianceRows, ...repairRows, ...candidateRows, ...briefRows, ...typedRows].slice(0, 18)
+})
+const ignoreMemoryReceiptWorkItemRows = computed(() => (ignoreMemoryReceiptRepairReport.value?.groups || [])
+  .flatMap(group => (group.items || []).map(item => ({
+    ...item,
+    groupId: group.groupId || '',
+    groupStatus: group.status || 'waiting',
+    key: `ignore-memory-work:${group.groupId || 'group'}:${item.id || item.work_item_id || item.packet_id || item.binding_id || ''}`
+  })))
+  .filter(item => item.id || item.work_item_id)
+  .slice(0, 10))
+const crossGroupQualityCards = computed(() => {
+  const bridge = globalBridgeCheck.value?.report?.overall || {}
+  const suppression = crossGroupSuppressionCheck.value?.report?.overall || {}
+  const freshness = crossGroupFreshnessCheck.value?.report?.overall || {}
+  return [
+    { label: 'semantic', value: bridge.semanticConflictCount || bridge.semanticRiskCount || 0, note: `${bridge.semanticRiskCount || 0} risk rows` },
+    { label: 'max risk', value: bridge.maxSemanticRiskScore || 0, note: 'semantic score' },
+    { label: 'hard', value: suppression.suppressedCount || 0, note: `${suppression.checkedGroupCount || 0} groups` },
+    { label: 'advisory', value: freshness.advisoryCount || 0, note: `${freshness.checkedGroupCount || 0} groups` },
+    { label: 'superseded', value: freshness.supersededCount || 0, note: 'new global memory' },
+    { label: 'missing', value: Number(suppression.missingRenderCount || 0) + Number(suppression.missingReferenceCount || 0) + Number(freshness.missingRenderCount || 0) + Number(freshness.missingReferenceCount || 0), note: 'render/source' }
+  ]
+})
+const normalizeCrossGroupQualityRow = (group, item, mode) => {
+  const freshness = item?.freshness || {}
+  const sourceLedgers = item?.sourceLedgers || []
+  return {
+    key: `${mode}:${group.groupId || 'group'}:${item?.globalMemoryId || 'memory'}:${item?.reason || item?.status || ''}`,
+    mode,
+    groupId: group.groupId || '',
+    targetProject: group.targetProject || '',
+    globalMemoryId: item?.globalMemoryId || '',
+    status: item?.status || item?.reason || '',
+    action: item?.action || '',
+    groupCount: item?.groupCount || 0,
+    conflictGroupCount: item?.conflictGroupCount || 0,
+    occurrenceCount: item?.totalOccurrenceCount || 0,
+    sourceCount: sourceLedgers.length,
+    source: sourceLedgers[0]?.file || group.crossGroupSuppressionSourceDir || '',
+    latestEvidenceAt: freshness.latestEvidenceAt || '',
+    globalUpdatedAt: freshness.globalUpdatedAt || '',
+    superseded: freshness.supersededByNewerGlobalMemory === true,
+    decayed: freshness.decayedToAdvisory === true
+  }
+}
+const crossGroupSuppressionRows = computed(() => {
+  const groups = crossGroupSuppressionCheck.value?.report?.groups || []
+  return groups.flatMap(group => (group.crossGroupSuppressionItems || []).map(item => normalizeCrossGroupQualityRow(group, item, 'hard'))).slice(0, 12)
+})
+const crossGroupAdvisoryRows = computed(() => {
+  const groups = crossGroupFreshnessCheck.value?.report?.groups || []
+  return groups.flatMap(group => (group.crossGroupSuppressionAdvisoryItems || []).map(item => normalizeCrossGroupQualityRow(group, item, 'advisory'))).slice(0, 12)
+})
+const crossGroupQualityRows = computed(() => [...crossGroupSuppressionRows.value, ...crossGroupAdvisoryRows.value].slice(0, 16))
+const crossGroupRowState = row => row.mode === 'hard' ? 'fail' : row.superseded ? 'ok' : row.decayed ? 'warn' : 'waiting'
 const postCompactUsage = computed(() => detail.value?.postCompactUsage || null)
 const postCompactTotals = computed(() => postCompactUsage.value?.summary?.totals || postCompactUsage.value?.ledger?.totals || {})
 const postCompactDiscipline = computed(() => postCompactUsage.value?.discipline || null)
 const postCompactDispatch = computed(() => postCompactUsage.value?.dispatch || null)
 const childAgentReliability = computed(() => postCompactUsage.value?.agentReliability || null)
 const compactBoundaryTimeline = computed(() => postCompactUsage.value?.boundaryTimeline || null)
+const compactStrategyDecision = computed(() => postCompactUsage.value?.compactStrategyDecision || null)
+const postCompactCleanupAudit = computed(() => postCompactUsage.value?.postCompactCleanupAudit || null)
+const apiMicroCompactEditPlan = computed(() => postCompactUsage.value?.apiMicroCompactEditPlan || null)
+const apiMicrocompactReceiptDiscipline = computed(() => postCompactUsage.value?.apiMicrocompactReceiptDiscipline || null)
+const apiMicrocompactNativeApplyReadiness = computed(() => postCompactUsage.value?.apiMicrocompactNativeApplyReadiness || null)
+const apiMicrocompactNativeApplyProof = computed(() => postCompactUsage.value?.apiMicrocompactNativeApplyProof || null)
 const groupSessionMemory = computed(() => postCompactUsage.value?.sessionMemory || selectedSummary.value?.sessionMemory || null)
 const compactionHooks = computed(() => postCompactUsage.value?.compactionHooks || null)
 const boundaryReplay = computed(() => postCompactUsage.value?.boundaryReplay || null)
@@ -104,6 +345,7 @@ const compactFileReferenceReadPlanRevalidationDiscipline = computed(() => postCo
 const compactFileReferenceReadPlanRevalidationSessionBinding = computed(() => postCompactUsage.value?.compactFileReferenceReadPlanRevalidationSessionBinding || null)
 const compactFileReferenceAccess = computed(() => postCompactUsage.value?.compactFileReferenceAccess || null)
 const compactFileReferenceDiscipline = computed(() => postCompactUsage.value?.compactFileReferenceDiscipline || null)
+const taskAgentMemoryContextSnapshots = computed(() => postCompactUsage.value?.taskAgentMemoryContextSnapshots || null)
 const boundaryReplayRepairWorkRows = computed(() => {
   const work = boundaryReplayRepairWorkItems.value || {}
   return (work.items || work.openItems || []).slice(0, 8)
@@ -179,6 +421,27 @@ const groupToolContinuityRows = computed(() => {
   for (const item of (continuity.missing?.mcp || []).slice(0, 5)) rows.push({ key: `missing-mcp:${item}`, type: 'missing', state: 'ignored', title: item, detail: 'missing MCP' })
   for (const item of (continuity.missing?.skill || []).slice(0, 5)) rows.push({ key: `missing-skill:${item}`, type: 'missing', state: 'ignored', title: item, detail: 'missing Skill' })
   return rows
+})
+const taskAgentMemoryContextSnapshotState = computed(() => {
+  const snapshots = taskAgentMemoryContextSnapshots.value || {}
+  if (snapshots.status === 'fail' || Number(snapshots.failCount || 0) > 0) return 'fail'
+  if (snapshots.status === 'warn' || Number(snapshots.warnCount || 0) > 0 || Number(snapshots.prunableCount || 0) > 0) return 'warn'
+  if (Number(snapshots.snapshotCount || 0) > 0) return 'ok'
+  return 'waiting'
+})
+const taskAgentMemoryContextSnapshotCards = computed(() => {
+  const snapshots = taskAgentMemoryContextSnapshots.value || {}
+  return [
+    { label: 'snapshots', value: snapshots.snapshotCount || 0, note: `${(snapshots.projects || []).length} projects` },
+    { label: 'healthy', value: snapshots.okCount || 0, note: `warn ${snapshots.warnCount || 0}` },
+    { label: 'failed', value: snapshots.failCount || 0, note: 'broken evidence' },
+    { label: 'stale', value: snapshots.staleCount || 0, note: `prunable ${snapshots.prunableCount || 0}` }
+  ]
+})
+const taskAgentMemoryContextSnapshotRows = computed(() => {
+  const snapshots = taskAgentMemoryContextSnapshots.value || {}
+  const rows = snapshots.weakRows?.length ? snapshots.weakRows : snapshots.rows || []
+  return rows.slice(0, 8)
 })
 const compactFileReferenceCards = computed(() => {
   const refs = compactFileReferences.value || {}
@@ -343,6 +606,172 @@ const compactBoundaryTimelineCards = computed(() => {
     { label: 'pressure', value: boundary.tokenPressure ?? '—', suffix: boundary.tokenPressure !== null && boundary.tokenPressure !== undefined ? '%' : '', note: 'post compact' },
     { label: 'events', value: timeline.events?.length || 0, note: `gaps ${timeline.gaps?.length || 0}` }
   ]
+})
+const compactStrategyDecisionState = computed(() => {
+  const decision = compactStrategyDecision.value || {}
+  if (!decision.schema || decision.status === 'empty') return 'waiting'
+  if (decision.status === 'fail' || (decision.failedInvariants || []).length) return 'fail'
+  if (decision.status === 'warn' || (decision.gaps || []).length) return 'warn'
+  return 'ok'
+})
+const compactStrategyDecisionCards = computed(() => {
+  const decision = compactStrategyDecision.value || {}
+  const micro = decision.microCompact || {}
+  return [
+    { label: 'mode', value: decision.mode || '—', note: decision.reason || decision.status || 'waiting' },
+    { label: 'window', value: decision.messagesToSummarize || 0, note: `kept ${decision.keptMessages || 0}` },
+    { label: 'tokens', value: decision.postCompactTokenEstimate || 0, note: `${formatNumber(decision.preCompactTokenCount || 0)} before` },
+    { label: 'pressure', value: decision.tokenPressurePercent ?? '—', suffix: decision.tokenPressurePercent !== null && decision.tokenPressurePercent !== undefined ? '%' : '', note: 'pre compact' },
+    { label: 'micro freed', value: micro.tokensFreed || 0, note: `${micro.compactedMessageCount || 0} compacted` },
+    { label: 'invariants', value: decision.invariantPass ? 'ok' : ((decision.failedInvariants || []).length || 'check'), note: `gaps ${(decision.gaps || []).length}` }
+  ]
+})
+const compactStrategyDecisionGaps = computed(() => {
+  const decision = compactStrategyDecision.value || {}
+  return (decision.gaps || []).slice(0, 6)
+})
+const postCompactCleanupAuditState = computed(() => {
+  const cleanup = postCompactCleanupAudit.value || {}
+  if (!cleanup.schema || cleanup.status === 'empty') return 'waiting'
+  if (cleanup.status === 'fail' || cleanup.auditStatus === 'failed' || (cleanup.failedChecks || []).length) return 'fail'
+  if (cleanup.status === 'warn' || cleanup.auditStatus === 'degraded' || (cleanup.gaps || []).length) return 'warn'
+  return 'ok'
+})
+const postCompactCleanupAuditCards = computed(() => {
+  const cleanup = postCompactCleanupAudit.value || {}
+  return [
+    { label: 'status', value: cleanup.auditStatus || cleanup.status || '—', note: cleanup.action || 'waiting' },
+    { label: 'checks', value: cleanup.passedChecks || 0, note: `of ${cleanup.checkCount || 0}` },
+    { label: 'actions', value: cleanup.cleanupActionCount || 0, note: cleanup.mode || 'cleanup' },
+    { label: 'skills', value: cleanup.preserveInvokedSkills ? 'keep' : 'check', note: `${(cleanup.skillHints || []).length} hints` },
+    { label: 'tools', value: cleanup.preserveToolContinuity ? 'keep' : 'check', note: cleanup.resetDerivedCompactState ? 'reset derived' : 'missing reset' },
+    { label: 'legacy', value: cleanup.inferredFromLegacy ? 'yes' : 'no', note: cleanup.stored ? 'stored audit' : 'inferred' }
+  ]
+})
+const postCompactCleanupAuditRows = computed(() => {
+  const cleanup = postCompactCleanupAudit.value || {}
+  return (cleanup.cleanupActions || []).slice(0, 8)
+})
+const postCompactCleanupAuditGaps = computed(() => {
+  const cleanup = postCompactCleanupAudit.value || {}
+  return (cleanup.gaps || []).slice(0, 6)
+})
+const apiMicroCompactEditPlanState = computed(() => {
+  const plan = apiMicroCompactEditPlan.value || {}
+  if (!plan.schema || plan.status === 'empty') return 'waiting'
+  if (plan.status === 'fail' || (plan.gaps || []).some(gap => gap.severity === 'fatal')) return 'fail'
+  if (plan.status === 'warn' || (plan.gaps || []).length) return 'warn'
+  return 'ok'
+})
+const apiMicroCompactEditPlanCards = computed(() => {
+  const plan = apiMicroCompactEditPlan.value || {}
+  return [
+    { label: 'edits', value: plan.editCount || 0, note: plan.recommended ? 'recommended' : 'advisory' },
+    { label: 'tokens', value: plan.activeTokens || 0, note: `trigger ${formatNumber(plan.trigger?.value || plan.maxInputTokens || 0)}` },
+    { label: 'target', value: plan.targetInputTokens || 0, note: `clear ${formatNumber(plan.clearAtLeastTokens || 0)}` },
+    { label: 'thinking', value: plan.thinkingBlocks || 0, note: 'blocks' },
+    { label: 'tool use', value: plan.toolUses || 0, note: `results ${plan.toolResults || 0}` },
+    { label: 'legacy', value: plan.inferredFromLegacy ? 'yes' : 'no', note: plan.stored ? 'stored plan' : 'inferred' }
+  ]
+})
+const apiMicroCompactEditPlanRows = computed(() => {
+  const plan = apiMicroCompactEditPlan.value || {}
+  return (plan.strategies || []).slice(0, 8)
+})
+const apiMicroCompactEditPlanGaps = computed(() => {
+  const plan = apiMicroCompactEditPlan.value || {}
+  return (plan.gaps || []).slice(0, 6)
+})
+const apiMicrocompactReceiptDisciplineState = computed(() => {
+  const discipline = apiMicrocompactReceiptDiscipline.value || {}
+  if (!discipline.schema || discipline.status === 'empty') return 'waiting'
+  return discipline.status || 'waiting'
+})
+const apiMicrocompactReceiptDisciplineCards = computed(() => {
+  const discipline = apiMicrocompactReceiptDiscipline.value || {}
+  return [
+    { label: 'checked', value: discipline.checked || 0, note: `passed ${discipline.passed || 0}` },
+    { label: 'missing', value: discipline.missing || 0, note: discipline.status || 'waiting' },
+    { label: 'score', value: discipline.score ?? '—', suffix: discipline.score !== null && discipline.score !== undefined ? '%' : '', note: 'receipt' },
+    { label: 'advisory', value: discipline.advisory || 0, note: `native ${discipline.nativeApplied || 0}` },
+    { label: 'session gap', value: discipline.sessionMismatch || 0, note: 'binding' },
+    { label: 'ignored', value: discipline.ignored || 0, note: 'declared' },
+    { label: 'tasks', value: discipline.checkedTaskCount || 0, note: `${discipline.taskCount || 0} total` }
+  ]
+})
+const apiMicrocompactReceiptDisciplineRows = computed(() => {
+  const discipline = apiMicrocompactReceiptDiscipline.value || {}
+  return (discipline.rows || []).slice(0, 8)
+})
+const apiMicrocompactReceiptDisciplineGaps = computed(() => {
+  const discipline = apiMicrocompactReceiptDiscipline.value || {}
+  return (discipline.gaps || []).slice(0, 6)
+})
+const apiMicrocompactNativeApplyReadinessState = computed(() => {
+  const readiness = apiMicrocompactNativeApplyReadiness.value || {}
+  if (!readiness.schema || readiness.status === 'empty') return 'waiting'
+  return readiness.status || 'waiting'
+})
+const apiMicrocompactNativeApplyReadinessCards = computed(() => {
+  const readiness = apiMicrocompactNativeApplyReadiness.value || {}
+  return [
+    { label: 'checked', value: readiness.checked || 0, note: `passed ${readiness.passed || 0}` },
+    { label: 'native ready', value: readiness.nativeReady || 0, note: 'provider API' },
+    { label: 'advisory', value: readiness.advisory || 0, note: 'CLI / unsupported' },
+    { label: 'session bound', value: readiness.sessionBound || 0, note: 'per run' },
+    { label: 'invalid', value: readiness.missing || 0, note: readiness.status || 'waiting' },
+    { label: 'score', value: readiness.score ?? '—', suffix: readiness.score !== null && readiness.score !== undefined ? '%' : '', note: 'contract' }
+  ]
+})
+const apiMicrocompactNativeApplyReadinessRows = computed(() => {
+  const readiness = apiMicrocompactNativeApplyReadiness.value || {}
+  return (readiness.rows || []).slice(0, 8)
+})
+const apiMicrocompactNativeApplyReadinessGaps = computed(() => {
+  const readiness = apiMicrocompactNativeApplyReadiness.value || {}
+  return (readiness.gaps || []).slice(0, 6)
+})
+const apiMicrocompactNativeApplyProofState = computed(() => {
+  const proof = apiMicrocompactNativeApplyProof.value || {}
+  if (!proof.schema || proof.status === 'empty') return 'waiting'
+  return proof.status || 'waiting'
+})
+const apiMicrocompactNativeApplyProofCards = computed(() => {
+  const proof = apiMicrocompactNativeApplyProof.value || {}
+  const adapterMatched = proof.requestTelemetryAdapterMatchedCount || 0
+  const receiptMatched = proof.requestTelemetryReceiptMatchedCount || 0
+  const strong = proof.requestTelemetryStrongCount || 0
+  const stale = proof.requestTelemetryStaleCount || 0
+  const receiptOnly = proof.requestTelemetryReceiptOnlyCount || 0
+  const sessionBound = proof.requestTelemetrySessionBoundCount || 0
+  const sessionMismatch = proof.requestTelemetrySessionMismatchCount || 0
+  const dispatchBound = proof.requestTelemetryDispatchBoundCount || 0
+  const dispatchUnbound = proof.requestTelemetryDispatchUnboundCount || 0
+  const runnerBound = proof.requestTelemetryRunnerBoundCount || 0
+  const runnerMissing = proof.requestTelemetryRunnerMissingCount || 0
+  const runnerMismatch = proof.requestTelemetryRunnerMismatchCount || 0
+  return [
+    { label: 'checked', value: proof.checked || 0, note: `passed ${proof.passed || 0}` },
+    { label: 'strong', value: strong, note: 'fresh + bound' },
+    { label: 'telemetry', value: proof.requestTelemetryMatchedCount || 0, note: `adapter ${adapterMatched} · receipt ${receiptMatched}` },
+    { label: 'adapter', value: adapterMatched, note: `fresh ${strong}` },
+    { label: 'session', value: sessionBound, note: `mismatch ${sessionMismatch}` },
+    { label: 'dispatch', value: dispatchBound, note: `unbound ${dispatchUnbound}` },
+    { label: 'runner', value: runnerBound, note: `missing ${runnerMissing} · mismatch ${runnerMismatch}` },
+    { label: 'weak', value: receiptOnly + stale, note: `receipt ${receiptOnly} · stale ${stale}` },
+    { label: 'failed', value: proof.failedProofCount || 0, note: 'bad claim' },
+    { label: 'missing', value: (proof.missingProofCount || 0) + (proof.requestTelemetryInvalidCount || 0) + (proof.requestTelemetryMissingCount || 0) + sessionMismatch + dispatchUnbound, note: 'proof / binding' },
+    { label: 'ledger', value: proof.ledgerEntryCount || 0, note: proof.requestTelemetryLedgerFile || proof.ledgerFile || 'sidecar' },
+    { label: 'score', value: proof.score ?? '—', suffix: proof.score !== null && proof.score !== undefined ? '%' : '', note: proof.status || 'proof' }
+  ]
+})
+const apiMicrocompactNativeApplyProofRows = computed(() => {
+  const proof = apiMicrocompactNativeApplyProof.value || {}
+  return (proof.rows || []).slice(0, 8)
+})
+const apiMicrocompactNativeApplyProofGaps = computed(() => {
+  const proof = apiMicrocompactNativeApplyProof.value || {}
+  return (proof.gaps || []).slice(0, 6)
 })
 const compactionHookCards = computed(() => {
   const hooks = compactionHooks.value || {}
@@ -628,13 +1057,105 @@ const openEvidence = async item => {
   }
 }
 
+const operationTitle = operation => {
+  if (operation === 'compact') return '手动压缩'
+  if (operation === 'rebuild') return '从原始数据重建'
+  if (operation === 'disable') return '禁用全局记忆'
+  if (operation === 'enable') return '启用全局记忆'
+  if (operation === 'block_pattern') return '添加禁记规则'
+  if (operation === 'archive_selftest_residue') return '归档自测残留'
+  if (operation === 'prune_task_agent_memory_context_snapshots') return '清理子 Agent 记忆快照'
+  return '从备份回滚'
+}
+
+const operationNote = operation => {
+  if (operation === 'compact') return '按照当前压缩边界收敛上下文，不删除加密原始转录。'
+  if (operation === 'rebuild') return '忽略旧摘要边界，从加密原始转录重新生成全局记忆。'
+  if (operation === 'disable') return '停止新的长期记忆写入与提取，已有记忆仍可查看和删除。'
+  if (operation === 'enable') return '恢复长期记忆写入、压缩和按需召回。'
+  if (operation === 'block_pattern') return '匹配此文本或正则表达式的内容不会进入长期记忆。'
+  if (operation === 'archive_selftest_residue') return '只移动 Global Agent memory 目录里的历史自测残留，不处理 active memory 或 active backup。'
+  if (operation === 'prune_task_agent_memory_context_snapshots') return '按 retention 预案清理过期或孤儿 task Agent 记忆上下文快照，不触碰最新会话快照。'
+  return '使用最近有效备份替换主记忆，并保留回滚前快照。'
+}
+
 const openOperation = operation => {
-  operationState.value = { operation, reason: '', pattern: '' }
+  operationState.value = {
+    operation,
+    reason: operation === 'archive_selftest_residue'
+      ? 'Memory Center 归档 Global Agent 自测残留'
+      : operation === 'prune_task_agent_memory_context_snapshots'
+        ? 'Memory Center 清理过期 task Agent 记忆上下文快照'
+        : '',
+    pattern: ''
+  }
 }
 
 const removeBlockedPattern = async pattern => {
   operationState.value = { operation: 'remove_block_pattern', reason: '用户删除禁记规则', pattern }
   await runOperation()
+}
+
+const runGlobalSelftestResidueArchive = async (dryRun = true, reason = '') => {
+  if (selftestResidueArchiveLoading.value) return
+  selftestResidueArchiveLoading.value = true
+  try {
+    const data = await requestJson('/api/memory-center/operation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scope: 'global',
+        scope_id: 'global-agent',
+        operation: 'archive_selftest_residue',
+        dryRun,
+        actor: 'memory-center',
+        reason: reason || (dryRun ? 'Memory Center 预演 Global Agent 自测残留归档' : 'Memory Center 归档 Global Agent 自测残留')
+      })
+    })
+    selftestResidueArchiveResult.value = data.result || null
+    if (!dryRun) operationState.value = null
+    toast.success(dryRun
+      ? `预演完成：可归档 ${data.result?.archivedCount || 0} 个残留文件`
+      : `归档完成：已移动 ${data.result?.archivedCount || 0} 个残留文件`)
+    await refreshQualityCheck('global_memory_selftest_contamination')
+    if (!dryRun) await loadOverview(true)
+  } catch (error) {
+    toast.error(error.message || '自测残留归档失败')
+  } finally {
+    selftestResidueArchiveLoading.value = false
+  }
+}
+
+const runTaskAgentSnapshotRetention = async (dryRun = true, reason = '') => {
+  if (taskAgentSnapshotRetentionLoading.value) return
+  taskAgentSnapshotRetentionLoading.value = true
+  try {
+    const scopedToGroup = selectedScope.value === 'group' && selectedId.value
+    const data = await requestJson('/api/memory-center/operation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scope: scopedToGroup ? 'group' : 'global',
+        scope_id: scopedToGroup ? selectedId.value : 'global-agent',
+        group_id: scopedToGroup ? selectedId.value : '',
+        operation: 'prune_task_agent_memory_context_snapshots',
+        dryRun,
+        actor: 'memory-center',
+        reason: reason || (dryRun ? 'Memory Center 预演 task Agent 记忆上下文快照清理' : 'Memory Center 清理过期 task Agent 记忆上下文快照')
+      })
+    })
+    taskAgentSnapshotRetentionResult.value = data.result || null
+    if (!dryRun) operationState.value = null
+    toast.success(dryRun
+      ? `预演完成：可清理 ${data.result?.candidateCount || 0} 个快照`
+      : `清理完成：已处理 ${data.result?.prunedCount || 0} 个快照`)
+    await refreshQualityCheck('task_agent_memory_context_snapshots')
+    await loadOverview(true)
+  } catch (error) {
+    toast.error(error.message || 'task Agent 记忆快照清理失败')
+  } finally {
+    taskAgentSnapshotRetentionLoading.value = false
+  }
 }
 
 const runOperation = async () => {
@@ -643,6 +1164,14 @@ const runOperation = async () => {
   if (state.operation === 'rollback') {
     const ok = await confirmDialog('回滚会用最近有效备份替换当前记忆，同时保留回滚前快照。确定继续？')
     if (!ok) return
+  }
+  if (state.operation === 'archive_selftest_residue') {
+    await runGlobalSelftestResidueArchive(false, state.reason)
+    return
+  }
+  if (state.operation === 'prune_task_agent_memory_context_snapshots') {
+    await runTaskAgentSnapshotRetention(false, state.reason)
+    return
   }
   loading.value = true
   try {
@@ -670,12 +1199,12 @@ const replayWorkActionLabel = action => {
   return action
 }
 
-const updateReplayRepairWorkItem = async (item, action) => {
-  if (selectedScope.value !== 'group') return toast.info('Replay 修复工作项只属于群聊记忆')
+const updateReplayRepairWorkItemForGroup = async (groupId, item, action) => {
+  if (!groupId) return toast.info('Replay 修复工作项缺少群聊 ID')
   const itemId = item.id || item.work_item_id
   if (!itemId) return toast.error('缺少 work item id')
   const payload = {
-    group_id: selectedId.value,
+    group_id: groupId,
     item_id: itemId,
     action,
     owner: 'group-main-agent',
@@ -698,11 +1227,16 @@ const updateReplayRepairWorkItem = async (item, action) => {
       body: JSON.stringify(payload)
     })
     toast.success(`Replay 修复工作项已${replayWorkActionLabel(action)}`)
-    await loadDetail()
+    if (selectedScope.value === 'group' && selectedId.value === groupId) await loadDetail()
     await loadOverview(true)
   } catch (error) {
     toast.error(error.message || 'Replay 修复工作项更新失败')
   }
+}
+
+const updateReplayRepairWorkItem = async (item, action) => {
+  if (selectedScope.value !== 'group') return toast.info('Replay 修复工作项只属于群聊记忆')
+  await updateReplayRepairWorkItemForGroup(selectedId.value, item, action)
 }
 
 const submitFeedback = async type => {
@@ -815,6 +1349,150 @@ onMounted(() => loadOverview(false))
       <div v-if="qualityReport?.nextActions?.length" class="quality-next-actions">
         <strong>建议处理</strong>
         <span v-for="action in qualityReport.nextActions" :key="action">{{ action }}</span>
+      </div>
+      <div v-if="ignoreMemoryReceiptAvailable" :class="['ignore-memory-receipt-panel', ignoreMemoryReceiptState]">
+        <div class="ignore-memory-receipt-head">
+          <div>
+            <span class="panel-kicker">IGNORE MEMORY DECLARATIONS</span>
+            <h4>不使用记忆声明</h4>
+          </div>
+          <div class="ignore-memory-receipt-actions">
+            <button class="quality-refresh-btn" :disabled="qualityLoading || !!targetedQualityLoading" title="刷新 ignore-memory receipt compliance" @click="refreshQualityCheck('worker_context_packet_ignore_memory_receipt_compliance')">{{ targetedQualityLoading === 'worker_context_packet_ignore_memory_receipt_compliance' ? '…' : '↻' }}</button>
+            <button class="quality-refresh-btn" :disabled="qualityLoading || !!targetedQualityLoading" title="刷新 ignore-memory receipt repair items" @click="refreshQualityCheck('worker_context_packet_ignore_memory_receipt_repair_work_items')">{{ targetedQualityLoading === 'worker_context_packet_ignore_memory_receipt_repair_work_items' ? '…' : '↻' }}</button>
+            <button class="quality-refresh-btn" :disabled="qualityLoading || !!targetedQualityLoading" title="刷新 ignore-memory receipt dispatch candidates" @click="refreshQualityCheck('worker_context_packet_ignore_memory_receipt_repair_dispatch_candidates')">{{ targetedQualityLoading === 'worker_context_packet_ignore_memory_receipt_repair_dispatch_candidates' ? '…' : '↻' }}</button>
+            <button class="quality-refresh-btn" :disabled="qualityLoading || !!targetedQualityLoading" title="刷新 ignore-memory receipt dispatch briefs" @click="refreshQualityCheck('worker_context_packet_ignore_memory_receipt_repair_dispatch_briefs')">{{ targetedQualityLoading === 'worker_context_packet_ignore_memory_receipt_repair_dispatch_briefs' ? '…' : '↻' }}</button>
+            <button class="quality-refresh-btn" :disabled="qualityLoading || !!targetedQualityLoading" title="刷新 ignore-memory receipt typed memory" @click="refreshQualityCheck('worker_context_packet_ignore_memory_receipt_repair_typed_memory')">{{ targetedQualityLoading === 'worker_context_packet_ignore_memory_receipt_repair_typed_memory' ? '…' : '↻' }}</button>
+          </div>
+        </div>
+        <div class="ignore-memory-receipt-cards">
+          <article v-for="card in ignoreMemoryReceiptCards" :key="card.label">
+            <span>{{ card.label }}</span>
+            <strong>{{ formatMetric(card.value, card.suffix) }}</strong>
+            <small>{{ card.note }}</small>
+          </article>
+        </div>
+        <div v-if="ignoreMemoryReceiptRows.length" class="ignore-memory-receipt-list">
+          <article v-for="row in ignoreMemoryReceiptRows" :key="row.key" :class="row.status">
+            <span :class="['usage-state', row.status === 'ok' ? 'verified' : row.status === 'fail' ? 'fail' : 'warn']">{{ row.type }}</span>
+            <strong>{{ row.title }}</strong>
+            <p>{{ compactDisplay(row.detail, 260) }}</p>
+            <code>{{ compactDisplay(row.code, 120) }}</code>
+          </article>
+        </div>
+        <div v-if="ignoreMemoryReceiptWorkItemRows.length" class="ignore-memory-receipt-work-list">
+          <div class="recall-diagnostic-head">
+            <strong>Ignore-Memory Repair Work Items</strong>
+            <span>{{ ignoreMemoryReceiptRepairReport?.overall?.openItemCount || 0 }} open</span>
+          </div>
+          <article v-for="item in ignoreMemoryReceiptWorkItemRows" :key="item.key" :class="item.status || item.groupStatus">
+            <span :class="['usage-state', item.status === 'completed' ? 'completed' : item.status === 'blocked' ? 'blocked' : item.status === 'in_progress' ? 'in_progress' : item.status === 'pending' ? 'pending' : item.groupStatus === 'fail' ? 'fail' : 'warn']">{{ item.status || item.groupStatus }}</span>
+            <strong>{{ item.target_project || item.target || item.packet_id || 'receipt repair' }}</strong>
+            <p>{{ compactDisplay(`${item.groupId || 'group'} · ${item.packet_id || item.worker_context_packet_id || 'packet'} · ${item.binding_id || item.worker_context_packet_binding_id || 'binding'} · ${item.priority || 'priority'}`, 260) }}</p>
+            <div class="replay-work-actions">
+              <button v-if="item.status === 'pending'" @click="updateReplayRepairWorkItemForGroup(item.groupId, item, 'claim')">认领</button>
+              <button v-if="['pending', 'in_progress', 'blocked'].includes(item.status)" @click="updateReplayRepairWorkItemForGroup(item.groupId, item, 'dispatch')">派发</button>
+              <button v-if="['pending', 'in_progress', 'blocked'].includes(item.status)" @click="updateReplayRepairWorkItemForGroup(item.groupId, item, 'complete')">完成</button>
+              <button v-if="['pending', 'in_progress'].includes(item.status)" @click="updateReplayRepairWorkItemForGroup(item.groupId, item, 'block')">阻塞</button>
+              <button v-if="['completed', 'cancelled'].includes(item.status)" @click="updateReplayRepairWorkItemForGroup(item.groupId, item, 'reopen')">重开</button>
+            </div>
+          </article>
+        </div>
+        <div v-if="!ignoreMemoryReceiptRows.length && !ignoreMemoryReceiptWorkItemRows.length" class="ignore-memory-receipt-empty">暂无 ignore-memory 声明缺口</div>
+      </div>
+      <div v-if="globalSelftestContaminationCheck" :class="['selftest-residue-panel', globalSelftestArchiveState]">
+        <div class="selftest-residue-head">
+          <div>
+            <span class="panel-kicker">GLOBAL MEMORY CLEANUP</span>
+            <h4>Global Agent 自测残留</h4>
+          </div>
+          <div class="selftest-residue-actions">
+            <button class="btn btn-sm btn-outline" :disabled="selftestResidueArchiveLoading" @click="runGlobalSelftestResidueArchive(true)">{{ selftestResidueArchiveLoading ? '处理中' : '预演归档' }}</button>
+            <button class="btn btn-sm btn-primary" :disabled="selftestResidueArchiveLoading || !globalSelftestHasResidue || globalSelftestHasActivePollution" @click="openOperation('archive_selftest_residue')">归档残留</button>
+          </div>
+        </div>
+        <div class="selftest-residue-cards">
+          <article v-for="card in globalSelftestArchiveCards" :key="card.label">
+            <span>{{ card.label }}</span>
+            <strong>{{ formatMetric(card.value, card.suffix) }}</strong>
+            <small>{{ card.note }}</small>
+          </article>
+        </div>
+        <div v-if="selftestResidueArchiveResult" class="selftest-residue-result">
+          <strong>{{ selftestResidueArchiveResult.dryRun ? '预演结果' : '归档结果' }}</strong>
+          <span>可移动 {{ selftestResidueArchiveResult.archivedCount || 0 }}</span>
+          <span>跳过 {{ selftestResidueArchiveResult.skippedCount || 0 }}</span>
+          <span>active {{ selftestResidueArchiveResult.after?.active_contamination_count ?? selftestResidueArchiveResult.before?.active_contamination_count ?? 0 }}</span>
+          <span>residue {{ selftestResidueArchiveResult.after?.residue_contamination_count ?? selftestResidueArchiveResult.before?.residue_contamination_count ?? 0 }}</span>
+        </div>
+        <div v-if="globalSelftestResidueRows.length" class="selftest-residue-list">
+          <article v-for="row in globalSelftestResidueRows" :key="`${row.file}:${row.kind || row.reason || ''}`" :class="row.active ? 'fail' : 'warn'">
+            <span :class="['usage-state', row.active ? 'fail' : 'warn']">{{ row.active ? 'active' : 'residue' }}</span>
+            <strong>{{ row.kind || row.role || 'file' }}</strong>
+            <p>{{ compactDisplay(row.file || row.reason || row.preview, 260) }}</p>
+          </article>
+        </div>
+      </div>
+      <div v-if="taskAgentMemoryContextSnapshotCheck" :class="['task-agent-snapshot-panel', taskAgentSnapshotState]">
+        <div class="task-agent-snapshot-head">
+          <div>
+            <span class="panel-kicker">TASK AGENT MEMORY</span>
+            <h4>项目子 Agent 记忆快照</h4>
+          </div>
+          <div class="task-agent-snapshot-actions">
+            <button class="btn btn-sm btn-outline" :disabled="taskAgentSnapshotRetentionLoading" @click="runTaskAgentSnapshotRetention(true)">{{ taskAgentSnapshotRetentionLoading ? '处理中' : '预演清理' }}</button>
+            <button class="btn btn-sm btn-primary" :disabled="taskAgentSnapshotRetentionLoading || !taskAgentSnapshotHasPrunable" @click="openOperation('prune_task_agent_memory_context_snapshots')">清理快照</button>
+          </div>
+        </div>
+        <div class="task-agent-snapshot-cards">
+          <article v-for="card in taskAgentSnapshotCards" :key="card.label">
+            <span>{{ card.label }}</span>
+            <strong>{{ formatMetric(card.value, card.suffix) }}</strong>
+            <small>{{ card.note }}</small>
+          </article>
+        </div>
+        <div v-if="taskAgentSnapshotRetentionResult" class="task-agent-snapshot-result">
+          <strong>{{ taskAgentSnapshotRetentionResult.dryRun ? '预演结果' : '清理结果' }}</strong>
+          <span>候选 {{ taskAgentSnapshotRetentionResult.candidateCount || 0 }}</span>
+          <span>处理 {{ taskAgentSnapshotRetentionResult.prunedCount || 0 }}</span>
+          <span>跳过 {{ taskAgentSnapshotRetentionResult.skippedCount || 0 }}</span>
+        </div>
+        <div v-if="taskAgentSnapshotRows.length" class="task-agent-snapshot-list">
+          <article v-for="row in taskAgentSnapshotRows" :key="`${row.snapshotId}:${row.snapshotFile}`" :class="row.status">
+            <span :class="['usage-state', row.status === 'fail' ? 'fail' : row.status === 'warn' ? 'warn' : 'verified']">{{ row.status }}</span>
+            <strong>{{ row.snapshotId || row.sessionId || 'snapshot' }}</strong>
+            <p>{{ compactDisplay(`${row.groupId || 'group'} · ${row.project || 'project'} · ${row.taskId || 'task'} · ${(row.gaps || [])[0]?.reason || row.workerContextPacketId || row.snapshotFile}`, 300) }}</p>
+            <code>{{ row.prunable ? 'prunable' : row.gateCount ? `${row.gateCount} gates` : 'gate check' }}</code>
+          </article>
+        </div>
+      </div>
+      <div v-if="globalMemoryArbitrationAvailable" class="cross-group-quality-panel">
+        <div class="cross-group-quality-head">
+          <div>
+            <span class="panel-kicker">GLOBAL MEMORY ARBITRATION</span>
+            <h4>全局记忆仲裁</h4>
+          </div>
+          <div class="cross-group-quality-actions">
+            <button class="quality-refresh-btn" :disabled="qualityLoading || !!targetedQualityLoading" title="刷新 semantic arbitration" @click="refreshQualityCheck('child_global_agent_memory_bridge')">{{ targetedQualityLoading === 'child_global_agent_memory_bridge' ? '…' : '↻' }}</button>
+            <button class="quality-refresh-btn" :disabled="qualityLoading || !!targetedQualityLoading" title="刷新 hard suppression" @click="refreshQualityCheck('global_memory_cross_group_suppression')">{{ targetedQualityLoading === 'global_memory_cross_group_suppression' ? '…' : '↻' }}</button>
+            <button class="quality-refresh-btn" :disabled="qualityLoading || !!targetedQualityLoading" title="刷新 advisory freshness" @click="refreshQualityCheck('global_memory_cross_group_suppression_freshness')">{{ targetedQualityLoading === 'global_memory_cross_group_suppression_freshness' ? '…' : '↻' }}</button>
+          </div>
+        </div>
+        <div class="cross-group-quality-cards">
+          <article v-for="card in crossGroupQualityCards" :key="card.label">
+            <span>{{ card.label }}</span>
+            <strong>{{ formatMetric(card.value, card.suffix) }}</strong>
+            <small>{{ card.note }}</small>
+          </article>
+        </div>
+        <div v-if="crossGroupQualityRows.length" class="cross-group-quality-table">
+          <article v-for="row in crossGroupQualityRows" :key="row.key" :class="crossGroupRowState(row)">
+            <span :class="['usage-state', row.mode === 'hard' ? 'fail' : row.superseded ? 'used' : 'waiting']">{{ row.mode }}</span>
+            <strong>{{ row.globalMemoryId || 'global-memory' }}</strong>
+            <p>{{ compactDisplay(`${row.groupId || 'group'} · ${row.targetProject || 'target'} · groups ${row.conflictGroupCount || row.groupCount || 0} · occurrences ${row.occurrenceCount || 0} · ${row.action || row.status}`, 260) }}</p>
+            <code>{{ row.superseded ? 'superseded' : row.decayed ? 'decayed' : row.sourceCount ? `${row.sourceCount} ledgers` : 'ledger' }}</code>
+          </article>
+        </div>
+        <div v-else class="cross-group-quality-empty">暂无跨群聊抑制行</div>
       </div>
     </section>
 
@@ -978,6 +1656,30 @@ onMounted(() => loadOverview(false))
                       <span :class="['usage-state', row.state]">{{ row.type }}</span>
                       <strong>{{ row.title }}</strong>
                       <p>{{ compactDisplay(row.detail, 180) }}</p>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="taskAgentMemoryContextSnapshots" :class="['discipline-panel', taskAgentMemoryContextSnapshotState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>Task Agent Memory Snapshots</strong>
+                      <span>{{ taskAgentMemoryContextSnapshots.directory || 'task-agent-memory-context-snapshots' }}</span>
+                    </div>
+                    <code>{{ taskAgentMemoryContextSnapshotState }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in taskAgentMemoryContextSnapshotCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value, card.suffix) }}</strong>
+                      <small>{{ card.note }}</small>
+                    </article>
+                  </div>
+                  <div v-if="taskAgentMemoryContextSnapshotRows.length" class="hook-ledger-list">
+                    <article v-for="row in taskAgentMemoryContextSnapshotRows" :key="`${row.snapshotId}:${row.snapshotFile}`" :class="row.status === 'ok' ? 'ok' : row.status === 'warn' ? 'warn' : 'fail'">
+                      <span :class="['usage-state', row.status === 'fail' ? 'fail' : row.status === 'warn' ? 'warn' : 'verified']">{{ row.status }}</span>
+                      <strong>{{ row.snapshotId || row.sessionId || 'snapshot' }}</strong>
+                      <p>{{ compactDisplay(`${row.project || 'project'} · ${row.taskId || 'task'} · ${(row.gaps || [])[0]?.reason || row.workerContextPacketId || row.snapshotFile}`, 260) }}</p>
+                      <code>{{ row.prunable ? 'prunable' : row.gateCount ? `${row.gateCount} gates` : 'gate check' }}</code>
                     </article>
                   </div>
                 </div>
@@ -1149,6 +1851,206 @@ onMounted(() => loadOverview(false))
                       <span class="usage-state waiting">{{ gap.type || 'gap' }}</span>
                       <strong>{{ gap.reference_id || 'reference' }}</strong>
                       <p>{{ compactDisplay(gap.reason || gap.path, 180) }}</p>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="compactStrategyDecision" :class="['discipline-panel', compactStrategyDecisionState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>压缩策略决策</strong>
+                      <span>{{ compactStrategyDecision.decisionId || compactStrategyDecision.summaryChecksum || 'no decision' }}</span>
+                    </div>
+                    <code>{{ compactStrategyDecision.mode || compactStrategyDecision.status || 'waiting' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in compactStrategyDecisionCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value, card.suffix) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div class="hook-ledger-list">
+                    <article :class="compactStrategyDecision.invariantPass ? 'ok' : 'warn'">
+                      <span :class="['usage-state', compactStrategyDecision.invariantPass ? 'verified' : 'waiting']">invariants</span>
+                      <strong>{{ compactStrategyDecision.invariantPass ? 'pass' : 'needs check' }}</strong>
+                      <p>{{ compactDisplay((compactStrategyDecision.failedInvariants || []).join(', ') || compactStrategyDecision.reason || 'strategy decision recorded', 220) }}</p>
+                      <code>{{ compactStrategyDecision.decisionChecksum || 'checksum' }}</code>
+                    </article>
+                    <article v-if="compactStrategyDecision.transcriptPath" class="ok">
+                      <span class="usage-state verified">raw</span>
+                      <strong>transcript</strong>
+                      <p>{{ compactDisplay(compactStrategyDecision.transcriptPath, 240) }}</p>
+                      <code>{{ compactStrategyDecision.summaryChecksum || 'summary' }}</code>
+                    </article>
+                  </div>
+                  <div v-if="compactStrategyDecisionGaps.length" class="discipline-gap-list">
+                    <article v-for="gap in compactStrategyDecisionGaps" :key="`${gap.severity}:${gap.reason}`">
+                      <span :class="['usage-state', gap.severity === 'fatal' ? 'fail' : 'warn']">{{ gap.severity || 'gap' }}</span>
+                      <strong>{{ gap.invariant || compactStrategyDecision.mode || 'strategy' }}</strong>
+                      <p>{{ compactDisplay(gap.reason, 180) }}</p>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="postCompactCleanupAudit" :class="['discipline-panel', postCompactCleanupAuditState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>压缩后清理审计</strong>
+                      <span>{{ postCompactCleanupAudit.boundaryId || postCompactCleanupAudit.summaryChecksum || 'cleanup audit' }}</span>
+                    </div>
+                    <code>{{ postCompactCleanupAudit.auditStatus || postCompactCleanupAudit.status || 'waiting' }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in postCompactCleanupAuditCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value, card.suffix) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="postCompactCleanupAuditRows.length" class="hook-ledger-list">
+                    <article v-for="row in postCompactCleanupAuditRows" :key="row.id || row.action" :class="row.status === 'missing' ? 'warn' : 'ok'">
+                      <span :class="['usage-state', row.status === 'missing' ? 'waiting' : 'verified']">{{ row.status || 'recorded' }}</span>
+                      <strong>{{ row.id || row.action }}</strong>
+                      <p>{{ compactDisplay(row.action || row.evidence, 220) }}</p>
+                      <code>{{ Array.isArray(row.evidence) ? row.evidence.length : (row.evidence || 'audit') }}</code>
+                    </article>
+                  </div>
+                  <div v-if="postCompactCleanupAudit.transcriptPath" class="hook-ledger-list">
+                    <article class="ok">
+                      <span class="usage-state verified">raw</span>
+                      <strong>transcript kept</strong>
+                      <p>{{ compactDisplay(postCompactCleanupAudit.transcriptPath, 240) }}</p>
+                      <code>{{ postCompactCleanupAudit.summaryChecksum || 'summary' }}</code>
+                    </article>
+                  </div>
+                  <div v-if="postCompactCleanupAuditGaps.length" class="discipline-gap-list">
+                    <article v-for="gap in postCompactCleanupAuditGaps" :key="`${gap.severity}:${gap.reason}`">
+                      <span :class="['usage-state', gap.severity === 'fatal' ? 'fail' : 'warn']">{{ gap.severity || 'gap' }}</span>
+                      <strong>{{ gap.checkId || postCompactCleanupAudit.mode || 'cleanup' }}</strong>
+                      <p>{{ compactDisplay(gap.reason, 180) }}</p>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="apiMicroCompactEditPlan" :class="['discipline-panel', apiMicroCompactEditPlanState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>API Microcompact Edit Plan</strong>
+                      <span>{{ apiMicroCompactEditPlan.planChecksum || apiMicroCompactEditPlan.reason || 'context management' }}</span>
+                    </div>
+                    <code>{{ apiMicroCompactEditPlan.editCount || 0 }} edits</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in apiMicroCompactEditPlanCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value, card.suffix) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="apiMicroCompactEditPlanRows.length" class="hook-ledger-list">
+                    <article v-for="row in apiMicroCompactEditPlanRows" :key="`${row.type}:${row.reason}`" :class="row.recommended ? 'ok' : 'warn'">
+                      <span :class="['usage-state', row.recommended ? 'verified' : 'waiting']">{{ row.recommended ? 'edit' : 'advisory' }}</span>
+                      <strong>{{ row.type }}</strong>
+                      <p>{{ compactDisplay(row.reason || JSON.stringify(row.keep || row.trigger || {}), 220) }}</p>
+                      <code>{{ row.keep === 'all' ? 'keep all' : row.keep?.value || row.trigger?.value || 'plan' }}</code>
+                    </article>
+                  </div>
+                  <div v-if="apiMicroCompactEditPlanGaps.length" class="discipline-gap-list">
+                    <article v-for="gap in apiMicroCompactEditPlanGaps" :key="`${gap.severity}:${gap.reason}`">
+                      <span :class="['usage-state', gap.severity === 'fatal' ? 'fail' : 'warn']">{{ gap.severity || 'gap' }}</span>
+                      <strong>api microcompact</strong>
+                      <p>{{ compactDisplay(gap.reason, 180) }}</p>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="apiMicrocompactReceiptDiscipline" :class="['discipline-panel', apiMicrocompactReceiptDisciplineState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>API Microcompact Receipt Discipline</strong>
+                      <span>{{ apiMicrocompactReceiptDiscipline.planChecksum || apiMicrocompactReceiptDiscipline.status || 'receipt usage' }}</span>
+                    </div>
+                    <code>{{ formatMetric(apiMicrocompactReceiptDiscipline.score, '%') }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in apiMicrocompactReceiptDisciplineCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value, card.suffix) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="apiMicrocompactReceiptDisciplineRows.length" class="hook-ledger-list">
+                    <article v-for="row in apiMicrocompactReceiptDisciplineRows" :key="`${row.taskId}:${row.agent}`" :class="row.pass ? 'ok' : 'warn'">
+                      <span :class="['usage-state', row.pass ? 'verified' : (row.session_mismatch_plan_checksums || []).length ? 'fail' : 'waiting']">{{ row.pass ? 'declared' : (row.session_mismatch_plan_checksums || []).length ? 'session' : 'missing' }}</span>
+                      <strong>{{ row.agent || row.taskId || 'agent' }}</strong>
+                      <p>{{ compactDisplay(`${(row.plan_checksums || []).join(', ')} · advisory ${row.advisory_count || 0} · native ${row.native_applied_count || 0} · session gaps ${(row.session_mismatch_plan_checksums || []).length}`, 240) }}</p>
+                      <code>{{ row.taskId || 'task' }}</code>
+                    </article>
+                  </div>
+                  <div v-if="apiMicrocompactReceiptDisciplineGaps.length" class="discipline-gap-list">
+                    <article v-for="gap in apiMicrocompactReceiptDisciplineGaps" :key="`${gap.taskId}:${gap.reason}`">
+                      <span :class="['usage-state', gap.severity === 'high' ? 'fail' : 'warn']">{{ gap.severity || 'gap' }}</span>
+                      <strong>{{ gap.agent || 'api microcompact' }}</strong>
+                      <p>{{ compactDisplay(gap.reason, 200) }}</p>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="apiMicrocompactNativeApplyReadiness" :class="['discipline-panel', apiMicrocompactNativeApplyReadinessState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>API Microcompact Native Apply Readiness</strong>
+                      <span>{{ apiMicrocompactNativeApplyReadiness.status || 'executor contract' }}</span>
+                    </div>
+                    <code>{{ formatMetric(apiMicrocompactNativeApplyReadiness.score, '%') }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in apiMicrocompactNativeApplyReadinessCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value, card.suffix) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="apiMicrocompactNativeApplyReadinessRows.length" class="hook-ledger-list">
+                    <article v-for="row in apiMicrocompactNativeApplyReadinessRows" :key="`${row.taskId}:${row.editPlanChecksum}`" :class="row.contractValid ? 'ok' : 'warn'">
+                      <span :class="['usage-state', row.nativeReady ? 'verified' : row.contractValid ? 'waiting' : 'fail']">{{ row.nativeReady ? 'native ready' : row.contractValid ? 'advisory' : 'invalid' }}</span>
+                      <strong>{{ row.agent || row.executor?.agentType || 'executor' }}</strong>
+                      <p>{{ compactDisplay(`${row.mode || 'unknown'} · edit ${row.editPlanChecksum || 'missing'} · apply ${row.applyPlanChecksum || 'missing'} · session ${row.taskAgentSessionId || row.memoryContextSnapshotId || 'unbound'}`, 260) }}</p>
+                      <code>{{ row.executor?.transport || row.taskId || 'task' }}</code>
+                    </article>
+                  </div>
+                  <div v-if="apiMicrocompactNativeApplyReadinessGaps.length" class="discipline-gap-list">
+                    <article v-for="gap in apiMicrocompactNativeApplyReadinessGaps" :key="`${gap.taskId}:${gap.reason}`">
+                      <span :class="['usage-state', gap.severity === 'high' ? 'fail' : 'warn']">{{ gap.severity || 'gap' }}</span>
+                      <strong>{{ gap.agent || 'api microcompact' }}</strong>
+                      <p>{{ compactDisplay(gap.reason, 200) }}</p>
+                    </article>
+                  </div>
+                </div>
+                <div v-if="apiMicrocompactNativeApplyProof" :class="['discipline-panel', apiMicrocompactNativeApplyProofState]">
+                  <div class="discipline-head">
+                    <div>
+                      <strong>API Microcompact Native Apply Proof</strong>
+                      <span>{{ apiMicrocompactNativeApplyProof.ledgerFile || apiMicrocompactNativeApplyProof.status || 'proof ledger' }}</span>
+                    </div>
+                    <code>{{ formatMetric(apiMicrocompactNativeApplyProof.score, '%') }}</code>
+                  </div>
+                  <div class="discipline-cards">
+                    <article v-for="card in apiMicrocompactNativeApplyProofCards" :key="card.label">
+                      <span>{{ card.label }}</span>
+                      <strong>{{ formatMetric(card.value, card.suffix) }}</strong>
+                      <small>{{ compactDisplay(card.note, 80) }}</small>
+                    </article>
+                  </div>
+                  <div v-if="apiMicrocompactNativeApplyProofRows.length" class="hook-ledger-list">
+                    <article v-for="row in apiMicrocompactNativeApplyProofRows" :key="row.entryId || `${row.taskId}:${row.planChecksum}`" :class="row.nativeApplyStrongProof ? 'ok' : row.proofStatus === 'failed' || ['missing', 'stale', 'receipt_only'].includes(row.requestTelemetryStatus) || (row.proofStatus === 'verified' && (!row.requestTelemetrySessionBound || !row.requestTelemetryDispatchBound)) ? 'fail' : 'warn'">
+                      <span :class="['usage-state', row.nativeApplyStrongProof ? 'verified' : row.proofStatus === 'failed' || ['missing', 'stale', 'receipt_only'].includes(row.requestTelemetryStatus) || (row.proofStatus === 'verified' && (!row.requestTelemetrySessionBound || !row.requestTelemetryDispatchBound)) ? 'fail' : 'waiting']">{{ row.nativeApplyStrongProof ? 'bound' : row.requestTelemetryStatus || row.proofStatus || 'proof' }}</span>
+                      <strong>{{ row.agent || row.targetProject || 'executor' }}</strong>
+                      <p>{{ compactDisplay(`plan ${row.planChecksum || 'missing'} · request ${row.requestPatchChecksum || 'missing'} · session ${row.requestTelemetrySessionStatus || row.taskAgentSessionId || 'unbound'} · dispatch ${row.requestTelemetryDispatchStatus || 'unbound'} · runner ${row.requestTelemetryRunnerRequestId || 'none'} · telemetry ${row.requestTelemetrySource || row.requestTelemetryEntryId || row.requestTelemetryStatus || 'missing'} · age ${row.requestTelemetryAgeMs ?? 'n/a'}`, 340) }}</p>
+                      <code>{{ row.taskId || row.generatedAt || 'ledger' }}</code>
+                    </article>
+                  </div>
+                  <div v-if="apiMicrocompactNativeApplyProofGaps.length" class="discipline-gap-list">
+                    <article v-for="gap in apiMicrocompactNativeApplyProofGaps" :key="`${gap.taskId}:${gap.reason}`">
+                      <span :class="['usage-state', gap.severity === 'high' ? 'fail' : 'warn']">{{ gap.severity || 'gap' }}</span>
+                      <strong>{{ gap.agent || 'native proof' }}</strong>
+                      <p>{{ compactDisplay(gap.reason, 220) }}</p>
                     </article>
                   </div>
                 </div>
@@ -1545,11 +2447,11 @@ onMounted(() => loadOverview(false))
 
     <div v-if="operationState" class="mc-modal-overlay" @click.self="operationState = null">
       <div class="mc-modal">
-        <div><span class="panel-kicker">MEMORY MAINTENANCE</span><h3>{{ operationState.operation === 'compact' ? '手动压缩' : operationState.operation === 'rebuild' ? '从原始数据重建' : operationState.operation === 'disable' ? '禁用全局记忆' : operationState.operation === 'enable' ? '启用全局记忆' : operationState.operation === 'block_pattern' ? '添加禁记规则' : '从备份回滚' }}</h3></div>
-        <p class="modal-note">{{ operationState.operation === 'compact' ? '按照当前压缩边界收敛上下文，不删除加密原始转录。' : operationState.operation === 'rebuild' ? '忽略旧摘要边界，从加密原始转录重新生成全局记忆。' : operationState.operation === 'disable' ? '停止新的长期记忆写入与提取，已有记忆仍可查看和删除。' : operationState.operation === 'enable' ? '恢复长期记忆写入、压缩和按需召回。' : operationState.operation === 'block_pattern' ? '匹配此文本或正则表达式的内容不会进入长期记忆。' : '使用最近有效备份替换主记忆，并保留回滚前快照。' }}</p>
+        <div><span class="panel-kicker">MEMORY MAINTENANCE</span><h3>{{ operationTitle(operationState.operation) }}</h3></div>
+        <p class="modal-note">{{ operationNote(operationState.operation) }}</p>
         <label v-if="operationState.operation === 'block_pattern'">文本或正则规则<input v-model="operationState.pattern" placeholder="例如：客户手机号|内部代号" /></label>
         <label>操作原因<textarea v-model="operationState.reason" rows="3" placeholder="建议记录本次维护的原因"></textarea></label>
-        <div class="modal-actions"><button class="btn" @click="operationState = null">取消</button><button class="btn" :class="['rollback','disable'].includes(operationState.operation) ? 'btn-danger' : 'btn-primary'" :disabled="!operationState.reason.trim() || (operationState.operation === 'block_pattern' && !operationState.pattern.trim())" @click="runOperation">执行</button></div>
+        <div class="modal-actions"><button class="btn" @click="operationState = null">取消</button><button class="btn" :class="['rollback','disable'].includes(operationState.operation) ? 'btn-danger' : 'btn-primary'" :disabled="!operationState.reason.trim() || (operationState.operation === 'block_pattern' && !operationState.pattern.trim()) || (operationState.operation === 'archive_selftest_residue' && (selftestResidueArchiveLoading || !globalSelftestHasResidue || globalSelftestHasActivePollution)) || (operationState.operation === 'prune_task_agent_memory_context_snapshots' && (taskAgentSnapshotRetentionLoading || !taskAgentSnapshotHasPrunable))" @click="runOperation">{{ operationState.operation === 'archive_selftest_residue' ? '归档残留' : operationState.operation === 'prune_task_agent_memory_context_snapshots' ? '清理快照' : '执行' }}</button></div>
       </div>
     </div>
 
@@ -1571,6 +2473,11 @@ onMounted(() => loadOverview(false))
 .summary-strip{display:grid;grid-template-columns:repeat(6,minmax(145px,1fr));gap:10px;margin:12px 0}.summary-card{min-height:105px;padding:16px;border-radius:13px;background:rgba(255,255,255,.55);border:1px solid var(--border-color);display:flex;flex-direction:column}.summary-label{font-size:11px;color:var(--text-muted);font-weight:700}.summary-card strong{font-family:var(--font-tech);font-size:24px;margin:9px 0 5px}.summary-card small{font-size:10px;color:var(--text-muted);line-height:1.4}.summary-card.warning strong,.summary-card.risk strong{color:var(--accent-yellow)}
 .global-alerts{display:flex;flex-direction:column;gap:6px;margin:-2px 0 12px}.global-alert{display:grid;grid-template-columns:7px auto minmax(0,1fr) auto;align-items:center;gap:9px;padding:9px 12px;border-radius:9px;border:1px solid rgba(245,158,11,.18);background:rgba(245,158,11,.06);font-size:10px}.global-alert>span{width:7px;height:7px;border-radius:50%;background:var(--accent-yellow)}.global-alert strong{font-family:monospace}.global-alert p{color:var(--text-secondary)}.global-alert small{color:var(--text-muted)}.global-alert.critical{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.06)}.global-alert.critical>span{background:var(--accent-red)}
 .quality-panel{border-radius:16px;padding:18px;margin:12px 0}.quality-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.quality-panel-head h3{font-size:17px;margin:4px 0}.quality-panel-head p{font-size:11px;color:var(--text-muted);line-height:1.5}.quality-score{min-width:112px;padding:12px 14px;border-radius:13px;background:rgba(100,116,139,.08);text-align:right}.quality-score strong{display:block;font-family:var(--font-tech);font-size:26px}.quality-score span,.quality-score small{display:block;font-size:10px;color:var(--text-muted)}.quality-score small{margin-top:4px;max-width:132px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quality-score.ok strong{color:var(--accent-green)}.quality-score.warn strong{color:var(--accent-yellow)}.quality-score.fail strong{color:var(--accent-red)}.quality-check-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:14px}.quality-check-card{min-width:0;padding:12px;border-radius:11px;border:1px solid var(--border-color);background:rgba(255,255,255,.42)}.quality-check-card.ok{border-color:rgba(16,185,129,.18);background:rgba(16,185,129,.045)}.quality-check-card.warn{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.06)}.quality-check-card.fail{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.055)}.quality-check-top{display:flex;align-items:center;justify-content:space-between;gap:8px}.quality-check-top strong{min-width:0;font-size:12px;color:var(--text-primary);overflow-wrap:anywhere}.quality-check-actions{display:flex;align-items:center;gap:5px;flex:0 0 auto}.quality-check-top span{font-family:var(--font-tech);font-size:13px;color:var(--accent-blue)}.quality-refresh-btn{width:24px;height:24px;border-radius:8px;border:1px solid rgba(37,99,235,.18);background:rgba(37,99,235,.06);color:var(--accent-blue);font-size:13px;font-weight:900;line-height:1;cursor:pointer}.quality-refresh-btn:disabled{cursor:not-allowed;opacity:.52}.quality-check-card p{min-height:42px;margin:8px 0 10px;font-size:9.5px;line-height:1.45;color:var(--text-muted)}.quality-check-stats{display:flex;gap:5px;flex-wrap:wrap}.quality-check-stats span{padding:3px 6px;border-radius:999px;background:rgba(15,23,42,.055);font-size:9px;color:var(--text-secondary)}.quality-check-detail{margin-top:8px;font-size:9px;color:var(--text-muted)}.quality-check-detail summary{cursor:pointer;font-weight:800}.quality-check-detail ul{margin:6px 0 0;padding-left:16px;line-height:1.45}.quality-next-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.quality-next-actions strong{font-size:10px;color:var(--text-muted);padding:4px 0}.quality-next-actions span{padding:5px 8px;border-radius:999px;background:rgba(245,158,11,.08);color:#a16207;font-size:9px}
+.selftest-residue-panel{margin-top:12px;border:1px solid rgba(16,185,129,.16);border-radius:12px;background:rgba(16,185,129,.04);overflow:hidden}.selftest-residue-panel.warn{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.selftest-residue-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.selftest-residue-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.selftest-residue-head h4{font-size:13px;margin-top:3px}.selftest-residue-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.selftest-residue-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;padding:9px}.selftest-residue-cards article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.selftest-residue-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.selftest-residue-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue);overflow-wrap:anywhere}.selftest-residue-cards small{font-size:7px;color:var(--text-muted);line-height:1.35}.selftest-residue-result{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 9px 9px;font-size:9px;color:var(--text-muted)}.selftest-residue-result strong{font-size:10px;color:var(--text-primary)}.selftest-residue-result span{padding:3px 6px;border-radius:999px;background:rgba(100,116,139,.08)}.selftest-residue-list{border-top:1px solid var(--border-color)}.selftest-residue-list article{display:grid;grid-template-columns:64px minmax(80px,150px) minmax(0,1fr);gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.selftest-residue-list article:first-child{border-top:0}.selftest-residue-list article.warn{background:rgba(245,158,11,.045)}.selftest-residue-list article.fail{background:rgba(239,68,68,.045)}.selftest-residue-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.selftest-residue-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}
+.task-agent-snapshot-panel{margin-top:12px;border:1px solid rgba(var(--accent-blue-rgb),.14);border-radius:12px;background:rgba(var(--accent-blue-rgb),.035);overflow:hidden}.task-agent-snapshot-panel.warn,.task-agent-snapshot-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.task-agent-snapshot-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.task-agent-snapshot-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.task-agent-snapshot-head h4{font-size:13px;margin-top:3px}.task-agent-snapshot-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.task-agent-snapshot-cards{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px;padding:9px}.task-agent-snapshot-cards article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.task-agent-snapshot-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.task-agent-snapshot-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue);overflow-wrap:anywhere}.task-agent-snapshot-cards small{font-size:7px;color:var(--text-muted);line-height:1.35}.task-agent-snapshot-result{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:0 9px 9px;font-size:9px;color:var(--text-muted)}.task-agent-snapshot-result strong{font-size:10px;color:var(--text-primary)}.task-agent-snapshot-result span{padding:3px 6px;border-radius:999px;background:rgba(100,116,139,.08)}.task-agent-snapshot-list{border-top:1px solid var(--border-color)}.task-agent-snapshot-list article{display:grid;grid-template-columns:64px minmax(110px,210px) minmax(0,1fr) 80px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.task-agent-snapshot-list article:first-child{border-top:0}.task-agent-snapshot-list article.warn{background:rgba(245,158,11,.045)}.task-agent-snapshot-list article.fail{background:rgba(239,68,68,.045)}.task-agent-snapshot-list article.ok{background:rgba(16,185,129,.035)}.task-agent-snapshot-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.task-agent-snapshot-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.task-agent-snapshot-list code{font-size:8px;color:var(--text-muted);text-align:right}
+.cross-group-quality-panel{margin-top:12px;border:1px solid rgba(var(--accent-blue-rgb),.12);border-radius:12px;background:rgba(var(--accent-blue-rgb),.035);overflow:hidden}.cross-group-quality-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.cross-group-quality-head h4{font-size:13px;margin-top:3px}.cross-group-quality-actions{display:flex;gap:5px}.cross-group-quality-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;padding:9px}.cross-group-quality-cards article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.cross-group-quality-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.cross-group-quality-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue)}.cross-group-quality-cards small{font-size:7px;color:var(--text-muted);line-height:1.35}.cross-group-quality-table{border-top:1px solid var(--border-color)}.cross-group-quality-table article{display:grid;grid-template-columns:64px minmax(130px,230px) minmax(0,1fr) 92px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.cross-group-quality-table article:first-child{border-top:0}.cross-group-quality-table article.ok{background:rgba(16,185,129,.035)}.cross-group-quality-table article.warn,.cross-group-quality-table article.waiting{background:rgba(245,158,11,.045)}.cross-group-quality-table article.fail{background:rgba(239,68,68,.045)}.cross-group-quality-table strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.cross-group-quality-table p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.cross-group-quality-table code{font-size:8px;color:var(--text-muted);text-align:right}.cross-group-quality-empty{padding:13px 10px;border-top:1px solid var(--border-color);font-size:10px;color:var(--text-muted);text-align:center}
+.ignore-memory-receipt-panel{margin-top:12px;border:1px solid rgba(16,185,129,.16);border-radius:12px;background:rgba(16,185,129,.04);overflow:hidden}.ignore-memory-receipt-panel.warn,.ignore-memory-receipt-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.ignore-memory-receipt-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.ignore-memory-receipt-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-bottom:1px solid var(--border-color)}.ignore-memory-receipt-head h4{font-size:13px;margin-top:3px}.ignore-memory-receipt-actions{display:flex;gap:5px;justify-content:flex-end}.ignore-memory-receipt-cards{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px;padding:9px}.ignore-memory-receipt-cards article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.38);padding:8px;display:flex;flex-direction:column;gap:3px}.ignore-memory-receipt-cards span{font-size:8px;color:var(--text-muted);font-weight:800}.ignore-memory-receipt-cards strong{font-family:var(--font-tech);font-size:15px;color:var(--accent-blue);overflow-wrap:anywhere}.ignore-memory-receipt-cards small{font-size:7px;color:var(--text-muted);line-height:1.35}.ignore-memory-receipt-list{border-top:1px solid var(--border-color)}.ignore-memory-receipt-list article{display:grid;grid-template-columns:64px minmax(130px,220px) minmax(0,1fr) 120px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.ignore-memory-receipt-list article:first-child{border-top:0}.ignore-memory-receipt-list article.ok{background:rgba(16,185,129,.035)}.ignore-memory-receipt-list article.warn,.ignore-memory-receipt-list article.waiting{background:rgba(245,158,11,.045)}.ignore-memory-receipt-list article.fail{background:rgba(239,68,68,.045)}.ignore-memory-receipt-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ignore-memory-receipt-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.ignore-memory-receipt-list code{font-size:8px;color:var(--text-muted);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ignore-memory-receipt-empty{padding:13px 10px;border-top:1px solid var(--border-color);font-size:10px;color:var(--text-muted);text-align:center}
+.ignore-memory-receipt-work-list{border-top:1px solid var(--border-color);background:rgba(var(--accent-blue-rgb),.025)}.ignore-memory-receipt-work-list article{display:grid;grid-template-columns:74px minmax(140px,230px) minmax(0,1fr) minmax(128px,auto);gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.ignore-memory-receipt-work-list article.pending{background:rgba(var(--accent-blue-rgb),.035)}.ignore-memory-receipt-work-list article.in_progress{background:rgba(99,102,241,.045)}.ignore-memory-receipt-work-list article.blocked,.ignore-memory-receipt-work-list article.warn{background:rgba(245,158,11,.055)}.ignore-memory-receipt-work-list article.completed,.ignore-memory-receipt-work-list article.ok{background:rgba(16,185,129,.035)}.ignore-memory-receipt-work-list article.fail{background:rgba(239,68,68,.045)}.ignore-memory-receipt-work-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ignore-memory-receipt-work-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}
 .workspace-grid{display:grid;grid-template-columns:260px minmax(0,1fr);gap:12px;min-height:620px}.scope-panel,.detail-panel{border-radius:16px;min-height:0}.scope-panel{padding:18px 10px}.panel-title-row{display:flex;align-items:center;justify-content:space-between;padding:0 8px 14px}.panel-title-row h3{font-size:17px;margin-top:3px}.count-badge{font-family:var(--font-tech);font-size:11px;padding:4px 8px;border-radius:20px;background:rgba(var(--accent-blue-rgb),.1);color:var(--accent-blue)}.scope-list{display:flex;flex-direction:column;gap:5px;max-height:700px;overflow:auto}.scope-item{border:1px solid transparent;background:transparent;border-radius:10px;padding:10px;display:flex;align-items:center;gap:10px;text-align:left;color:var(--text-primary);cursor:pointer;transition:.2s}.scope-item:hover{background:rgba(var(--accent-blue-rgb),.05)}.scope-item.active{background:rgba(var(--accent-blue-rgb),.1);border-color:rgba(var(--accent-blue-rgb),.18)}.scope-mark{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;font-family:var(--font-tech);font-size:11px;color:white;background:var(--accent-purple)}.scope-mark.project{background:var(--accent-blue)}.scope-mark.warning,.scope-mark.critical{box-shadow:0 0 0 3px rgba(245,158,11,.12)}.scope-copy{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}.scope-copy strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.scope-copy small{font-size:10px;color:var(--text-muted)}.health-dot{width:7px;height:7px;border-radius:50%;background:var(--accent-green)}.alert-count{font-size:10px;color:#fff;background:var(--accent-yellow);padding:2px 6px;border-radius:10px}
 .detail-panel{padding:20px;overflow:hidden}.detail-header{display:flex;justify-content:space-between;gap:22px;align-items:flex-start}.detail-header h3{font-size:22px;margin:6px 0 5px}.detail-header>div:first-child{min-width:0}.detail-header>div:first-child>p{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;max-width:760px}.scope-meta{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--text-muted)}.status-pill{padding:3px 7px;border-radius:10px;background:rgba(16,185,129,.1);color:var(--accent-green);font-weight:800}.status-pill.warning{background:rgba(245,158,11,.12);color:var(--accent-yellow)}.status-pill.critical{background:rgba(239,68,68,.1);color:var(--accent-red)}.maintenance-actions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}
 .alerts-block{margin-top:14px;display:flex;flex-direction:column;gap:6px}.alert-row{display:flex;align-items:center;gap:8px;padding:9px 11px;border:1px solid rgba(245,158,11,.18);background:rgba(245,158,11,.06);border-radius:9px;font-size:11px}.alert-row.critical{border-color:rgba(239,68,68,.2);background:rgba(239,68,68,.06)}.alert-signal{width:7px;height:7px;border-radius:50%;background:var(--accent-yellow)}.critical .alert-signal{background:var(--accent-red)}
@@ -1582,9 +2489,9 @@ onMounted(() => loadOverview(false))
 .audit-view{padding-top:12px;max-height:560px;overflow:auto}.audit-item{display:grid;grid-template-columns:145px minmax(0,1fr) auto;gap:12px;padding:11px;border-bottom:1px solid var(--border-color);align-items:center}.audit-time{font-size:9px;color:var(--text-muted)}.audit-item strong{font-size:11px}.audit-item p{font-size:9px;color:var(--text-muted);margin-top:3px}.audit-item code{font-size:8px;color:var(--accent-blue)}.feedback-panel{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:12px;padding:14px;border-radius:10px;background:rgba(var(--accent-blue-rgb),.04);border:1px solid rgba(var(--accent-blue-rgb),.1)}.feedback-panel h4{font-size:12px;margin-bottom:4px}.feedback-panel p{font-size:9px;color:var(--text-muted)}.feedback-actions{display:flex;gap:5px;flex-wrap:wrap}.counter-table{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}.counter-table div{padding:11px;border-bottom:2px solid rgba(var(--accent-blue-rgb),.12);display:flex;justify-content:space-between;font-size:10px}.counter-table span{color:var(--text-muted)}
 .acceptance-note{margin-top:9px;padding:9px 11px;border-radius:8px;background:rgba(16,185,129,.06);color:var(--text-muted);font-size:9px;border:1px solid rgba(16,185,129,.12)}
 .empty-state{padding:35px;text-align:center;color:var(--text-muted);font-size:11px}.empty-state.large{padding-top:180px}.mc-modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.24);backdrop-filter:blur(10px);z-index:200;display:grid;place-items:center}.mc-modal{width:min(520px,calc(100vw - 36px));max-height:80vh;overflow:auto;border:1px solid var(--border-color);background:rgba(255,255,255,.92);box-shadow:0 26px 80px rgba(15,23,42,.18);border-radius:15px;padding:22px}.mc-modal h3{font-size:19px;margin:4px 0 14px}.mc-modal label{display:flex;flex-direction:column;gap:6px;font-size:10px;font-weight:700;color:var(--text-muted);margin-top:13px}.mc-modal textarea{resize:vertical;font-size:12px;line-height:1.5}.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.evidence-modal{width:min(760px,calc(100vw - 36px))}.evidence-row{border:1px solid var(--border-color);border-radius:10px;margin-top:9px;overflow:hidden}.evidence-row>div{display:flex;justify-content:space-between;padding:9px 12px;background:rgba(var(--accent-blue-rgb),.04);font-size:9px;color:var(--text-muted)}
-@media(max-width:1100px){.summary-strip{grid-template-columns:repeat(3,1fr)}.memory-groups{grid-template-columns:1fr}.workspace-grid{grid-template-columns:220px minmax(0,1fr)}.quality-check-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.post-compact-cards,.discipline-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.discipline-buckets{grid-template-columns:repeat(4,minmax(0,1fr))}.post-compact-buckets{grid-template-columns:1fr}}
-@media(max-width:760px){.memory-center{padding:10px}.mc-header,.detail-header,.feedback-panel,.quality-panel-head,.post-compact-head{flex-direction:column}.summary-strip{grid-template-columns:repeat(2,1fr)}.workspace-grid{grid-template-columns:1fr}.scope-panel{max-height:240px}.detail-panel{padding:13px}.maintenance-actions{justify-content:flex-start}.memory-toolbar{flex-direction:column}.memory-search{width:100%}.boundary-grid,.metrics-grid{grid-template-columns:repeat(2,1fr)}.quality-check-grid{grid-template-columns:1fr}.audit-item{grid-template-columns:1fr}.counter-table{grid-template-columns:repeat(2,1fr)}.post-compact-head code{max-width:100%;white-space:normal;overflow-wrap:anywhere}.post-compact-cards,.discipline-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.discipline-buckets{grid-template-columns:repeat(2,minmax(0,1fr))}.recall-diagnostic-row,.recent-usage-row,.discipline-gap-list article{grid-template-columns:1fr}}
-:global([data-theme='dark']) .memory-center .aura-card,:global([data-theme='dark']) .summary-card,:global([data-theme='dark']) .memory-group,:global([data-theme='dark']) .memory-item,:global([data-theme='dark']) .boundary-grid article,:global([data-theme='dark']) .metrics-grid article,:global([data-theme='dark']) .quality-check-card,:global([data-theme='dark']) .post-compact-cards article,:global([data-theme='dark']) .discipline-cards article,:global([data-theme='dark']) .discipline-buckets article,:global([data-theme='dark']) .post-compact-bucket,:global([data-theme='dark']) .candidate-row,:global([data-theme='dark']) .recall-diagnostic-list,:global([data-theme='dark']) .recent-usage-list{background:rgba(15,23,42,.54)}:global([data-theme='dark']) .mc-modal{background:rgba(15,23,42,.94)}
+@media(max-width:1100px){.summary-strip{grid-template-columns:repeat(3,1fr)}.memory-groups{grid-template-columns:1fr}.workspace-grid{grid-template-columns:220px minmax(0,1fr)}.quality-check-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.cross-group-quality-cards,.ignore-memory-receipt-cards,.selftest-residue-cards,.task-agent-snapshot-cards,.post-compact-cards,.discipline-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.discipline-buckets{grid-template-columns:repeat(4,minmax(0,1fr))}.post-compact-buckets{grid-template-columns:1fr}}
+@media(max-width:760px){.memory-center{padding:10px}.mc-header,.detail-header,.feedback-panel,.quality-panel-head,.post-compact-head,.cross-group-quality-head,.ignore-memory-receipt-head,.selftest-residue-head,.task-agent-snapshot-head{flex-direction:column;align-items:flex-start}.summary-strip{grid-template-columns:repeat(2,1fr)}.workspace-grid{grid-template-columns:1fr}.scope-panel{max-height:240px}.detail-panel{padding:13px}.maintenance-actions{justify-content:flex-start}.memory-toolbar{flex-direction:column}.memory-search{width:100%}.boundary-grid,.metrics-grid{grid-template-columns:repeat(2,1fr)}.quality-check-grid{grid-template-columns:1fr}.audit-item{grid-template-columns:1fr}.counter-table{grid-template-columns:repeat(2,1fr)}.post-compact-head code{max-width:100%;white-space:normal;overflow-wrap:anywhere}.cross-group-quality-cards,.ignore-memory-receipt-cards,.selftest-residue-cards,.task-agent-snapshot-cards,.post-compact-cards,.discipline-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.discipline-buckets{grid-template-columns:repeat(2,minmax(0,1fr))}.cross-group-quality-table article,.ignore-memory-receipt-list article,.ignore-memory-receipt-work-list article,.selftest-residue-list article,.task-agent-snapshot-list article,.recall-diagnostic-row,.recent-usage-row,.discipline-gap-list article{grid-template-columns:1fr}.cross-group-quality-table code,.ignore-memory-receipt-list code,.task-agent-snapshot-list code{text-align:left}}
+:global([data-theme='dark']) .memory-center .aura-card,:global([data-theme='dark']) .summary-card,:global([data-theme='dark']) .memory-group,:global([data-theme='dark']) .memory-item,:global([data-theme='dark']) .boundary-grid article,:global([data-theme='dark']) .metrics-grid article,:global([data-theme='dark']) .quality-check-card,:global([data-theme='dark']) .ignore-memory-receipt-cards article,:global([data-theme='dark']) .ignore-memory-receipt-work-list article,:global([data-theme='dark']) .selftest-residue-cards article,:global([data-theme='dark']) .task-agent-snapshot-cards article,:global([data-theme='dark']) .post-compact-cards article,:global([data-theme='dark']) .discipline-cards article,:global([data-theme='dark']) .discipline-buckets article,:global([data-theme='dark']) .post-compact-bucket,:global([data-theme='dark']) .candidate-row,:global([data-theme='dark']) .recall-diagnostic-list,:global([data-theme='dark']) .recent-usage-list{background:rgba(15,23,42,.54)}:global([data-theme='dark']) .mc-modal{background:rgba(15,23,42,.94)}
 .scope-mark.global{background:linear-gradient(135deg,var(--accent-purple),var(--accent-blue))}
 .memory-policy-strip{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 0 12px;font-size:10px;color:var(--text-muted)}.memory-policy-strip button{border:1px solid rgba(239,68,68,.18);background:rgba(239,68,68,.06);color:var(--accent-red);border-radius:14px;padding:4px 8px;cursor:pointer}
 .timeline-panel{margin-top:9px;border:1px solid rgba(var(--accent-blue-rgb),.16);border-radius:10px;background:rgba(var(--accent-blue-rgb),.04);overflow:hidden}.timeline-panel.warn,.timeline-panel.waiting{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.055)}.timeline-panel.fail{border-color:rgba(239,68,68,.22);background:rgba(239,68,68,.055)}.timeline-panel .discipline-head code{color:var(--accent-blue)}.timeline-panel.warn .discipline-head code,.timeline-panel.waiting .discipline-head code{color:var(--accent-yellow)}.timeline-panel.fail .discipline-head code{color:var(--accent-red)}.timeline-component-list{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px;padding:0 9px 9px}.timeline-component-list article{min-width:0;border:1px solid var(--border-color);border-radius:8px;background:rgba(255,255,255,.36);padding:7px;display:flex;flex-direction:column;gap:3px}.timeline-component-list article.warn{border-color:rgba(245,158,11,.2)}.timeline-component-list article.fail{border-color:rgba(239,68,68,.2)}.timeline-component-list span{font-size:8px;font-weight:800;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.timeline-component-list strong{font-family:var(--font-tech);font-size:13px;color:var(--accent-blue)}.timeline-event-list{border-top:1px solid var(--border-color)}.timeline-event-list article{display:grid;grid-template-columns:88px minmax(90px,170px) minmax(0,1fr) 120px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid rgba(100,116,139,.08);font-size:9px}.timeline-event-list article:first-child{border-top:0}.timeline-event-list span{font-size:8px;font-weight:800;color:var(--text-muted);text-transform:uppercase}.timeline-event-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.timeline-event-list p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted)}.timeline-event-list code{font-size:8px;color:var(--text-muted);text-align:right}

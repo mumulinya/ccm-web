@@ -2,6 +2,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createMcpBrowserAdapter = createMcpBrowserAdapter;
 const utils_1 = require("../utils");
+const network_assertions_1 = require("./network-assertions");
+const console_assertions_1 = require("./console-assertions");
+const semantic_locator_1 = require("./semantic-locator");
 function has(tools, pattern) {
     return tools.some(tool => pattern.test(tool));
 }
@@ -73,6 +76,131 @@ function targetInput(action) {
         value: String(action.value ?? action.text ?? ""),
     };
 }
+function typedText(action) {
+    return String(action.value ?? action.text ?? "");
+}
+function typedTextDetail(action) {
+    const input = targetInput(action);
+    return `${input.element || "focused control"}; text length=${typedText(action).length}`;
+}
+function pressKeyText(action, fallback = "Enter") {
+    return String(action.key || action.value || action.text || fallback);
+}
+function isCookieAction(action) {
+    return action.type === "setCookie" || action.type === "clearCookies";
+}
+function cookieActionName(action) {
+    return String(action.key || "").trim();
+}
+function cookieActionNames(action) {
+    const names = Array.isArray(action.keys) ? action.keys.map(name => String(name || "").trim()).filter(Boolean) : [];
+    const single = cookieActionName(action);
+    return names.length ? names : single ? [single] : [];
+}
+function cookieActionValue(action) {
+    return String(action.value ?? action.text ?? action.content ?? "");
+}
+function cookieActionHasValue(action) {
+    return action.value !== undefined || action.text !== undefined || action.content !== undefined;
+}
+function cookieActionPath(action) {
+    return String(action.cookiePath || action.cookie_path || "/").trim() || "/";
+}
+function cookieActionSameSite(action) {
+    const raw = String(action.sameSite || action.same_site || "").trim().toLowerCase();
+    if (raw === "strict")
+        return "Strict";
+    if (raw === "lax")
+        return "Lax";
+    if (raw === "none")
+        return "None";
+    return "";
+}
+function cookieActionBoolean(value) {
+    return value === undefined ? undefined : value === true || String(value).toLowerCase() === "true";
+}
+function cookieActionDetail(action) {
+    const names = cookieActionNames(action);
+    if (action.type === "clearCookies")
+        return names.length ? `cookie count=${names.length}` : "all JS-visible cookies";
+    return `cookie=${cookieActionName(action) || "(missing)"}; value length=${cookieActionValue(action).length}`;
+}
+function cookieActionScript(action) {
+    if (cookieActionBoolean(action.httpOnly ?? action.http_only)) {
+        throw new Error(`${action.type} with HttpOnly requires the Playwright provider.`);
+    }
+    const path = cookieActionPath(action);
+    if (action.type === "setCookie") {
+        const name = cookieActionName(action);
+        if (!name)
+            throw new Error("setCookie requires key/cookieName/name.");
+        if (!cookieActionHasValue(action))
+            throw new Error("setCookie requires value/text/content.");
+        const value = cookieActionValue(action);
+        const sameSite = cookieActionSameSite(action);
+        const secure = cookieActionBoolean(action.secure);
+        const expires = Number(action.expires);
+        return `() => { const parts = [encodeURIComponent(${JSON.stringify(name)}) + "=" + encodeURIComponent(${JSON.stringify(value)}), "Path=" + ${JSON.stringify(path)}];${sameSite ? ` parts.push("SameSite=${sameSite}");` : ""}${secure ? ` parts.push("Secure");` : ""}${Number.isFinite(expires) ? ` parts.push("Expires=" + new Date(${expires} * 1000).toUTCString());` : ""} document.cookie = parts.join("; "); }`;
+    }
+    const names = cookieActionNames(action);
+    return `() => { const names = ${JSON.stringify(names)}.length ? ${JSON.stringify(names)} : document.cookie.split(";").map(part => part.split("=")[0].trim()).filter(Boolean).map(decodeURIComponent); for (const name of names) { document.cookie = encodeURIComponent(name) + "=; Path=" + ${JSON.stringify(path)} + "; Expires=Thu, 01 Jan 1970 00:00:00 GMT"; } }`;
+}
+function isStorageAction(action) {
+    return action.type === "setLocalStorage" || action.type === "setSessionStorage" || action.type === "clearStorage";
+}
+function isNetworkStateAction(action) {
+    return action.type === "setOffline" || action.type === "setOnline";
+}
+function storageActionValue(action) {
+    return String(action.value ?? action.text ?? action.content ?? "");
+}
+function storageActionHasValue(action) {
+    return action.value !== undefined || action.text !== undefined || action.content !== undefined;
+}
+function storageActionKey(action) {
+    return String(action.key || "").trim();
+}
+function storageActionKeys(action) {
+    const keys = Array.isArray(action.keys) ? action.keys.map(key => String(key || "").trim()).filter(Boolean) : [];
+    const single = storageActionKey(action);
+    return keys.length ? keys : single ? [single] : [];
+}
+function storageActionArea(action) {
+    if (action.type === "setLocalStorage")
+        return "localStorage";
+    if (action.type === "setSessionStorage")
+        return "sessionStorage";
+    const raw = String(action.storage || action.storageArea || action.storage_area || "").trim().toLowerCase();
+    if (raw === "local" || raw === "localstorage" || raw === "local_storage")
+        return "localStorage";
+    if (raw === "session" || raw === "sessionstorage" || raw === "session_storage")
+        return "sessionStorage";
+    return "both";
+}
+function storageActionDetail(action) {
+    const area = storageActionArea(action);
+    const keys = storageActionKeys(action);
+    if (action.type === "clearStorage")
+        return `${area}; ${keys.length ? `key count=${keys.length}` : "clear all"}`;
+    return `${area}; key=${storageActionKey(action) || "(missing)"}; value length=${storageActionValue(action).length}`;
+}
+function storageActionScript(action) {
+    const area = storageActionArea(action);
+    if (action.type === "setLocalStorage" || action.type === "setSessionStorage") {
+        const key = storageActionKey(action);
+        if (area === "both")
+            throw new Error(`${action.type} requires a single storage area.`);
+        if (!key)
+            throw new Error(`${action.type} requires key/storageKey.`);
+        if (!storageActionHasValue(action))
+            throw new Error(`${action.type} requires value/text/content.`);
+        const value = storageActionValue(action);
+        return `() => { globalThis[${JSON.stringify(area)}].setItem(${JSON.stringify(key)}, ${JSON.stringify(value)}); }`;
+    }
+    const storageNames = area === "both" ? ["localStorage", "sessionStorage"] : [area];
+    const keys = storageActionKeys(action);
+    return `() => { for (const storageName of ${JSON.stringify(storageNames)}) { const storage = globalThis[storageName]; if (!storage) continue; if (${JSON.stringify(keys)}.length) { for (const key of ${JSON.stringify(keys)}) storage.removeItem(key); } else { storage.clear(); } } }`;
+}
 function step(kind, name, status, detail = "", error = "") {
     return { kind, name, status, detail, ...(error ? { error } : {}) };
 }
@@ -91,6 +219,54 @@ function computerActionDetail(action) {
 function browserAddressShortcut() {
     return process.platform === "darwin" ? "command+l" : "ctrl+l";
 }
+function expectedUrlFragment(action) {
+    return String(action.url || action.text || action.value || "").trim();
+}
+function assertionExpectedUrl(assertion) {
+    return String(assertion.url || assertion.urlIncludes || assertion.url_includes || assertion.value || assertion.text || "").trim();
+}
+function comparableUrl(actualUrl, expected) {
+    if (!expected.startsWith("/"))
+        return actualUrl;
+    try {
+        const url = new URL(actualUrl);
+        return `${url.pathname}${url.search}${url.hash}`;
+    }
+    catch {
+        return actualUrl;
+    }
+}
+function assertWithCurrentUrl(adapterName, currentUrl, assertion) {
+    const expected = assertionExpectedUrl(assertion);
+    if (!expected)
+        return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `${assertion.type} requires url/text/value.`);
+    const actual = comparableUrl(currentUrl || "", expected);
+    if (assertion.type === "urlEquals") {
+        return actual === expected
+            ? step("assertion", `${adapterName}:urlEquals`, "passed", expected)
+            : step("assertion", `${adapterName}:urlEquals`, "failed", expected, `Expected URL to equal "${expected}", got "${actual || "unknown"}".`);
+    }
+    if (assertion.type === "urlNotIncludes") {
+        return !String(currentUrl || "").includes(expected)
+            ? step("assertion", `${adapterName}:urlNotIncludes`, "passed", expected)
+            : step("assertion", `${adapterName}:urlNotIncludes`, "failed", expected, `Expected URL not to include "${expected}", got "${currentUrl || "unknown"}".`);
+    }
+    return String(currentUrl || "").includes(expected)
+        ? step("assertion", `${adapterName}:urlIncludes`, "passed", expected)
+        : step("assertion", `${adapterName}:urlIncludes`, "failed", expected, `Expected URL to include "${expected}", got "${currentUrl || "unknown"}".`);
+}
+async function waitForMcpUrl(adapterName, currentUrl, action, defaultTimeout) {
+    const expected = expectedUrlFragment(action);
+    if (!expected)
+        return step("action", `${adapterName}:waitForUrl`, "failed", "", "waitForUrl requires url/text/value.");
+    const deadline = Date.now() + Math.max(1, Number(action.timeoutMs || action.timeout_ms || defaultTimeout || 1000));
+    while (Date.now() < deadline) {
+        if (currentUrl.includes(expected))
+            return step("action", `${adapterName}:waitForUrl`, "passed", expected);
+        await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    return step("action", `${adapterName}:waitForUrl`, "failed", expected, `Expected URL to include "${expected}", got "${currentUrl || "(unknown)"}".`);
+}
 function normalizeComputerUseApps(apps) {
     if (!Array.isArray(apps))
         return undefined;
@@ -101,17 +277,88 @@ function normalizeComputerUseApps(apps) {
     }))
         .filter(app => app.displayName || app.bundle_id);
 }
-async function assertWithText(adapterName, assertion, signals) {
+function normalizeVisibleText(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+}
+function textOrderExpectedTexts(assertion) {
+    for (const value of [assertion.expectedTexts, assertion.expected_texts, assertion.texts, assertion.values]) {
+        if (!Array.isArray(value))
+            continue;
+        const texts = value.map(item => normalizeVisibleText(String(item ?? ""))).filter(Boolean);
+        if (texts.length)
+            return texts;
+    }
+    return [];
+}
+function assertTextOrderFromPageText(adapterName, assertion, pageText) {
+    const expected = textOrderExpectedTexts(assertion);
+    if (expected.length < 2) {
+        return step("assertion", `${adapterName}:textOrder`, "failed", "", "textOrder requires at least two values in texts/values/expectedTexts.");
+    }
+    const normalized = normalizeVisibleText(pageText);
+    let cursor = 0;
+    let foundCount = 0;
+    for (let i = 0; i < expected.length; i += 1) {
+        const index = normalized.indexOf(expected[i], cursor);
+        if (index < 0) {
+            return step("assertion", `${adapterName}:textOrder`, "failed", `expected text count=${expected.length}`, `Expected page text order to match; foundCount=${foundCount}; missingIndex=${i}.`);
+        }
+        foundCount += 1;
+        cursor = index + expected[i].length;
+    }
+    return step("assertion", `${adapterName}:textOrder`, "passed", `expected text count=${expected.length}`);
+}
+async function assertWithText(adapterName, assertion, signals, defaultTimeout = 1000) {
     const expected = String(assertion.text || assertion.value || "");
     if (assertion.type === "consoleNoErrors") {
-        return signals.consoleErrors.length
-            ? step("assertion", `${adapterName}:consoleNoErrors`, "failed", "", signals.consoleErrors.slice(0, 3).join(" | "))
+        const consoleErrors = signals.consoleErrors.length ? signals.consoleErrors : (0, console_assertions_1.filterBrowserConsoleErrorLines)(signals.consoleMessages || []);
+        return consoleErrors.length
+            ? step("assertion", `${adapterName}:consoleNoErrors`, "failed", "", consoleErrors.slice(0, 3).join(" | "))
             : step("assertion", `${adapterName}:consoleNoErrors`, "passed");
+    }
+    if (assertion.type === "consoleIncludes" || assertion.type === "consoleNotIncludes" || assertion.type === "consoleNoWarnings") {
+        const consoleMessages = (0, console_assertions_1.normalizeBrowserConsoleLines)([...(signals.consoleMessages || []), ...signals.consoleErrors.map(item => `error: ${item}`)]);
+        if (!(0, console_assertions_1.browserConsoleAssertionHasExpectation)(assertion)) {
+            return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `${assertion.type} requires text/value/message/messageIncludes.`);
+        }
+        const detail = (0, console_assertions_1.browserConsoleAssertionDetail)(assertion);
+        if ((0, console_assertions_1.browserConsoleAssertionIsNegative)(assertion)) {
+            const matched = await (0, console_assertions_1.waitForAbsentBrowserConsoleLine)(consoleMessages, assertion, (0, console_assertions_1.browserConsoleAssertionSettleMs)(assertion, defaultTimeout));
+            return matched
+                ? step("assertion", `${adapterName}:${assertion.type}`, "failed", detail, `Unexpected console telemetry matched ${detail}: ${matched}`)
+                : step("assertion", `${adapterName}:${assertion.type}`, "passed", detail);
+        }
+        const matched = await (0, console_assertions_1.waitForBrowserConsoleLine)(consoleMessages, assertion, defaultTimeout);
+        return matched
+            ? step("assertion", `${adapterName}:${assertion.type}`, "passed", detail)
+            : step("assertion", `${adapterName}:${assertion.type}`, "failed", detail, `Expected console telemetry to match ${detail}.`);
     }
     if (assertion.type === "networkNoErrors") {
         return signals.networkErrors.length
             ? step("assertion", `${adapterName}:networkNoErrors`, "failed", "", signals.networkErrors.slice(0, 3).join(" | "))
             : step("assertion", `${adapterName}:networkNoErrors`, "passed");
+    }
+    if (assertion.type === "networkRequestIncludes"
+        || assertion.type === "networkResponseIncludes"
+        || assertion.type === "networkRequest"
+        || assertion.type === "networkResponse"
+        || assertion.type === "networkRequestNotIncludes"
+        || assertion.type === "networkResponseNotIncludes"
+        || assertion.type === "networkRequestNot"
+        || assertion.type === "networkResponseNot") {
+        if (!(0, network_assertions_1.browserNetworkAssertionHasExpectation)(assertion))
+            return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `${assertion.type} requires text/value or structured network fields.`);
+        const requests = signals.networkRequests || [];
+        const detail = (0, network_assertions_1.browserNetworkAssertionDetail)(assertion);
+        const matched = (0, network_assertions_1.findMatchingBrowserNetworkLine)(requests, assertion);
+        if ((0, network_assertions_1.browserNetworkAssertionIsNegative)(assertion)) {
+            return matched
+                ? step("assertion", `${adapterName}:${assertion.type}`, "failed", detail, `Unexpected network telemetry matched ${detail || assertion.type}: ${matched}`)
+                : step("assertion", `${adapterName}:${assertion.type}`, "passed", detail);
+        }
+        return matched
+            ? step("assertion", `${adapterName}:${assertion.type}`, "passed", detail)
+            : step("assertion", `${adapterName}:${assertion.type}`, "failed", detail, `Expected network telemetry to match ${detail || assertion.type}.`);
     }
     if (assertion.type === "text" || assertion.type === "elementTextIncludes") {
         if (!expected)
@@ -119,6 +366,50 @@ async function assertWithText(adapterName, assertion, signals) {
         return signals.pageText.includes(expected)
             ? step("assertion", `${adapterName}:${assertion.type}`, "passed", expected)
             : step("assertion", `${adapterName}:${assertion.type}`, "failed", expected, `Expected page text to include "${expected}".`);
+    }
+    if (assertion.type === "ariaSnapshotIncludes") {
+        const snapshotText = String(assertion.snapshotIncludes || assertion.snapshot_includes || assertion.text || assertion.value || "");
+        if (!snapshotText)
+            return step("assertion", `${adapterName}:ariaSnapshotIncludes`, "failed", "", "ariaSnapshotIncludes requires text/value/snapshotIncludes.");
+        return signals.pageText.includes(snapshotText)
+            ? step("assertion", `${adapterName}:ariaSnapshotIncludes`, "passed", `expected substring length=${snapshotText.length}`)
+            : step("assertion", `${adapterName}:ariaSnapshotIncludes`, "failed", `expected substring length=${snapshotText.length}`, "Expected MCP page snapshot to include requested ARIA text.");
+    }
+    if (assertion.type === "accessibleNameEquals"
+        || assertion.type === "accessibleNameIncludes"
+        || assertion.type === "accessibleDescriptionEquals"
+        || assertion.type === "accessibleDescriptionIncludes") {
+        return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot compute precise accessible name/description from TestAgent; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "textOrder") {
+        return assertTextOrderFromPageText(adapterName, assertion, signals.pageText);
+    }
+    if (assertion.type === "pageNotBlank") {
+        const text = signals.pageText.trim();
+        return text && !emptyLike(text)
+            ? step("assertion", `${adapterName}:pageNotBlank`, "passed", `page text length=${text.length}`)
+            : step("assertion", `${adapterName}:pageNotBlank`, "failed", "visible user-facing page content", "Expected page snapshot/text to be non-empty.");
+    }
+    if (assertion.type === "inViewport") {
+        return step("assertion", `${adapterName}:inViewport`, "failed", (0, semantic_locator_1.browserTargetDetail)(assertion), `MCP ${adapterName} cannot verify viewport position without DOM layout metrics; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "elementScreenshotNotBlank") {
+        return step("assertion", `${adapterName}:elementScreenshotNotBlank`, "failed", (0, semantic_locator_1.browserTargetDetail)(assertion), `MCP ${adapterName} cannot verify element-level screenshot pixels from TestAgent; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "noHorizontalOverflow") {
+        return step("assertion", `${adapterName}:noHorizontalOverflow`, "failed", "", `MCP ${adapterName} cannot verify layout overflow without DOM layout metrics; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "onlineState" || assertion.type === "browserOnline" || assertion.type === "browserOffline") {
+        return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot verify browser offline/online network emulation state from TestAgent; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "cookieExists" || assertion.type === "cookieValueIncludes") {
+        return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot verify browser cookies from TestAgent; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "clipboardTextEquals" || assertion.type === "clipboardTextIncludes") {
+        return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot verify browser clipboard contents from TestAgent; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "localStorageEquals" || assertion.type === "localStorageIncludes" || assertion.type === "sessionStorageEquals" || assertion.type === "sessionStorageIncludes") {
+        return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot verify Web Storage contents from TestAgent; use Playwright for this assertion.`);
     }
     if (assertion.type === "visible") {
         const expectedVisible = String(assertion.text || assertion.value || assertion.selector || "");
@@ -136,7 +427,53 @@ async function assertWithText(adapterName, assertion, signals) {
             ? step("assertion", `${adapterName}:notVisible`, "passed", expectedHidden)
             : step("assertion", `${adapterName}:notVisible`, "failed", expectedHidden, `Target "${expectedHidden}" is still present in page text.`);
     }
-    if (assertion.type === "titleIncludes") {
+    if (assertion.type === "focused" || assertion.type === "notFocused") {
+        return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot verify focus state without DOM activeElement access; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "enabled" || assertion.type === "disabled") {
+        return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot verify enabled/disabled state without DOM property access; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "checked" || assertion.type === "notChecked") {
+        return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot verify checked state without DOM property access; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "selectedValue"
+        || assertion.type === "selectedTextIncludes"
+        || assertion.type === "inputValueEquals"
+        || assertion.type === "inputValueIncludes"
+        || assertion.type === "attributeEquals"
+        || assertion.type === "attributeIncludes"
+        || assertion.type === "computedStyleEquals"
+        || assertion.type === "computedStyleIncludes"
+        || assertion.type === "elementCountEquals"
+        || assertion.type === "elementCountAtLeast"
+        || assertion.type === "elementCountAtMost") {
+        return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot verify DOM attribute/control/style/count state without DOM property access; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "dialogAppeared" || assertion.type === "dialogMessageIncludes" || assertion.type === "dialogTypeEquals") {
+        return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot verify native browser dialog telemetry from TestAgent; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "popupOpened" || assertion.type === "popupUrlIncludes" || assertion.type === "popupTextIncludes" || assertion.type === "popupTitleIncludes") {
+        return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot verify new browser page/popup telemetry from TestAgent; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "tableRowIncludes" || assertion.type === "tableCellTextIncludes" || assertion.type === "tableCellTextEquals") {
+        return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot verify table row/cell structure without DOM table semantics; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "downloadedFile") {
+        return step("assertion", `${adapterName}:downloadedFile`, "failed", "", `MCP ${adapterName} cannot verify local downloaded files; use Playwright for this assertion.`);
+    }
+    if (assertion.type === "titleEquals" || assertion.type === "titleIncludes" || assertion.type === "titleNotIncludes") {
+        if (!expected)
+            return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `${assertion.type} requires text/value/title.`);
+        if (assertion.type === "titleEquals") {
+            return signals.pageText.trim() === expected
+                ? step("assertion", `${adapterName}:titleEquals`, "passed", expected)
+                : step("assertion", `${adapterName}:titleEquals`, "failed", expected, "MCP title assertion fell back to page text and did not match exactly.");
+        }
+        if (assertion.type === "titleNotIncludes") {
+            return !signals.pageText.includes(expected)
+                ? step("assertion", `${adapterName}:titleNotIncludes`, "passed", expected)
+                : step("assertion", `${adapterName}:titleNotIncludes`, "failed", expected, "MCP title negative assertion fell back to page text and still matched.");
+        }
         return signals.pageText.includes(expected)
             ? step("assertion", `${adapterName}:titleIncludes`, "passed", expected)
             : step("assertion", `${adapterName}:titleIncludes`, "failed", expected, "MCP title assertion fell back to page text and did not match.");
@@ -166,6 +503,38 @@ class PlaywrightMcpAdapter {
     }
     async runAction(project, action, defaultTimeout) {
         try {
+            if (action.type === "uploadFile") {
+                return step("action", "playwright:uploadFile", "failed", "", "Playwright MCP cannot verify local file uploads from TestAgent; use the Playwright provider for this action.");
+            }
+            if (action.type === "dragTo") {
+                return step("action", "playwright:dragTo", "failed", "", "Playwright MCP drag/drop is not mapped for TestAgent; use the Playwright provider for this action.");
+            }
+            if (action.type === "doubleClick" || action.type === "rightClick") {
+                return step("action", `playwright:${action.type}`, "failed", "", `Playwright MCP ${action.type} is not mapped for TestAgent; use the Playwright provider for this action.`);
+            }
+            if (action.type === "focus") {
+                return step("action", "playwright:focus", "failed", "", "Playwright MCP focus is not mapped for TestAgent; use the Playwright provider for deterministic DOM focus.");
+            }
+            if (action.type === "setClipboard") {
+                return step("action", "playwright:setClipboard", "failed", "", "Playwright MCP clipboard write is not mapped for TestAgent; use the Playwright provider for this action.");
+            }
+            if (isCookieAction(action)) {
+                const tool = pick(this.tools, [/__browser_evaluate$/]);
+                if (!tool)
+                    throw new Error("Missing browser_evaluate.");
+                await this.call(tool, { function: cookieActionScript(action) });
+                return step("action", `playwright:${action.type}`, "passed", cookieActionDetail(action));
+            }
+            if (isStorageAction(action)) {
+                const tool = pick(this.tools, [/__browser_evaluate$/]);
+                if (!tool)
+                    throw new Error("Missing browser_evaluate.");
+                await this.call(tool, { function: storageActionScript(action) });
+                return step("action", `playwright:${action.type}`, "passed", storageActionDetail(action));
+            }
+            if (isNetworkStateAction(action)) {
+                return step("action", `playwright:${action.type}`, "failed", "", "Playwright MCP does not expose browser context offline/online emulation to TestAgent; use the Playwright provider for this action.");
+            }
             if (action.type === "goto") {
                 const tool = pick(this.tools, [/__browser_navigate$/]);
                 if (!tool)
@@ -200,12 +569,20 @@ class PlaywrightMcpAdapter {
                 await this.call(tool, targetInput(action));
                 return step("action", "playwright:fill", "passed", action.selector || action.text || "");
             }
+            if (action.type === "typeText") {
+                const tool = pick(this.tools, [/__browser_type$/]);
+                if (!tool)
+                    throw new Error("Missing browser_type.");
+                await this.call(tool, targetInput(action));
+                return step("action", "playwright:typeText", "passed", typedTextDetail(action));
+            }
             if (action.type === "press") {
                 const tool = pick(this.tools, [/__browser_press_key$/]);
                 if (!tool)
                     throw new Error("Missing browser_press_key.");
-                await this.call(tool, { key: action.key || action.text || "Enter" });
-                return step("action", "playwright:press", "passed", action.key || action.text || "Enter");
+                const key = pressKeyText(action);
+                await this.call(tool, { key });
+                return step("action", "playwright:press", "passed", key);
             }
             if (action.type === "waitForTimeout") {
                 const tool = pick(this.tools, [/__browser_wait_for$/]);
@@ -215,6 +592,9 @@ class PlaywrightMcpAdapter {
                 else
                     await new Promise(resolve => setTimeout(resolve, ms));
                 return step("action", "playwright:waitForTimeout", "passed", `${ms}ms`);
+            }
+            if (action.type === "waitForUrl") {
+                return await waitForMcpUrl("playwright", this.currentUrl, action, defaultTimeout);
             }
             if (action.type === "evaluate") {
                 const tool = pick(this.tools, [/__browser_evaluate$/]);
@@ -229,21 +609,21 @@ class PlaywrightMcpAdapter {
             return step("action", `playwright:${action.type}`, "failed", action.selector || action.text || action.url || "", error.message || String(error));
         }
     }
-    async runAssertion(assertion, signals) {
-        if (assertion.type === "urlIncludes") {
-            const expected = String(assertion.value || assertion.text || "");
-            return this.currentUrl.includes(expected)
-                ? step("assertion", "playwright:urlIncludes", "passed", expected)
-                : step("assertion", "playwright:urlIncludes", "failed", expected, `Expected URL to include "${expected}", got "${this.currentUrl}".`);
+    async runAssertion(assertion, signals, defaultTimeout) {
+        if (assertion.type === "urlEquals" || assertion.type === "urlIncludes" || assertion.type === "urlNotIncludes") {
+            return assertWithCurrentUrl("playwright", this.currentUrl, assertion);
         }
-        return assertWithText("playwright", assertion, signals);
+        return assertWithText("playwright", assertion, signals, defaultTimeout);
     }
-    async readConsoleErrors() {
+    async readConsoleMessages() {
         const tool = pick(this.tools, [/__browser_console_messages$/, /__read_console_messages$/]);
         if (!tool)
             return [];
         const text = extractToolText(await this.call(tool, {}));
-        return text && !emptyLike(text) ? [(0, utils_1.compactText)(text, 1000)] : [];
+        return text && !emptyLike(text) ? (0, console_assertions_1.normalizeBrowserConsoleLines)((0, utils_1.compactText)(text, 4000).split(/\r?\n/)) : [];
+    }
+    async readConsoleErrors() {
+        return (0, console_assertions_1.filterBrowserConsoleErrorLines)(await this.readConsoleMessages());
     }
     async readNetworkErrors() {
         const tool = pick(this.tools, [/__browser_network_requests$/, /__read_network_requests$/]);
@@ -251,6 +631,13 @@ class PlaywrightMcpAdapter {
             return [];
         const text = extractToolText(await this.call(tool, {}));
         return text && /\b(4\d\d|5\d\d|failed|error)\b/i.test(text) ? [(0, utils_1.compactText)(text, 1000)] : [];
+    }
+    async readNetworkRequests() {
+        const tool = pick(this.tools, [/__browser_network_requests$/, /__read_network_requests$/]);
+        if (!tool)
+            return [];
+        const text = extractToolText(await this.call(tool, {}));
+        return text && !emptyLike(text) ? (0, utils_1.compactText)(text, 4000).split(/\r?\n/).filter(Boolean) : [];
     }
     async captureScreenshot(name) {
         const tool = pick(this.tools, [/__browser_take_screenshot$/]);
@@ -291,6 +678,38 @@ class ClaudeChromeAdapter {
     }
     async runAction(project, action, defaultTimeout) {
         try {
+            if (action.type === "uploadFile") {
+                return step("action", "claude-in-chrome:uploadFile", "failed", "", "Claude in Chrome MCP cannot verify local file uploads from TestAgent; use the Playwright provider for this action.");
+            }
+            if (action.type === "dragTo") {
+                return step("action", "claude-in-chrome:dragTo", "failed", "", "Claude in Chrome MCP drag/drop is not mapped for TestAgent; use the Playwright provider for this action.");
+            }
+            if (action.type === "doubleClick" || action.type === "rightClick") {
+                return step("action", `claude-in-chrome:${action.type}`, "failed", "", `Claude in Chrome MCP ${action.type} is not mapped for TestAgent; use the Playwright provider for this action.`);
+            }
+            if (action.type === "focus") {
+                return step("action", "claude-in-chrome:focus", "failed", "", "Claude in Chrome MCP focus is not mapped for TestAgent; use the Playwright provider for deterministic DOM focus.");
+            }
+            if (action.type === "setClipboard") {
+                return step("action", "claude-in-chrome:setClipboard", "failed", "", "Claude in Chrome MCP clipboard write is not mapped for TestAgent; use the Playwright provider for this action.");
+            }
+            if (isCookieAction(action)) {
+                const tool = pick(this.tools, [/__javascript_tool$/]);
+                if (!tool)
+                    throw new Error("Missing javascript_tool.");
+                await this.call(tool, this.withTab({ text: cookieActionScript(action) }));
+                return step("action", `claude-in-chrome:${action.type}`, "passed", cookieActionDetail(action));
+            }
+            if (isStorageAction(action)) {
+                const tool = pick(this.tools, [/__javascript_tool$/]);
+                if (!tool)
+                    throw new Error("Missing javascript_tool.");
+                await this.call(tool, this.withTab({ text: storageActionScript(action) }));
+                return step("action", `claude-in-chrome:${action.type}`, "passed", storageActionDetail(action));
+            }
+            if (isNetworkStateAction(action)) {
+                return step("action", `claude-in-chrome:${action.type}`, "failed", "", "Claude in Chrome MCP does not expose browser context offline/online emulation to TestAgent; use the Playwright provider for this action.");
+            }
             if (action.type === "goto") {
                 const url = (0, utils_1.resolveUrl)(project.targetUrl, action.url || "");
                 await this.ensureTab(url);
@@ -329,9 +748,22 @@ class ClaudeChromeAdapter {
                 await this.call(tool, this.withTab(payload));
                 return step("action", "claude-in-chrome:fill", "passed", action.selector || action.text || "");
             }
+            if (action.type === "typeText") {
+                const tool = pick(this.tools, [/__form_input$/, /__computer$/]);
+                if (!tool)
+                    throw new Error("Missing input tool.");
+                const payload = tool.endsWith("__computer")
+                    ? { action: "type", text: typedText(action) }
+                    : targetInput(action);
+                await this.call(tool, this.withTab(payload));
+                return step("action", "claude-in-chrome:typeText", "passed", typedTextDetail(action));
+            }
             if (action.type === "waitForTimeout") {
                 await new Promise(resolve => setTimeout(resolve, Math.min(Number(action.value || action.text || 1000), defaultTimeout)));
                 return step("action", "claude-in-chrome:waitForTimeout", "passed");
+            }
+            if (action.type === "waitForUrl") {
+                return await waitForMcpUrl("claude-in-chrome", this.currentUrl, action, defaultTimeout);
             }
             if (action.type === "evaluate") {
                 const tool = pick(this.tools, [/__javascript_tool$/]);
@@ -346,21 +778,21 @@ class ClaudeChromeAdapter {
             return step("action", `claude-in-chrome:${action.type}`, "failed", action.selector || action.text || action.url || "", error.message || String(error));
         }
     }
-    async runAssertion(assertion, signals) {
-        if (assertion.type === "urlIncludes") {
-            const expected = String(assertion.value || assertion.text || "");
-            return this.currentUrl.includes(expected)
-                ? step("assertion", "claude-in-chrome:urlIncludes", "passed", expected)
-                : step("assertion", "claude-in-chrome:urlIncludes", "failed", expected, `Expected URL to include "${expected}", got "${this.currentUrl}".`);
+    async runAssertion(assertion, signals, defaultTimeout) {
+        if (assertion.type === "urlEquals" || assertion.type === "urlIncludes" || assertion.type === "urlNotIncludes") {
+            return assertWithCurrentUrl("claude-in-chrome", this.currentUrl, assertion);
         }
-        return assertWithText("claude-in-chrome", assertion, signals);
+        return assertWithText("claude-in-chrome", assertion, signals, defaultTimeout);
     }
-    async readConsoleErrors() {
+    async readConsoleMessages() {
         const tool = pick(this.tools, [/__read_console_messages$/]);
         if (!tool)
             return [];
-        const text = extractToolText(await this.call(tool, this.withTab({ onlyErrors: true })));
-        return text && !emptyLike(text) ? [(0, utils_1.compactText)(text, 1000)] : [];
+        const text = extractToolText(await this.call(tool, this.withTab({})));
+        return text && !emptyLike(text) ? (0, console_assertions_1.normalizeBrowserConsoleLines)((0, utils_1.compactText)(text, 4000).split(/\r?\n/)) : [];
+    }
+    async readConsoleErrors() {
+        return (0, console_assertions_1.filterBrowserConsoleErrorLines)(await this.readConsoleMessages());
     }
     async readNetworkErrors() {
         const tool = pick(this.tools, [/__read_network_requests$/]);
@@ -368,6 +800,13 @@ class ClaudeChromeAdapter {
             return [];
         const text = extractToolText(await this.call(tool, this.withTab({})));
         return text && /\b(4\d\d|5\d\d|failed|error)\b/i.test(text) ? [(0, utils_1.compactText)(text, 1000)] : [];
+    }
+    async readNetworkRequests() {
+        const tool = pick(this.tools, [/__read_network_requests$/]);
+        if (!tool)
+            return [];
+        const text = extractToolText(await this.call(tool, this.withTab({})));
+        return text && !emptyLike(text) ? (0, utils_1.compactText)(text, 4000).split(/\r?\n/).filter(Boolean) : [];
     }
     async captureScreenshot(name) {
         const tool = pick(this.tools, [/__gif_creator$/]);
@@ -394,6 +833,38 @@ class ChromeDevtoolsAdapter {
     }
     async runAction(project, action, defaultTimeout) {
         try {
+            if (action.type === "uploadFile") {
+                return step("action", "chrome-devtools:uploadFile", "failed", "", "Chrome DevTools MCP cannot verify local file uploads from TestAgent; use the Playwright provider for this action.");
+            }
+            if (action.type === "dragTo") {
+                return step("action", "chrome-devtools:dragTo", "failed", "", "Chrome DevTools MCP drag/drop is not mapped for TestAgent; use the Playwright provider for this action.");
+            }
+            if (action.type === "doubleClick" || action.type === "rightClick") {
+                return step("action", `chrome-devtools:${action.type}`, "failed", "", `Chrome DevTools MCP ${action.type} is not mapped for TestAgent; use the Playwright provider for this action.`);
+            }
+            if (action.type === "focus") {
+                return step("action", "chrome-devtools:focus", "failed", "", "Chrome DevTools MCP focus is not mapped for TestAgent; use the Playwright provider for deterministic DOM focus.");
+            }
+            if (action.type === "setClipboard") {
+                return step("action", "chrome-devtools:setClipboard", "failed", "", "Chrome DevTools MCP clipboard write is not mapped for TestAgent; use the Playwright provider for this action.");
+            }
+            if (isCookieAction(action)) {
+                const tool = pick(this.tools, [/__evaluate_script$/]);
+                if (!tool)
+                    throw new Error("Missing evaluate_script.");
+                await this.call(tool, { function: cookieActionScript(action) });
+                return step("action", `chrome-devtools:${action.type}`, "passed", cookieActionDetail(action));
+            }
+            if (isStorageAction(action)) {
+                const tool = pick(this.tools, [/__evaluate_script$/]);
+                if (!tool)
+                    throw new Error("Missing evaluate_script.");
+                await this.call(tool, { function: storageActionScript(action) });
+                return step("action", `chrome-devtools:${action.type}`, "passed", storageActionDetail(action));
+            }
+            if (isNetworkStateAction(action)) {
+                return step("action", `chrome-devtools:${action.type}`, "failed", "", "Chrome DevTools MCP offline/online emulation is not mapped for TestAgent; use the Playwright provider for this action.");
+            }
             if (action.type === "goto") {
                 const url = (0, utils_1.resolveUrl)(project.targetUrl, action.url || "");
                 const createTool = pick(this.tools, [/__new_page$/]);
@@ -432,6 +903,13 @@ class ChromeDevtoolsAdapter {
                 await this.call(tool, targetInput(action));
                 return step("action", "chrome-devtools:fill", "passed", action.selector || action.text || "");
             }
+            if (action.type === "typeText") {
+                const tool = pick(this.tools, [/__type$/]);
+                if (!tool)
+                    throw new Error("Missing type tool.");
+                await this.call(tool, targetInput(action));
+                return step("action", "chrome-devtools:typeText", "passed", typedTextDetail(action));
+            }
             if (action.type === "evaluate") {
                 const tool = pick(this.tools, [/__evaluate_script$/]);
                 if (!tool)
@@ -443,27 +921,30 @@ class ChromeDevtoolsAdapter {
                 await new Promise(resolve => setTimeout(resolve, Math.min(Number(action.value || action.text || 1000), defaultTimeout)));
                 return step("action", "chrome-devtools:waitForTimeout", "passed");
             }
+            if (action.type === "waitForUrl") {
+                return await waitForMcpUrl("chrome-devtools", this.currentUrl, action, defaultTimeout);
+            }
             return step("action", `chrome-devtools:${action.type}`, "failed", "", `Action ${action.type} is not mapped for Chrome DevTools MCP.`);
         }
         catch (error) {
             return step("action", `chrome-devtools:${action.type}`, "failed", action.selector || action.text || action.url || "", error.message || String(error));
         }
     }
-    async runAssertion(assertion, signals) {
-        if (assertion.type === "urlIncludes") {
-            const expected = String(assertion.value || assertion.text || "");
-            return this.currentUrl.includes(expected)
-                ? step("assertion", "chrome-devtools:urlIncludes", "passed", expected)
-                : step("assertion", "chrome-devtools:urlIncludes", "failed", expected, `Expected URL to include "${expected}", got "${this.currentUrl}".`);
+    async runAssertion(assertion, signals, defaultTimeout) {
+        if (assertion.type === "urlEquals" || assertion.type === "urlIncludes" || assertion.type === "urlNotIncludes") {
+            return assertWithCurrentUrl("chrome-devtools", this.currentUrl, assertion);
         }
-        return assertWithText("chrome-devtools", assertion, signals);
+        return assertWithText("chrome-devtools", assertion, signals, defaultTimeout);
     }
-    async readConsoleErrors() {
+    async readConsoleMessages() {
         const tool = pick(this.tools, [/__list_console_messages$/]);
         if (!tool)
             return [];
         const text = extractToolText(await this.call(tool, {}));
-        return text && /\b(error|exception|failed)\b/i.test(text) ? [(0, utils_1.compactText)(text, 1000)] : [];
+        return text && !emptyLike(text) ? (0, console_assertions_1.normalizeBrowserConsoleLines)((0, utils_1.compactText)(text, 4000).split(/\r?\n/)) : [];
+    }
+    async readConsoleErrors() {
+        return (0, console_assertions_1.filterBrowserConsoleErrorLines)(await this.readConsoleMessages());
     }
     async readNetworkErrors() {
         const tool = pick(this.tools, [/__list_network_requests$/]);
@@ -471,6 +952,13 @@ class ChromeDevtoolsAdapter {
             return [];
         const text = extractToolText(await this.call(tool, {}));
         return text && /\b(4\d\d|5\d\d|failed|error)\b/i.test(text) ? [(0, utils_1.compactText)(text, 1000)] : [];
+    }
+    async readNetworkRequests() {
+        const tool = pick(this.tools, [/__list_network_requests$/]);
+        if (!tool)
+            return [];
+        const text = extractToolText(await this.call(tool, {}));
+        return text && !emptyLike(text) ? (0, utils_1.compactText)(text, 4000).split(/\r?\n/).filter(Boolean) : [];
     }
     async captureScreenshot(name) {
         const tool = pick(this.tools, [/__take_screenshot$/]);
@@ -500,6 +988,37 @@ class ComputerUseAdapter {
     }
     async runAction(project, action, defaultTimeout) {
         try {
+            if (action.type === "uploadFile") {
+                return this.unsupported("action", "uploadFile", "Computer Use MCP cannot verify local file uploads from TestAgent; use the Playwright provider for this action.");
+            }
+            if (action.type === "dragTo") {
+                return this.unsupported("action", "dragTo", "Computer Use MCP drag/drop is not mapped for TestAgent; use the Playwright provider for this action.");
+            }
+            if (action.type === "doubleClick" || action.type === "rightClick") {
+                return this.unsupported("action", action.type, `Computer Use MCP ${action.type} is not mapped for TestAgent; use the Playwright provider for this action.`);
+            }
+            if (action.type === "focus") {
+                const tool = pick(this.tools, [/__left_click$/]);
+                if (!tool)
+                    throw new Error("Missing left_click tool.");
+                const input = coordinateInput(action);
+                if (!input.coordinate)
+                    throw new Error("Computer Use focus requires action.coordinate [x,y]; selectors/text cannot be resolved without DOM access.");
+                await this.call(tool, input);
+                return step("action", "computer-use:focus", "passed", computerActionDetail(action));
+            }
+            if (action.type === "setClipboard") {
+                return this.unsupported("action", "setClipboard", "Computer Use MCP cannot write browser clipboard contents for TestAgent; use the Playwright provider for this action.");
+            }
+            if (isCookieAction(action)) {
+                return this.unsupported("action", action.type, "Computer Use MCP cannot modify browser cookies from TestAgent; use Playwright or a JavaScript-capable browser provider.");
+            }
+            if (isStorageAction(action)) {
+                return this.unsupported("action", action.type, "Computer Use MCP cannot modify Web Storage from TestAgent; use Playwright or a JavaScript-capable browser provider.");
+            }
+            if (isNetworkStateAction(action)) {
+                return this.unsupported("action", action.type, "Computer Use MCP cannot emulate browser offline/online network state from TestAgent; use Playwright for this action.");
+            }
             if (action.type === "requestAccess") {
                 const tool = pick(this.tools, [/__request_access$/]);
                 if (!tool)
@@ -576,11 +1095,30 @@ class ComputerUseAdapter {
                 await this.call(typeTool, { text });
                 return step("action", "computer-use:fill", "passed", input.coordinate ? `${computerActionDetail(action)} then typed` : "typed into focused control");
             }
+            if (action.type === "typeText") {
+                const typeTool = pick(this.tools, [/__type$/]);
+                if (!typeTool)
+                    throw new Error("Missing type tool.");
+                const text = typedText(action);
+                if (!text)
+                    throw new Error("typeText requires value/text.");
+                const input = coordinateInput(action);
+                if (input.coordinate) {
+                    const clickTool = pick(this.tools, [/__left_click$/]);
+                    if (clickTool)
+                        await this.call(clickTool, input);
+                }
+                else if (action.selector) {
+                    throw new Error("Computer Use typeText cannot resolve selectors; click a coordinate first or provide action.coordinate.");
+                }
+                await this.call(typeTool, { text });
+                return step("action", "computer-use:typeText", "passed", input.coordinate ? `${computerActionDetail(action)} then typed ${text.length} chars` : `typed ${text.length} chars into focused control`);
+            }
             if (action.type === "press") {
                 const tool = pick(this.tools, [/__key$/]);
                 if (!tool)
                     throw new Error("Missing key tool.");
-                const text = String(action.key || action.text || action.value || "enter");
+                const text = pressKeyText(action, "enter");
                 await this.call(tool, { text });
                 return step("action", "computer-use:press", "passed", text);
             }
@@ -610,6 +1148,9 @@ class ComputerUseAdapter {
             if (action.type === "waitForSelector" || action.type === "waitForText") {
                 return this.unsupported("action", action.type, "Computer Use cannot wait on DOM selectors or page text. Use a browser-native MCP provider for DOM assertions.");
             }
+            if (action.type === "waitForUrl") {
+                return await waitForMcpUrl("computer-use", this.currentUrl, action, defaultTimeout);
+            }
             if (action.type === "evaluate") {
                 return this.unsupported("action", "evaluate", "Computer Use cannot evaluate JavaScript in the page. Use Playwright, Claude in Chrome, or Chrome DevTools MCP.");
             }
@@ -623,14 +1164,35 @@ class ComputerUseAdapter {
         }
     }
     async runAssertion(assertion) {
-        if (assertion.type === "urlIncludes") {
-            const expected = String(assertion.value || assertion.text || "");
-            return this.currentUrl && this.currentUrl.includes(expected)
-                ? step("assertion", "computer-use:urlIncludes", "passed", expected)
-                : step("assertion", "computer-use:urlIncludes", "failed", expected, `Expected best-effort URL to include "${expected}", got "${this.currentUrl || "unknown"}".`);
+        if (assertion.type === "urlEquals" || assertion.type === "urlIncludes" || assertion.type === "urlNotIncludes") {
+            return assertWithCurrentUrl("computer-use", this.currentUrl, assertion);
         }
-        if (assertion.type === "consoleNoErrors" || assertion.type === "networkNoErrors") {
-            return this.unsupported("assertion", assertion.type, "Computer Use MCP does not expose console or network telemetry.");
+        if (assertion.type === "consoleNoErrors"
+            || assertion.type === "consoleIncludes"
+            || assertion.type === "consoleNotIncludes"
+            || assertion.type === "consoleNoWarnings"
+            || assertion.type === "onlineState"
+            || assertion.type === "browserOnline"
+            || assertion.type === "browserOffline"
+            || assertion.type === "accessibleNameEquals"
+            || assertion.type === "accessibleNameIncludes"
+            || assertion.type === "accessibleDescriptionEquals"
+            || assertion.type === "accessibleDescriptionIncludes"
+            || assertion.type === "ariaSnapshotIncludes"
+            || assertion.type === "networkNoErrors"
+            || assertion.type === "networkRequest"
+            || assertion.type === "networkResponse"
+            || assertion.type === "networkRequestIncludes"
+            || assertion.type === "networkResponseIncludes"
+            || assertion.type === "networkRequestNot"
+            || assertion.type === "networkResponseNot"
+            || assertion.type === "networkRequestNotIncludes"
+            || assertion.type === "networkResponseNotIncludes"
+            || assertion.type === "popupOpened"
+            || assertion.type === "popupUrlIncludes"
+            || assertion.type === "popupTextIncludes"
+            || assertion.type === "popupTitleIncludes") {
+            return this.unsupported("assertion", assertion.type, "Computer Use MCP does not expose console, network, offline/online emulation, or popup page telemetry.");
         }
         return this.unsupported("assertion", assertion.type, "Computer Use MCP cannot read DOM/page text; use screenshot evidence or a browser-native provider for this assertion.");
     }
@@ -638,6 +1200,9 @@ class ComputerUseAdapter {
         return [];
     }
     async readNetworkErrors() {
+        return [];
+    }
+    async readNetworkRequests() {
         return [];
     }
     async captureScreenshot(name) {

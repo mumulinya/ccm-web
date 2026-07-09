@@ -67,7 +67,7 @@ const auditRows = computed(() => {
     <div class="modal resource-modal">
       <button class="modal-close" @click="emit('close')">&times;</button>
       <h3>🔧 群聊工具配置 - {{ groupName }}</h3>
-      <div class="modal-desc">配置此群聊可用的 MCP 和 Skill，子 Agent 只会收到这里授权的工具。</div>
+      <div class="modal-desc">配置此群聊可用的 MCP 和 Skill，执行成员只会收到这里授权的工具。</div>
 
       <div class="resource-body">
         <div class="resource-section-title">🔌 MCP 服务器</div>

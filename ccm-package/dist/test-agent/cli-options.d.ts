@@ -5,6 +5,7 @@ export interface TestAgentCliOptions {
     verifyArtifactsPath: string;
     help: boolean;
     validateOnly: boolean;
+    planOnly: boolean;
     summary: boolean;
     json: boolean;
     artifactDir?: string;

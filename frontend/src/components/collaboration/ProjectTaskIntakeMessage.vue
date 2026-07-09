@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { sanitizeUserFacingPlanText } from '../../utils/agentDisplay.js'
 
 const props = defineProps({
   msg: { type: Object, required: true },
@@ -7,8 +8,34 @@ const props = defineProps({
   accentStyle: { type: Object, default: () => ({}) },
 })
 
-const intakeSummary = computed(() => props.msg?.intakeSummary || props.msg?.intake_summary || null)
+const planCopy = (value, fallback = '', max = 220) => sanitizeUserFacingPlanText(value, fallback, max)
+const normalizeIntakeItem = (item = {}) => {
+  const rawLabel = String(item.label || '').trim()
+  const rawValue = String(item.value || '').trim()
+  if (/负责.*(主\s*)?Agent|负责协调/i.test(rawLabel) || /^coordinator$/i.test(rawValue)) {
+    return { ...item, label: '负责协调', value: '我会统一跟进' }
+  }
+  return {
+    ...item,
+    label: planCopy(rawLabel, '状态', 80),
+    value: planCopy(rawValue, '已整理', 140),
+  }
+}
+
+const intakeSummary = computed(() => {
+  const raw = props.msg?.intakeSummary || props.msg?.intake_summary || null
+  if (!raw) return null
+  return {
+    ...raw,
+    title: planCopy(raw.title || '接下来', '接下来', 80),
+    status_label: planCopy(raw.status_label || raw.statusLabel || '', '已接管', 80),
+    headline: raw.headline ? planCopy(raw.headline, '接下来我会继续处理。', 240) : raw.headline,
+    next_action: raw.next_action || raw.nextAction ? planCopy(raw.next_action || raw.nextAction, '等待下一步。', 180) : '',
+    items: Array.isArray(raw.items) ? raw.items.map(normalizeIntakeItem) : [],
+  }
+})
 const intakeItems = computed(() => Array.isArray(intakeSummary.value?.items) ? intakeSummary.value.items : [])
+const visibleContent = computed(() => planCopy(props.displayContent || props.msg?.content || '', '我已整理好执行前计划。', 600))
 const taskStatusLabel = computed(() => {
   if (intakeSummary.value?.status_label) return intakeSummary.value.status_label
   if (props.msg?.queue?.queued === false) {
@@ -27,7 +54,7 @@ const taskStatusLabel = computed(() => {
       </div>
       <span class="project-task-status">{{ taskStatusLabel }}</span>
     </div>
-    <div class="project-task-content">{{ displayContent || msg.content }}</div>
+    <div class="project-task-content">{{ visibleContent }}</div>
     <section v-if="intakeSummary" class="project-task-next" :class="intakeSummary.status">
       <header>
         <span>{{ intakeSummary.title || '接下来' }}</span>

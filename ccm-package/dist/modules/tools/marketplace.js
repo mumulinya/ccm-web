@@ -1307,6 +1307,22 @@ function localMarketplaceItems() {
             author: "CC-Connect",
             version: "2.2.0",
         }, source),
+        normalizeMarketplaceItem({
+            name: "code-review",
+            type: "skill",
+            description: "Review code changes for correctness bugs, regressions, missing tests, and maintainability risks.",
+            prompt: "Review the supplied code or diff as a senior software engineer. Prioritize correctness bugs, behavioral regressions, authorization mistakes, data loss risks, concurrency issues, and missing tests. Return findings first, ordered by severity, with concrete file or symbol references when available. If no issues are found, say that clearly and list any residual test gaps.",
+            author: "CC-Connect",
+            version: "1.0.0",
+        }, source),
+        normalizeMarketplaceItem({
+            name: "frontend-design",
+            type: "skill",
+            description: "Design and review production-grade frontend UI with strong layout, interaction, and accessibility judgment.",
+            prompt: "Use this skill for frontend UI design, implementation review, or redesign work. Focus on task-first workflows, responsive layout, visual hierarchy, accessibility, interaction states, and consistency with the existing design system. Avoid generic landing-page filler; provide concrete component, layout, and styling guidance tailored to the product context.",
+            author: "CC-Connect",
+            version: "1.0.0",
+        }, source),
     ];
 }
 async function runMarketplaceSelfTest() {

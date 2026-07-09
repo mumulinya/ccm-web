@@ -1,0 +1,12 @@
+import { BrowserAssertionSpec } from "../types";
+export declare function normalizeBrowserConsoleLines(lines: string[]): string[];
+export declare function isBrowserConsoleErrorLine(line: string): boolean;
+export declare function isBrowserConsoleWarningLine(line: string): boolean;
+export declare function filterBrowserConsoleErrorLines(lines: string[]): string[];
+export declare function browserConsoleAssertionHasExpectation(assertion: BrowserAssertionSpec): boolean;
+export declare function browserConsoleAssertionIsNegative(assertion: BrowserAssertionSpec): boolean;
+export declare function browserConsoleAssertionSettleMs(assertion: BrowserAssertionSpec, defaultTimeout: number, fallback?: number): number;
+export declare function browserConsoleAssertionDetail(assertion: BrowserAssertionSpec): string;
+export declare function findMatchingBrowserConsoleLine(lines: string[], assertion: BrowserAssertionSpec): string;
+export declare function waitForBrowserConsoleLine(lines: string[], assertion: BrowserAssertionSpec, timeout: number): Promise<string>;
+export declare function waitForAbsentBrowserConsoleLine(lines: string[], assertion: BrowserAssertionSpec, settleMs: number): Promise<string>;

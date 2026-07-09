@@ -155,11 +155,39 @@ export interface BrowserCheckSpec {
   actions?: BrowserActionSpec[];
   assertions?: BrowserAssertionSpec[];
   screenshot?: boolean;
+  viewport?: {
+    width?: number;
+    height?: number;
+  };
+  viewportWidth?: number;
+  viewport_width?: number;
+  viewportHeight?: number;
+  viewport_height?: number;
+  isMobile?: boolean;
+  is_mobile?: boolean;
+  deviceScaleFactor?: number;
+  device_scale_factor?: number;
+  userAgent?: string;
+  user_agent?: string;
+  locale?: string;
+  timezoneId?: string;
+  timezone_id?: string;
+  colorScheme?: "light" | "dark" | "no-preference" | string;
+  color_scheme?: "light" | "dark" | "no-preference" | string;
+  reducedMotion?: "reduce" | "no-preference" | string;
+  reduced_motion?: "reduce" | "no-preference" | string;
+  permissions?: string[];
+  geolocation?: {
+    latitude?: number;
+    longitude?: number;
+    accuracy?: number;
+  };
   adversarial?: boolean;
   probeType?: string;
   probe_type?: string;
   timeoutMs?: number;
   timeout_ms?: number;
+  context?: Record<string, any>;
 }
 
 export interface HttpCheckSpec {
@@ -197,11 +225,25 @@ export interface BrowserActionSpec {
   type:
     | "goto"
     | "click"
+    | "doubleClick"
+    | "rightClick"
     | "fill"
     | "selectOption"
     | "check"
     | "uncheck"
+    | "uploadFile"
+    | "dragTo"
+    | "setClipboard"
+    | "setCookie"
+    | "clearCookies"
+    | "setLocalStorage"
+    | "setSessionStorage"
+    | "clearStorage"
+    | "setOffline"
+    | "setOnline"
     | "hover"
+    | "focus"
+    | "typeText"
     | "press"
     | "scroll"
     | "openApplication"
@@ -211,14 +253,54 @@ export interface BrowserActionSpec {
     | "goForward"
     | "waitForSelector"
     | "waitForText"
+    | "waitForUrl"
     | "waitForTimeout"
     | "evaluate";
   selector?: string;
   locator?: string;
   text?: string;
   value?: string;
+  storage?: string;
+  storageArea?: string;
+  storage_area?: string;
+  keys?: string[];
   url?: string;
   key?: string;
+  domain?: string;
+  cookiePath?: string;
+  cookie_path?: string;
+  expires?: number;
+  httpOnly?: boolean;
+  http_only?: boolean;
+  secure?: boolean;
+  sameSite?: "Strict" | "Lax" | "None" | string;
+  same_site?: "Strict" | "Lax" | "None" | string;
+  filePath?: string;
+  file_path?: string;
+  path?: string;
+  fileName?: string;
+  file_name?: string;
+  filename?: string;
+  fileContent?: string;
+  file_content?: string;
+  content?: string;
+  mediaType?: string;
+  media_type?: string;
+  filePaths?: string[];
+  file_paths?: string[];
+  files?: Array<{
+    filePath?: string;
+    file_path?: string;
+    path?: string;
+    fileName?: string;
+    file_name?: string;
+    filename?: string;
+    fileContent?: string;
+    file_content?: string;
+    content?: string;
+    mediaType?: string;
+    media_type?: string;
+  }>;
   testId?: string;
   test_id?: string;
   dataTestId?: string;
@@ -231,11 +313,38 @@ export interface BrowserActionSpec {
   alt_text?: string;
   title?: string;
   exact?: boolean;
+  destinationSelector?: string;
+  destination_selector?: string;
+  destinationLocator?: string;
+  destination_locator?: string;
+  destinationTestId?: string;
+  destination_test_id?: string;
+  destinationDataTestId?: string;
+  destination_data_testid?: string;
+  destinationLabel?: string;
+  destination_label?: string;
+  destinationPlaceholder?: string;
+  destination_placeholder?: string;
+  destinationRole?: string;
+  destination_role?: string;
+  destinationName?: string;
+  destination_name?: string;
+  destinationText?: string;
+  destination_text?: string;
+  destinationAltText?: string;
+  destination_alt_text?: string;
+  destinationTitle?: string;
+  destination_title?: string;
+  destinationExact?: boolean;
+  destination_exact?: boolean;
   coordinate?: [number, number];
   startCoordinate?: [number, number];
   start_coordinate?: [number, number];
   direction?: "up" | "down" | "left" | "right";
   amount?: number;
+  delay?: number;
+  delayMs?: number;
+  delay_ms?: number;
   duration?: number;
   region?: [number, number, number, number];
   bundleId?: string;
@@ -254,12 +363,72 @@ export interface BrowserAssertionSpec {
   type:
     | "visible"
     | "notVisible"
+    | "focused"
+    | "notFocused"
+    | "enabled"
+    | "disabled"
+    | "checked"
+    | "notChecked"
+    | "selectedValue"
+    | "selectedTextIncludes"
+    | "inputValueEquals"
+    | "inputValueIncludes"
+    | "attributeEquals"
+    | "attributeIncludes"
+    | "computedStyleEquals"
+    | "computedStyleIncludes"
+    | "elementCountEquals"
+    | "elementCountAtLeast"
+    | "elementCountAtMost"
+    | "dialogAppeared"
+    | "dialogMessageIncludes"
+    | "dialogTypeEquals"
+    | "popupOpened"
+    | "popupUrlIncludes"
+    | "popupTextIncludes"
+    | "popupTitleIncludes"
+    | "tableRowIncludes"
+    | "tableCellTextIncludes"
+    | "tableCellTextEquals"
+    | "clipboardTextEquals"
+    | "clipboardTextIncludes"
+    | "elementScreenshotNotBlank"
+    | "textOrder"
     | "text"
+    | "urlEquals"
     | "urlIncludes"
+    | "urlNotIncludes"
+    | "titleEquals"
     | "titleIncludes"
+    | "titleNotIncludes"
     | "elementTextIncludes"
+    | "accessibleNameEquals"
+    | "accessibleNameIncludes"
+    | "accessibleDescriptionEquals"
+    | "accessibleDescriptionIncludes"
+    | "ariaSnapshotIncludes"
+    | "inViewport"
+    | "pageNotBlank"
+    | "noHorizontalOverflow"
+    | "onlineState"
+    | "browserOnline"
+    | "browserOffline"
+    | "cookieExists"
+    | "cookieValueIncludes"
     | "networkNoErrors"
+    | "networkRequest"
+    | "networkRequestIncludes"
+    | "networkRequestNot"
+    | "networkRequestNotIncludes"
+    | "networkResponse"
+    | "networkResponseIncludes"
+    | "networkResponseNot"
+    | "networkResponseNotIncludes"
+    | "downloadedFile"
+    | "consoleIncludes"
+    | "consoleNotIncludes"
     | "consoleNoErrors"
+    | "consoleNoWarnings"
     | "jsTruthy"
     | "jsEquals"
     | "localStorageEquals"
@@ -270,6 +439,99 @@ export interface BrowserAssertionSpec {
   locator?: string;
   text?: string;
   value?: string;
+  attribute?: string;
+  attributeName?: string;
+  attribute_name?: string;
+  property?: string;
+  styleProperty?: string;
+  style_property?: string;
+  cssProperty?: string;
+  css_property?: string;
+  url?: string;
+  urlIncludes?: string;
+  url_includes?: string;
+  method?: string;
+  httpMethod?: string;
+  http_method?: string;
+  status?: number | number[];
+  statusCode?: number | number[];
+  status_code?: number | number[];
+  resourceType?: string;
+  resource_type?: string;
+  headerName?: string;
+  header_name?: string;
+  headerIncludes?: string;
+  header_includes?: string;
+  headerValueIncludes?: string;
+  header_value_includes?: string;
+  bodyIncludes?: string;
+  body_includes?: string;
+  bodyJsonPath?: string;
+  body_json_path?: string;
+  bodyJsonEquals?: any;
+  body_json_equals?: any;
+  bodyJsonIncludes?: string;
+  body_json_includes?: string;
+  fileName?: string;
+  file_name?: string;
+  filename?: string;
+  fileNameIncludes?: string;
+  file_name_includes?: string;
+  filenameIncludes?: string;
+  filename_includes?: string;
+  contentIncludes?: string;
+  content_includes?: string;
+  minBytes?: number;
+  min_bytes?: number;
+  count?: number;
+  expectedCount?: number;
+  expected_count?: number;
+  minCount?: number;
+  min_count?: number;
+  maxCount?: number;
+  max_count?: number;
+  minUniqueColors?: number;
+  min_unique_colors?: number;
+  minNonWhitePixels?: number;
+  min_non_white_pixels?: number;
+  message?: string;
+  messageIncludes?: string;
+  message_includes?: string;
+  accessibleName?: string;
+  accessible_name?: string;
+  accessibleDescription?: string;
+  accessible_description?: string;
+  description?: string;
+  descriptionIncludes?: string;
+  description_includes?: string;
+  snapshotIncludes?: string;
+  snapshot_includes?: string;
+  dialogType?: "alert" | "beforeunload" | "confirm" | "prompt" | string;
+  dialog_type?: "alert" | "beforeunload" | "confirm" | "prompt" | string;
+  popupIndex?: number;
+  popup_index?: number;
+  tableSelector?: string;
+  table_selector?: string;
+  tableLocator?: string;
+  table_locator?: string;
+  rowText?: string;
+  row_text?: string;
+  rowIndex?: number;
+  row_index?: number;
+  rowNumber?: number;
+  row_number?: number;
+  columnName?: string;
+  column_name?: string;
+  columnHeader?: string;
+  column_header?: string;
+  columnIndex?: number;
+  column_index?: number;
+  columnNumber?: number;
+  column_number?: number;
+  texts?: string[];
+  values?: string[];
+  expectedTexts?: string[];
+  expected_texts?: string[];
   key?: string;
   expression?: string;
   testId?: string;
@@ -286,6 +548,8 @@ export interface BrowserAssertionSpec {
   exact?: boolean;
   timeoutMs?: number;
   timeout_ms?: number;
+  settleMs?: number;
+  settle_ms?: number;
 }
 
 export interface NormalizedTestAgentWorkOrder {
@@ -373,6 +637,25 @@ export interface BrowserCheckResult {
   title?: string;
   pageTextPreview?: string;
   pageSnapshots?: string[];
+  viewport?: {
+    width: number;
+    height: number;
+    isMobile?: boolean;
+    deviceScaleFactor?: number;
+  };
+  contextOptions?: {
+    userAgent?: string;
+    locale?: string;
+    timezoneId?: string;
+    colorScheme?: string;
+    reducedMotion?: string;
+    permissions?: string[];
+    geolocation?: {
+      latitude: number;
+      longitude: number;
+      accuracy?: number;
+    };
+  };
   status: "passed" | "failed" | "blocked" | "skipped";
   startedAt: string;
   finishedAt: string;
@@ -380,16 +663,68 @@ export interface BrowserCheckResult {
   steps: BrowserStepResult[];
   screenshots: string[];
   consoleMessages?: string[];
+  dialogMessages?: string[];
+  popupMessages?: string[];
   consoleErrors: string[];
   pageErrors: string[];
   networkRequests?: string[];
   networkErrors?: string[];
   consoleLogPath?: string;
+  dialogLogPath?: string;
+  popupLogPath?: string;
   networkLogPath?: string;
   browserArtifacts?: BrowserEvidenceArtifact[];
   adversarial?: boolean;
   probeType?: string;
   error?: string;
+}
+
+export interface BrowserNetworkSummaryItem {
+  project: string;
+  name: string;
+  provider?: "playwright" | "mcp" | "none";
+  status: BrowserCheckResult["status"];
+  url: string;
+  finalUrl?: string;
+  requestCount: number;
+  responseCount: number;
+  failedRequestCount: number;
+  failedResponseCount: number;
+  errorCount: number;
+  statusCodes: Record<string, number>;
+  resourceTypes: Record<string, number>;
+  failureKinds: Record<string, number>;
+  failedUrls: string[];
+  errors: string[];
+  networkLogPath?: string;
+}
+
+export interface BrowserInteractionSummaryStep {
+  kind: "action" | "assertion";
+  name: string;
+  status: BrowserStepResult["status"];
+  detail?: string;
+  error?: string;
+}
+
+export interface BrowserInteractionSummaryItem {
+  project: string;
+  name: string;
+  provider?: "playwright" | "mcp" | "none";
+  status: BrowserCheckResult["status"];
+  url: string;
+  finalUrl?: string;
+  probeType?: string;
+  actionCount: number;
+  assertionCount: number;
+  passedActions: number;
+  failedActions: number;
+  passedAssertions: number;
+  failedAssertions: number;
+  actionTypes: Record<string, number>;
+  assertionTypes: Record<string, number>;
+  actionSteps: BrowserInteractionSummaryStep[];
+  failedSteps: BrowserInteractionSummaryStep[];
 }
 
 export interface BrowserEvidenceArtifact {
@@ -460,10 +795,13 @@ export interface TestAgentArtifactManifestItem {
   type:
     | "report_json"
     | "report_markdown"
+    | "verdict_json"
     | "artifact_manifest"
     | "screenshot"
     | "browser_snapshot"
     | "browser_console_log"
+    | "browser_dialog_log"
+    | "browser_popup_log"
     | "browser_network_log"
     | "browser_tool_transcript"
     | "browser_trace"
@@ -498,6 +836,7 @@ export interface TestAgentArtifactManifest {
     screenshots: number;
     browserSnapshots: number;
     browserConsoleLogs: number;
+    browserPopupLogs: number;
     browserNetworkLogs: number;
     browserToolTranscripts: number;
     browserTraces: number;
@@ -509,6 +848,52 @@ export interface TestAgentArtifactManifest {
     integrityMissing: number;
   };
   files: TestAgentArtifactManifestItem[];
+}
+
+export interface TestAgentVerdict {
+  schema: "ccm-test-agent-verdict-v1";
+  agent: "test-agent";
+  reportId: string;
+  workOrderId: string;
+  taskId: string;
+  groupId: string;
+  status: TestAgentStatus;
+  recommendation: TestAgentRecommendation;
+  canAccept: boolean;
+  needsRework: boolean;
+  needsHuman: boolean;
+  summary: string;
+  failedRequiredChecks: RequiredCheckCoverageItem[];
+  unknownRequiredChecks: RequiredCheckCoverageItem[];
+  failedAcceptanceCriteria: AcceptanceCoverageItem[];
+  unknownAcceptanceCriteria: AcceptanceCoverageItem[];
+  blockedReasons: string[];
+  risks: string[];
+  nextActions: string[];
+  evidenceSummary: {
+    commands: Record<string, number>;
+    devServers: Record<string, number>;
+    httpChecks: Record<string, number>;
+    browserChecks: Record<string, number>;
+    browserToolCalls: Record<string, number>;
+    browserNetworkErrors?: number;
+    browserActions?: number;
+    browserFailedActions?: number;
+    browserAssertions?: number;
+    browserFailedAssertions?: number;
+    artifacts: number;
+  };
+  browserNetworkSummary?: BrowserNetworkSummaryItem[];
+  browserInteractionSummary?: BrowserInteractionSummaryItem[];
+  keyEvidence: EvidenceItem[];
+  artifacts: {
+    artifactDir: string;
+    reportJsonPath?: string;
+    reportMarkdownPath?: string;
+    verdictJsonPath?: string;
+    manifestPath?: string;
+  };
+  metadata: Record<string, any>;
 }
 
 export interface TestAgentReport {
@@ -531,6 +916,8 @@ export interface TestAgentReport {
   httpResults: HttpCheckResult[];
   browserResults: BrowserCheckResult[];
   browserToolCalls: BrowserToolCallRecord[];
+  browserNetworkSummary: BrowserNetworkSummaryItem[];
+  browserInteractionSummary: BrowserInteractionSummaryItem[];
   requiredCheckCoverage: RequiredCheckCoverageItem[];
   acceptanceCoverage: AcceptanceCoverageItem[];
   evidence: EvidenceItem[];

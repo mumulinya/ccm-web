@@ -339,6 +339,135 @@ export declare function buildGroupPostCompactUsageDiagnostics(groupId: string, m
     };
     compactFileReferenceAccess: any;
     compactFileReferenceDiscipline: any;
+    taskAgentMemoryContextSnapshots: {
+        schema: string;
+        groupId: string;
+        status: string;
+        directory: any;
+        policy: any;
+        snapshotCount: number;
+        okCount: number;
+        warnCount: number;
+        failCount: number;
+        staleCount: number;
+        prunableCount: number;
+        projects: any;
+        rows: any;
+        weakRows: any;
+        prunableRows: any;
+        retention: {
+            schema: any;
+            dryRun: boolean;
+            candidateCount: number;
+            prunedCount: number;
+            skippedCount: number;
+            rows: any;
+        } | {
+            dryRun: boolean;
+            candidateCount: number;
+            prunedCount: number;
+            skippedCount: number;
+            rows: any[];
+            schema?: undefined;
+        };
+    };
+    compactStrategyDecision: {
+        schema: string;
+        groupId: string;
+        status: string;
+        checked: boolean;
+        compacted: boolean;
+        mode: any;
+        reason: string;
+        decisionId: any;
+        decisionChecksum: any;
+        summaryChecksum: any;
+        transcriptPath: any;
+        messagesToSummarize: number;
+        keptMessages: number;
+        preCompactTokenCount: number;
+        postCompactTokenEstimate: number;
+        tokenPressurePercent: any;
+        invariantPass: boolean;
+        failedInvariants: string[];
+        stored: boolean;
+        inferredFromLegacy: boolean;
+        microCompact: {
+            recordCount: number;
+            compactedMessageCount: number;
+            tokensFreed: number;
+            timeBasedTriggered: boolean;
+        };
+        partialCompact: {
+            requested: boolean;
+            enabled: boolean;
+            sidecar: boolean;
+            direction: any;
+        };
+        ptlEmergency: any;
+        ptlRecovery: any;
+        gaps: any[];
+        decision: any;
+    };
+    postCompactCleanupAudit: {
+        schema: string;
+        groupId: string;
+        status: string;
+        checked: boolean;
+        compacted: boolean;
+        stored: boolean;
+        inferredFromLegacy: boolean;
+        auditStatus: any;
+        action: any;
+        mode: any;
+        boundaryId: any;
+        summaryChecksum: any;
+        transcriptPath: any;
+        preserveInvokedSkills: boolean;
+        preserveToolContinuity: boolean;
+        resetDerivedCompactState: boolean;
+        cleanupActionCount: any;
+        passedChecks: number;
+        checkCount: number;
+        failedChecks: any;
+        skillHints: any;
+        cleanupActions: any;
+        gaps: any[];
+        audit: any;
+        recoveryAuditLinked: boolean;
+    };
+    apiMicroCompactEditPlan: {
+        schema: string;
+        groupId: string;
+        status: string;
+        checked: boolean;
+        compacted: boolean;
+        stored: boolean;
+        inferredFromLegacy: boolean;
+        advisoryOnly: boolean;
+        canApplyNatively: boolean;
+        recommended: boolean;
+        editCount: number;
+        activeTokens: number;
+        maxInputTokens: number;
+        targetInputTokens: number;
+        clearAtLeastTokens: number;
+        trigger: any;
+        aboveTrigger: boolean;
+        thinkingBlocks: number;
+        toolUses: number;
+        toolResults: number;
+        strategies: any;
+        contextManagement: any;
+        reason: string;
+        planChecksum: any;
+        gaps: any[];
+        plan: any;
+    };
+    apiMicrocompactReceiptDiscipline: any;
+    apiMicrocompactNativeApplyReadiness: any;
+    apiMicrocompactNativeApplyProof: any;
+    apiMicrocompactNativeApplyProofRepairWorkItems: any;
     compactionHooks: {
         schema: string;
         groupId: string;
@@ -500,6 +629,14 @@ export declare function buildGroupPostCompactUsageDiagnostics(groupId: string, m
     compactFileReferenceReadPlanRevalidationSessionBinding?: undefined;
     compactFileReferenceAccess?: undefined;
     compactFileReferenceDiscipline?: undefined;
+    taskAgentMemoryContextSnapshots?: undefined;
+    compactStrategyDecision?: undefined;
+    postCompactCleanupAudit?: undefined;
+    apiMicroCompactEditPlan?: undefined;
+    apiMicrocompactReceiptDiscipline?: undefined;
+    apiMicrocompactNativeApplyReadiness?: undefined;
+    apiMicrocompactNativeApplyProof?: undefined;
+    apiMicrocompactNativeApplyProofRepairWorkItems?: undefined;
     compactionHooks?: undefined;
     boundaryReplay?: undefined;
     replayRepairWorkItems?: undefined;
@@ -678,6 +815,7 @@ export declare function buildChildAgentMemoryReliabilityReport(options?: any): {
 export declare function getGroupCompactBoundaryReplayRepairLedgerFile(groupId: string): string;
 export declare function readGroupCompactBoundaryReplayRepairLedger(groupId: string): any;
 export declare function getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId: string): string;
+export declare function getGroupReplayRepairDispatchPlanLedgerFile(groupId: string): string;
 export declare function readGroupCompactBoundaryReplayRepairWorkItems(groupId: string): any;
 export declare function buildReplayRepairMainAgentDispatchCandidates(groupId: string, options?: any): {
     schema: string;
@@ -725,6 +863,13 @@ export declare function updateCompactBoundaryReplayRepairWorkItem(input?: any): 
             target_project: any;
             revalidation_gate_id: any;
             read_plan_id: any;
+            proof_entry_id: any;
+            plan_checksum: any;
+            request_patch_checksum: any;
+            request_telemetry_status: any;
+            request_telemetry_session_status: any;
+            request_telemetry_dispatch_status: any;
+            runner_request_id: any;
             expected_task_agent_session_id: any;
             receipt_task_agent_session_id: any;
             session_mismatch: boolean;
@@ -1078,6 +1223,511 @@ export declare function buildMemoryCenterOverview(): {
         groups: any[];
         weakGroups: any[];
     };
+    compactStrategyDecisionReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            score: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            passedGroupCount: any;
+            compactedGroupCount: any;
+            missingDecisionCount: any;
+            invariantFailureCount: any;
+            gapCount: any;
+            legacyInferredCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    postCompactCleanupAuditReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            score: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            passedGroupCount: any;
+            compactedGroupCount: any;
+            missingAuditCount: any;
+            failedCheckCount: any;
+            gapCount: any;
+            legacyInferredCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicroCompactEditPlanReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            score: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            passedGroupCount: any;
+            compactedGroupCount: any;
+            missingPlanCount: any;
+            recommendedEditCount: any;
+            gapCount: any;
+            legacyInferredCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicrocompactReceiptDisciplineReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            score: number;
+            checked: any;
+            passed: any;
+            missing: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsCovered: any;
+            nativeAppliedCount: any;
+            advisoryCount: any;
+            ignoredCount: any;
+            sessionMismatchCount: any;
+            gapCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicrocompactNativeApplyReadinessReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            score: number;
+            checked: any;
+            passed: any;
+            missing: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            nativeReadyCount: any;
+            advisoryCount: any;
+            sessionBoundCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicrocompactNativeApplyProofReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            score: number;
+            checked: any;
+            passed: any;
+            missing: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            nativeClaimCount: any;
+            verifiedProofCount: any;
+            failedProofCount: any;
+            missingProofCount: any;
+            requestTelemetryMatchedCount: any;
+            requestTelemetryStrongCount: any;
+            requestTelemetryReceiptOnlyCount: any;
+            requestTelemetryStaleCount: any;
+            requestTelemetryMaxAgeMs: number;
+            requestTelemetryAdapterMatchedCount: any;
+            requestTelemetryReceiptMatchedCount: any;
+            requestTelemetryMissingCount: any;
+            requestTelemetryInvalidCount: any;
+            requestTelemetrySessionBoundCount: any;
+            requestTelemetrySessionMismatchCount: any;
+            requestTelemetryDispatchBoundCount: any;
+            requestTelemetryDispatchUnboundCount: any;
+            requestTelemetryRunnerBoundCount: any;
+            requestTelemetryRunnerMissingCount: any;
+            requestTelemetryRunnerMismatchCount: any;
+            requestTelemetryEntryCount: any;
+            requestTelemetryNativeAdapterEntryCount: any;
+            requestTelemetryAgentReceiptEntryCount: any;
+            advisoryProofCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicrocompactNativeApplyProofRepairWorkItemReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            coverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsNeedingWork: any;
+            groupsCovered: any;
+            requiredActionCount: any;
+            openItemCount: any;
+            coveredItemCount: any;
+            sessionBindingRepairCount: any;
+            dispatchBindingRepairCount: any;
+            runnerMismatchRepairCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicrocompactNativeApplyProofRepairDispatchCandidateReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            coverageRate: number;
+            metadataCoverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsNeedingCandidates: any;
+            groupsCovered: any;
+            groupsMetadataComplete: any;
+            expectedCandidateCount: any;
+            coveredCandidateCount: any;
+            candidateCount: any;
+            nativeOpenItemCount: any;
+            readyCount: any;
+            dispatchMarkedCount: any;
+            metadataGapCount: any;
+            proofEntryCandidateCount: any;
+            runnerBoundCandidateCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicrocompactNativeApplyProofRepairDispatchBriefReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            coverageRate: number;
+            metadataCoverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsNeedingBriefs: any;
+            groupsCovered: any;
+            groupsMetadataComplete: any;
+            expectedBriefCount: any;
+            coveredBriefCount: any;
+            readyBriefCount: any;
+            metadataGapCount: any;
+            proofEntryBriefCount: any;
+            runnerBoundBriefCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicrocompactNativeApplyProofRepairAssignmentBindingReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            coverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsCovered: any;
+            bindingCount: any;
+            validBindingCount: any;
+            metadataGapCount: any;
+            proofEntryBindingCount: any;
+            runnerBoundBindingCount: any;
+            workerContextPacketBindingCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    workerContextPacketContextUsageReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            coverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsCovered: any;
+            packetBindingCount: any;
+            validUsageCount: any;
+            metadataGapCount: any;
+            overBudgetCount: any;
+            compactRecommendedCount: any;
+            renderedBudgetCount: any;
+            totalTokens: any;
+            maxPressure: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    workerContextPacketContextUsageRepairWorkItemReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            coverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsNeedingWork: any;
+            groupsCovered: any;
+            requiredActionCount: any;
+            openItemCount: any;
+            currentOpenItemCount: any;
+            coveredItemCount: any;
+            overBudgetCount: any;
+            criticalCount: any;
+            compactRecommendedCount: any;
+            maxPressure: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    workerContextPacketPreDispatchGateReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            coverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsCovered: any;
+            gateBindingCount: any;
+            validGateCount: any;
+            metadataGapCount: any;
+            overBudgetCount: any;
+            blockedOverBudgetCount: any;
+            blockedGateCount: any;
+            compactRecommendedCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    workerContextPacketCompactionRetryReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            coverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsCovered: any;
+            retryBindingCount: any;
+            validRetryCount: any;
+            metadataGapCount: any;
+            recoveredCount: any;
+            blockedCount: any;
+            memoryFirstCount: any;
+            partialCompactCount: any;
+            partialCompactPolicyCount: any;
+            totalOmittedChars: any;
+            memoryOmittedChars: any;
+            partialOmittedChars: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    workerContextPacketCompactHookLedgerReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            coverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsCovered: any;
+            retryBindingCount: any;
+            validHookBindingCount: any;
+            metadataGapCount: any;
+            hookRunCount: any;
+            preHookCount: any;
+            postHookCount: any;
+            memoryFirstHookCount: any;
+            recoveredHookCount: any;
+            blockedHookCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    workerContextPacketMemoryReinjectionProofReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            coverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsCovered: any;
+            reinjectionBindingCount: any;
+            validReinjectionCount: any;
+            metadataGapCount: any;
+            memoryFirstCount: any;
+            compactedReinjectionCount: any;
+            ignoredByPolicyCount: any;
+            hashMatchCount: any;
+            renderedProofCount: any;
+            renderedMemoryCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            coverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsCovered: any;
+            bindingCount: any;
+            validInjectionCount: any;
+            metadataGapCount: any;
+            workerContextPacketBindingCount: any;
+            packetBriefInjectionCount: any;
+            renderedProbeCount: any;
+            providerReproofBindingCount: any;
+            providerReproofPacketCount: any;
+            renderedProviderReproofCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicrocompactNativeApplyProofRepairTimelineBindingReport: {
+        schema: string;
+        generatedAt: string;
+        requiredEventTypes: string[];
+        overall: {
+            status: string;
+            coverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsCovered: any;
+            bindingCount: any;
+            validBindingCount: any;
+            metadataGapCount: any;
+            taskBoundBindingCount: any;
+            sessionBoundBindingCount: any;
+            snapshotBoundBindingCount: any;
+            executionBoundBindingCount: any;
+            runnerBoundBindingCount: any;
+            receiptBoundBindingCount: any;
+            requiredEventCoverageCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicrocompactNativeApplyProofRepairReceiptConsumptionReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            coverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsCovered: any;
+            receiptBindingCount: any;
+            validConsumptionCount: any;
+            metadataGapCount: any;
+            providerReproofReceiptCount: any;
+            providerReproofConsumedCount: any;
+            strongReceiptClaimCount: any;
+            usedCount: any;
+            verifiedCount: any;
+            ignoredCount: any;
+            blockedCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            coverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsCovered: any;
+            providerReproofReceiptCount: any;
+            archivedReceiptCount: any;
+            promotedReceiptCount: any;
+            cautionReceiptCount: any;
+            strongReceiptClaimCount: any;
+            typedDocCount: any;
+            recallProbeCoveredCount: any;
+            metadataGapCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicrocompactNativeApplyProofRepairTimelineCompletionReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            coverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsCovered: any;
+            completeBindingCount: any;
+            matchedBindingCount: any;
+            completedBindingCount: any;
+            completedRepairItemCount: any;
+            openMatchedRepairItemCount: any;
+            missingWorkItemBindingCount: any;
+            completedNow: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicrocompactNativeApplyProofRepairClosureReproofReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            score: number;
+            checked: any;
+            passed: any;
+            missing: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            timelineProvedRepairCount: any;
+            providerStrongProofCount: any;
+            providerStrongReproofNeededCount: any;
+            missingProofCount: any;
+            requestTelemetryMissingCount: any;
+            requestTelemetryReceiptOnlyCount: any;
+            requestTelemetryStaleCount: any;
+            requestTelemetrySessionUnboundCount: any;
+            requestTelemetryDispatchUnboundCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
+    apiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport: {
+        schema: string;
+        generatedAt: any;
+        overall: {
+            status: string;
+            coverageRate: number;
+            metadataCoverageRate: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            groupsNeedingWorkItems: any;
+            groupsCovered: any;
+            groupsMetadataComplete: any;
+            expectedWorkItemCount: any;
+            coveredWorkItemCount: any;
+            openItemCount: any;
+            completedItemCount: any;
+            dispatchCandidateCount: any;
+            metadataGapCount: any;
+        };
+        groups: any;
+        weakGroups: any;
+    };
     compactionHookLedgerReport: {
         schema: string;
         generatedAt: string;
@@ -1300,6 +1950,8 @@ export declare function buildMemoryCenterOverview(): {
             missingRenderedCount: any;
             missingArbitrationRenderCount: any;
             missingCrossGroupSuppressionRenderCount: any;
+            missingCrossGroupFreshnessRenderCount: any;
+            missingSemanticArbitrationRenderCount: any;
             missingArbitrationLedgerCount: any;
             missingArbitrationLedgerReferenceCount: any;
             missingCrossGroupSuppressionReferenceCount: any;
@@ -1307,7 +1959,13 @@ export declare function buildMemoryCenterOverview(): {
             missingCompactReferenceCount: any;
             demotedCount: any;
             conflictCount: any;
+            semanticRiskCount: any;
+            semanticConflictCount: any;
+            maxSemanticRiskScore: any;
             crossGroupSuppressedCount: any;
+            crossGroupAdvisoryCount: any;
+            crossGroupSupersededCount: any;
+            crossGroupDecayedCount: any;
             arbitrationLedgerEntryCount: any;
             repeatedArbitrationConflictCount: any;
             arbitrationDistillationCandidateCount: any;
@@ -1316,6 +1974,89 @@ export declare function buildMemoryCenterOverview(): {
         };
         groups: any;
         weakGroups: any;
+    };
+    taskAgentMemoryContextSnapshotReport: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            checked: number;
+            passed: number;
+            score: number;
+            sessionCount: number;
+            snapshotCount: number;
+            okCount: number;
+            warnCount: number;
+            failCount: number;
+            orphanFileCount: number;
+            missingFileCount: number;
+            checksumMismatchCount: number;
+            missingPacketCount: number;
+            missingGateCount: number;
+            staleCount: number;
+            prunableCount: number;
+            retentionCandidateCount: number;
+        };
+        inventory: {
+            directory: any;
+            policy: any;
+            summary: any;
+        };
+        retention: {
+            schema: any;
+            dryRun: boolean;
+            candidateCount: number;
+            prunedCount: number;
+            skippedCount: number;
+            rows: any;
+        };
+        groups: any;
+        rows: any;
+        weakRows: any;
+        prunableRows: any;
+        error?: undefined;
+    } | {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            checked: number;
+            passed: number;
+            score: number;
+            sessionCount: number;
+            snapshotCount: number;
+            okCount: number;
+            warnCount: number;
+            failCount: number;
+            prunableCount: number;
+            orphanFileCount?: undefined;
+            missingFileCount?: undefined;
+            checksumMismatchCount?: undefined;
+            missingPacketCount?: undefined;
+            missingGateCount?: undefined;
+            staleCount?: undefined;
+            retentionCandidateCount?: undefined;
+        };
+        inventory: {
+            summary: {};
+            directory?: undefined;
+            policy?: undefined;
+        };
+        retention: {
+            dryRun: boolean;
+            candidateCount: number;
+            prunedCount: number;
+            skippedCount: number;
+            rows: any[];
+            schema?: undefined;
+        };
+        groups: any[];
+        rows: any[];
+        weakRows: {
+            reason: any;
+        }[];
+        prunableRows: any[];
+        error: any;
     };
 };
 export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string): {
@@ -1710,6 +2451,135 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
         };
         compactFileReferenceAccess: any;
         compactFileReferenceDiscipline: any;
+        taskAgentMemoryContextSnapshots: {
+            schema: string;
+            groupId: string;
+            status: string;
+            directory: any;
+            policy: any;
+            snapshotCount: number;
+            okCount: number;
+            warnCount: number;
+            failCount: number;
+            staleCount: number;
+            prunableCount: number;
+            projects: any;
+            rows: any;
+            weakRows: any;
+            prunableRows: any;
+            retention: {
+                schema: any;
+                dryRun: boolean;
+                candidateCount: number;
+                prunedCount: number;
+                skippedCount: number;
+                rows: any;
+            } | {
+                dryRun: boolean;
+                candidateCount: number;
+                prunedCount: number;
+                skippedCount: number;
+                rows: any[];
+                schema?: undefined;
+            };
+        };
+        compactStrategyDecision: {
+            schema: string;
+            groupId: string;
+            status: string;
+            checked: boolean;
+            compacted: boolean;
+            mode: any;
+            reason: string;
+            decisionId: any;
+            decisionChecksum: any;
+            summaryChecksum: any;
+            transcriptPath: any;
+            messagesToSummarize: number;
+            keptMessages: number;
+            preCompactTokenCount: number;
+            postCompactTokenEstimate: number;
+            tokenPressurePercent: any;
+            invariantPass: boolean;
+            failedInvariants: string[];
+            stored: boolean;
+            inferredFromLegacy: boolean;
+            microCompact: {
+                recordCount: number;
+                compactedMessageCount: number;
+                tokensFreed: number;
+                timeBasedTriggered: boolean;
+            };
+            partialCompact: {
+                requested: boolean;
+                enabled: boolean;
+                sidecar: boolean;
+                direction: any;
+            };
+            ptlEmergency: any;
+            ptlRecovery: any;
+            gaps: any[];
+            decision: any;
+        };
+        postCompactCleanupAudit: {
+            schema: string;
+            groupId: string;
+            status: string;
+            checked: boolean;
+            compacted: boolean;
+            stored: boolean;
+            inferredFromLegacy: boolean;
+            auditStatus: any;
+            action: any;
+            mode: any;
+            boundaryId: any;
+            summaryChecksum: any;
+            transcriptPath: any;
+            preserveInvokedSkills: boolean;
+            preserveToolContinuity: boolean;
+            resetDerivedCompactState: boolean;
+            cleanupActionCount: any;
+            passedChecks: number;
+            checkCount: number;
+            failedChecks: any;
+            skillHints: any;
+            cleanupActions: any;
+            gaps: any[];
+            audit: any;
+            recoveryAuditLinked: boolean;
+        };
+        apiMicroCompactEditPlan: {
+            schema: string;
+            groupId: string;
+            status: string;
+            checked: boolean;
+            compacted: boolean;
+            stored: boolean;
+            inferredFromLegacy: boolean;
+            advisoryOnly: boolean;
+            canApplyNatively: boolean;
+            recommended: boolean;
+            editCount: number;
+            activeTokens: number;
+            maxInputTokens: number;
+            targetInputTokens: number;
+            clearAtLeastTokens: number;
+            trigger: any;
+            aboveTrigger: boolean;
+            thinkingBlocks: number;
+            toolUses: number;
+            toolResults: number;
+            strategies: any;
+            contextManagement: any;
+            reason: string;
+            planChecksum: any;
+            gaps: any[];
+            plan: any;
+        };
+        apiMicrocompactReceiptDiscipline: any;
+        apiMicrocompactNativeApplyReadiness: any;
+        apiMicrocompactNativeApplyProof: any;
+        apiMicrocompactNativeApplyProofRepairWorkItems: any;
         compactionHooks: {
             schema: string;
             groupId: string;
@@ -1871,6 +2741,14 @@ export declare function getMemoryCenterScope(scope: MemoryScope, scopeId: string
         compactFileReferenceReadPlanRevalidationSessionBinding?: undefined;
         compactFileReferenceAccess?: undefined;
         compactFileReferenceDiscipline?: undefined;
+        taskAgentMemoryContextSnapshots?: undefined;
+        compactStrategyDecision?: undefined;
+        postCompactCleanupAudit?: undefined;
+        apiMicroCompactEditPlan?: undefined;
+        apiMicrocompactReceiptDiscipline?: undefined;
+        apiMicrocompactNativeApplyReadiness?: undefined;
+        apiMicrocompactNativeApplyProof?: undefined;
+        apiMicrocompactNativeApplyProofRepairWorkItems?: undefined;
         compactionHooks?: undefined;
         boundaryReplay?: undefined;
         replayRepairWorkItems?: undefined;
@@ -2082,6 +2960,18 @@ export declare function runMemoryCenterChildGlobalAgentMemoryCrossGroupSuppressi
     row: any;
     quality: any;
 };
+export declare function runMemoryCenterChildGlobalAgentMemoryCrossGroupFreshnessSelfTest(): {
+    pass: boolean;
+    checks: {
+        reportCoversFreshness: boolean;
+        rowHasRenderedFreshness: boolean;
+        rowHasCrossGroupSources: boolean;
+        qualityCheckPasses: boolean;
+        reportOverallCountsFreshness: boolean;
+    };
+    row: any;
+    quality: any;
+};
 export declare function runMemoryCenterQualityTargetedRefreshSelfTest(): {
     pass: boolean;
     checks: {
@@ -2110,6 +3000,1545 @@ export declare function runMemoryCenterCompactBoundaryTimelineSelfTest(): {
         qualityCheckPassesTimeline: boolean;
     };
     timeline: any;
+};
+export declare function runMemoryCenterCompactStrategyDecisionSelfTest(): {
+    pass: boolean;
+    checks: {
+        overviewPassesDecision: boolean;
+        reportAggregatesDecision: boolean;
+        qualityCheckCoversDecision: boolean;
+        detailExposesDecision: boolean;
+        childAgentRendererMentionsDecision: any;
+    };
+    decision: any;
+};
+export declare function runMemoryCenterPostCompactCleanupAuditSelfTest(): {
+    pass: boolean;
+    checks: {
+        overviewPassesCleanupAudit: boolean;
+        reportAggregatesCleanupAudit: boolean;
+        qualityCheckCoversCleanupAudit: boolean;
+        detailExposesCleanupAudit: boolean;
+        childAgentRendererMentionsCleanup: any;
+    };
+    cleanup: any;
+};
+export declare function runMemoryCenterApiMicroCompactEditPlanSelfTest(): {
+    pass: boolean;
+    checks: {
+        overviewPassesApiMicrocompactPlan: boolean;
+        reportAggregatesApiMicrocompactPlan: boolean;
+        qualityCheckCoversApiMicrocompactPlan: boolean;
+        detailExposesApiMicrocompactPlan: boolean;
+        childAgentRendererMentionsApiMicrocompactPlan: any;
+        planKeepsThirdPartyCliAdvisoryBoundary: boolean;
+    };
+    plan: any;
+};
+export declare function runMemoryCenterApiMicrocompactReceiptDisciplineSelfTest(): {
+    pass: boolean;
+    checks: {
+        reportAggregatesReceiptDiscipline: boolean;
+        qualityCheckCoversReceiptDiscipline: boolean;
+        detailExposesReceiptDiscipline: boolean;
+    };
+    discipline: any;
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyReadinessSelfTest(): {
+    pass: boolean;
+    checks: {
+        reportAggregatesNativeReadiness: boolean;
+        qualityCheckCoversNativeReadiness: boolean;
+        detailExposesNativeReadiness: boolean;
+        readinessTracksSessionBinding: boolean;
+    };
+    readiness: any;
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyProofSelfTest(): {
+    pass: boolean;
+    checks: {
+        reportAggregatesNativeProof: boolean;
+        qualityCheckCoversNativeProof: boolean;
+        detailExposesNativeProof: boolean;
+        detailExposesAdapterTelemetrySource: boolean;
+        childAgentRendererMentionsNativeProof: any;
+    };
+    proof: any;
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyProofAgingSelfTest(): {
+    pass: boolean;
+    checks: {
+        receiptOnlyDoesNotPass: boolean;
+        staleAdapterDoesNotPass: boolean;
+        overallCountsWeakProofs: boolean;
+        gapsExplainDowngrade: boolean;
+    };
+    report: {
+        overall: {
+            status: string;
+            score: number;
+            checked: any;
+            passed: any;
+            missing: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            nativeClaimCount: any;
+            verifiedProofCount: any;
+            failedProofCount: any;
+            missingProofCount: any;
+            requestTelemetryMatchedCount: any;
+            requestTelemetryStrongCount: any;
+            requestTelemetryReceiptOnlyCount: any;
+            requestTelemetryStaleCount: any;
+            requestTelemetryMaxAgeMs: number;
+            requestTelemetryAdapterMatchedCount: any;
+            requestTelemetryReceiptMatchedCount: any;
+            requestTelemetryMissingCount: any;
+            requestTelemetryInvalidCount: any;
+            requestTelemetrySessionBoundCount: any;
+            requestTelemetrySessionMismatchCount: any;
+            requestTelemetryDispatchBoundCount: any;
+            requestTelemetryDispatchUnboundCount: any;
+            requestTelemetryRunnerBoundCount: any;
+            requestTelemetryRunnerMissingCount: any;
+            requestTelemetryRunnerMismatchCount: any;
+            requestTelemetryEntryCount: any;
+            requestTelemetryNativeAdapterEntryCount: any;
+            requestTelemetryAgentReceiptEntryCount: any;
+            advisoryProofCount: any;
+        };
+        receiptOnly: any;
+        stale: any;
+    };
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyDispatchBindingSelfTest(): {
+    pass: boolean;
+    checks: {
+        boundDispatchPasses: boolean;
+        missingSessionDowngrades: boolean;
+        runnerMismatchDowngrades: boolean;
+        gapsNameBindingFailures: boolean;
+        overallCountsBinding: boolean;
+    };
+    report: {
+        overall: {
+            status: string;
+            score: number;
+            checked: any;
+            passed: any;
+            missing: number;
+            groupCount: any;
+            checkedGroupCount: any;
+            nativeClaimCount: any;
+            verifiedProofCount: any;
+            failedProofCount: any;
+            missingProofCount: any;
+            requestTelemetryMatchedCount: any;
+            requestTelemetryStrongCount: any;
+            requestTelemetryReceiptOnlyCount: any;
+            requestTelemetryStaleCount: any;
+            requestTelemetryMaxAgeMs: number;
+            requestTelemetryAdapterMatchedCount: any;
+            requestTelemetryReceiptMatchedCount: any;
+            requestTelemetryMissingCount: any;
+            requestTelemetryInvalidCount: any;
+            requestTelemetrySessionBoundCount: any;
+            requestTelemetrySessionMismatchCount: any;
+            requestTelemetryDispatchBoundCount: any;
+            requestTelemetryDispatchUnboundCount: any;
+            requestTelemetryRunnerBoundCount: any;
+            requestTelemetryRunnerMissingCount: any;
+            requestTelemetryRunnerMismatchCount: any;
+            requestTelemetryEntryCount: any;
+            requestTelemetryNativeAdapterEntryCount: any;
+            requestTelemetryAgentReceiptEntryCount: any;
+            advisoryProofCount: any;
+        };
+        good: any;
+        missingSession: any;
+        runnerMismatch: any;
+    };
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyProofRepairWorkItemSelfTest(): {
+    pass: boolean;
+    checks: {
+        proofProducesBindingGaps: boolean;
+        firstMaterializesNativeProofRepairItems: boolean;
+        duplicateDoesNotAppend: boolean;
+        qualityCoversRepairItems: boolean;
+        childAgentRendererMentionsRepairItems: any;
+        resolvedProofClosesOpenNativeItems: any;
+    };
+    first: {
+        schema: string;
+        groupId: string;
+        file: any;
+        updatedAt: any;
+        latestReplay: any;
+        total: number;
+        openItemCount: number;
+        pendingCount: number;
+        inProgressCount: number;
+        blockedCount: number;
+        completedCount: number;
+        cancelledCount: number;
+        items: {
+            id: any;
+            work_item_id: any;
+            status: string;
+            owner: any;
+            priority: any;
+            component: any;
+            source: any;
+            subject: any;
+            activeForm: any;
+            target: any;
+            repair_target: any;
+            target_project: any;
+            revalidation_gate_id: any;
+            read_plan_id: any;
+            proof_entry_id: any;
+            plan_checksum: any;
+            request_patch_checksum: any;
+            request_telemetry_status: any;
+            request_telemetry_session_status: any;
+            request_telemetry_dispatch_status: any;
+            runner_request_id: any;
+            expected_task_agent_session_id: any;
+            receipt_task_agent_session_id: any;
+            session_mismatch: boolean;
+            instruction: string;
+            expected: string;
+            dispatch_target: any;
+            replay_attempt_id: any;
+            replay_rendered_hash: any;
+            boundary_checksum: any;
+            createdAt: any;
+            updatedAt: any;
+            startedAt: any;
+            completedAt: any;
+            blockedReason: any;
+            resolutionReason: any;
+            seenCount: number;
+        }[];
+        openItems: any;
+    };
+    resolved: {
+        schema: string;
+        groupId: string;
+        file: any;
+        updatedAt: any;
+        latestReplay: any;
+        total: number;
+        openItemCount: number;
+        pendingCount: number;
+        inProgressCount: number;
+        blockedCount: number;
+        completedCount: number;
+        cancelledCount: number;
+        items: {
+            id: any;
+            work_item_id: any;
+            status: string;
+            owner: any;
+            priority: any;
+            component: any;
+            source: any;
+            subject: any;
+            activeForm: any;
+            target: any;
+            repair_target: any;
+            target_project: any;
+            revalidation_gate_id: any;
+            read_plan_id: any;
+            proof_entry_id: any;
+            plan_checksum: any;
+            request_patch_checksum: any;
+            request_telemetry_status: any;
+            request_telemetry_session_status: any;
+            request_telemetry_dispatch_status: any;
+            runner_request_id: any;
+            expected_task_agent_session_id: any;
+            receipt_task_agent_session_id: any;
+            session_mismatch: boolean;
+            instruction: string;
+            expected: string;
+            dispatch_target: any;
+            replay_attempt_id: any;
+            replay_rendered_hash: any;
+            boundary_checksum: any;
+            createdAt: any;
+            updatedAt: any;
+            startedAt: any;
+            completedAt: any;
+            blockedReason: any;
+            resolutionReason: any;
+            seenCount: number;
+        }[];
+        openItems: any;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsNeedingWork: any;
+        groupsCovered: any;
+        requiredActionCount: any;
+        openItemCount: any;
+        coveredItemCount: any;
+        sessionBindingRepairCount: any;
+        dispatchBindingRepairCount: any;
+        runnerMismatchRepairCount: any;
+    };
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyProofRepairDispatchCandidateSelfTest(): {
+    pass: boolean;
+    checks: {
+        proofProducesNativeRepairItems: boolean;
+        nativeRepairItemsBecomeDispatchCandidates: any;
+        nativeCandidateCarriesProofTelemetry: boolean;
+        nativeDispatchCandidateQualityPasses: boolean;
+        childAgentRendererMentionsNativeCandidateTelemetry: any;
+        resolvedProofRemovesNativeCandidates: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        metadataCoverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsNeedingCandidates: any;
+        groupsCovered: any;
+        groupsMetadataComplete: any;
+        expectedCandidateCount: any;
+        coveredCandidateCount: any;
+        candidateCount: any;
+        nativeOpenItemCount: any;
+        readyCount: any;
+        dispatchMarkedCount: any;
+        metadataGapCount: any;
+        proofEntryCandidateCount: any;
+        runnerBoundCandidateCount: any;
+    };
+    candidate: {
+        work_item_id: any;
+        proof_entry_id: any;
+        request_patch_checksum: any;
+        request_telemetry_session_status: any;
+        request_telemetry_dispatch_status: any;
+        runner_request_id: any;
+    };
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyProofRepairDispatchBriefSelfTest(): {
+    pass: boolean;
+    checks: {
+        nativeCandidatesCoveredBeforeBriefs: boolean;
+        dispatchBriefReportPasses: boolean;
+        dispatchBriefLedgerPersistsNativeProof: boolean;
+        dispatchBriefWorkerTaskIsSelfContained: boolean;
+        coordinatorPromptReceivesDispatchBrief: any;
+        resolvedProofSupersedesReadyBriefs: any;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        metadataCoverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsNeedingBriefs: any;
+        groupsCovered: any;
+        groupsMetadataComplete: any;
+        expectedBriefCount: any;
+        coveredBriefCount: any;
+        readyBriefCount: any;
+        metadataGapCount: any;
+        proofEntryBriefCount: any;
+        runnerBoundBriefCount: any;
+    };
+    brief: {
+        brief_id: any;
+        work_item_id: any;
+        proof_entry_id: any;
+        request_patch_checksum: any;
+        runner_request_id: any;
+    };
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyProofRepairAssignmentBindingSelfTest(): {
+    pass: boolean;
+    checks: {
+        dispatchBriefReady: boolean;
+        assignmentCarriesBriefBinding: boolean;
+        workerContextPacketCarriesBrief: boolean;
+        bindingLedgerPersistsAssignmentProof: boolean;
+        qualityCoversAssignmentBinding: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        bindingCount: any;
+        validBindingCount: any;
+        metadataGapCount: any;
+        proofEntryBindingCount: any;
+        runnerBoundBindingCount: any;
+        workerContextPacketBindingCount: any;
+    };
+    binding: {
+        binding_id: any;
+        brief_id: any;
+        assignment_id: any;
+        dispatch_key: any;
+        worker_context_packet_id: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketContextUsageSelfTest(): {
+    pass: boolean;
+    checks: {
+        assignmentPacketCarriesUsage: boolean;
+        renderedWorkerTaskShowsBudget: boolean;
+        bindingPersistsUsageBudget: boolean;
+        reportCoversUsageBudget: boolean;
+        qualityCheckExposesUsageBudget: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        packetBindingCount: any;
+        validUsageCount: any;
+        metadataGapCount: any;
+        overBudgetCount: any;
+        compactRecommendedCount: any;
+        renderedBudgetCount: any;
+        totalTokens: any;
+        maxPressure: any;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+    usage: {
+        status: any;
+        total_tokens: any;
+        free_tokens: any;
+        top_categories: any;
+    };
+    binding: {
+        binding_id: any;
+        packet_id: any;
+        rendered_context_usage_budget: boolean;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketContextUsageRepairWorkItemSelfTest(): {
+    pass: boolean;
+    checks: {
+        usageReportSeesOverBudget: boolean;
+        repairReportCreatesOpenWorkItem: boolean;
+        repairItemCarriesPressureMetadata: boolean;
+        dispatchCandidateSurfacesRepair: boolean;
+        qualityCheckCoversReactiveRepair: boolean;
+    };
+    usageReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        packetBindingCount: any;
+        validUsageCount: any;
+        metadataGapCount: any;
+        overBudgetCount: any;
+        compactRecommendedCount: any;
+        renderedBudgetCount: any;
+        totalTokens: any;
+        maxPressure: any;
+    };
+    repairReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsNeedingWork: any;
+        groupsCovered: any;
+        requiredActionCount: any;
+        openItemCount: any;
+        currentOpenItemCount: any;
+        coveredItemCount: any;
+        overBudgetCount: any;
+        criticalCount: any;
+        compactRecommendedCount: any;
+        maxPressure: any;
+    };
+    repairItem: {
+        id: any;
+        status: any;
+        priority: any;
+        packet_id: any;
+        usage_status: any;
+        top_categories: any;
+    };
+    candidate: {
+        candidate_id: any;
+        work_item_id: any;
+        source: any;
+        recommendedAction: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketContextUsageRepairTypedMemorySelfTest(): {
+    pass: boolean;
+    checks: {
+        repairReportCreatesPressureItem: boolean;
+        typedMemoryReportPasses: boolean;
+        qualityCheckExposesTypedMemory: boolean;
+        ledgerArchivesContextUsageRows: boolean;
+        typedDocContainsBudgetDiscipline: boolean;
+        recallFindsContextUsageDiscipline: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        inputRowCount: any;
+        repairItemCount: any;
+        archivedCount: any;
+        typedMemoryDocCount: any;
+        recallMatchCount: any;
+        overBudgetCount: any;
+        criticalCount: any;
+        compactRecommendedCount: any;
+        maxPressure: any;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+    doc: {
+        relPath: any;
+        source: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketPreDispatchGateSelfTest(): {
+    pass: boolean;
+    checks: {
+        gateReportAcceptsBlockedOverBudget: boolean;
+        gateQualityCheckPasses: boolean;
+        overBudgetStillCreatesRepairItem: boolean;
+    };
+    gateReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        gateBindingCount: any;
+        validGateCount: any;
+        metadataGapCount: any;
+        overBudgetCount: any;
+        blockedOverBudgetCount: any;
+        blockedGateCount: any;
+        compactRecommendedCount: any;
+    };
+    repairReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsNeedingWork: any;
+        groupsCovered: any;
+        requiredActionCount: any;
+        openItemCount: any;
+        currentOpenItemCount: any;
+        coveredItemCount: any;
+        overBudgetCount: any;
+        criticalCount: any;
+        compactRecommendedCount: any;
+        maxPressure: any;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketCompactionRetrySelfTest(): {
+    pass: boolean;
+    checks: {
+        reportAcceptsRecoveredRetry: boolean;
+        qualityCheckCoversRetry: boolean;
+        retryShowsTokenRecovery: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        retryBindingCount: any;
+        validRetryCount: any;
+        metadataGapCount: any;
+        recoveredCount: any;
+        blockedCount: any;
+        memoryFirstCount: any;
+        partialCompactCount: any;
+        partialCompactPolicyCount: any;
+        totalOmittedChars: any;
+        memoryOmittedChars: any;
+        partialOmittedChars: any;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketMemoryFirstCompactionRetrySelfTest(): {
+    pass: boolean;
+    checks: {
+        reportAcceptsMemoryFirstRetry: boolean;
+        qualityCheckCoversMemoryFirstRetry: boolean;
+        retryShowsMemoryFirstRecovery: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        retryBindingCount: any;
+        validRetryCount: any;
+        metadataGapCount: any;
+        recoveredCount: any;
+        blockedCount: any;
+        memoryFirstCount: any;
+        partialCompactCount: any;
+        partialCompactPolicyCount: any;
+        totalOmittedChars: any;
+        memoryOmittedChars: any;
+        partialOmittedChars: any;
+    };
+    retry: {
+        memory_first: boolean;
+        memory_compaction_schema: any;
+        memory_omitted_chars: any;
+        original_task_chars: any;
+        compacted_task_chars: any;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketPartialCompactRetrySelfTest(): {
+    pass: boolean;
+    checks: {
+        reportAcceptsPartialCompactRetry: boolean;
+        qualityCheckCoversPartialCompactRetry: boolean;
+        retryShowsPartialRecoveryWithoutTaskCompaction: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        retryBindingCount: any;
+        validRetryCount: any;
+        metadataGapCount: any;
+        recoveredCount: any;
+        blockedCount: any;
+        memoryFirstCount: any;
+        partialCompactCount: any;
+        partialCompactPolicyCount: any;
+        totalOmittedChars: any;
+        memoryOmittedChars: any;
+        partialOmittedChars: any;
+    };
+    retry: {
+        partial_compact: boolean;
+        partial_compaction_schema: any;
+        partial_compaction_category: any;
+        partial_omitted_chars: any;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketMetadataPartialCompactRetrySelfTest(): {
+    pass: boolean;
+    checks: {
+        reportAcceptsMetadataPartialCompactRetry: boolean;
+        qualityCheckCoversMetadataPartialCompactRetry: boolean;
+        retryShowsMetadataRecoveryWithoutTaskCompaction: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        retryBindingCount: any;
+        validRetryCount: any;
+        metadataGapCount: any;
+        recoveredCount: any;
+        blockedCount: any;
+        memoryFirstCount: any;
+        partialCompactCount: any;
+        partialCompactPolicyCount: any;
+        totalOmittedChars: any;
+        memoryOmittedChars: any;
+        partialOmittedChars: any;
+    };
+    retry: {
+        partial_compact: boolean;
+        partial_compaction_schema: any;
+        partial_compaction_category: any;
+        partial_compaction_categories: any;
+        partial_omitted_chars: any;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketPartialCompactPolicySelfTest(): {
+    pass: boolean;
+    checks: {
+        reportCountsPartialCompactPolicy: boolean;
+        retryRowExposesPolicy: any;
+        qualityCheckCoversPolicy: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        retryBindingCount: any;
+        validRetryCount: any;
+        metadataGapCount: any;
+        recoveredCount: any;
+        blockedCount: any;
+        memoryFirstCount: any;
+        partialCompactCount: any;
+        partialCompactPolicyCount: any;
+        totalOmittedChars: any;
+        memoryOmittedChars: any;
+        partialOmittedChars: any;
+    };
+    retry: {
+        partial_compact_policy: any;
+        partial_compaction_categories: any;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketCompactOutcomeLedgerSelfTest(): {
+    pass: boolean;
+    checks: {
+        reportAcceptsOutcomeLedger: boolean;
+        qualityCheckCoversOutcomeLedger: boolean;
+        outcomeRowCarriesStrategySample: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        retryBindingCount: any;
+        outcomeCount: any;
+        validOutcomeCount: any;
+        metadataGapCount: any;
+        recoveredOutcomeCount: any;
+        blockedOutcomeCount: any;
+        partialCompactPolicyOutcomeCount: any;
+        taskPreservedOutcomeCount: any;
+        totalTokenDelta: any;
+        totalFreeTokenDelta: any;
+    };
+    outcome: {
+        outcome_status: any;
+        selected_categories: any;
+        token_delta: any;
+        task_hash_unchanged: boolean;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketCompactStrategyMemorySelfTest(): {
+    pass: boolean;
+    checks: {
+        reportDistillsStrategyMemory: boolean;
+        strategySidecarCreated: boolean;
+        preferredCategoryFromRecovery: boolean;
+        qualityCheckCoversStrategyMemory: boolean;
+        reportRowCarriesStrategy: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        distilledOutcomeCount: any;
+        strategyMemoryCount: any;
+        categoryCount: any;
+        preferredCategoryCount: any;
+        metadataGapCount: any;
+    };
+    strategy: {
+        preferred_categories: any;
+        sample_count: number;
+        source_ledger_file: string;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketPtlEmergencyDowngradeSelfTest(): {
+    pass: boolean;
+    checks: {
+        reportEngagesPtlEmergency: boolean;
+        hintSidecarCreated: boolean;
+        hintCarriesDowngradeBudgets: boolean;
+        qualityCheckCoversPtlEmergency: boolean;
+        reportRowCarriesPtl: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        engagedCount: any;
+        criticalCount: any;
+        blockedOutcomeCount: any;
+        taskCompactedBlockedCount: any;
+        metadataGapCount: any;
+    };
+    hint: {
+        engaged: boolean;
+        emergency_level: string;
+        blocked_outcome_count: number;
+        maxTaskChars: number;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketIgnoreMemoryPolicySelfTest(): {
+    pass: boolean;
+    checks: {
+        reportCoversIgnorePolicy: boolean;
+        reportRequiresReceiptAndProof: boolean;
+        qualityCheckExposesIgnorePolicy: boolean;
+        reinjectionProofAcceptsIgnoredByPolicy: boolean;
+        policyRowCarriesReason: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        ignoredPolicyBindingCount: any;
+        validIgnoredPolicyCount: any;
+        metadataGapCount: any;
+        receiptRequiredCount: any;
+        ignoredProofCount: any;
+        usagePolicyCategoryCount: any;
+        renderedIgnoredPolicyCount: any;
+    };
+    proofReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        reinjectionBindingCount: any;
+        validReinjectionCount: any;
+        metadataGapCount: any;
+        memoryFirstCount: any;
+        compactedReinjectionCount: any;
+        ignoredByPolicyCount: any;
+        hashMatchCount: any;
+        renderedProofCount: any;
+        renderedMemoryCount: any;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketIgnoreMemoryReceiptComplianceSelfTest(): {
+    pass: boolean;
+    checks: {
+        missingComplianceDetectsGap: boolean;
+        missingGapCreatesRepairItem: boolean;
+        repairQualityCheckCoversGap: boolean;
+        resolvedCompliancePasses: boolean;
+        resolvedRepairItemClosed: boolean;
+    };
+    missingComplianceReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        ignoredPolicyBindingCount: any;
+        compliantReceiptCount: any;
+        metadataGapCount: any;
+        missingReceiptCount: any;
+        missingMemoryIgnoredCount: any;
+        missingReasonCount: any;
+        memoryUsedViolationCount: any;
+    };
+    missingRepairReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        requiredActionCount: any;
+        openItemCount: any;
+        currentOpenItemCount: any;
+        staleOpenItemCount: any;
+        coveredItemCount: any;
+        total: any;
+        missingReceiptCount: any;
+        memoryUsedViolationCount: any;
+    };
+    resolvedComplianceReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        ignoredPolicyBindingCount: any;
+        compliantReceiptCount: any;
+        metadataGapCount: any;
+        missingReceiptCount: any;
+        missingMemoryIgnoredCount: any;
+        missingReasonCount: any;
+        memoryUsedViolationCount: any;
+    };
+    resolvedRepairReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        requiredActionCount: any;
+        openItemCount: any;
+        currentOpenItemCount: any;
+        staleOpenItemCount: any;
+        coveredItemCount: any;
+        total: any;
+        missingReceiptCount: any;
+        memoryUsedViolationCount: any;
+    };
+    repairItem: {
+        id: any;
+        status: any;
+        source: any;
+        component: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketIgnoreMemoryReceiptRepairDispatchSelfTest(): {
+    pass: boolean;
+    checks: {
+        repairItemCreated: boolean;
+        repairItemBecomesDispatchCandidate: boolean;
+        candidateQualityCheckPasses: boolean;
+        correctedReceiptBriefCreated: boolean;
+        briefQualityCheckPasses: boolean;
+        renderedContextMentionsIgnoreMemoryCandidate: any;
+    };
+    repairReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        requiredActionCount: any;
+        openItemCount: any;
+        currentOpenItemCount: any;
+        staleOpenItemCount: any;
+        coveredItemCount: any;
+        total: any;
+        missingReceiptCount: any;
+        memoryUsedViolationCount: any;
+    };
+    candidateReport: {
+        status: string;
+        coverageRate: number;
+        metadataCoverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsNeedingCandidates: any;
+        groupsCovered: any;
+        groupsMetadataComplete: any;
+        expectedCandidateCount: any;
+        coveredCandidateCount: any;
+        candidateCount: any;
+        readyCount: any;
+        dispatchMarkedCount: any;
+        metadataGapCount: any;
+        promptPatchCandidateCount: any;
+        packetBoundCandidateCount: any;
+    };
+    briefReport: {
+        status: string;
+        coverageRate: number;
+        metadataCoverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsNeedingBriefs: any;
+        groupsCovered: any;
+        groupsMetadataComplete: any;
+        expectedBriefCount: any;
+        coveredBriefCount: any;
+        readyBriefCount: any;
+        metadataGapCount: any;
+        packetBoundBriefCount: any;
+        memoryIgnoredPromptBriefCount: any;
+    };
+    candidate: {
+        work_item_id: any;
+        source: any;
+        worker_context_packet_id: any;
+        memory_policy_reason: any;
+    };
+    brief: {
+        brief_id: any;
+        source: any;
+        worker_context_packet_id: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketIgnoreMemoryReceiptRepairTypedMemorySelfTest(): {
+    pass: boolean;
+    checks: {
+        repairDispatchChainReady: boolean;
+        typedMemoryReportPasses: boolean;
+        qualityCheckExposesTypedMemory: boolean;
+        ledgerArchivesIgnoreMemoryRows: boolean;
+        typedDocContainsReceiptDiscipline: boolean;
+        recallFindsIgnoreMemoryDiscipline: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: number;
+        checkedGroupCount: number;
+        groupsCovered: number;
+        inputRowCount: number;
+        archivedCount: number;
+        typedMemoryDocCount: number;
+        recallMatchCount: number;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+    doc: {
+        relPath: any;
+        source: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketCompactHookLedgerSelfTest(): {
+    pass: boolean;
+    checks: {
+        reportAcceptsPrePostHookLedger: boolean;
+        qualityCheckCoversCompactHookLedger: boolean;
+        hookRowBindsRetryToPrePost: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        retryBindingCount: any;
+        validHookBindingCount: any;
+        metadataGapCount: any;
+        hookRunCount: any;
+        preHookCount: any;
+        postHookCount: any;
+        memoryFirstHookCount: any;
+        recoveredHookCount: any;
+        blockedHookCount: any;
+    };
+    hook: {
+        hook_run_id: any;
+        pre_count: any;
+        post_count: any;
+        post_dispatch_ready: boolean;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterWorkerContextPacketMemoryReinjectionProofSelfTest(): {
+    pass: boolean;
+    checks: {
+        reportAcceptsMemoryReinjectionProof: boolean;
+        qualityCheckCoversMemoryReinjectionProof: boolean;
+        proofBindsRetryHashToRenderedPacket: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        reinjectionBindingCount: any;
+        validReinjectionCount: any;
+        metadataGapCount: any;
+        memoryFirstCount: any;
+        compactedReinjectionCount: any;
+        ignoredByPolicyCount: any;
+        hashMatchCount: any;
+        renderedProofCount: any;
+        renderedMemoryCount: any;
+    };
+    proof: {
+        status: any;
+        memory_first: boolean;
+        hash_matches_compaction: boolean;
+        rendered_memory_reinjection_proof: boolean;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyProofRepairTimelineBindingSelfTest(): {
+    pass: boolean;
+    checks: {
+        dispatchBriefReady: boolean;
+        assignmentCarriesBriefBinding: boolean;
+        timelineLedgerMergesRequiredEvents: boolean;
+        timelineLedgerCarriesExecutionProof: boolean;
+        qualityCoversTimelineBinding: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        bindingCount: any;
+        validBindingCount: any;
+        metadataGapCount: any;
+        taskBoundBindingCount: any;
+        sessionBoundBindingCount: any;
+        snapshotBoundBindingCount: any;
+        executionBoundBindingCount: any;
+        runnerBoundBindingCount: any;
+        receiptBoundBindingCount: any;
+        requiredEventCoverageCount: any;
+    };
+    binding: {
+        timeline_binding_id: any;
+        brief_id: any;
+        task_id: any;
+        assignment_id: any;
+        worker_context_packet_id: any;
+        task_agent_session_id: any;
+        memory_context_snapshot_id: any;
+        execution_id: any;
+        event_types: any;
+    };
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyProofRepairTimelineCompletionSelfTest(): {
+    pass: boolean;
+    checks: {
+        weakProofCreatesOpenRepairItem: boolean;
+        timelineBindingCarriesRequiredEvents: boolean;
+        liveTimelineBindingClosesRepairItem: boolean;
+        completionReportCoversClosure: boolean;
+    };
+    first: {
+        openItemCount: number;
+        total: number;
+    };
+    binding: {
+        timeline_binding_id: any;
+        brief_id: any;
+        work_item_id: any;
+        event_types: any;
+    };
+    completedItem: {
+        id: any;
+        status: string;
+        completion_source: any;
+        resolutionReason: any;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        completeBindingCount: any;
+        matchedBindingCount: any;
+        completedBindingCount: any;
+        completedRepairItemCount: any;
+        openMatchedRepairItemCount: any;
+        missingWorkItemBindingCount: any;
+        completedNow: any;
+    };
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyProofRepairClosureReproofSelfTest(): {
+    pass: boolean;
+    checks: {
+        weakTimelineClosureDoesNotBecomeProviderStrong: boolean;
+        weakCandidateCarriesPreciseReproofKeys: boolean;
+        strongNativeTelemetrySatisfiesReproof: boolean;
+        qualitySeparatesTimelineAndProviderProof: boolean;
+        liveTimelineClosuresHappened: boolean;
+    };
+    weak: {
+        timelineProvedRepairCount: any;
+        providerStrongProofCount: any;
+        providerStrongReproofNeededCount: any;
+        candidate: any;
+    };
+    strong: {
+        timelineProvedRepairCount: any;
+        providerStrongProofCount: any;
+        providerStrongReproofNeededCount: any;
+    };
+    report: {
+        status: string;
+        score: number;
+        checked: any;
+        passed: any;
+        missing: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        timelineProvedRepairCount: any;
+        providerStrongProofCount: any;
+        providerStrongReproofNeededCount: any;
+        missingProofCount: any;
+        requestTelemetryMissingCount: any;
+        requestTelemetryReceiptOnlyCount: any;
+        requestTelemetryStaleCount: any;
+        requestTelemetrySessionUnboundCount: any;
+        requestTelemetryDispatchUnboundCount: any;
+    };
+    quality: {
+        checked: any;
+        passed: any;
+        failed: any;
+        status: any;
+    };
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyProofRepairClosureReproofWorkItemSelfTest(): {
+    pass: boolean;
+    checks: {
+        closureReproofProducesCandidate: boolean;
+        candidateMaterializesProviderReproofWorkItem: boolean;
+        workItemCarriesPreciseReproofKeys: boolean;
+        genericDispatchCandidateSurfacesProviderReproof: boolean;
+        strongClosureClosesProviderReproofWorkItem: boolean;
+    };
+    closure: {
+        status: string;
+        score: number;
+        checked: any;
+        passed: any;
+        missing: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        timelineProvedRepairCount: any;
+        providerStrongProofCount: any;
+        providerStrongReproofNeededCount: any;
+        missingProofCount: any;
+        requestTelemetryMissingCount: any;
+        requestTelemetryReceiptOnlyCount: any;
+        requestTelemetryStaleCount: any;
+        requestTelemetrySessionUnboundCount: any;
+        requestTelemetryDispatchUnboundCount: any;
+    };
+    workItemReport: {
+        status: string;
+        coverageRate: number;
+        metadataCoverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsNeedingWorkItems: any;
+        groupsCovered: any;
+        groupsMetadataComplete: any;
+        expectedWorkItemCount: any;
+        coveredWorkItemCount: any;
+        openItemCount: any;
+        completedItemCount: any;
+        dispatchCandidateCount: any;
+        metadataGapCount: any;
+    };
+    providerItem: {
+        id: any;
+        status: string;
+        source: any;
+        provider_reproof_status: any;
+        provider_reproof_reason: any;
+        request_patch_checksum: any;
+        runner_request_id: any;
+    };
+    providerCandidate: {
+        candidate_id: any;
+        source: any;
+        provider_reproof_status: any;
+        request_patch_checksum: any;
+    };
+    resolvedProviderItem: {
+        status: string;
+        provider_reproof_status: any;
+        resolutionReason: any;
+    };
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyProviderReproofDispatchTimelineSelfTest(): {
+    pass: boolean;
+    checks: {
+        providerCandidateCarriesReproofMetadata: boolean;
+        providerBriefUsesNativeProofContract: boolean;
+        providerBriefReportCoversMetadata: boolean;
+        assignmentBindingIncludesProviderReproof: boolean;
+        timelineBindingIncludesProviderReproof: boolean;
+        timelineDoesNotPrematurelyCloseProviderReproof: boolean;
+    };
+    briefReport: {
+        status: string;
+        coverageRate: number;
+        metadataCoverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsNeedingBriefs: any;
+        groupsCovered: any;
+        groupsMetadataComplete: any;
+        expectedBriefCount: any;
+        coveredBriefCount: any;
+        readyBriefCount: any;
+        metadataGapCount: any;
+        proofEntryBriefCount: any;
+        runnerBoundBriefCount: any;
+    };
+    assignmentReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        bindingCount: any;
+        validBindingCount: any;
+        metadataGapCount: any;
+        proofEntryBindingCount: any;
+        runnerBoundBindingCount: any;
+        workerContextPacketBindingCount: any;
+    };
+    timelineReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        bindingCount: any;
+        validBindingCount: any;
+        metadataGapCount: any;
+        taskBoundBindingCount: any;
+        sessionBoundBindingCount: any;
+        snapshotBoundBindingCount: any;
+        executionBoundBindingCount: any;
+        runnerBoundBindingCount: any;
+        receiptBoundBindingCount: any;
+        requiredEventCoverageCount: any;
+    };
+    providerBrief: {
+        brief_id: any;
+        source: any;
+        provider_reproof_status: any;
+        original_work_item_id: any;
+    };
+    timelineBinding: {
+        timeline_binding_id: any;
+        source: any;
+        provider_reproof_status: any;
+        original_work_item_id: any;
+        event_types: any;
+    };
+    providerWorkItem: {
+        id: any;
+        status: string;
+        provider_reproof_status: any;
+    };
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyProviderReproofWorkerContextInjectionSelfTest(): {
+    pass: boolean;
+    checks: {
+        assignmentPacketCarriesProviderReproofBrief: boolean;
+        renderedWorkerContextCarriesProviderReproofBrief: any;
+        bindingPersistsInjectedPacketSnapshot: boolean;
+        injectionReportCoversProviderReproofPacket: boolean;
+        qualityCheckExposesWorkerContextInjection: boolean;
+    };
+    injectionReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        bindingCount: any;
+        validInjectionCount: any;
+        metadataGapCount: any;
+        workerContextPacketBindingCount: any;
+        packetBriefInjectionCount: any;
+        renderedProbeCount: any;
+        providerReproofBindingCount: any;
+        providerReproofPacketCount: any;
+        renderedProviderReproofCount: any;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+    packetBrief: {
+        brief_id: any;
+        source: any;
+        provider_reproof_status: any;
+        provider_reproof_reason: any;
+        reproof_candidate_id: any;
+        original_work_item_id: any;
+    };
+    binding: {
+        binding_id: any;
+        worker_context_packet_id: any;
+        rendered_flags: any;
+    };
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyProviderReproofReceiptConsumptionSelfTest(): {
+    pass: boolean;
+    checks: {
+        timelineBindingRecordsReceiptConsumption: boolean;
+        consumptionReportCoversProviderReproofReceipt: boolean;
+        qualityCheckExposesReceiptConsumption: boolean;
+        receiptConsumptionDoesNotCloseProviderReproof: boolean;
+    };
+    consumptionReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        receiptBindingCount: any;
+        validConsumptionCount: any;
+        metadataGapCount: any;
+        providerReproofReceiptCount: any;
+        providerReproofConsumedCount: any;
+        strongReceiptClaimCount: any;
+        usedCount: any;
+        verifiedCount: any;
+        ignoredCount: any;
+        blockedCount: any;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+    timelineBinding: {
+        timeline_binding_id: any;
+        replay_repair_consumption_status: any;
+        replay_repair_consumption_source: any;
+        provider_reproof_status: any;
+    };
+    providerWorkItem: {
+        id: any;
+        status: string;
+        provider_reproof_status: any;
+    };
+};
+export declare function runMemoryCenterApiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemorySelfTest(): {
+    pass: boolean;
+    checks: {
+        timelineReceiptAutoDistillsTypedArchive: boolean;
+        archiveClassifiesStrongAsClaimOnly: boolean;
+        typedDocsSplitPromotedAndCaution: boolean;
+        recallProbeFindsPromotedProviderMemory: boolean;
+        cautionProbeFindsFeedbackMemory: boolean;
+        reportCoversTypedMemoryDistillation: boolean;
+        qualityCheckExposesTypedMemoryCoverage: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        providerReproofReceiptCount: any;
+        archivedReceiptCount: any;
+        promotedReceiptCount: any;
+        cautionReceiptCount: any;
+        strongReceiptClaimCount: any;
+        typedDocCount: any;
+        recallProbeCoveredCount: any;
+        metadataGapCount: any;
+    };
+    qualityCheck: {
+        id: any;
+        status: any;
+        checked: any;
+        passed: any;
+    };
+    docs: any;
+    recalled: any;
+    cautionRecalled: any;
 };
 export declare function runMemoryCenterCompactionHookLedgerSelfTest(): {
     pass: boolean;
@@ -2240,6 +4669,13 @@ export declare function runMemoryCenterReplayRepairPendingWorkItemsSelfTest(): {
             target_project: any;
             revalidation_gate_id: any;
             read_plan_id: any;
+            proof_entry_id: any;
+            plan_checksum: any;
+            request_patch_checksum: any;
+            request_telemetry_status: any;
+            request_telemetry_session_status: any;
+            request_telemetry_dispatch_status: any;
+            runner_request_id: any;
             expected_task_agent_session_id: any;
             receipt_task_agent_session_id: any;
             session_mismatch: boolean;
@@ -2287,6 +4723,13 @@ export declare function runMemoryCenterReplayRepairPendingWorkItemsSelfTest(): {
             target_project: any;
             revalidation_gate_id: any;
             read_plan_id: any;
+            proof_entry_id: any;
+            plan_checksum: any;
+            request_patch_checksum: any;
+            request_telemetry_status: any;
+            request_telemetry_session_status: any;
+            request_telemetry_dispatch_status: any;
+            runner_request_id: any;
             expected_task_agent_session_id: any;
             receipt_task_agent_session_id: any;
             session_mismatch: boolean;
@@ -2373,6 +4816,101 @@ export declare function runMemoryCenterGroupToolContinuitySnapshotSelfTest(): {
         qualityCheckCoversToolContinuity: boolean;
     };
     snapshot: any;
+};
+export declare function runMemoryCenterTaskAgentMemoryContextSnapshotSelfTest(): {
+    pass: boolean;
+    checks: {
+        snapshotBoundToSession: boolean;
+        inventoryFindsSnapshot: any;
+        reportScoresSnapshotOk: boolean;
+        qualityCheckCoversSnapshot: boolean;
+        groupOverviewExposesSnapshot: any;
+        retentionDryRunIsSafe: boolean;
+    };
+    inventory: any;
+    report: {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            checked: number;
+            passed: number;
+            score: number;
+            sessionCount: number;
+            snapshotCount: number;
+            okCount: number;
+            warnCount: number;
+            failCount: number;
+            orphanFileCount: number;
+            missingFileCount: number;
+            checksumMismatchCount: number;
+            missingPacketCount: number;
+            missingGateCount: number;
+            staleCount: number;
+            prunableCount: number;
+            retentionCandidateCount: number;
+        };
+        inventory: {
+            directory: any;
+            policy: any;
+            summary: any;
+        };
+        retention: {
+            schema: any;
+            dryRun: boolean;
+            candidateCount: number;
+            prunedCount: number;
+            skippedCount: number;
+            rows: any;
+        };
+        groups: any;
+        rows: any;
+        weakRows: any;
+        prunableRows: any;
+        error?: undefined;
+    } | {
+        schema: string;
+        generatedAt: string;
+        overall: {
+            status: string;
+            checked: number;
+            passed: number;
+            score: number;
+            sessionCount: number;
+            snapshotCount: number;
+            okCount: number;
+            warnCount: number;
+            failCount: number;
+            prunableCount: number;
+            orphanFileCount?: undefined;
+            missingFileCount?: undefined;
+            checksumMismatchCount?: undefined;
+            missingPacketCount?: undefined;
+            missingGateCount?: undefined;
+            staleCount?: undefined;
+            retentionCandidateCount?: undefined;
+        };
+        inventory: {
+            summary: {};
+            directory?: undefined;
+            policy?: undefined;
+        };
+        retention: {
+            dryRun: boolean;
+            candidateCount: number;
+            prunedCount: number;
+            skippedCount: number;
+            rows: any[];
+            schema?: undefined;
+        };
+        groups: any[];
+        rows: any[];
+        weakRows: {
+            reason: any;
+        }[];
+        prunableRows: any[];
+        error: any;
+    };
 };
 export declare function runMemoryCenterCompactFileReferenceSelfTest(): {
     pass: boolean;

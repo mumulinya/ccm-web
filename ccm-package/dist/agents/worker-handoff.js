@@ -170,6 +170,42 @@ function extractReadPlanRevalidationGate(value) {
         return extractReadPlanRevalidationGate(value.memory);
     return null;
 }
+function extractGlobalMemoryHealthGate(value) {
+    if (!value || typeof value !== "object")
+        return null;
+    if (value.global_memory_health_gate?.schema === "ccm-child-global-agent-memory-health-gate-v1")
+        return value.global_memory_health_gate;
+    if (value.globalMemoryHealthGate?.schema === "ccm-child-global-agent-memory-health-gate-v1")
+        return value.globalMemoryHealthGate;
+    if (value.global_agent_memory?.memory_health_gate?.schema === "ccm-child-global-agent-memory-health-gate-v1")
+        return value.global_agent_memory.memory_health_gate;
+    if (value.globalAgentMemory?.memoryHealthGate?.schema === "ccm-child-global-agent-memory-health-gate-v1")
+        return value.globalAgentMemory.memoryHealthGate;
+    if (value.group_memory)
+        return extractGlobalMemoryHealthGate(value.group_memory);
+    if (value.memory)
+        return extractGlobalMemoryHealthGate(value.memory);
+    return null;
+}
+function extractApiMicrocompactNativeApplyPlan(value) {
+    if (!value || typeof value !== "object")
+        return null;
+    if (value.api_microcompact_native_apply_plan?.schema === "ccm-api-microcompact-native-apply-plan-v1")
+        return value.api_microcompact_native_apply_plan;
+    if (value.apiMicrocompactNativeApplyPlan?.schema === "ccm-api-microcompact-native-apply-plan-v1")
+        return value.apiMicrocompactNativeApplyPlan;
+    if (value.compaction?.apiMicrocompactNativeApplyPlan?.schema === "ccm-api-microcompact-native-apply-plan-v1")
+        return value.compaction.apiMicrocompactNativeApplyPlan;
+    if (value.compaction?.api_microcompact_native_apply_plan?.schema === "ccm-api-microcompact-native-apply-plan-v1")
+        return value.compaction.api_microcompact_native_apply_plan;
+    if (value.group_memory)
+        return extractApiMicrocompactNativeApplyPlan(value.group_memory);
+    if (value.groupMemory)
+        return extractApiMicrocompactNativeApplyPlan(value.groupMemory);
+    if (value.memory)
+        return extractApiMicrocompactNativeApplyPlan(value.memory);
+    return null;
+}
 function renderMemoryFreshnessGate(gate) {
     if (!gate?.schema)
         return "";
@@ -230,6 +266,45 @@ function renderReadPlanRevalidationGate(gate) {
         "回执 memoryUsed/memoryIgnored 必须声明 gate、read_plan_id、当前源已重读/已验证，且应绑定本任务 Agent 会话。",
     ].filter(Boolean).join("；");
 }
+function renderGlobalMemoryHealthGate(gate) {
+    if (!gate?.schema)
+        return "";
+    return [
+        `Global Agent memory health gate：gate=${gate.gate_id || ""}`,
+        `status=${gate.status || "unknown"}`,
+        `active=${gate.active_contamination_count || 0}`,
+        `residue=${gate.residue_contamination_count || 0}`,
+        `action=${gate.action || "unknown"}`,
+        gate.status === "fail"
+            ? "active memory 不干净时不得使用 global_agent_memory；回执 memoryIgnored 必须引用该 gate。"
+            : gate.status === "warn"
+                ? "active memory 干净但有历史残留；使用全局记忆前仍需核验当前源。"
+                : "active memory clean；全局记忆仍只作历史上下文，当前源优先。",
+    ].filter(Boolean).join("；");
+}
+function renderApiMicrocompactNativeApplyPlan(plan) {
+    if (!plan?.schema)
+        return "";
+    const executor = plan.executor || {};
+    return [
+        `API microcompact native apply：applyPlan=${plan.applyPlanChecksum || ""}`,
+        `mode=${plan.mode || "advisory_only"}`,
+        `ready=${plan.nativeApplyReady === true}`,
+        `executor=${executor.agentType || "unknown"}/${executor.transport || "unknown"}`,
+        plan.task_agent_session_id ? `session=${plan.task_agent_session_id}` : "",
+        plan.memory_context_snapshot_id ? `snapshot=${plan.memory_context_snapshot_id}` : "",
+        plan.nativeApplyReady === true
+            ? `provider request 必须合并 requestPatch.body.context_management，并携带 beta=${plan.capability?.requiredBetaHeader || "context-management-2025-06-27"}`
+            : `仅 advisory：${plan.reason || "native provider request layer unavailable"}`,
+        "只有真实发送带 context_management 的 API 请求，并且回执匹配本轮 session/snapshot 后，才能声明 native_applied。",
+        plan.nativeApplyReady === true
+            ? "声明 native_applied 时还必须填写 apiMicrocompactNativeApplyRequestTelemetry，记录 requestPatchChecksum、requestBodyChecksum、betaHeaders、provider endpoint、session/snapshot 和 sentAt。"
+            : "",
+        plan.nativeApplyReady === true
+            ? "强 native_applied 证明必须由 fresh native_request_adapter telemetry 支撑；agent_receipt 来源 telemetry 只能作为弱证据，不能单独证明 provider request 已真实合并。"
+            : "",
+    ].filter(Boolean).join("；");
+}
 function renderMemoryContextForWorker(memory) {
     if (!memory)
         return "";
@@ -288,6 +363,8 @@ function buildSelfContainedWorkerHandoff(input) {
     const postCompactReinjectionGate = extractPostCompactReinjectionGate(memoryContext);
     const postCompactDispatchMarker = extractPostCompactDispatchMarker(memoryContext);
     const readPlanRevalidationGate = extractReadPlanRevalidationGate(memoryContext);
+    const globalMemoryHealthGate = extractGlobalMemoryHealthGate(memoryContext);
+    const apiMicrocompactNativeApplyPlan = extractApiMicrocompactNativeApplyPlan(memoryContext);
     const workerContextPacket = input.workerContextPacket || (0, runtime_kernel_1.buildWorkerContextPacket)({
         group: input.group,
         project,
@@ -345,6 +422,8 @@ function buildSelfContainedWorkerHandoff(input) {
             post_compact_reinjection_gate: postCompactReinjectionGate,
             post_compact_dispatch_marker: postCompactDispatchMarker,
             read_plan_revalidation_gate: readPlanRevalidationGate,
+            global_memory_health_gate: globalMemoryHealthGate,
+            api_microcompact_native_apply_plan: apiMicrocompactNativeApplyPlan,
         },
         verification: {
             required: input.requiresCodeChanges === false ? "说明产出和人工核验依据" : "运行与改动范围匹配的最小必要验证",
@@ -363,7 +442,7 @@ function buildSelfContainedWorkerHandoff(input) {
         },
         receipt_schema: {
             marker: "CCM_AGENT_RECEIPT",
-            required_fields: ["status", "summary", "actions", "filesChanged", "verification", "blockers", "needs", "ack", "contractChanges", "consumedInjectionIds", "memoryUsed", "memoryIgnored", "postCompactCandidateUsage"],
+            required_fields: ["status", "summary", "actions", "filesChanged", "verification", "blockers", "needs", "ack", "contractChanges", "consumedInjectionIds", "memoryUsed", "memoryIgnored", "replayRepairDispatchBriefUsage", "apiMicrocompactUsage", "apiMicrocompactNativeApplyRequestTelemetry", "postCompactCandidateUsage"],
             status_values: ["done", "partial", "blocked", "failed", "needs_info"],
         },
         user_summary: {
@@ -379,6 +458,8 @@ function buildSelfContainedWorkerHandoff(input) {
                 has_post_compact_reinjection_gate: !!postCompactReinjectionGate,
                 has_post_compact_dispatch_marker: !!postCompactDispatchMarker,
                 has_read_plan_revalidation_gate: !!readPlanRevalidationGate,
+                has_global_memory_health_gate: !!globalMemoryHealthGate,
+                has_api_microcompact_native_apply_plan: !!apiMicrocompactNativeApplyPlan,
             },
         },
     };
@@ -409,6 +490,23 @@ function renderReceiptSchemaForWorker(handoff) {
             consumedInjectionIds: ["消费的 injection_id；没有填空数组"],
             memoryUsed: ["实际使用的记忆/文档/知识库；未使用填空数组"],
             memoryIgnored: ["没有使用或无法使用记忆的原因；没有填空数组"],
+            replayRepairDispatchBriefUsage: [{
+                    briefId: "Replay repair brief id；没有此 brief 填空字符串",
+                    workItemId: "Replay repair work_item_id；没有此 brief 填空字符串",
+                    usageState: "used | verified | ignored | blocked | strong",
+                    providerReproofStatus: "needed | strong | blocked | ignored",
+                    requestPatchChecksum: "API microcompact provider request patch checksum；没有填空字符串",
+                    runnerRequestId: "runner request id；没有填空字符串",
+                    reason: "说明本轮如何使用/忽略/阻塞该 replay repair brief",
+                }],
+            globalMemoryUsage: [{
+                    globalMemoryId: "使用/忽略/核验过的 global_memory_id；没有全局记忆填空字符串",
+                    usageState: "used | ignored | verified | background | advisory",
+                    currentSourceVerified: false,
+                    semanticRiskAcknowledged: false,
+                    crossGroupSuppression: "background_only | advisory | none",
+                    reason: "说明该全局记忆如何被使用、忽略或仅作背景",
+                }],
             readPlanRevalidationUsage: [{
                     gateId: "读取计划重读 gate id；没有此 gate 填空字符串",
                     readPlanId: "stale read_plan_id；没有此 gate 填空字符串",
@@ -416,6 +514,39 @@ function renderReceiptSchemaForWorker(handoff) {
                     taskAgentSessionId: "必须与工作包 session_binding.task_agent_session_id 一致；没有则填空字符串",
                     nativeSessionId: "必须与工作包 session_binding.native_session_id 一致；没有则填空字符串",
                     reason: "已重读当前源，或说明未使用该 stale read plan",
+                }],
+            apiMicrocompactUsage: [{
+                    planChecksum: "API microcompact edit plan checksum；没有此计划填空字符串",
+                    applyPlanChecksum: "native apply plan checksum；advisory/不支持时可填空字符串",
+                    requestPatchChecksum: "真实合并 provider requestPatch 后的 checksum；未 native_applied 时填空字符串",
+                    usageState: "native_applied | advisory | ignored | not_supported",
+                    nativeApplied: false,
+                    advisoryOnly: true,
+                    taskAgentSessionId: "必须与工作包 session_binding.task_agent_session_id 一致；没有则填空字符串",
+                    nativeSessionId: "必须与工作包 session_binding.native_session_id 一致；没有则填空字符串",
+                    memoryContextSnapshotId: "必须与本轮 memory_context_snapshot_id 一致；没有则填空字符串",
+                    memoryContextSnapshotChecksum: "必须与本轮 memory_context_snapshot_checksum 一致；没有则填空字符串",
+                    reason: "说明是否原生应用 API context-management；第三方 CLI 不支持时写 advisory 或 not_supported",
+                }],
+            apiMicrocompactNativeApplyRequestTelemetry: [{
+                    planChecksum: "native_applied 的 API microcompact edit plan checksum；未 native_applied 时填空字符串",
+                    applyPlanChecksum: "native apply plan checksum；未 native_applied 时填空字符串",
+                    requestPatchChecksum: "真实合并 provider requestPatch 后的 checksum；未 native_applied 时填空字符串",
+                    requestBodyChecksum: "发给 provider 的请求体稳定 checksum；不要粘贴完整请求体",
+                    hasContextManagement: true,
+                    betaHeaders: ["context-management-2025-06-27"],
+                    provider: "anthropic | openai-compatible | other",
+                    model: "实际请求模型；未知填空字符串",
+                    endpoint: "provider endpoint；可脱敏",
+                    method: "POST",
+                    responseStatus: 200,
+                    requestId: "provider request id / trace id；没有填空字符串",
+                    taskAgentSessionId: "必须与 apiMicrocompactUsage 一致",
+                    nativeSessionId: "必须与 apiMicrocompactUsage 一致",
+                    memoryContextSnapshotId: "必须与 apiMicrocompactUsage 一致",
+                    memoryContextSnapshotChecksum: "必须与 apiMicrocompactUsage 一致",
+                    sentAt: "ISO 时间；真实发送 API 请求的时间",
+                    telemetrySource: "native_request_adapter | agent_receipt",
                 }],
             postCompactCandidateUsage: [{
                     gateId: "压缩后重注入 gate id；没有此 gate 填空字符串",
@@ -428,7 +559,11 @@ function renderReceiptSchemaForWorker(handoff) {
         }, null, 2),
         "```",
         fields.length ? `必须包含字段：${fields.join("、")}` : "",
+        "如果工作包包含 global_memory_id、semantic_risk 或 cross_group_suppression，回执 globalMemoryUsage 必须逐条声明该全局记忆是 used / ignored / verified / background / advisory；风险记忆若被使用必须声明 currentSourceVerified=true。",
+        "如果工作包包含 global_memory_health_gate，回执 memoryUsed/memoryIgnored 必须引用 gate_id；当 gate status=fail 或 action=block_global_agent_memory_recall 时，必须在 memoryIgnored 说明未使用全局记忆，且不得在 globalMemoryUsage 声明 used。",
+        "如果工作包包含 Replay repair dispatch brief，回执 replayRepairDispatchBriefUsage 必须逐条引用 briefId/workItemId，并声明 used/verified/ignored/blocked/strong；provider re-proof 不能只靠口头 strong，仍需 native provider proof ledger 证明。",
         "如果存在 read_plan_revalidation_gate，memoryUsed/memoryIgnored 或 readPlanRevalidationUsage 必须同时引用 gateId、readPlanId，并声明 currentSourceVerified=true；回执 session id 必须匹配工作包 session_binding。",
+        "如果存在 API microcompact edit plan，回执 apiMicrocompactUsage 或 memoryUsed/memoryIgnored 必须引用 planChecksum，并声明 usageState=native_applied/advisory/ignored/not_supported；apiMicrocompactUsage 应绑定本轮 taskAgentSessionId/nativeSessionId/memoryContextSnapshotId；第三方 CLI 未实际调用 native API context-management 时不得声明 native_applied。",
     ].filter(Boolean).join("\n");
 }
 function renderSelfContainedWorkerHandoff(handoff) {
@@ -444,6 +579,8 @@ function renderSelfContainedWorkerHandoff(handoff) {
     const postCompactReinjectionGate = renderPostCompactReinjectionGate(handoff?.references?.post_compact_reinjection_gate || extractPostCompactReinjectionGate(handoff?.worker_context_packet?.memory || null));
     const postCompactDispatchMarker = renderPostCompactDispatchMarker(handoff?.references?.post_compact_dispatch_marker || extractPostCompactDispatchMarker(handoff?.worker_context_packet?.memory || null));
     const readPlanRevalidationGate = renderReadPlanRevalidationGate(handoff?.references?.read_plan_revalidation_gate || extractReadPlanRevalidationGate(handoff?.worker_context_packet?.memory || null));
+    const globalMemoryHealthGate = renderGlobalMemoryHealthGate(handoff?.references?.global_memory_health_gate || extractGlobalMemoryHealthGate(handoff?.worker_context_packet?.memory || null));
+    const apiMicrocompactNativeApplyPlan = renderApiMicrocompactNativeApplyPlan(handoff?.references?.api_microcompact_native_apply_plan || extractApiMicrocompactNativeApplyPlan(handoff?.worker_context_packet?.memory || null));
     return [
         "【主 Agent 自包含 Worker 工作包】",
         `schema: ${handoff?.schema || "ccm-self-contained-worker-handoff-v1"}`,
@@ -484,6 +621,8 @@ function renderSelfContainedWorkerHandoff(handoff) {
         "",
         "平台记忆/上下文：",
         memoryFreshnessGate,
+        globalMemoryHealthGate,
+        apiMicrocompactNativeApplyPlan,
         postCompactReinjectionGate,
         postCompactDispatchMarker,
         readPlanRevalidationGate,
@@ -537,6 +676,14 @@ function runWorkerHandoffSelfTest() {
             group_id: "group-selftest",
             target_project: "frontend",
             rendered_text: "子 Agent 受控记忆包：历史要求是负责人筛选必须保留权限校验。",
+            global_memory_health_gate: {
+                schema: "ccm-child-global-agent-memory-health-gate-v1",
+                gate_id: "ggmh_worker_handoff_selftest",
+                status: "ok",
+                action: "allow_global_agent_memory_recall",
+                active_contamination_count: 0,
+                residue_contamination_count: 0,
+            },
             dispatch_freshness_gate: {
                 schema: "ccm-child-agent-memory-dispatch-freshness-gate-v1",
                 dispatch_gate_id: "gmd_worker_handoff_selftest",
@@ -593,6 +740,9 @@ function runWorkerHandoffSelfTest() {
         ackAndReceipt: rendered.includes("ACK gate") && rendered.includes("CCM_AGENT_RECEIPT"),
         dependencyAndInjection: rendered.includes("backend") && rendered.includes("injection_id"),
         memoryContextPreserved: handoff.worker_context_packet?.memory?.schema === "ccm-group-memory-context-v1" && rendered.includes("平台记忆/上下文") && rendered.includes("负责人筛选必须保留权限校验"),
+        globalMemoryHealthGatePreserved: handoff.references?.global_memory_health_gate?.gate_id === "ggmh_worker_handoff_selftest"
+            && rendered.includes("Global Agent memory health gate")
+            && rendered.includes("ggmh_worker_handoff_selftest"),
         memoryFreshnessGatePreserved: handoff.references?.memory_freshness_gate?.dispatch_gate_id === "gmd_worker_handoff_selftest"
             && rendered.includes("记忆派发门禁")
             && rendered.includes("memory_source_changed"),

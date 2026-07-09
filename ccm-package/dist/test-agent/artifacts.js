@@ -40,6 +40,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
 const utils_1 = require("./utils");
+const verdict_1 = require("./verdict");
 function fileIntegrity(filePath, options = {}) {
     try {
         const stat = fs.statSync(filePath);
@@ -86,9 +87,36 @@ function httpLine(result) {
 }
 function browserLine(result) {
     const finalUrl = result.finalUrl && result.finalUrl !== result.url ? `; final=${result.finalUrl}` : "";
+    const viewport = result.viewport ? `; viewport=${result.viewport.width}x${result.viewport.height}${result.viewport.isMobile ? "; mobile" : ""}` : "";
+    const browserContext = result.contextOptions ? `; context=${browserContextOptionsSummary(result.contextOptions)}` : "";
     const artifacts = (result.browserArtifacts || []).length;
-    const detail = result.error || `${result.url}${finalUrl}; steps=${result.steps.length}; screenshots=${result.screenshots.length}; artifacts=${artifacts}${result.probeType ? `; probe=${result.probeType}` : ""}`;
+    const detail = result.error || `${result.url}${finalUrl}${viewport}${browserContext}; steps=${result.steps.length}; screenshots=${result.screenshots.length}; artifacts=${artifacts}${result.probeType ? `; probe=${result.probeType}` : ""}`;
     return statusLine(`${result.project} ${result.adversarial ? "adversarial " : ""}browser ${result.name}`, result.status, detail);
+}
+function browserContextOptionsSummary(contextOptions) {
+    const parts = [
+        contextOptions.locale ? `locale=${contextOptions.locale}` : "",
+        contextOptions.timezoneId ? `timezone=${contextOptions.timezoneId}` : "",
+        contextOptions.colorScheme ? `color=${contextOptions.colorScheme}` : "",
+        contextOptions.reducedMotion ? `motion=${contextOptions.reducedMotion}` : "",
+        contextOptions.permissions?.length ? `permissions=${contextOptions.permissions.join(",")}` : "",
+        contextOptions.geolocation ? `geo=${contextOptions.geolocation.latitude},${contextOptions.geolocation.longitude}` : "",
+    ].filter(Boolean);
+    return parts.join("; ") || "default";
+}
+function browserNetworkSummaryLine(item) {
+    const failedUrls = item.failedUrls.length ? `; failed=${item.failedUrls.slice(0, 3).join(", ")}` : "";
+    const detail = `requests=${item.requestCount}; responses=${item.responseCount}; errors=${item.errorCount}; failedResponses=${item.failedResponseCount}${failedUrls}${item.networkLogPath ? `; log=${item.networkLogPath}` : ""}`;
+    return statusLine(`${item.project} browser network ${item.name}`, item.status, detail);
+}
+function typedCounts(counts) {
+    const entries = Object.entries(counts || {});
+    return entries.length ? entries.map(([key, value]) => `${key}:${value}`).join(", ") : "none";
+}
+function browserInteractionSummaryLine(item) {
+    const failed = item.failedSteps.length ? `; failed=${item.failedSteps.slice(0, 3).map(step => `${step.name}${step.error ? `(${step.error})` : ""}`).join(", ")}` : "";
+    const detail = `actions=${item.actionCount} passed=${item.passedActions} failed=${item.failedActions}; assertions=${item.assertionCount} passed=${item.passedAssertions} failed=${item.failedAssertions}; actionTypes=${typedCounts(item.actionTypes)}; assertionTypes=${typedCounts(item.assertionTypes)}${failed}`;
+    return statusLine(`${item.project} browser interactions ${item.name}`, item.status, detail);
 }
 function evidenceLine(item) {
     const target = item.path || item.detail || "";
@@ -184,6 +212,8 @@ function browserDetail(result, index) {
         `- Provider: ${result.provider || "(unknown)"}`,
         `- URL: ${result.url}`,
         ...(result.finalUrl ? [`- Final URL: ${result.finalUrl}`] : []),
+        ...(result.viewport ? [`- Viewport: ${result.viewport.width}x${result.viewport.height}${result.viewport.isMobile ? " mobile" : ""}${result.viewport.deviceScaleFactor ? ` @${result.viewport.deviceScaleFactor}x` : ""}`] : []),
+        ...(result.contextOptions ? [`- Context: ${browserContextOptionsSummary(result.contextOptions)}`] : []),
         ...(result.title ? [`- Title: ${result.title}`] : []),
         `- Duration: ${result.durationMs}ms`,
         ...(result.error ? [`- Error: ${result.error}`] : []),
@@ -197,6 +227,14 @@ function browserDetail(result, index) {
         "**Console messages:**",
         ...((result.consoleMessages || []).length ? (result.consoleMessages || []).slice(0, 20).map(item => `- ${item}`) : ["- none"]),
         ...(result.consoleLogPath ? [`- Full log: ${result.consoleLogPath}`] : []),
+        "",
+        "**Browser dialogs:**",
+        ...((result.dialogMessages || []).length ? (result.dialogMessages || []).slice(0, 20).map(item => `- ${item}`) : ["- none"]),
+        ...(result.dialogLogPath ? [`- Full log: ${result.dialogLogPath}`] : []),
+        "",
+        "**Browser popups:**",
+        ...((result.popupMessages || []).length ? (result.popupMessages || []).slice(0, 20).map(item => `- ${item}`) : ["- none"]),
+        ...(result.popupLogPath ? [`- Full log: ${result.popupLogPath}`] : []),
         "",
         "**Page errors:**",
         ...(result.pageErrors.length ? result.pageErrors.map(item => `- ${item}`) : ["- none"]),
@@ -296,6 +334,13 @@ function buildTestAgentArtifactManifest(report, manifestPath) {
             source: "writeTestAgentArtifacts",
         },
         {
+            type: "verdict_json",
+            title: "TestAgent verdict JSON",
+            path: String(report.metadata.artifactFiles?.verdictJsonPath || path.join(report.artifactDir, "verdict.json")),
+            status: report.status,
+            source: "writeTestAgentArtifacts",
+        },
+        {
             type: "artifact_manifest",
             title: "TestAgent artifact manifest",
             path: manifestPath,
@@ -322,6 +367,22 @@ function buildTestAgentArtifactManifest(report, manifestPath) {
                 type: "browser_console_log",
                 title: `Console log: ${result.name}`,
                 path: result.consoleLogPath,
+                project: result.project,
+                status: result.status,
+                source: "browserResults",
+            }] : []),
+        ...report.browserResults.flatMap(result => result.dialogLogPath ? [{
+                type: "browser_dialog_log",
+                title: `Dialog log: ${result.name}`,
+                path: result.dialogLogPath,
+                project: result.project,
+                status: result.status,
+                source: "browserResults",
+            }] : []),
+        ...report.browserResults.flatMap(result => result.popupLogPath ? [{
+                type: "browser_popup_log",
+                title: `Popup log: ${result.name}`,
+                path: result.popupLogPath,
                 project: result.project,
                 status: result.status,
                 source: "browserResults",
@@ -376,6 +437,7 @@ function buildTestAgentArtifactManifest(report, manifestPath) {
             screenshots: files.filter(item => item.type === "screenshot").length,
             browserSnapshots: files.filter(item => item.type === "browser_snapshot").length,
             browserConsoleLogs: files.filter(item => item.type === "browser_console_log").length,
+            browserPopupLogs: files.filter(item => item.type === "browser_popup_log").length,
             browserNetworkLogs: files.filter(item => item.type === "browser_network_log").length,
             browserToolTranscripts: files.filter(item => item.type === "browser_tool_transcript").length,
             browserTraces: files.filter(item => item.type === "browser_trace").length,
@@ -418,6 +480,14 @@ function buildTestAgentMarkdownReport(report) {
         "",
         ...(report.browserResults.length ? report.browserResults.map(browserLine) : ["- none"]),
         "",
+        "## Browser Network Summary",
+        "",
+        ...((report.browserNetworkSummary || []).length ? (report.browserNetworkSummary || []).map(browserNetworkSummaryLine) : ["- none"]),
+        "",
+        "## Browser Interaction Summary",
+        "",
+        ...((report.browserInteractionSummary || []).length ? (report.browserInteractionSummary || []).map(browserInteractionSummaryLine) : ["- none"]),
+        "",
         "## Required Check Coverage",
         "",
         ...(report.requiredCheckCoverage.length ? report.requiredCheckCoverage.map(requiredCheckLine) : ["- none"]),
@@ -453,6 +523,7 @@ function writeTestAgentArtifacts(report) {
     const artifactDir = (0, utils_1.ensureDir)(report.artifactDir);
     const reportJsonPath = path.join(artifactDir, "report.json");
     const reportMarkdownPath = path.join(artifactDir, "report.md");
+    const verdictJsonPath = path.join(artifactDir, "verdict.json");
     const manifestPath = path.join(artifactDir, "artifact-manifest.json");
     const artifactEvidence = [
         {
@@ -469,6 +540,12 @@ function writeTestAgentArtifacts(report) {
         },
         {
             type: "artifact",
+            title: "TestAgent verdict JSON",
+            status: report.status,
+            path: verdictJsonPath,
+        },
+        {
+            type: "artifact",
             title: "TestAgent artifact manifest",
             status: report.status,
             path: manifestPath,
@@ -482,12 +559,15 @@ function writeTestAgentArtifacts(report) {
             artifactFiles: {
                 reportJsonPath,
                 reportMarkdownPath,
+                verdictJsonPath,
                 manifestPath,
             },
         },
     };
+    const verdict = (0, verdict_1.buildTestAgentVerdict)(augmented);
     fs.writeFileSync(reportJsonPath, `${JSON.stringify(augmented, null, 2)}\n`, "utf-8");
     fs.writeFileSync(reportMarkdownPath, buildTestAgentMarkdownReport(augmented), "utf-8");
+    fs.writeFileSync(verdictJsonPath, `${JSON.stringify(verdict, null, 2)}\n`, "utf-8");
     let manifest = buildTestAgentArtifactManifest(augmented, manifestPath);
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
     manifest = buildTestAgentArtifactManifest(augmented, manifestPath);

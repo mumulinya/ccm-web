@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_LEDGER = exports.GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_LEDGER = exports.GROUP_TYPED_MEMORY_DISTILLATION_QUALITY_VERSION = exports.GROUP_TYPED_MEMORY_DISTILLATION_FACT_LIMIT = exports.GROUP_TYPED_MEMORY_DISTILLATION_MAX_MESSAGES = exports.GROUP_TYPED_MEMORY_DISTILLATION_LEDGER = exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION = exports.GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_VERSION = exports.GROUP_CLAUDE_MEMORY_SETTING_SOURCE_POLICY_VERSION = exports.GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_VERSION = exports.GROUP_CLAUDE_MEMORY_INCLUDE_AUDIT_VERSION = exports.GROUP_GLOBAL_CLAUDE_MEMORY_IMPORT_VERSION = exports.GROUP_PROJECT_MEMORY_IMPORT_VERSION = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_INCLUDE_DEPTH = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_ENTRIES = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_VERSION = exports.GROUP_TYPED_MEMORY_RECALL_LEDGER = exports.GROUP_TYPED_MEMORY_MAX_RECALL = exports.GROUP_TYPED_MEMORY_MAX_INDEX_BYTES = exports.GROUP_TYPED_MEMORY_MAX_INDEX_LINES = exports.GROUP_TYPED_MEMORY_ENTRYPOINT = exports.GROUP_TYPED_MEMORY_VERSION = void 0;
+exports.GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_LEDGER = exports.GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_LEDGER = exports.GROUP_CONTEXT_USAGE_REPAIR_DISTILLATION_VERSION = exports.GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION = exports.GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = exports.GROUP_TYPED_MEMORY_DISTILLATION_QUALITY_VERSION = exports.GROUP_TYPED_MEMORY_DISTILLATION_FACT_LIMIT = exports.GROUP_TYPED_MEMORY_DISTILLATION_MAX_MESSAGES = exports.GROUP_TYPED_MEMORY_DISTILLATION_LEDGER = exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION = exports.GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_VERSION = exports.GROUP_CLAUDE_MEMORY_SETTING_SOURCE_POLICY_VERSION = exports.GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_VERSION = exports.GROUP_CLAUDE_MEMORY_INCLUDE_AUDIT_VERSION = exports.GROUP_GLOBAL_CLAUDE_MEMORY_IMPORT_VERSION = exports.GROUP_PROJECT_MEMORY_IMPORT_VERSION = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_INCLUDE_DEPTH = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_ENTRIES = exports.GROUP_TYPED_MEMORY_LOAD_PLAN_VERSION = exports.GROUP_TYPED_MEMORY_RECALL_LEDGER = exports.GROUP_TYPED_MEMORY_MAX_RECALL = exports.GROUP_TYPED_MEMORY_MAX_INDEX_BYTES = exports.GROUP_TYPED_MEMORY_MAX_INDEX_LINES = exports.GROUP_TYPED_MEMORY_ENTRYPOINT = exports.GROUP_TYPED_MEMORY_VERSION = void 0;
 exports.buildClaudeMemorySettingSourcePolicy = buildClaudeMemorySettingSourcePolicy;
 exports.deriveGroupTypedMemoryTargetPaths = deriveGroupTypedMemoryTargetPaths;
 exports.getGroupTypedMemoryDir = getGroupTypedMemoryDir;
@@ -59,6 +59,9 @@ exports.buildGroupTypedMemoryIndex = buildGroupTypedMemoryIndex;
 exports.buildGroupTypedMemoryLoadPlan = buildGroupTypedMemoryLoadPlan;
 exports.renderGroupTypedMemoryLoadPlan = renderGroupTypedMemoryLoadPlan;
 exports.readGroupTypedMemoryDistillationLedger = readGroupTypedMemoryDistillationLedger;
+exports.distillProviderReproofReceiptConsumptionToTypedMemory = distillProviderReproofReceiptConsumptionToTypedMemory;
+exports.distillIgnoreMemoryReceiptRepairToTypedMemory = distillIgnoreMemoryReceiptRepairToTypedMemory;
+exports.distillContextUsageRepairToTypedMemory = distillContextUsageRepairToTypedMemory;
 exports.evaluateGroupTypedMemoryDistillationQuality = evaluateGroupTypedMemoryDistillationQuality;
 exports.distillGroupMessagesToTypedMemory = distillGroupMessagesToTypedMemory;
 exports.syncGroupTypedMemoryFromGroupMemory = syncGroupTypedMemoryFromGroupMemory;
@@ -79,6 +82,7 @@ exports.runGroupClaudeMemorySettingSourcePolicySelfTest = runGroupClaudeMemorySe
 exports.runGroupInstructionsLoadedHookPipelineSelfTest = runGroupInstructionsLoadedHookPipelineSelfTest;
 exports.runGroupTypedMemoryLogDistillationSelfTest = runGroupTypedMemoryLogDistillationSelfTest;
 exports.runGroupTypedMemoryPostCompactUsageDistillationSelfTest = runGroupTypedMemoryPostCompactUsageDistillationSelfTest;
+exports.runGroupTypedMemoryProviderReproofReceiptConsumptionDistillationSelfTest = runGroupTypedMemoryProviderReproofReceiptConsumptionDistillationSelfTest;
 exports.runGroupTypedMemoryDistillationQualitySelfTest = runGroupTypedMemoryDistillationQualitySelfTest;
 const crypto = __importStar(require("crypto"));
 const fs = __importStar(require("fs"));
@@ -105,6 +109,9 @@ exports.GROUP_TYPED_MEMORY_DISTILLATION_LEDGER = ".distillation-ledger.json";
 exports.GROUP_TYPED_MEMORY_DISTILLATION_MAX_MESSAGES = 1200;
 exports.GROUP_TYPED_MEMORY_DISTILLATION_FACT_LIMIT = 100;
 exports.GROUP_TYPED_MEMORY_DISTILLATION_QUALITY_VERSION = 1;
+exports.GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = 1;
+exports.GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION = 1;
+exports.GROUP_CONTEXT_USAGE_REPAIR_DISTILLATION_VERSION = 1;
 exports.GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_LEDGER = ".claude-external-include-approvals.json";
 exports.GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_LEDGER = ".instructions-loaded-hooks.json";
 const GROUP_TYPED_MEMORY_DIR = path.join(utils_1.CCM_DIR, "group-memory-md");
@@ -1860,6 +1867,732 @@ function buildPostCompactCandidateUsageArchive(input = {}, options = {}) {
         body: lines.join("\n").trim() + "\n",
     };
 }
+function normalizeProviderReproofReceiptConsumptionStatus(value) {
+    const status = String(value || "").trim().toLowerCase();
+    if (["strong", "native_strong", "provider_strong"].includes(status))
+        return "strong";
+    if (["used", "consumed", "applied"].includes(status))
+        return "used";
+    if (["verified", "checked", "rechecked"].includes(status))
+        return "verified";
+    if (["ignored", "not_used", "not-used", "not used", "skipped"].includes(status))
+        return "ignored";
+    if (["blocked", "failed", "needs_info", "needs-user", "needs_user", "waiting"].includes(status))
+        return "blocked";
+    return status ? "invalid" : "missing";
+}
+function providerReproofReceiptConsumptionCategory(status) {
+    return status === "ignored" || status === "blocked" ? "caution" : "promoted";
+}
+function providerReproofReceiptConsumptionRecommendation(row = {}) {
+    const status = String(row.status || "");
+    if (status === "blocked")
+        return "requires_followup_before_reuse";
+    if (status === "ignored")
+        return "do_not_promote_unless_current_task_explicitly_matches";
+    if (status === "strong")
+        return "recall_but_verify_native_provider_proof_ledger";
+    if (status === "verified")
+        return "promote_recall_with_current_source_verification";
+    return "promote_recall_with_current_repo_verification";
+}
+function providerReproofReceiptConsumptionRowId(row = {}) {
+    return `provider-reproof-receipt:${checksum([
+        row.timeline_binding_id,
+        row.brief_id,
+        row.work_item_id,
+        row.task_id,
+        row.project,
+        row.request_patch_checksum,
+        row.status,
+    ], 24)}`;
+}
+function providerReproofReceiptConsumptionInputRows(input = {}) {
+    if (Array.isArray(input))
+        return input;
+    const rows = [
+        ...(Array.isArray(input.rows) ? input.rows : []),
+        ...(Array.isArray(input.entries) ? input.entries : []),
+        ...(Array.isArray(input.bindings) ? input.bindings : []),
+    ];
+    if (rows.length)
+        return rows;
+    const reportGroups = Array.isArray(input.report?.groups) ? input.report.groups : Array.isArray(input.groups) ? input.groups : [];
+    return reportGroups.flatMap((group) => Array.isArray(group.bindings) ? group.bindings : []);
+}
+function normalizeProviderReproofReceiptConsumptionRows(input = {}, options = {}) {
+    const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    return providerReproofReceiptConsumptionInputRows(input).map((raw, index) => {
+        const entry = raw?.entry || raw?.binding || raw || {};
+        const dispatchSource = String(entry.source || entry.dispatch_source || raw?.source || "").trim();
+        const status = normalizeProviderReproofReceiptConsumptionStatus(entry.replay_repair_consumption_status
+            || entry.replayRepairConsumptionStatus
+            || entry.usage_state
+            || entry.usageState
+            || raw?.status);
+        const row = {
+            schema: "ccm-provider-reproof-receipt-consumption-distilled-row-v1",
+            version: exports.GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
+            groupId: String(entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+            timeline_binding_id: String(entry.timeline_binding_id || entry.timelineBindingId || raw?.timeline_binding_id || raw?.timelineBindingId || "").trim(),
+            brief_id: String(entry.brief_id || entry.briefId || raw?.brief_id || raw?.briefId || "").trim(),
+            work_item_id: String(entry.work_item_id || entry.workItemId || raw?.work_item_id || raw?.workItemId || "").trim(),
+            task_id: String(entry.task_id || entry.taskId || raw?.task_id || raw?.taskId || "").trim(),
+            project: String(entry.project || entry.target_project || entry.targetProject || raw?.project || "").trim(),
+            dispatch_source: dispatchSource,
+            status,
+            category: providerReproofReceiptConsumptionCategory(status),
+            recommendation: "",
+            consumption_source: String(entry.replay_repair_consumption_source || entry.replayRepairConsumptionSource || raw?.replay_repair_consumption_source || raw?.consumption_source || "").trim(),
+            consumption_state: String(entry.replay_repair_consumption_state || entry.replayRepairConsumptionState || raw?.replay_repair_consumption_state || raw?.usage_state || raw?.usageState || "").trim(),
+            reason: compactText(entry.replay_repair_consumption_reason || entry.replayRepairConsumptionReason || raw?.replay_repair_consumption_reason || raw?.reason || raw?.summary || "", 700),
+            receipt_status: String(entry.receipt_status || entry.receiptStatus || raw?.receipt_status || "").trim(),
+            provider_reproof_status: String(entry.provider_reproof_status || entry.providerReproofStatus || raw?.provider_reproof_status || "").trim(),
+            provider_reproof_reason: compactText(entry.provider_reproof_reason || entry.providerReproofReason || raw?.provider_reproof_reason || "", 500),
+            reproof_candidate_id: String(entry.reproof_candidate_id || entry.reproofCandidateId || raw?.reproof_candidate_id || "").trim(),
+            original_work_item_id: String(entry.original_work_item_id || entry.originalWorkItemId || raw?.original_work_item_id || "").trim(),
+            original_timeline_binding_id: String(entry.original_timeline_binding_id || entry.originalTimelineBindingId || raw?.original_timeline_binding_id || "").trim(),
+            request_patch_checksum: String(entry.request_patch_checksum || entry.requestPatchChecksum || raw?.request_patch_checksum || "").trim(),
+            runner_request_id: String(entry.runner_request_id || entry.runnerRequestId || raw?.runner_request_id || "").trim(),
+            task_agent_session_id: String(entry.task_agent_session_id || entry.taskAgentSessionId || raw?.task_agent_session_id || "").trim(),
+            memory_context_snapshot_id: String(entry.memory_context_snapshot_id || entry.memoryContextSnapshotId || raw?.memory_context_snapshot_id || "").trim(),
+            execution_id: String(entry.execution_id || entry.executionId || raw?.execution_id || "").trim(),
+            first_seen_at: String(entry.first_seen_at || entry.firstSeenAt || entry.at || raw?.first_seen_at || raw?.at || options.updatedAt || now()),
+            last_seen_at: String(entry.updated_at || entry.updatedAt || entry.at || raw?.updated_at || raw?.at || options.updatedAt || now()),
+            source_index: Number(raw?.source_index || raw?.sourceIndex || index),
+        };
+        row.recommendation = providerReproofReceiptConsumptionRecommendation(row);
+        return { ...row, row_id: providerReproofReceiptConsumptionRowId(row), strong_receipt_claim_only: status === "strong" };
+    }).filter((row) => row.dispatch_source === "api_microcompact_native_apply_provider_reproof")
+        .filter((row) => ["strong", "used", "verified", "ignored", "blocked"].includes(row.status));
+}
+function mergeProviderReproofReceiptConsumptionRows(existing = [], incoming = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const merged = new Map();
+    for (const row of existing || []) {
+        const normalized = { ...row };
+        const id = String(normalized.row_id || providerReproofReceiptConsumptionRowId(normalized));
+        merged.set(id, { ...normalized, row_id: id });
+    }
+    const previousIds = new Set(merged.keys());
+    for (const row of incoming || []) {
+        const id = String(row.row_id || providerReproofReceiptConsumptionRowId(row));
+        const previous = merged.get(id);
+        merged.set(id, {
+            ...(previous || {}),
+            ...row,
+            row_id: id,
+            first_seen_at: previous?.first_seen_at || row.first_seen_at || updatedAt,
+            last_seen_at: updatedAt,
+            seen_count: Number(previous?.seen_count || 0) + 1,
+        });
+    }
+    const limit = Math.max(1, Math.min(300, Number(options.limit || options.maxRows || options.max_rows || 120)));
+    const rows = [...merged.values()]
+        .sort((a, b) => String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || "")) || Number(a.source_index || 0) - Number(b.source_index || 0))
+        .slice(-limit);
+    const currentIds = new Set(rows.map((row) => row.row_id));
+    return {
+        rows,
+        newRowCount: rows.filter((row) => !previousIds.has(row.row_id)).length,
+        updatedRowCount: rows.filter((row) => previousIds.has(row.row_id) && incoming.some((item) => String(item.row_id || "") === row.row_id)).length,
+        prunedRowCount: Math.max(0, merged.size - currentIds.size),
+    };
+}
+function renderProviderReproofReceiptConsumptionBody(title, rows = [], options = {}) {
+    const lines = [
+        `# ${title}`,
+        "",
+        `Generated by CCM provider re-proof receipt consumption distillation at ${options.updatedAt || now()}.`,
+        "Each row came from a child Agent receipt after a provider re-proof dispatch brief was injected into its WorkerContextPacket.",
+        "A receipt strong claim is not native provider strong proof; future agents must still verify the native proof/request telemetry ledger before closing provider re-proof.",
+        "",
+        "## Receipt Consumption Rows",
+    ];
+    for (const row of rows) {
+        const ids = [
+            row.project ? `project=${row.project}` : "",
+            row.task_id ? `task=${row.task_id}` : "",
+            row.brief_id ? `brief=${row.brief_id}` : "",
+            row.work_item_id ? `work_item=${row.work_item_id}` : "",
+            row.request_patch_checksum ? `request=${row.request_patch_checksum}` : "",
+            row.runner_request_id ? `runner=${row.runner_request_id}` : "",
+        ].filter(Boolean).join("; ");
+        lines.push(`- [${row.status}] ${ids || row.row_id}; recommendation=${row.recommendation}; provider_reproof_status=${row.provider_reproof_status || "unknown"}.`);
+        if (row.reason)
+            lines.push(`  Reason: ${compactText(row.reason, 700).replace(/\n/g, " ")}`);
+        if (row.provider_reproof_reason)
+            lines.push(`  Provider re-proof reason: ${compactText(row.provider_reproof_reason, 400).replace(/\n/g, " ")}`);
+        if (row.strong_receipt_claim_only)
+            lines.push("  Note: receipt strong is a consumption claim only; require native provider proof ledger before closure.");
+    }
+    return lines.join("\n").trim() + "\n";
+}
+function providerReproofReceiptConsumptionArchive(rows = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const promoted = rows.filter((row) => row.category === "promoted");
+    const caution = rows.filter((row) => row.category === "caution");
+    return {
+        schema: "ccm-provider-reproof-receipt-consumption-distillation-v1",
+        version: exports.GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
+        archived_count: rows.length,
+        promoted_count: promoted.length,
+        caution_count: caution.length,
+        strong_receipt_claim_count: rows.filter((row) => row.status === "strong").length,
+        used_count: rows.filter((row) => row.status === "used").length,
+        verified_count: rows.filter((row) => row.status === "verified").length,
+        ignored_count: rows.filter((row) => row.status === "ignored").length,
+        blocked_count: rows.filter((row) => row.status === "blocked").length,
+        rows,
+        updatedAt,
+    };
+}
+function distillProviderReproofReceiptConsumptionToTypedMemory(groupId, input = {}, options = {}) {
+    if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+        return {
+            schema: "ccm-provider-reproof-receipt-consumption-distillation-v1",
+            version: exports.GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
+            groupId,
+            skipped: true,
+            reason: "disabled",
+        };
+    }
+    const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const incomingRows = normalizeProviderReproofReceiptConsumptionRows(input, { ...options, groupId, updatedAt });
+    const previousArchive = ledger.providerReproofReceiptConsumptionArchive || {};
+    const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
+    const merged = mergeProviderReproofReceiptConsumptionRows(previousRows, incomingRows, { ...options, updatedAt });
+    const archive = providerReproofReceiptConsumptionArchive(merged.rows, { updatedAt });
+    const writes = [];
+    const promotedRows = archive.rows.filter((row) => row.category === "promoted");
+    const cautionRows = archive.rows.filter((row) => row.category === "caution");
+    if (promotedRows.length) {
+        writes.push(upsertGroupTypedMemoryDocument(groupId, {
+            type: "reference",
+            slug: "provider-reproof-receipt-consumption-recall",
+            name: "Provider re-proof receipt consumption recall",
+            description: "Provider re-proof dispatch briefs that child Agents actually used, verified, or claimed strong after WorkerContextPacket injection.",
+            source: "auto:provider-reproof-receipt-consumption-distillation",
+            updatedAt,
+            body: renderProviderReproofReceiptConsumptionBody("Provider Re-proof Receipt Consumption Recall", promotedRows, { updatedAt }),
+            maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
+        }));
+    }
+    if (cautionRows.length) {
+        writes.push(upsertGroupTypedMemoryDocument(groupId, {
+            type: "feedback",
+            slug: "provider-reproof-receipt-consumption-cautions",
+            name: "Provider re-proof receipt consumption cautions",
+            description: "Provider re-proof dispatch briefs that child Agents ignored or blocked; keep them as cautionary memory, not promoted context.",
+            source: "auto:provider-reproof-receipt-consumption-distillation",
+            updatedAt,
+            body: renderProviderReproofReceiptConsumptionBody("Provider Re-proof Receipt Consumption Cautions", cautionRows, { updatedAt }),
+            maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
+        }));
+    }
+    const ledgerState = { ...ledger };
+    delete ledgerState.file;
+    writeJsonAtomic(ledger.file, {
+        ...ledgerState,
+        schema: "ccm-group-typed-memory-distillation-ledger-v1",
+        version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+        groupId,
+        facts: ledger.facts || {},
+        providerReproofReceiptConsumptionArchive: archive,
+        updatedAt,
+    });
+    const index = buildGroupTypedMemoryIndex(groupId);
+    return {
+        schema: "ccm-provider-reproof-receipt-consumption-distillation-v1",
+        version: exports.GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION,
+        groupId,
+        skipped: false,
+        reason: compactText(options.reason || "", 220),
+        ledgerFile: ledger.file,
+        incomingRowCount: incomingRows.length,
+        archivedCount: archive.archived_count,
+        promotedCount: archive.promoted_count,
+        cautionCount: archive.caution_count,
+        strongReceiptClaimCount: archive.strong_receipt_claim_count,
+        newRowCount: merged.newRowCount,
+        updatedRowCount: merged.updatedRowCount,
+        prunedRowCount: merged.prunedRowCount,
+        writeCount: writes.length,
+        writes,
+        index,
+        archive,
+        distilledAt: updatedAt,
+    };
+}
+function ignoreMemoryReceiptRepairInputRows(input = {}) {
+    if (Array.isArray(input))
+        return input;
+    const rows = [
+        ...(Array.isArray(input.rows) ? input.rows : []),
+        ...(Array.isArray(input.items) ? input.items : []),
+        ...(Array.isArray(input.candidates) ? input.candidates : []),
+        ...(Array.isArray(input.briefs) ? input.briefs : []),
+    ];
+    if (rows.length)
+        return rows;
+    const groups = Array.isArray(input.report?.groups) ? input.report.groups : Array.isArray(input.groups) ? input.groups : [];
+    return groups.flatMap((group) => [
+        ...(Array.isArray(group.items) ? group.items : []),
+        ...(Array.isArray(group.candidates) ? group.candidates : []),
+        ...(Array.isArray(group.briefs) ? group.briefs : []),
+        ...(Array.isArray(group.gaps) ? group.gaps : []),
+    ].map((row) => ({ ...row, groupId: row.groupId || group.groupId || group.group_id || "" })));
+}
+function ignoreMemoryReceiptRepairRowId(row = {}) {
+    return `ignore-memory-receipt-repair:${checksum([
+        row.groupId,
+        row.work_item_id,
+        row.worker_context_packet_id,
+        row.binding_id,
+        row.assignment_id,
+        row.project,
+        row.status,
+        row.gap_signature,
+    ], 24)}`;
+}
+function normalizeIgnoreMemoryReceiptRepairRows(input = {}, options = {}) {
+    const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    return ignoreMemoryReceiptRepairInputRows(input).map((raw, index) => {
+        const entry = raw?.entry || raw?.item || raw?.candidate || raw?.brief || raw || {};
+        const source = String(entry.source || raw?.source || "").trim();
+        const gaps = uniqueStrings([
+            ...(Array.isArray(entry.gaps) ? entry.gaps : []),
+            ...(Array.isArray(raw?.gaps) ? raw.gaps : []),
+        ].map((gap) => typeof gap === "string" ? gap : gap?.reason || gap?.type || JSON.stringify(gap)), 16);
+        const reason = compactText(entry.reason
+            || entry.source_reason
+            || entry.description
+            || entry.instruction
+            || raw?.reason
+            || gaps.join("; ")
+            || "ignore-memory receipt repair required", 900);
+        const row = {
+            schema: "ccm-ignore-memory-receipt-repair-distilled-row-v1",
+            version: exports.GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION,
+            groupId: String(entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+            work_item_id: String(entry.work_item_id || entry.workItemId || entry.id || raw?.work_item_id || raw?.id || "").trim(),
+            brief_id: String(entry.brief_id || entry.briefId || raw?.brief_id || raw?.briefId || "").trim(),
+            candidate_id: String(entry.candidate_id || entry.candidateId || raw?.candidate_id || raw?.candidateId || "").trim(),
+            worker_context_packet_id: String(entry.worker_context_packet_id || entry.workerContextPacketId || entry.packet_id || raw?.worker_context_packet_id || "").trim(),
+            binding_id: String(entry.worker_context_packet_binding_id || entry.binding_id || entry.bindingId || raw?.binding_id || "").trim(),
+            assignment_id: String(entry.assignment_id || entry.assignmentId || raw?.assignment_id || "").trim(),
+            dispatch_key: String(entry.dispatch_key || entry.dispatchKey || raw?.dispatch_key || "").trim(),
+            project: String(entry.project || entry.target_project || entry.targetProject || raw?.project || "").trim(),
+            source,
+            status: String(entry.status || raw?.status || "pending").trim().toLowerCase(),
+            priority: String(entry.priority || raw?.priority || "").trim(),
+            component: String(entry.component || raw?.component || "worker_context_ignore_memory_receipt_contract").trim(),
+            memory_policy_reason: String(entry.worker_context_packet_memory_policy_reason || entry.memory_policy_reason || entry.expectedReason || raw?.memory_policy_reason || "user_requested_ignore_memory").trim(),
+            gap_signature: gaps.join("|"),
+            reason,
+            expected: compactText(entry.expected || raw?.expected || "CCM_AGENT_RECEIPT.memoryIgnored includes user_requested_ignore_memory; memoryUsed empty for platform memory", 700),
+            prompt_patch: compactText(entry.prompt_patch || entry.promptPatch || raw?.prompt_patch || "", 1200),
+            first_seen_at: String(entry.first_seen_at || entry.createdAt || entry.created_at || entry.at || raw?.first_seen_at || raw?.at || options.updatedAt || now()),
+            last_seen_at: String(entry.updated_at || entry.updatedAt || entry.lastSeenAt || entry.at || raw?.updated_at || raw?.at || options.updatedAt || now()),
+            source_index: Number(raw?.source_index || raw?.sourceIndex || index),
+        };
+        return { ...row, row_id: ignoreMemoryReceiptRepairRowId(row) };
+    })
+        .filter((row) => row.groupId || fallbackGroupId)
+        .filter((row) => row.source === "worker_context_ignore_memory_receipt_repair" || row.component === "worker_context_ignore_memory_receipt_contract" || /ignore-memory|memoryIgnored|user_requested_ignore_memory/i.test(`${row.reason}\n${row.expected}\n${row.prompt_patch}`));
+}
+function mergeIgnoreMemoryReceiptRepairRows(existing = [], incoming = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const merged = new Map();
+    for (const row of existing || []) {
+        const id = String(row.row_id || ignoreMemoryReceiptRepairRowId(row));
+        merged.set(id, { ...row, row_id: id });
+    }
+    const previousIds = new Set(merged.keys());
+    for (const row of incoming || []) {
+        const id = String(row.row_id || ignoreMemoryReceiptRepairRowId(row));
+        const previous = merged.get(id);
+        merged.set(id, {
+            ...(previous || {}),
+            ...row,
+            row_id: id,
+            first_seen_at: previous?.first_seen_at || row.first_seen_at || updatedAt,
+            last_seen_at: updatedAt,
+            seen_count: Number(previous?.seen_count || 0) + 1,
+        });
+    }
+    const limit = Math.max(1, Math.min(240, Number(options.limit || options.maxRows || options.max_rows || 80)));
+    const rows = [...merged.values()]
+        .sort((a, b) => String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || "")) || Number(a.source_index || 0) - Number(b.source_index || 0))
+        .slice(-limit);
+    return {
+        rows,
+        newRowCount: rows.filter((row) => !previousIds.has(row.row_id)).length,
+        updatedRowCount: rows.filter((row) => previousIds.has(row.row_id) && incoming.some((item) => String(item.row_id || "") === row.row_id)).length,
+        prunedRowCount: Math.max(0, merged.size - rows.length),
+    };
+}
+function ignoreMemoryReceiptRepairArchive(rows = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    return {
+        schema: "ccm-ignore-memory-receipt-repair-distillation-v1",
+        version: exports.GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION,
+        archived_count: rows.length,
+        open_count: rows.filter((row) => ["pending", "in_progress", "blocked", "warn", "fail"].includes(String(row.status || ""))).length,
+        completed_count: rows.filter((row) => ["completed", "done", "ok"].includes(String(row.status || ""))).length,
+        packet_bound_count: rows.filter((row) => row.worker_context_packet_id).length,
+        corrected_prompt_count: rows.filter((row) => /memoryIgnored/i.test(`${row.expected}\n${row.prompt_patch}`)).length,
+        rows,
+        updatedAt,
+    };
+}
+function renderIgnoreMemoryReceiptRepairBody(rows = [], options = {}) {
+    const lines = [
+        "# Ignore-Memory Receipt Discipline",
+        "",
+        `Generated by CCM ignore-memory receipt repair distillation at ${options.updatedAt || now()}.`,
+        "This feedback memory records repeated child-Agent receipt failures when the WorkerContextPacket says platform/group/typed/global memory must be ignored.",
+        "When a current task says to ignore memory, treat platform memory as empty and require the final CCM_AGENT_RECEIPT.memoryIgnored to mention user_requested_ignore_memory / must_not_use_group_memory. Do not put historical group, typed MEMORY.md, or global memory in memoryUsed.",
+        "",
+        "## Receipt Discipline Rows",
+    ];
+    for (const row of rows) {
+        const ids = [
+            row.project ? `project=${row.project}` : "",
+            row.worker_context_packet_id ? `packet=${row.worker_context_packet_id}` : "",
+            row.binding_id ? `binding=${row.binding_id}` : "",
+            row.work_item_id ? `work_item=${row.work_item_id}` : "",
+            row.brief_id ? `brief=${row.brief_id}` : "",
+        ].filter(Boolean).join("; ");
+        lines.push(`- [${row.status || "pending"}] ${ids || row.row_id}; reason=${row.memory_policy_reason || "user_requested_ignore_memory"}.`);
+        lines.push(`  Rule: corrected receipts must put user_requested_ignore_memory / must_not_use_group_memory in memoryIgnored and must not claim historical platform memory in memoryUsed.`);
+        if (row.reason)
+            lines.push(`  Evidence: ${compactText(row.reason, 650).replace(/\n/g, " ")}`);
+    }
+    return lines.join("\n").trim() + "\n";
+}
+function distillIgnoreMemoryReceiptRepairToTypedMemory(groupId, input = {}, options = {}) {
+    if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+        return {
+            schema: "ccm-ignore-memory-receipt-repair-distillation-v1",
+            version: exports.GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION,
+            groupId,
+            skipped: true,
+            reason: "disabled",
+        };
+    }
+    const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const incomingRows = normalizeIgnoreMemoryReceiptRepairRows(input, { ...options, groupId, updatedAt });
+    const previousArchive = ledger.ignoreMemoryReceiptRepairArchive || {};
+    const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
+    const merged = mergeIgnoreMemoryReceiptRepairRows(previousRows, incomingRows, { ...options, updatedAt });
+    const archive = ignoreMemoryReceiptRepairArchive(merged.rows, { updatedAt });
+    const writes = [];
+    if (archive.rows.length) {
+        writes.push(upsertGroupTypedMemoryDocument(groupId, {
+            type: "feedback",
+            slug: "ignore-memory-receipt-discipline",
+            name: "Ignore-memory receipt discipline",
+            description: "Child Agent receipt discipline for WorkerContextPacket ignore-memory policy.",
+            source: "auto:ignore-memory-receipt-repair-distillation",
+            updatedAt,
+            body: renderIgnoreMemoryReceiptRepairBody(archive.rows, { updatedAt }),
+            maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 16_000),
+        }));
+    }
+    const ledgerState = { ...ledger };
+    delete ledgerState.file;
+    writeJsonAtomic(ledger.file, {
+        ...ledgerState,
+        schema: "ccm-group-typed-memory-distillation-ledger-v1",
+        version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+        groupId,
+        facts: ledger.facts || {},
+        ignoreMemoryReceiptRepairArchive: archive,
+        updatedAt,
+    });
+    const index = buildGroupTypedMemoryIndex(groupId);
+    return {
+        schema: "ccm-ignore-memory-receipt-repair-distillation-v1",
+        version: exports.GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION,
+        groupId,
+        skipped: false,
+        reason: compactText(options.reason || "", 220),
+        ledgerFile: ledger.file,
+        incomingRowCount: incomingRows.length,
+        archivedCount: archive.archived_count,
+        openCount: archive.open_count,
+        completedCount: archive.completed_count,
+        packetBoundCount: archive.packet_bound_count,
+        correctedPromptCount: archive.corrected_prompt_count,
+        newRowCount: merged.newRowCount,
+        updatedRowCount: merged.updatedRowCount,
+        prunedRowCount: merged.prunedRowCount,
+        writeCount: writes.length,
+        writes,
+        index,
+        archive,
+        distilledAt: updatedAt,
+    };
+}
+function contextUsageRepairInputRows(input = {}) {
+    if (Array.isArray(input))
+        return input;
+    const rows = [
+        ...(Array.isArray(input.rows) ? input.rows : []),
+        ...(Array.isArray(input.items) ? input.items : []),
+        ...(Array.isArray(input.packets) ? input.packets : []),
+        ...(Array.isArray(input.gaps) ? input.gaps : []),
+    ];
+    if (rows.length)
+        return rows;
+    const groups = Array.isArray(input.report?.groups) ? input.report.groups : Array.isArray(input.groups) ? input.groups : [];
+    return groups.flatMap((group) => [
+        ...(Array.isArray(group.items) ? group.items : []),
+        ...(Array.isArray(group.packets) ? group.packets : []),
+        ...(Array.isArray(group.gaps) ? group.gaps : []),
+    ].map((row) => ({ ...row, groupId: row.groupId || group.groupId || group.group_id || "" })));
+}
+function contextUsageRepairRowId(row = {}) {
+    return `context-usage-repair:${checksum([
+        row.groupId,
+        row.worker_context_packet_id,
+        row.binding_id,
+        row.work_item_id,
+        row.project,
+        row.usage_status,
+        row.pressure,
+    ], 24)}`;
+}
+function normalizeContextUsageRepairStatus(value) {
+    const status = String(value || "").trim().toLowerCase();
+    if (["over_budget", "critical", "compact_recommended", "warn", "ok", "completed", "cancelled", "pending", "in_progress", "blocked"].includes(status))
+        return status;
+    return status ? "unknown" : "compact_recommended";
+}
+function normalizeContextUsageRepairRows(input = {}, options = {}) {
+    const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+    return contextUsageRepairInputRows(input).map((raw, index) => {
+        const entry = raw?.entry || raw?.item || raw?.packet || raw || {};
+        const usageStatus = normalizeContextUsageRepairStatus(entry.worker_context_packet_usage_status
+            || entry.usage_status
+            || entry.status
+            || entry.workerContextPacketUsageStatus
+            || raw?.usage_status
+            || raw?.status);
+        const topCategories = Array.isArray(entry.worker_context_packet_top_categories)
+            ? entry.worker_context_packet_top_categories
+            : Array.isArray(entry.top_categories)
+                ? entry.top_categories
+                : [];
+        const reductions = Array.isArray(entry.worker_context_packet_suggested_reductions)
+            ? entry.worker_context_packet_suggested_reductions
+            : Array.isArray(entry.suggested_reductions)
+                ? entry.suggested_reductions
+                : [];
+        const row = {
+            schema: "ccm-context-usage-repair-distilled-row-v1",
+            version: exports.GROUP_CONTEXT_USAGE_REPAIR_DISTILLATION_VERSION,
+            groupId: String(entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+            work_item_id: String(entry.work_item_id || entry.workItemId || entry.id || raw?.work_item_id || raw?.id || "").trim(),
+            worker_context_packet_id: String(entry.worker_context_packet_id || entry.workerContextPacketId || entry.packet_id || raw?.packet_id || raw?.worker_context_packet_id || "").trim(),
+            binding_id: String(entry.worker_context_packet_binding_id || entry.binding_id || entry.bindingId || raw?.binding_id || "").trim(),
+            assignment_id: String(entry.assignment_id || entry.assignmentId || raw?.assignment_id || "").trim(),
+            project: String(entry.project || entry.target_project || entry.targetProject || raw?.project || "").trim(),
+            source: String(entry.source || raw?.source || "worker_context_packet_context_usage_repair").trim(),
+            status: String(entry.status || raw?.status || "pending").trim().toLowerCase(),
+            usage_status: usageStatus,
+            pressure: Number(entry.worker_context_packet_pressure ?? entry.pressure ?? raw?.pressure ?? 0),
+            total_tokens: Number(entry.worker_context_packet_total_tokens ?? entry.total_tokens ?? raw?.total_tokens ?? 0),
+            max_tokens: Number(entry.worker_context_packet_max_tokens ?? entry.max_tokens ?? raw?.max_tokens ?? 0),
+            free_tokens: Number(entry.worker_context_packet_free_tokens ?? entry.free_tokens ?? raw?.free_tokens ?? 0),
+            autocompact_buffer_tokens: Number(entry.worker_context_packet_autocompact_buffer_tokens ?? entry.autocompact_buffer_tokens ?? raw?.autocompact_buffer_tokens ?? 0),
+            top_categories: topCategories.slice(0, 8).map((item) => ({
+                id: String(item.id || item.category_id || item.categoryId || item.name || "").trim(),
+                name: String(item.name || item.label || item.id || item.category_id || "").trim(),
+                tokens: Number(item.tokens || 0),
+            })),
+            suggested_reductions: reductions.slice(0, 8).map((item) => ({
+                category_id: String(item.category_id || item.categoryId || item.id || item.name || "").trim(),
+                name: String(item.name || item.label || item.category_id || item.id || "").trim(),
+                tokens: Number(item.tokens || 0),
+                suggestion: compactText(item.suggestion || item.instruction || item.reason || "", 360),
+            })),
+            instruction: compactText(entry.instruction || raw?.instruction || "", 1200),
+            expected: compactText(entry.expected || raw?.expected || "context_usage.status<=warn; free_tokens>=autocompact_buffer_tokens; rendered Context usage budget present", 700),
+            reason: compactText(entry.source_reason || entry.description || raw?.reason || raw?.source_reason || "", 700),
+            first_seen_at: String(entry.first_seen_at || entry.createdAt || entry.created_at || entry.at || raw?.first_seen_at || raw?.at || options.updatedAt || now()),
+            last_seen_at: String(entry.updated_at || entry.updatedAt || entry.lastSeenAt || entry.at || raw?.updated_at || raw?.at || options.updatedAt || now()),
+            source_index: Number(raw?.source_index || raw?.sourceIndex || index),
+        };
+        return { ...row, row_id: contextUsageRepairRowId(row) };
+    })
+        .filter((row) => row.groupId || fallbackGroupId)
+        .filter((row) => row.source === "worker_context_packet_context_usage_repair" || /context usage|Context usage budget|free_tokens|autocompact_buffer|typed MEMORY/i.test(`${row.reason}\n${row.instruction}\n${row.expected}`));
+}
+function mergeContextUsageRepairRows(existing = [], incoming = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const merged = new Map();
+    for (const row of existing || []) {
+        const id = String(row.row_id || contextUsageRepairRowId(row));
+        merged.set(id, { ...row, row_id: id });
+    }
+    const previousIds = new Set(merged.keys());
+    for (const row of incoming || []) {
+        const id = String(row.row_id || contextUsageRepairRowId(row));
+        const previous = merged.get(id);
+        merged.set(id, {
+            ...(previous || {}),
+            ...row,
+            row_id: id,
+            first_seen_at: previous?.first_seen_at || row.first_seen_at || updatedAt,
+            last_seen_at: updatedAt,
+            seen_count: Number(previous?.seen_count || 0) + 1,
+        });
+    }
+    const limit = Math.max(1, Math.min(260, Number(options.limit || options.maxRows || options.max_rows || 100)));
+    const rows = [...merged.values()]
+        .sort((a, b) => String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || "")) || Number(a.source_index || 0) - Number(b.source_index || 0))
+        .slice(-limit);
+    return {
+        rows,
+        newRowCount: rows.filter((row) => !previousIds.has(row.row_id)).length,
+        updatedRowCount: rows.filter((row) => previousIds.has(row.row_id) && incoming.some((item) => String(item.row_id || "") === row.row_id)).length,
+        prunedRowCount: Math.max(0, merged.size - rows.length),
+    };
+}
+function contextUsageRepairArchive(rows = [], options = {}) {
+    const updatedAt = String(options.updatedAt || now());
+    const overBudgetRows = rows.filter((row) => row.usage_status === "over_budget");
+    const criticalRows = rows.filter((row) => row.usage_status === "critical");
+    const compactRows = rows.filter((row) => row.usage_status === "compact_recommended");
+    return {
+        schema: "ccm-context-usage-repair-distillation-v1",
+        version: exports.GROUP_CONTEXT_USAGE_REPAIR_DISTILLATION_VERSION,
+        archived_count: rows.length,
+        over_budget_count: overBudgetRows.length,
+        critical_count: criticalRows.length,
+        compact_recommended_count: compactRows.length,
+        open_count: rows.filter((row) => ["pending", "in_progress", "blocked", "warn", "fail"].includes(String(row.status || ""))).length,
+        packet_bound_count: rows.filter((row) => row.worker_context_packet_id).length,
+        max_pressure: rows.reduce((max, row) => Math.max(max, Number(row.pressure || 0)), 0),
+        rows,
+        updatedAt,
+    };
+}
+function renderContextUsageRepairBody(rows = [], options = {}) {
+    const categoryCounts = new Map();
+    for (const row of rows) {
+        for (const category of row.top_categories || []) {
+            const id = String(category.id || category.category_id || category.name || "").trim();
+            if (!id)
+                continue;
+            categoryCounts.set(id, Number(categoryCounts.get(id) || 0) + 1);
+        }
+    }
+    const hotCategories = [...categoryCounts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 8)
+        .map(([id, count]) => `${id}:${count}`)
+        .join("; ");
+    const lines = [
+        "# WorkerContextPacket Context Usage Repair Discipline",
+        "",
+        `Generated by CCM context usage repair distillation at ${options.updatedAt || now()}.`,
+        "This feedback memory records repeated WorkerContextPacket context pressure repairs before third-party child Agent dispatch.",
+        "When context_usage.status is compact_recommended, critical, or over_budget, compact/crop the WorkerContextPacket before child-Agent dispatch.",
+        "Keep task_goal, verification_and_acceptance, required proof/receipt identifiers, and the rendered Context usage budget visible.",
+        "Target context_usage.status<=warn and free_tokens>=autocompact_buffer_tokens. Prefer replacing full group_memory_rendered with the newest compact summary, deduping typed_memory_recall, suppressing irrelevant global_memory, and trimming replay_repair_dispatch_briefs to IDs and required proof facts.",
+        hotCategories ? `Hot pressure categories: ${hotCategories}.` : "",
+        "",
+        "## Pressure Repair Rows",
+    ].filter(line => line !== "");
+    for (const row of rows) {
+        const ids = [
+            row.project ? `project=${row.project}` : "",
+            row.worker_context_packet_id ? `packet=${row.worker_context_packet_id}` : "",
+            row.binding_id ? `binding=${row.binding_id}` : "",
+            row.work_item_id ? `work_item=${row.work_item_id}` : "",
+        ].filter(Boolean).join("; ");
+        const categories = (row.top_categories || []).slice(0, 4).map((item) => `${item.id || item.name}:${item.tokens || 0}`).join("; ");
+        const reductions = (row.suggested_reductions || []).slice(0, 3).map((item) => `${item.category_id || item.name}: ${item.suggestion || ""}`).join(" ");
+        lines.push(`- [${row.usage_status || "pressure"}] ${ids || row.row_id}; pressure=${Number(row.pressure || 0)}%; tokens=${Number(row.total_tokens || 0)}/${Number(row.max_tokens || 0)}; free=${Number(row.free_tokens || 0)}; buffer=${Number(row.autocompact_buffer_tokens || 0)}.`);
+        if (categories)
+            lines.push(`  Top categories: ${categories}.`);
+        if (reductions)
+            lines.push(`  Suggested reductions: ${compactText(reductions, 700).replace(/\n/g, " ")}`);
+    }
+    return lines.join("\n").trim() + "\n";
+}
+function distillContextUsageRepairToTypedMemory(groupId, input = {}, options = {}) {
+    if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+        return {
+            schema: "ccm-context-usage-repair-distillation-v1",
+            version: exports.GROUP_CONTEXT_USAGE_REPAIR_DISTILLATION_VERSION,
+            groupId,
+            skipped: true,
+            reason: "disabled",
+        };
+    }
+    const updatedAt = String(options.updatedAt || options.updated_at || now());
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const incomingRows = normalizeContextUsageRepairRows(input, { ...options, groupId, updatedAt });
+    const previousArchive = ledger.contextUsageRepairArchive || {};
+    const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
+    const merged = mergeContextUsageRepairRows(previousRows, incomingRows, { ...options, updatedAt });
+    const archive = contextUsageRepairArchive(merged.rows, { updatedAt });
+    const writes = [];
+    if (archive.rows.length) {
+        writes.push(upsertGroupTypedMemoryDocument(groupId, {
+            type: "feedback",
+            slug: "worker-context-usage-pressure-discipline",
+            name: "WorkerContextPacket context usage pressure discipline",
+            description: "Reactive compact/crop discipline for WorkerContextPacket context pressure before child Agent dispatch.",
+            source: "auto:context-usage-repair-distillation",
+            updatedAt,
+            body: renderContextUsageRepairBody(archive.rows, { updatedAt }),
+            maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
+        }));
+    }
+    const ledgerState = { ...ledger };
+    delete ledgerState.file;
+    writeJsonAtomic(ledger.file, {
+        ...ledgerState,
+        schema: "ccm-group-typed-memory-distillation-ledger-v1",
+        version: exports.GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+        groupId,
+        facts: ledger.facts || {},
+        contextUsageRepairArchive: archive,
+        updatedAt,
+    });
+    const index = buildGroupTypedMemoryIndex(groupId);
+    return {
+        schema: "ccm-context-usage-repair-distillation-v1",
+        version: exports.GROUP_CONTEXT_USAGE_REPAIR_DISTILLATION_VERSION,
+        groupId,
+        skipped: false,
+        reason: compactText(options.reason || "", 220),
+        ledgerFile: ledger.file,
+        incomingRowCount: incomingRows.length,
+        archivedCount: archive.archived_count,
+        overBudgetCount: archive.over_budget_count,
+        criticalCount: archive.critical_count,
+        compactRecommendedCount: archive.compact_recommended_count,
+        openCount: archive.open_count,
+        packetBoundCount: archive.packet_bound_count,
+        maxPressure: archive.max_pressure,
+        newRowCount: merged.newRowCount,
+        updatedRowCount: merged.updatedRowCount,
+        prunedRowCount: merged.prunedRowCount,
+        writeCount: writes.length,
+        writes,
+        index,
+        archive,
+        distilledAt: updatedAt,
+    };
+}
 function extractPathClaims(value) {
     const text = String(value || "");
     const matched = text.match(/(?:[A-Za-z]:\\[^\s，。；]+|(?:[\w.-]+\/)+[\w.-]+\.[A-Za-z0-9]+|[\w.-]+\.(?:ts|tsx|js|jsx|vue|java|py|go|rs|md|json|toml|yaml|yml|xml|sql))/g) || [];
@@ -2073,6 +2806,7 @@ function distillGroupMessagesToTypedMemory(groupId, messages = [], memory = {}, 
             rows: postCompactUsageArchive.rows,
             updatedAt,
         },
+        providerReproofReceiptConsumptionArchive: ledger.providerReproofReceiptConsumptionArchive || undefined,
         updatedAt,
     });
     const writes = [];
@@ -2156,6 +2890,7 @@ function distillGroupMessagesToTypedMemory(groupId, messages = [], memory = {}, 
             rows: postCompactUsageArchive.rows,
             updatedAt,
         },
+        providerReproofReceiptConsumptionArchive: persistedLedger.providerReproofReceiptConsumptionArchive || ledger.providerReproofReceiptConsumptionArchive || undefined,
         quality,
         updatedAt,
     });
@@ -2261,6 +2996,8 @@ function syncGroupTypedMemoryFromGroupMemory(groupId, memory = {}) {
     return { schema: "ccm-group-typed-memory-sync-v1", version: exports.GROUP_TYPED_MEMORY_VERSION, groupId, writes, index };
 }
 function shouldIgnoreGroupMemoryRequest(query, options = {}) {
+    if (options.forceMemory === true || options.force_memory === true || options.disableIgnoreMemoryDetection === true || options.disable_ignore_memory_detection === true)
+        return false;
     if (options.ignoreMemory === true || options.ignore_memory === true)
         return true;
     return /(忽略|不要|不使用|别用|ignore|do not use|don't use)[^\n]{0,20}(记忆|memory)/i.test(query)
@@ -2359,6 +3096,11 @@ function buildGroupTypedMemoryRecall(groupId, query, options = {}) {
             score += 2;
         if (doc.type === "reference")
             score += 1;
+        const source = String(doc.source || "").toLowerCase();
+        if (source.includes("global-claude-memory:"))
+            score += 5;
+        if (source.includes("global-claude-memory:managed:"))
+            score += 2;
         if (pathCondition.conditional && pathCondition.matched)
             score += 8;
         for (const tool of recentTools) {
@@ -3221,6 +3963,122 @@ function runGroupTypedMemoryPostCompactUsageDistillationSelfTest() {
             checks,
             archive: distillation.postCompactUsageArchive,
             recalled: recall.recalled.map((item) => ({ relPath: item.relPath, score: item.score, postCompactUsage: item.postCompactUsage })),
+        };
+    }
+    finally {
+        try {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runGroupTypedMemoryProviderReproofReceiptConsumptionDistillationSelfTest() {
+    const groupId = `typed-memory-provider-reproof-receipt-consumption-selftest-${process.pid}-${Date.now().toString(36)}`;
+    const dir = getGroupTypedMemoryDir(groupId);
+    const rows = [
+        {
+            groupId,
+            timeline_binding_id: "timeline-provider-reproof-consumption-used",
+            brief_id: "brief-provider-reproof-consumption-used",
+            work_item_id: "work-provider-reproof-consumption-used",
+            source: "api_microcompact_native_apply_provider_reproof",
+            project: "api",
+            task_id: "task-provider-reproof-consumption-used",
+            receipt_status: "done",
+            replay_repair_consumption_status: "used",
+            replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
+            replay_repair_consumption_reason: "PROVIDER_REPROOF_CONSUMPTION_USED_SENTINEL 使用 WorkerContextPacket provider re-proof brief 定位 request-provider-reproof-consumption-used。",
+            provider_reproof_status: "needed",
+            provider_reproof_reason: "missing_native_request_adapter_telemetry",
+            request_patch_checksum: "request-provider-reproof-consumption-used",
+            runner_request_id: "runner-provider-reproof-consumption-used",
+            task_agent_session_id: "tas-provider-reproof-consumption-used",
+            memory_context_snapshot_id: "snapshot-provider-reproof-consumption-used",
+            execution_id: "execution-provider-reproof-consumption-used",
+        },
+        {
+            groupId,
+            timeline_binding_id: "timeline-provider-reproof-consumption-strong",
+            brief_id: "brief-provider-reproof-consumption-strong",
+            work_item_id: "work-provider-reproof-consumption-strong",
+            source: "api_microcompact_native_apply_provider_reproof",
+            project: "api",
+            task_id: "task-provider-reproof-consumption-strong",
+            receipt_status: "done",
+            replay_repair_consumption_status: "strong",
+            replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
+            replay_repair_consumption_reason: "PROVIDER_REPROOF_CONSUMPTION_STRONG_CLAIM_SENTINEL 子 Agent 声称 strong，但仍需 native provider proof ledger。",
+            provider_reproof_status: "needed",
+            provider_reproof_reason: "missing_native_request_adapter_telemetry",
+            request_patch_checksum: "request-provider-reproof-consumption-strong",
+            runner_request_id: "runner-provider-reproof-consumption-strong",
+        },
+        {
+            groupId,
+            timeline_binding_id: "timeline-provider-reproof-consumption-ignored",
+            brief_id: "brief-provider-reproof-consumption-ignored",
+            work_item_id: "work-provider-reproof-consumption-ignored",
+            source: "api_microcompact_native_apply_provider_reproof",
+            project: "api",
+            task_id: "task-provider-reproof-consumption-ignored",
+            receipt_status: "done",
+            replay_repair_consumption_status: "ignored",
+            replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
+            replay_repair_consumption_reason: "PROVIDER_REPROOF_CONSUMPTION_IGNORED_SENTINEL stale provider re-proof brief 被子 Agent 忽略。",
+            provider_reproof_status: "needed",
+            provider_reproof_reason: "superseded_candidate",
+            request_patch_checksum: "request-provider-reproof-consumption-ignored",
+            runner_request_id: "runner-provider-reproof-consumption-ignored",
+        },
+    ];
+    try {
+        const first = distillProviderReproofReceiptConsumptionToTypedMemory(groupId, { rows }, {
+            reason: "provider-reproof-receipt-consumption-selftest",
+            updatedAt: "2026-07-08T12:00:00.000Z",
+        });
+        const second = distillProviderReproofReceiptConsumptionToTypedMemory(groupId, { rows }, {
+            reason: "provider-reproof-receipt-consumption-selftest-repeat",
+            updatedAt: "2026-07-08T12:01:00.000Z",
+        });
+        const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+        const docs = scanGroupTypedMemoryDocuments(groupId);
+        const indexText = fs.readFileSync(getGroupTypedMemoryIndexFile(groupId), "utf-8");
+        const recall = buildGroupTypedMemoryRecall(groupId, "PROVIDER_REPROOF_CONSUMPTION_USED_SENTINEL request-provider-reproof-consumption-used", { disableLedger: true, forceMemory: true, max: 8 });
+        const cautionRecall = buildGroupTypedMemoryRecall(groupId, "PROVIDER_REPROOF_CONSUMPTION_IGNORED_SENTINEL request-provider-reproof-consumption-ignored", { disableLedger: true, forceMemory: true, max: 8 });
+        const recallText = JSON.stringify(recall.recalled || []);
+        const cautionText = JSON.stringify(cautionRecall.recalled || []);
+        const archiveRows = ledger.providerReproofReceiptConsumptionArchive?.rows || [];
+        const checks = {
+            archiveCountsRows: first.archivedCount === 3
+                && first.promotedCount === 2
+                && first.cautionCount === 1
+                && first.strongReceiptClaimCount === 1,
+            repeatDoesNotDuplicateRows: second.archivedCount === 3 && second.newRowCount === 0,
+            ledgerPersistsArchive: ledger.providerReproofReceiptConsumptionArchive?.archived_count === 3
+                && archiveRows.some((row) => row.strong_receipt_claim_only === true),
+            typedDocsWritten: docs.some(item => item.relPath === "provider-reproof-receipt-consumption-recall.md" && item.type === "reference")
+                && docs.some(item => item.relPath === "provider-reproof-receipt-consumption-cautions.md" && item.type === "feedback"),
+            indexLinksProviderDocs: indexText.includes("provider-reproof-receipt-consumption-recall.md")
+                && indexText.includes("provider-reproof-receipt-consumption-cautions.md"),
+            promotedRecallFindsUsedRow: recallText.includes("PROVIDER_REPROOF_CONSUMPTION_USED_SENTINEL")
+                && recallText.includes("request-provider-reproof-consumption-used"),
+            cautionRecallIsFeedbackMemory: cautionRecall.recalled.some((item) => item.relPath === "provider-reproof-receipt-consumption-cautions.md" && item.type === "feedback")
+                && cautionText.includes("PROVIDER_REPROOF_CONSUMPTION_IGNORED_SENTINEL"),
+            strongClaimWarnsNotNativeProof: fs.readFileSync(path.join(dir, "provider-reproof-receipt-consumption-recall.md"), "utf-8")
+                .includes("receipt strong is a consumption claim only"),
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            first: {
+                archivedCount: first.archivedCount,
+                promotedCount: first.promotedCount,
+                cautionCount: first.cautionCount,
+                strongReceiptClaimCount: first.strongReceiptClaimCount,
+            },
+            second: { archivedCount: second.archivedCount, newRowCount: second.newRowCount, updatedRowCount: second.updatedRowCount },
+            recalled: recall.recalled.map((item) => item.relPath),
+            cautionRecalled: cautionRecall.recalled.map((item) => `${item.type}:${item.relPath}`),
         };
     }
     finally {

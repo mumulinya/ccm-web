@@ -5,14 +5,20 @@ export declare const GROUP_MEMORY_DISPATCH_FRESHNESS_GATE_VERSION = 1;
 export declare const GROUP_MEMORY_POST_COMPACT_REINJECTION_GATE_VERSION = 1;
 export declare const GROUP_MEMORY_POST_COMPACT_FIRST_DISPATCH_MARKER_VERSION = 1;
 export declare const GROUP_MEMORY_POST_COMPACT_CANDIDATE_USAGE_LEDGER_VERSION = 1;
+export declare const GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_LEDGER_VERSION = 1;
+export declare const GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_LEDGER_VERSION = 1;
+export declare const GROUP_API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS: number;
 export declare const GROUP_SESSION_MEMORY_SNAPSHOT_VERSION = 1;
 export declare const GROUP_TOOL_CONTINUITY_SNAPSHOT_VERSION = 1;
 export declare const GROUP_COMPACT_FILE_REFERENCE_LEDGER_VERSION = 1;
 export declare const GROUP_COMPACT_FILE_REFERENCE_READ_PLAN_REVALIDATION_GATE_VERSION = 1;
 export declare const GROUP_GLOBAL_MEMORY_ARBITRATION_LEDGER_VERSION = 1;
+export declare const GROUP_GLOBAL_MEMORY_HEALTH_GATE_VERSION = 1;
 export declare function getGroupMemoryFile(groupId: string): string;
 export declare function getGroupPostCompactDispatchLedgerFile(groupId: string): string;
 export declare function getGroupPostCompactCandidateUsageLedgerFile(groupId: string): string;
+export declare function getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId: string): string;
+export declare function getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId: string): string;
 export declare function getGroupSessionMemorySnapshotFile(groupId: string): string;
 export declare function getGroupSessionMemoryMarkdownFile(groupId: string): string;
 export declare function getGroupToolContinuitySnapshotFile(groupId: string): string;
@@ -82,6 +88,7 @@ export declare function runGroupMemoryStorageRecoverySelfTest(): {
 export declare function uniqueByKey(items: any[], keyFn: (item: any) => string, limit?: number): any[];
 export declare function compactMemoryText(value: any, max?: number): string;
 export declare function compactPreserveLines(value: any, max?: number): string;
+export declare function buildChildGlobalAgentMemoryHealthGate(input?: any): any;
 export declare function readGroupGlobalMemoryArbitrationLedger(groupId: string): any;
 export declare function recordGroupGlobalMemoryArbitrationLedger(groupId: string, input?: any): {
     schema: string;
@@ -91,6 +98,9 @@ export declare function recordGroupGlobalMemoryArbitrationLedger(groupId: string
     recordedCount: number;
     demotedCount: any;
     conflictCount: any;
+    semanticRiskCount: any;
+    semanticConflictCount: any;
+    maxSemanticRiskScore: any;
     repeatedConflictCount: any;
     distilledConflictCount: any;
     pendingDistillationCount: any;
@@ -157,6 +167,9 @@ export declare function distillGroupGlobalMemoryArbitrationToTypedMemory(groupId
         recordedCount: number;
         demotedCount: any;
         conflictCount: any;
+        semanticRiskCount: any;
+        semanticConflictCount: any;
+        maxSemanticRiskScore: any;
         repeatedConflictCount: any;
         distilledConflictCount: any;
         pendingDistillationCount: any;
@@ -341,6 +354,8 @@ export declare function buildGroupMemorySourceManifest(groupId: string, input?: 
 };
 export declare function readGroupPostCompactDispatchLedger(groupId: string): any;
 export declare function readGroupPostCompactCandidateUsageLedger(groupId: string): any;
+export declare function readGroupApiMicrocompactNativeApplyProofLedger(groupId: string): any;
+export declare function readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId: string): any;
 export declare function recordGroupPostCompactCandidateUsageLedger(groupId: string, input?: any): {
     schema: string;
     groupId: string;
@@ -374,6 +389,168 @@ export declare function buildGroupPostCompactCandidateUsageSummary(groupId: stri
     useful_candidates: unknown[];
     ignored_candidates: unknown[];
     missing_usage_candidates: unknown[];
+    recent_entries: any;
+    updatedAt: any;
+};
+export declare function buildGroupApiMicrocompactNativeApplyAdapterTelemetryRow(input?: any): {
+    planChecksum: string;
+    applyPlanChecksum: string;
+    requestPatchChecksum: string;
+    requestBodyChecksum: string;
+    requestBody: any;
+    hasContextManagement: boolean;
+    contextManagementEditCount: number;
+    betaHeaders: string[];
+    provider: string;
+    model: string;
+    endpoint: string;
+    method: string;
+    responseStatus: number;
+    requestId: string;
+    runnerRequestId: string;
+    externalRunnerRequestId: string;
+    taskAgentSessionId: string;
+    nativeSessionId: string;
+    memoryContextSnapshotId: string;
+    memoryContextSnapshotChecksum: string;
+    targetProject: string;
+    agent: string;
+    taskId: string;
+    executionId: string;
+    sentAt: string;
+    telemetrySource: string;
+    ok: any;
+    error: string;
+};
+export declare function recordGroupApiMicrocompactNativeApplyAdapterTelemetry(input?: any): {
+    schema: string;
+    groupId: string;
+    file: string;
+    skipped: boolean;
+    reason: string;
+    recorded_count: number;
+    totals: any;
+    updated_count?: undefined;
+    updatedAt?: undefined;
+} | {
+    schema: string;
+    groupId: string;
+    file: string;
+    recorded_count: number;
+    updated_count: number;
+    totals: any;
+    updatedAt: string;
+    skipped?: undefined;
+    reason?: undefined;
+} | {
+    schema: string;
+    skipped: boolean;
+    reason: string;
+    recorded_count: number;
+    groupId?: undefined;
+} | {
+    schema: string;
+    groupId: string;
+    skipped: boolean;
+    reason: string;
+    recorded_count: number;
+};
+export declare function recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId: string, input?: any): {
+    schema: string;
+    groupId: string;
+    file: string;
+    skipped: boolean;
+    reason: string;
+    recorded_count: number;
+    totals: any;
+    updated_count?: undefined;
+    updatedAt?: undefined;
+} | {
+    schema: string;
+    groupId: string;
+    file: string;
+    recorded_count: number;
+    updated_count: number;
+    totals: any;
+    updatedAt: string;
+    skipped?: undefined;
+    reason?: undefined;
+};
+export declare function buildGroupApiMicrocompactNativeApplyRequestTelemetrySummary(groupId: string, options?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    target_project: string;
+    ledger_file: any;
+    has_history: boolean;
+    status: string;
+    entry_count: any;
+    totals: any;
+    source_counts: any;
+    matched_entries: any;
+    failed_entries: any;
+    recent_entries: any;
+    updatedAt: any;
+};
+export declare function recordGroupApiMicrocompactNativeApplyProofLedger(groupId: string, input?: any): {
+    schema: string;
+    groupId: string;
+    file: string;
+    skipped: boolean;
+    reason: string;
+    recorded_count: number;
+    totals: any;
+    updated_count?: undefined;
+    updatedAt?: undefined;
+} | {
+    schema: string;
+    groupId: string;
+    file: string;
+    recorded_count: number;
+    updated_count: number;
+    totals: any;
+    updatedAt: string;
+    skipped?: undefined;
+    reason?: undefined;
+};
+export declare function buildGroupApiMicrocompactNativeApplyProofSummary(groupId: string, options?: any): {
+    schema: string;
+    version: number;
+    groupId: string;
+    target_project: string;
+    ledger_file: any;
+    has_history: boolean;
+    status: string;
+    entry_count: any;
+    proof_coverage_rate: number;
+    request_telemetry: {
+        matched_verified_count: any;
+        adapter_matched_verified_count: any;
+        receipt_matched_verified_count: any;
+        strong_verified_count: any;
+        receipt_only_verified_count: any;
+        missing_verified_count: any;
+        stale_verified_count: any;
+        max_age_ms: number;
+        schema: string;
+        version: number;
+        groupId: string;
+        target_project: string;
+        ledger_file: any;
+        has_history: boolean;
+        status: string;
+        entry_count: any;
+        totals: any;
+        source_counts: any;
+        matched_entries: any;
+        failed_entries: any;
+        recent_entries: any;
+        updatedAt: any;
+    };
+    totals: any;
+    verified_entries: any;
+    failed_entries: any;
+    advisory_entries: any;
     recent_entries: any;
     updatedAt: any;
 };
@@ -760,8 +937,10 @@ export declare function runGroupGlobalClaudeMemoryImportContextSelfTest(): {
 export declare function runGroupGlobalAgentMemoryBridgeContextSelfTest(): {
     pass: boolean;
     checks: {
+        healthGateAllowsCleanGlobalMemory: boolean;
         globalRecallStructured: boolean;
         renderedInjectsGlobalAgentMemory: boolean;
+        renderedMentionsHealthGate: boolean;
         currentStateBoundaryRendered: boolean;
         sourceManifestTracksGlobalMemory: any;
         compactReferencesTrackGlobalMemory: any;
@@ -772,6 +951,21 @@ export declare function runGroupGlobalAgentMemoryBridgeContextSelfTest(): {
     globalRecall: {
         itemCount: any;
         file: any;
+    };
+};
+export declare function runGroupGlobalAgentMemoryHealthGateSelfTest(): {
+    pass: boolean;
+    checks: {
+        healthGateFailsActivePollution: boolean;
+        recallBlocked: boolean;
+        renderedBlocksGlobalMemory: boolean;
+        contaminatedPreviewNotRendered: boolean;
+        sourceManifestStillAvailable: boolean;
+        rawSourceStillTrackedForAudit: boolean;
+    };
+    healthGate: {
+        status: any;
+        active: any;
     };
 };
 export declare function runGroupGlobalAgentMemoryArbitrationContextSelfTest(): {
@@ -793,6 +987,22 @@ export declare function runGroupGlobalAgentMemoryArbitrationContextSelfTest(): {
     ledger: any;
     arbitrationDistillation: any;
 };
+export declare function runGroupGlobalAgentMemorySemanticArbitrationSelfTest(): {
+    pass: boolean;
+    checks: {
+        globalMemoryWasRecalled: boolean;
+        semanticRiskScoresConflict: any;
+        arbitrationDemotesViaSemanticConflict: boolean;
+        decisiveEvidenceCarriesSemanticReasons: any;
+        renderedShowsSemanticRisk: boolean;
+        ledgerPersistsSemanticRisk: any;
+        sourceManifestTracksArbitrationLedger: any;
+        compactReferencesTrackArbitrationLedger: any;
+    };
+    arbitration: any;
+    ledger: any;
+    ledgerEntry: any;
+};
 export declare function runGroupGlobalAgentMemoryCrossGroupSuppressionContextSelfTest(): {
     pass: boolean;
     checks: {
@@ -805,6 +1015,23 @@ export declare function runGroupGlobalAgentMemoryCrossGroupSuppressionContextSel
         sourceManifestTracksCrossGroupLedgerDir: any;
         compactReferencesTrackCrossGroupLedgerDir: any;
         readPlanTargetsCrossGroupSuppression: any;
+    };
+    crossGroupSuppression: any;
+    arbitration: any;
+    sourceLedger: any;
+    targetSummary: any;
+};
+export declare function runGroupGlobalAgentMemoryCrossGroupSuppressionFreshnessSelfTest(): {
+    pass: boolean;
+    checks: {
+        sourceGroupRecordedConflict: boolean;
+        targetRecallsUpdatedGlobalMemory: boolean;
+        suppressionDowngradedToAdvisory: boolean;
+        arbitrationDoesNotCrossGroupSuppress: boolean;
+        recallSummaryCountsFreshness: boolean;
+        renderedShowsFreshnessAdvisory: boolean;
+        sourceManifestTracksCrossGroupLedgerDir: any;
+        compactReferencesTrackCrossGroupLedgerDir: any;
     };
     crossGroupSuppression: any;
     arbitration: any;

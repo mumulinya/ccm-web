@@ -31,22 +31,24 @@ import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
 import { usePinnedScroll } from '../../composables/usePinnedScroll.js'
 import { downloadCommandJson } from '../../utils/commandExport.js'
 import { buildGroupConversationKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
-import { sanitizeUserFacingAgentText, sanitizeUserFacingLegacyTerminology } from '../../utils/agentDisplay.js'
+import { normalizeTestAgentExecutionPlanSummary, sanitizeUserFacingAgentText, sanitizeUserFacingLegacyTerminology, sanitizeUserFacingPlanText } from '../../utils/agentDisplay.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
 const emit = defineEmits(['navigated'])
 
 const GROUP_VISIBLE_INTERNAL_TEXT_PATTERN = /CCM_AGENT_RECEIPT|CCM_AGENT_REQUESTS|<\s*\/?\s*task-notification|task-notification|receipt[-_\s]*status|trace_id|session_id|WorkerContextPacket|raw\s+receipt|raw\s+payload|raw_report|scratchpad|Runtime Kernel|workflow_timeline/i
-const sanitizeGroupVisibleText = (value, fallback = '主 Agent 正在处理当前请求。', max = 4000) => {
+const GROUP_INTERNAL_PROTOCOL_FALLBACK = '执行成员已提交技术执行信息，我正在整理用户可读结论。'
+const sanitizeGroupVisibleText = (value, fallback = '我正在处理当前请求。', max = 4000) => {
   const raw = String(value || '')
   if (!raw) return ''
   if (GROUP_VISIBLE_INTERNAL_TEXT_PATTERN.test(raw)) {
-    return sanitizeUserFacingAgentText(raw, fallback, Math.min(max, 1200))
+    const visible = sanitizeUserFacingLegacyTerminology(sanitizeUserFacingAgentText(raw, GROUP_INTERNAL_PROTOCOL_FALLBACK, Math.min(max, 1200)))
+    return sanitizeUserFacingPlanText(visible, fallback || GROUP_INTERNAL_PROTOCOL_FALLBACK, Math.min(max, 1200))
   }
-  const text = sanitizeUserFacingLegacyTerminology(raw)
+  const text = sanitizeUserFacingPlanText(raw, fallback, max)
   return text.length > max ? `${text.slice(0, max)}...` : text
 }
-function getVisibleGroupMessageContent(msg, fallback = '主 Agent 已整理这条消息。') {
+function getVisibleGroupMessageContent(msg, fallback = '我已整理这条消息。') {
   if (!msg) return ''
   if (msg.role === 'user') return String(msg.content || '')
   return sanitizeGroupVisibleText(msg.content, fallback, 4000)
@@ -187,7 +189,7 @@ const {
   openCodeChangeDrawer,
   openSingleFileChange,
   closeCodeChangeDrawer,
-} = useCodeChangeDrawer({ title: '群聊 Agent 代码改动' })
+} = useCodeChangeDrawer({ title: '群聊代码改动' })
 
 const pipelineViewer = ref({ visible: false, assignments: [], coordinationPlan: null, fileChanges: null, receipts: [], deliverySummary: null, status: 'pending', title: 'Agent 协作流' })
 const agentQaActionLoading = ref({})
@@ -268,11 +270,11 @@ const getMemoryCompressionMeta = () => {
 }
 const getMemoryCompressionTitle = () => {
   const stats = getMemoryCompression()
-  return `总消息 ${stats.totalMessages || messages.value.length || 0}；旧消息压缩 ${stats.compressedMessages || 0}；近期原文 ${stats.recentMessages || stats.recentLimit || 0}；子 Agent 记忆 ${getAgentMemoryCount()} 个`
+  return `总消息 ${stats.totalMessages || messages.value.length || 0}；旧消息压缩 ${stats.compressedMessages || 0}；近期原文 ${stats.recentMessages || stats.recentLimit || 0}；执行成员记忆 ${getAgentMemoryCount()} 个`
 }
 const getAgentDisplayName = (agent) => {
   if (agent === 'system') return '系统'
-  if (isCoordinatorProject(agent)) return '协调者（主 Agent）'
+  if (isCoordinatorProject(agent)) return '协调者'
   return agent || 'Agent'
 }
 const getWorkEvents = (msg) => Array.isArray(msg?.workEvents) ? msg.workEvents.filter(Boolean) : []
@@ -360,7 +362,7 @@ const handleTaskCardAction = createGroupTaskCardActionHandler({
   },
   loadMessages: () => loadMessages(),
 })
-const taskRuntimeStatusLabel = (status) => ({ pending: '待执行', in_progress: '执行中', done: '已完成', failed: '失败', cancelled: '已取消' }[status] || status || '执行中')
+const taskRuntimeStatusLabel = (status) => ({ pending: '待执行', in_progress: '执行中', blocked: '受阻', done: '已完成', failed: '失败', cancelled: '已取消' }[status] || status || '执行中')
 const taskRuntimeAgentState = (state) => ({ queued: '排队', spawning: '启动', ready: '就绪', prompt_accepted: '已接单', running: '执行中', reviewing: '验收', succeeded: '完成', failed: '失败', cancel_requested: '停止中', cancelled: '已取消' }[state] || state || '等待')
 const taskRuntimeGreenLabel = (green) => ({ none: '未验收', targeted: '局部绿', project: '项目绿', workspace: '工作区绿', merge_ready: '可合并' }[green] || green || '未验收')
 const applyTransientTaskRuntime = (taskId, updater) => {
@@ -374,6 +376,47 @@ const applyTransientTaskRuntime = (taskId, updater) => {
     msg.taskCard = next?.taskCard || next?.task_card || msg.taskCard || msg.task_card || null
     msg.task_card = next?.task_card || next?.taskCard || msg.task_card || msg.taskCard || null
   })
+}
+const applyTestAgentExecutionPlanReady = (data = {}) => {
+  const plan = data.test_agent_execution_plan || data.testAgentExecutionPlan || data.technical?.test_agent_execution_plan || null
+  const summary = normalizeTestAgentExecutionPlanSummary(plan, data.test_agent_execution_plan_summary || data.testAgentExecutionPlanSummary || data.detail || null, data.detail || '')
+  if (!summary) return false
+  const runtimeStatus = summary.status === 'blocked' ? 'blocked' : 'in_progress'
+  const taskId = data.taskId || data.task_id || ''
+  let applied = false
+  applyTransientTaskRuntime(taskId, (runtime) => {
+    const currentCard = runtime.taskCard || runtime.task_card || {}
+    const nextCard = {
+      ...currentCard,
+      test_agent_execution_plan: plan,
+      testAgentExecutionPlan: plan,
+      test_agent_execution_plan_summary: summary,
+      testAgentExecutionPlanSummary: summary,
+      test_agent_execution_plan_detail: data.detail || '',
+      testAgentExecutionPlanDetail: data.detail || '',
+    }
+    applied = true
+    return {
+      ...runtime,
+      status: runtimeStatus,
+      statusText: summary.headline,
+      taskCard: nextCard,
+      task_card: nextCard,
+      testAgentExecutionPlan: plan,
+      test_agent_execution_plan: plan,
+      testAgentExecutionPlanSummary: summary,
+      test_agent_execution_plan_summary: summary,
+    }
+  })
+  if (!applied) {
+    appendAgentWorkEvent(data.agent || 'test-agent', {
+      id: `test-agent-plan-${Date.now()}`,
+      time: new Date().toISOString(),
+      kind: summary.status === 'blocked' ? 'error' : 'status',
+      text: `${summary.title}：${summary.headline}`,
+    })
+  }
+  return applied
 }
 const appendAgentWorkEvent = (agent, event) => {
   if (!agent || !event) return
@@ -399,7 +442,7 @@ const appendAgentWorkEvent = (agent, event) => {
   streamMsg.timestamp = event.time || streamMsg.timestamp
 }
 const getTargetDisplayName = (target) => {
-  if (target === 'all' || isCoordinatorProject(target)) return '协调者（主 Agent）'
+  if (target === 'all' || isCoordinatorProject(target)) return '协调者'
   return target || 'Agent'
 }
 
@@ -426,11 +469,11 @@ const runAgentQaAction = async (msg, action) => {
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: qa.id, decision: action, reason: action === 'accept' ? '主 Agent 在群聊界面采纳该回答' : action === 'reject' ? '主 Agent 在群聊界面拒绝该回答' : '用户在群聊界面接管该问答' })
+      body: JSON.stringify({ id: qa.id, decision: action, reason: action === 'accept' ? '用户在群聊界面采纳该回答' : action === 'reject' ? '用户在群聊界面拒绝该回答' : '用户在群聊界面接管该问答' })
     })
     const data = await res.json()
     if (!res.ok || data.success === false) throw new Error(data.error || '操作失败')
-    toast.success(action === 'retry' ? '已重试 Agent 问答' : action === 'manual' ? '已标记人工接管' : action === 'accept' ? '主 Agent 已采纳回答' : '主 Agent 已拒绝回答')
+    toast.success(action === 'retry' ? '已重试 Agent 问答' : action === 'manual' ? '已标记人工接管' : action === 'accept' ? '已采纳回答' : '已拒绝回答')
     await loadMessages()
   } catch (err) {
     toast.error((action === 'retry' ? '重试失败：' : '接管失败：') + (err?.message || err))
@@ -733,15 +776,15 @@ const getWorkflowLabel = (msg) => {
   if (msg?.workflow?.label) return msg.workflow.label
   if (phase === 'rework' || phase === 'needs_rework') return '验收返工'
   if (phase === 'needs_user') return '等待用户'
-  if (phase === 'reviewing') return '主 Agent 验收'
+  if (phase === 'reviewing') return '最终验收'
   if (phase === 'complete') return '协作完成'
-  if (phase === 'executing') return '子 Agent 执行中'
+  if (phase === 'executing') return '执行成员执行中'
   if (phase === 'dispatching') return '任务拆分'
   return '需求理解'
 }
 
 const getDispatchActionLabel = (action) => {
-  if (action === 'delegate') return '派发子 Agent'
+  if (action === 'delegate') return '安排执行成员'
   if (action === 'ask_user') return '先问用户'
   if (action === 'hold') return '暂不执行'
   if (action === 'direct_answer') return '直接回复'
@@ -749,9 +792,9 @@ const getDispatchActionLabel = (action) => {
 }
 
 const getPlanTitle = (msg) => {
-  if (getWorkflowPhase(msg) === 'rework' || (msg.assignments || []).some(item => item.rework)) return '主 Agent 返工计划'
+  if (getWorkflowPhase(msg) === 'rework' || (msg.assignments || []).some(item => item.rework)) return '返工计划'
   if (msg?.workflow?.label) return msg.workflow.label
-  return '主 Agent 工作计划'
+  return '执行计划'
 }
 
 const compactPlanText = (text, max = 180) => {
@@ -1101,10 +1144,15 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
       if (data.type === 'status') {
         applyMainAgentProgressCheckpoint(data)
         // 更新思考状态
-        thinkingMsg.content = sanitizeGroupVisibleText(data.text, '主 Agent 正在整理当前进展。', 600)
+        thinkingMsg.content = sanitizeGroupVisibleText(data.text, '我正在整理当前进展。', 600)
         if (String(data.text || '').includes('分派') || String(data.text || '').includes('等待')) {
           waitingCrossReply.value = true
         }
+        scrollToBottom()
+      } else if (data.type === 'test_agent_execution_plan_ready') {
+        applyTestAgentExecutionPlanReady(data)
+        thinkingMsg.content = sanitizeGroupVisibleText(data.detail || 'TestAgent 复核计划已生成。', 'TestAgent 复核计划已整理。', 600)
+        waitingCrossReply.value = true
         scrollToBottom()
       } else if (data.type === 'task_created') {
         applyMainAgentProgressCheckpoint(data)
@@ -1113,7 +1161,7 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
           role: 'assistant',
           agent: data.agent || 'coordinator',
           type: 'project_task_intake',
-          content: data.text || '项目任务已由主 Agent 接管',
+          content: data.text || '我已接管项目任务',
           timestamp: new Date().toISOString(),
           task_id: data.task?.id,
           task: data.task || null,
@@ -1205,7 +1253,7 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
         agentStreamRawBuffers[agentKey] = nextRaw
         if (agentStreamHiddenBuffers[agentKey] || GROUP_VISIBLE_INTERNAL_TEXT_PATTERN.test(nextRaw)) {
           agentStreamHiddenBuffers[agentKey] = true
-          agentStreamMsgs[agentKey].content = sanitizeGroupVisibleText(nextRaw, 'Agent 已提交技术执行信息，主 Agent 正在整理用户可读结论。', 1200)
+          agentStreamMsgs[agentKey].content = sanitizeGroupVisibleText(nextRaw, '执行成员已提交技术执行信息，我正在整理用户可读结论。', 1200)
         } else {
           agentStreamMsgs[agentKey].content += sanitizeGroupVisibleText(chunkText)
         }
@@ -1218,7 +1266,7 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
         // 某个 Agent 完成：用最终完整内容替换流式消息
         const agentKey = data.agent
         const streamMsg = agentStreamMsgs[agentKey]
-        const finalText = sanitizeGroupVisibleText(data.text || agentStreamRawBuffers[agentKey], 'Agent 已提交结果说明，主 Agent 正在汇总验收。', 3000)
+        const finalText = sanitizeGroupVisibleText(data.text || agentStreamRawBuffers[agentKey], '执行成员已提交结果说明，我正在汇总验收。', 3000)
         if (streamMsg) {
           if (data.messageId) streamMsg.id = data.messageId
           streamMsg.content = finalText
@@ -1277,7 +1325,7 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
         singleStreamRawBuffer += chunkText
         if (singleStreamHiddenBuffer || GROUP_VISIBLE_INTERNAL_TEXT_PATTERN.test(singleStreamRawBuffer)) {
           singleStreamHiddenBuffer = true
-          agentMsg.content = sanitizeGroupVisibleText(singleStreamRawBuffer, 'Agent 已提交技术执行信息，主 Agent 正在整理用户可读结论。', 1200)
+          agentMsg.content = sanitizeGroupVisibleText(singleStreamRawBuffer, '执行成员已提交技术执行信息，我正在整理用户可读结论。', 1200)
         } else {
           agentMsg.content += sanitizeGroupVisibleText(chunkText)
         }
@@ -1774,7 +1822,7 @@ if (activeSelectedTemplate) {
                   <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
                 </div>
                 <!-- 项目主 Agent 任务接管 -->
-                <ProjectTaskIntakeMessage v-else-if="msg.type === 'project_task_intake'" :msg="msg" :display-content="getVisibleGroupMessageContent(msg, '项目任务已由主 Agent 接管。')" :accent-style="getAgentAccentStyle(msg.agent)">
+                <ProjectTaskIntakeMessage v-else-if="msg.type === 'project_task_intake'" :msg="msg" :display-content="getVisibleGroupMessageContent(msg, '我已接管项目任务。')" :accent-style="getAgentAccentStyle(msg.agent)">
                   <MainAgentDecisionCard v-if="getMainAgentDecision(msg) && !isPrimaryTaskCard(msg, i)" :decision="getMainAgentDecision(msg)" compact @step-action="handleTaskCardAction(msg, $event)" />
                   <TaskCollaborationCard v-if="isPrimaryTaskCard(msg, i)" :card="getTaskCard(msg)" :runtime="getTaskRuntime(msg)" @action="handleTaskCardAction(msg, $event)" />
                 </ProjectTaskIntakeMessage>
@@ -1843,7 +1891,7 @@ if (activeSelectedTemplate) {
           v-if="currentGroup"
           v-model="newMessage"
           input-id="groupChatInput"
-          placeholder="输入消息...（可 @ 项目 Agent，输入 / 打开命令中心）"
+          placeholder="输入消息...（可 @ 项目执行成员，输入 / 打开命令中心）"
           send-label="发送 ➤"
           :files="messageFiles"
           :slash="slash"

@@ -95,6 +95,10 @@ function groupTaskStatusMeta(status) {
     if (["cancelled", "canceled", "stopped"].includes(value)) {
         return { phase: "cancelled", label: "已取消", terminal: true, deliveryStatus: "cancelled", checkpointStatus: "warning" };
     }
+    if (["reworking", "needs_rework", "retrying", "repairing"].includes(value))
+        return { phase: "reworking", label: "返工中", terminal: false, deliveryStatus: "active", checkpointStatus: "active" };
+    if (["blocked", "needs_attention", "partial", "missing_receipt", "needs_info"].includes(value))
+        return { phase: "needs_user", label: "待补齐", terminal: false, deliveryStatus: "active", checkpointStatus: "warning" };
     if (["reviewing", "review", "verifying"].includes(value))
         return { phase: "reviewing", label: "验收中", terminal: false, deliveryStatus: "active", checkpointStatus: "active" };
     if (["waiting_user", "needs_user", "needs_confirmation"].includes(value))
@@ -121,7 +125,7 @@ function groupDeliveryCheckpointLabel(status) {
         return "任务未完成，已整理原因";
     if (status === "cancelled")
         return "任务已取消，已整理状态";
-    return "主 Agent 已整理阶段总结";
+    return "已整理阶段总结";
 }
 function countGroupStatusItems(...values) {
     let count = 0;
@@ -135,12 +139,13 @@ function countGroupStatusItems(...values) {
 }
 function friendlyGroupCompletionText(value, fallback, max = 220) {
     const text = compactGroupStatusText(value, max);
+    const fallbackText = (0, delivery_report_1.sanitizeMainAgentDeliveryText)(fallback, fallback, max);
     if (!text)
-        return fallback;
+        return fallbackText;
     if (/CCM_AGENT_RECEIPT|trace[_-]?id|session[_-]?id|run[_-]?id|workflow_timeline|runtime kernel|raw_report|stack/i.test(text)) {
-        return (0, delivery_report_1.sanitizeMainAgentDeliveryText)(text, fallback, max);
+        return (0, delivery_report_1.sanitizeMainAgentDeliveryText)(text, fallbackText, max);
     }
-    return (0, delivery_report_1.sanitizeMainAgentDeliveryText)(text, fallback, max);
+    return (0, delivery_report_1.sanitizeMainAgentDeliveryText)(text, fallbackText, max);
 }
 function firstDeliverySectionItem(report, sectionId) {
     const section = Array.isArray(report?.sections)
@@ -157,12 +162,12 @@ function buildGroupCompletionSummary(task, summary) {
         return null;
     const status = statusMeta.deliveryStatus;
     const fallbackHeadline = status === "done"
-        ? "任务已经完成，主 Agent 已整理交付结果。"
+        ? "任务已经完成，我已整理交付结果。"
         : status === "failed"
-            ? "任务还没有完成，主 Agent 已整理原因和下一步。"
+            ? "任务还没有完成，我已整理原因和下一步。"
             : status === "cancelled"
                 ? "任务已取消，当前状态已整理。"
-                : "主 Agent 已整理阶段性处理结果。";
+                : "我已整理阶段性处理结果。";
     const headline = friendlyGroupCompletionText(report?.headline || summary?.headline || summary?.summary || task?.status_detail || firstDeliverySectionItem(report, "完成内容"), fallbackHeadline, 260);
     const fileCount = countGroupStatusItems(summary?.actual_file_change_count, summary?.file_change_count, summary?.file_changes?.count, summary?.actual_file_changes, report?.files);
     const verificationCount = countGroupStatusItems(summary?.external_runner_verification_count, summary?.verification_count, summary?.verification_executed, summary?.verification, report?.verification);
@@ -194,7 +199,7 @@ function buildGroupPickupSummary(task, summary, completionSummary) {
     if (!existing && !report && !statusMeta.terminal)
         return null;
     const status = existing?.status || report?.status || completionSummary?.status || statusMeta.deliveryStatus;
-    const headline = friendlyGroupCompletionText(existing?.headline || report?.headline || completionSummary?.headline || task?.status_detail || "", statusMeta.terminal ? "主 Agent 已整理本轮任务结果。" : "主 Agent 已整理当前任务状态。", 260);
+    const headline = friendlyGroupCompletionText(existing?.headline || report?.headline || completionSummary?.headline || task?.status_detail || "", statusMeta.terminal ? "我已整理本轮任务结果。" : "我已整理当前任务状态。", 260);
     const currentState = friendlyGroupCompletionText(existing?.current_state || existing?.currentState || headline, headline, 260);
     const reviewItems = Array.isArray(existing?.review_items || existing?.reviewItems)
         ? (existing.review_items || existing.reviewItems)
@@ -206,7 +211,7 @@ function buildGroupPickupSummary(task, summary, completionSummary) {
         || existing?.resumeAction
         || completionSummary?.next_action
         || (Array.isArray(report?.next_action) ? report.next_action[0] : report?.next_action)
-        || "", statusMeta.terminal ? "可以查看交付总结，或继续补充新的要求。" : "主 Agent 会继续推进当前任务，并在完成后汇总给你。", 220);
+        || "", statusMeta.terminal ? "可以查看交付总结，或继续补充新的要求。" : "我会继续推进当前任务，并在完成后汇总给你。", 220);
     return {
         schema: "ccm-group-main-agent-pickup-summary-v1",
         source_schema: existing?.schema || "",
@@ -251,6 +256,17 @@ function buildGroupCurrentTodoSummary(latestCard, latestTask, latestStatusMeta) 
     const steps = Array.isArray(todo?.steps) ? todo.steps.filter((item) => item?.content || item?.label || item?.activeForm || item?.active_form) : [];
     if (!steps.length)
         return null;
+    const policy = { ...(todo?.display || {}), ...(todo?.display_policy || todo?.displayPolicy || {}) };
+    const allDone = steps.every((item) => ["completed", "done", "success", "succeeded"].includes(String(item?.status || "").toLowerCase()));
+    const archiveCompleted = policy.archive_completed_todo === true
+        || policy.archiveCompletedTodo === true
+        || policy.archived_when_complete === true
+        || policy.archivedWhenComplete === true
+        || policy.visible_when_completed === false
+        || policy.visibleWhenCompleted === false;
+    const hasVerificationReminder = todo?.verification_reminder || todo?.verificationReminder || todo?.verification_nudge === true || todo?.verificationNudge === true;
+    if (allDone && archiveCompleted && !hasVerificationReminder)
+        return null;
     const activeStatuses = new Set(["in_progress", "active", "running", "reviewing", "reworking", "needs_confirmation", "needs_user", "failed"]);
     const activeStep = steps.find((item) => activeStatuses.has(String(item?.status || "").toLowerCase()))
         || steps.find((item) => !["completed", "done", "cancelled", "canceled"].includes(String(item?.status || "").toLowerCase()))
@@ -259,9 +275,15 @@ function buildGroupCurrentTodoSummary(latestCard, latestTask, latestStatusMeta) 
         return null;
     const completedCount = steps.filter((item) => ["completed", "done", "success", "succeeded"].includes(String(item?.status || "").toLowerCase())).length;
     const status = String(activeStep.status || "pending").toLowerCase();
-    const label = friendlyGroupCompletionText(activeStep.content || activeStep.label || "主 Agent 正在处理当前任务", "主 Agent 正在处理当前任务", 160);
+    const label = friendlyGroupCompletionText(activeStep.content || activeStep.label || "我正在处理当前任务", "我正在处理当前任务", 160);
     const activeForm = friendlyGroupCompletionText(activeStep.activeForm || activeStep.active_form || label, label, 160);
-    const detail = friendlyGroupCompletionText(activeStep.detail || latestCard.next_action || latestTask?.status_detail || "", "", 220);
+    const todoNextAction = todo?.next_action || todo?.nextAction || todo?.next_step || todo?.nextStep || "";
+    const detail = friendlyGroupCompletionText(activeStep.detail || todoNextAction || latestCard.next_action || latestTask?.status_detail || "", "", 220);
+    const recentStep = [...steps]
+        .reverse()
+        .find((item) => ["completed", "done", "success", "succeeded"].includes(String(item?.status || "").toLowerCase()) && item !== activeStep);
+    const recentAction = friendlyGroupCompletionText(recentStep?.activeForm || recentStep?.active_form || recentStep?.content || recentStep?.label || latestCard.latest_progress_checkpoint?.label || "", "", 180);
+    const needsAction = friendlyGroupCompletionText(activeStep.needs_action || activeStep.needsAction || todo?.needs_action || todo?.needsAction || todoNextAction || latestCard.next_action || latestTask?.status_detail || detail, "", 220);
     return {
         schema: "ccm-group-main-agent-current-todo-v1",
         title: todo?.title || "当前 Todo",
@@ -271,20 +293,30 @@ function buildGroupCurrentTodoSummary(latestCard, latestTask, latestStatusMeta) 
         label,
         active_form: activeForm,
         detail,
+        recent_action: recentAction,
+        recentAction,
+        needs_action: needsAction,
+        needsAction,
         status,
         status_label: liveTodoStatusLabel(status),
         progress_label: `${completedCount}/${steps.length}`,
         completed_count: completedCount,
         total_count: steps.length,
-        next_action: friendlyGroupCompletionText(latestCard.next_action || latestTask?.status_detail || "", "", 220),
-        display_policy: { user_visible: true, technical_details_default_collapsed: true },
+        next_action: friendlyGroupCompletionText(todoNextAction || latestCard.next_action || latestTask?.status_detail || "", "", 220),
+        display_policy: {
+            user_visible: true,
+            technical_details_default_collapsed: true,
+            hide_internal_protocols: true,
+            archive_completed_todo: archiveCompleted,
+            visible_when_completed: !archiveCompleted,
+        },
     };
 }
 function normalizeGroupProgressWorkItem(row, fallbackTask, index) {
     if (!row || typeof row !== "object")
         return null;
     const target = friendlyGroupCompletionText(row.target || row.owner || row.agent || row.project || row.name || fallbackTask?.target_project || "", "", 80);
-    const subject = friendlyGroupCompletionText(row.subject || row.title || row.task || row.message || row.description || fallbackTask?.title || "子 Agent 工作项", "子 Agent 工作项", 140);
+    const subject = friendlyGroupCompletionText(row.subject || row.title || row.task || row.message || row.description || fallbackTask?.title || "执行成员工作项", "执行成员工作项", 140);
     if (!target && !subject)
         return null;
     return {
@@ -352,33 +384,33 @@ function buildGroupProgressRefreshSummary(latestTask, latestCard, latestStatusMe
     const firstStalled = stalledItems[0] || null;
     const firstNext = nextClaimable[0] || null;
     const headline = requeueMarker
-        ? "主 Agent 已检测到卡住的子 Agent 工作项，并把它们放回可继续派发状态。"
+        ? "我已检测到卡住的执行成员工作项，并把它们放回可继续派发状态。"
         : stalledItems.length
-            ? `${stalledItems.length} 个子 Agent 工作项长时间没有新进展，主 Agent 会先刷新状态，再决定继续等待、重派或定向补充。`
+            ? `${stalledItems.length} 个执行成员工作项长时间没有新进展，我会先刷新状态，再决定继续等待、重派或定向补充。`
             : pendingTooLong
-                ? `这项任务已排队 ${ageLabel || "一段时间"}，主 Agent 会检查执行通道并接上下一步。`
-                : `这项任务已经 ${ageLabel || "一段时间"} 没有新的可展示进展，主 Agent 会主动刷新状态。`;
+                ? `这项任务已排队 ${ageLabel || "一段时间"}，我会检查执行通道并接上下一步。`
+                : `这项任务已经 ${ageLabel || "一段时间"} 没有新的可展示进展，我会主动刷新状态。`;
     const reviewItems = [
         latestCheckpoint?.label ? `最后进展：${latestCheckpoint.label}` : "",
-        firstStalled ? `待确认：${firstStalled.target || "子 Agent"} 是否仍在处理「${firstStalled.subject}」` : "",
-        firstNext ? `可接续：${firstNext.target || "子 Agent"}「${firstNext.subject}」` : "",
-        childAgentStatusSummary?.summary_text ? `子 Agent 状态：${childAgentStatusSummary.summary_text}` : "",
+        firstStalled ? `待确认：${firstStalled.target || "执行成员"} 是否仍在处理「${firstStalled.subject}」` : "",
+        firstNext ? `可接续：${firstNext.target || "执行成员"}「${firstNext.subject}」` : "",
+        childAgentStatusSummary?.summary_text ? `执行成员状态：${childAgentStatusSummary.summary_text}` : "",
         requeueMarker?.reason ? `恢复原因：${requeueMarker.reason}` : "",
     ].map(item => friendlyGroupCompletionText(item, "", 160)).filter(Boolean).slice(0, 5);
     const nextAction = friendlyGroupCompletionText(firstNext
-        ? `优先接上 ${firstNext.target || "子 Agent"} 的「${firstNext.subject}」，完成后继续验收和总结。`
+        ? `优先接上 ${firstNext.target || "执行成员"} 的「${firstNext.subject}」，完成后继续验收和总结。`
         : stalledItems.length
-            ? "先确认子 Agent 是否还在执行；没有新结果就重新派发或定向补充。"
+            ? "先确认执行成员是否还在执行；没有新结果就重新派发或定向补充。"
             : pendingTooLong
                 ? "检查执行通道和队列状态，能恢复就继续推进；不能恢复会提示你处理。"
-                : "刷新任务卡状态；如果没有新结果，会继续等待或补派。", "主 Agent 会刷新任务状态并接上下一步。", 220);
+                : "刷新任务卡状态；如果没有新结果，会继续等待或补派。", "我会刷新任务状态并接上下一步。", 220);
     return {
         schema: "ccm-group-main-agent-progress-refresh-v1",
         title: "进度刷新提醒",
         status: requeueMarker ? "requeued" : stalledItems.length || pendingTooLong ? "needs_refresh" : "watching",
         status_label: requeueMarker ? "已接续" : stalledItems.length || pendingTooLong ? "需要接续" : "刷新中",
-        headline: friendlyGroupCompletionText(headline, "主 Agent 已整理当前进度刷新状态。", 240),
-        current_state: friendlyGroupCompletionText(headline, "主 Agent 已整理当前进度刷新状态。", 240),
+        headline: friendlyGroupCompletionText(headline, "我已整理当前进度刷新状态。", 240),
+        current_state: friendlyGroupCompletionText(headline, "我已整理当前进度刷新状态。", 240),
         review_items: reviewItems,
         next_action: nextAction,
         last_progress_age_label: ageLabel,
@@ -392,11 +424,12 @@ function buildGroupProgressRefreshSummary(latestTask, latestCard, latestStatusMe
     };
 }
 function buildGroupMainAgentStatus(input) {
+    const activeStatusValues = new Set(["pending", "queued", "in_progress", "running", "reviewing", "reworking", "needs_rework", "blocked", "needs_user", "waiting_user", "needs_confirmation"]);
     const groupTasks = (input.tasks || [])
         .filter((task) => String(task?.group_id || task?.groupId || "") === input.groupId)
         .filter((task) => !task?.archived && !task?.deleted_at)
         .sort((a, b) => taskUpdatedMs(b) - taskUpdatedMs(a));
-    const activeTasks = groupTasks.filter((task) => ["pending", "queued", "in_progress", "running", "reviewing"].includes(String(task?.status || "")));
+    const activeTasks = groupTasks.filter((task) => activeStatusValues.has(String(task?.status || "").toLowerCase()));
     const latestTask = activeTasks[0] || groupTasks[0] || null;
     const latestRuntime = latestTask ? input.getRuntime(latestTask) : null;
     const latestCard = latestRuntime?.taskCard || latestRuntime?.task_card || null;
@@ -507,10 +540,11 @@ function isGroupProgressStatusRequest(message) {
 }
 function cleanGroupStatusFollowupText(value, fallback, max = 180) {
     const text = compactGroupStatusText(value, max);
+    const fallbackText = (0, delivery_report_1.sanitizeMainAgentDeliveryText)(fallback, fallback, max);
     if (!text)
-        return fallback;
+        return fallbackText;
     if (GROUP_PROGRESS_STATUS_INTERNAL_PATTERN.test(text))
-        return fallback;
+        return fallbackText;
     return (0, delivery_report_1.sanitizeMainAgentDeliveryText)(text, fallback, max);
 }
 function joinGroupStatusItems(items, fallback = "") {
@@ -641,7 +675,7 @@ function buildGroupChildAgentStatusSummary(latestCard, latestSummary, latestStat
             : "completed";
     return {
         schema: "ccm-group-child-agent-status-summary-v1",
-        title: "子 Agent 等待情况",
+        title: "执行成员等待情况",
         status,
         status_label: status === "completed" ? "已收齐" : status === "needs_attention" ? "需补齐" : "等待中",
         rows,
@@ -649,12 +683,12 @@ function buildGroupChildAgentStatusSummary(latestCard, latestSummary, latestStat
         running_agents: runningAgents,
         waiting_agents: waitingAgents,
         attention_agents: attentionAgents,
-        summary_text: summaryParts.length ? summaryParts.join("；") : "暂无可展示的子 Agent 状态。",
+        summary_text: summaryParts.length ? summaryParts.join("；") : "暂无可展示的执行成员状态。",
         next_action: status === "completed"
-            ? "主 Agent 会把已收齐的结果合并进验收和最终总结。"
+            ? "我会把已收齐的结果合并进验收和最终总结。"
             : status === "needs_attention"
-                ? "主 Agent 会优先处理待补齐的结果说明、验证证据或阻塞项。"
-                : "主 Agent 会继续等待子 Agent 返回可验收结果，不会提前编造结论。",
+                ? "我会优先处理待补齐的结果说明、验证证据或阻塞项。"
+                : "我会继续等待执行成员返回可验收结果，不会提前编造结论。",
         display_policy: {
             user_visible: true,
             task_card_visible: false,
@@ -674,15 +708,61 @@ function groupStatusNextAction(status) {
         return "请先看未完成原因；如果要继续，我会按缺口重新派发或返工。";
     if (["cancelled", "canceled"].includes(phase))
         return "任务已经停止；如需继续，请重新说明希望恢复的范围。";
+    if (["reworking"].includes(phase))
+        return "我会让原执行成员按失败点或复核缺口返工，修复后重新验收和总结。";
     if (["needs_user"].includes(phase))
-        return "当前需要你确认或补充信息，确认后主 Agent 才会继续推进。";
+        return "当前需要你确认或补充信息，确认后我才会继续推进。";
     if (["queued", "pending"].includes(phase))
         return "任务已在队列中，等执行通道开始后会继续更新任务卡。";
     if (status?.child_agent_status_summary?.status === "needs_attention")
-        return "我会先处理待补齐的子 Agent 结果说明、验证证据或阻塞项。";
+        return "我会先处理待补齐的执行成员结果说明、验证证据或阻塞项。";
     if (Array.isArray(status?.running_child_agents) && status.running_child_agents.length)
-        return "我会等子 Agent 返回可验收结果后再汇总，不会提前编造结果。";
-    return "主 Agent 会继续检查任务卡里的结果说明、验证证据和阻塞项。";
+        return "我会等执行成员返回可验收结果后再汇总，不会提前编造结果。";
+    return "我会继续检查任务卡里的结果说明、验证证据和阻塞项。";
+}
+function buildGroupStatusUserActionSummary(status) {
+    const phase = String(status?.phase || "").toLowerCase();
+    const todo = status?.current_todo_summary || status?.currentTodoSummary || null;
+    const needsAction = cleanGroupStatusFollowupText(todo?.needs_action || todo?.needsAction || "", "", 180);
+    const needs = Array.isArray(status?.needs) ? status.needs : [];
+    const blockers = Array.isArray(status?.blockers) ? status.blockers : [];
+    const openQaCount = Number(status?.open_qa_count || 0);
+    if (phase === "needs_user" || needsAction || openQaCount > 0 || needs.length || blockers.length) {
+        const headline = phase === "needs_user"
+            ? "当前需要你确认或补充信息，我确认后才会继续推进。"
+            : needsAction
+                ? needsAction
+                : openQaCount > 0
+                    ? `还有 ${openQaCount} 个问答需要你处理。`
+                    : blockers.length
+                        ? cleanGroupStatusFollowupText(blockers[0], "有阻塞项需要处理。", 160)
+                        : cleanGroupStatusFollowupText(needs[0], "还有信息需要补齐。", 160);
+        const actionItems = [
+            needsAction,
+            openQaCount > 0 ? `处理 ${openQaCount} 个待确认问答` : "",
+            ...blockers,
+            ...needs,
+        ]
+            .map((item) => cleanGroupStatusFollowupText(item, "", 120))
+            .filter(Boolean)
+            .filter((item, index, arr) => arr.indexOf(item) === index)
+            .slice(0, 4);
+        return {
+            schema: "ccm-group-status-user-action-summary-v1",
+            title: "需要你处理",
+            headline,
+            action_items: actionItems,
+            next_action: actionItems[0] || headline,
+            display_policy: {
+                user_visible: true,
+                task_card_visible: false,
+                todo_visible: false,
+                technical_details_default_collapsed: true,
+                hide_internal_protocols: true,
+            },
+        };
+    }
+    return null;
 }
 function buildGroupStatusFollowupSummary(input) {
     const status = input.status || buildGroupMainAgentStatus({
@@ -706,6 +786,9 @@ function buildGroupStatusFollowupSummary(input) {
         || status.latest_delivery_summary?.progress_refresh_summary
         || status.latestDeliverySummary?.progressRefreshSummary
         || null;
+    const userActionSummary = status.user_action_summary
+        || status.userActionSummary
+        || buildGroupStatusUserActionSummary(status);
     if (!status.task_id) {
         lines.push("当前群聊还没有正在跟踪的开发任务。");
     }
@@ -713,18 +796,18 @@ function buildGroupStatusFollowupSummary(input) {
         lines.push(`最近群聊任务进展：${latestTitle}，当前状态是${label}。`);
     }
     if (latestCheckpoint?.label) {
-        const checkpointLabel = cleanGroupStatusFollowupText(latestCheckpoint.label, "主 Agent 已更新进展", 120);
+        const checkpointLabel = cleanGroupStatusFollowupText(latestCheckpoint.label, "我已更新进展", 120);
         const checkpointDetail = cleanGroupStatusFollowupText(latestCheckpoint.detail, "", 160);
         lines.push(`当前进展：${checkpointLabel}${checkpointDetail ? `，${checkpointDetail}` : ""}。`);
     }
     else if (status.task_id) {
-        lines.push("当前进展：主 Agent 已记录任务，但还没有新的可展示节点。");
+        lines.push("当前进展：我已记录任务，但还没有新的可展示节点。");
     }
     if (completion?.headline) {
-        lines.push(`交付总结：${cleanGroupStatusFollowupText(completion.headline, "主 Agent 已整理阶段总结。", 200)}`);
+        lines.push(`交付总结：${cleanGroupStatusFollowupText(completion.headline, "我已整理阶段总结。", 200)}`);
     }
     if (pickup?.current_state || pickup?.currentState || pickup?.headline) {
-        const pickupState = cleanGroupStatusFollowupText(pickup.current_state || pickup.currentState || pickup.headline, "主 Agent 已整理当前任务状态。", 220);
+        const pickupState = cleanGroupStatusFollowupText(pickup.current_state || pickup.currentState || pickup.headline, "我已整理当前任务状态。", 220);
         lines.push(`${cleanGroupStatusFollowupText(pickup.title, "回来继续看这里", 80)}：${pickupState}`);
     }
     const pickupReviewItems = Array.isArray(pickup?.review_items || pickup?.reviewItems)
@@ -737,7 +820,7 @@ function buildGroupStatusFollowupSummary(input) {
         lines.push(`回看要点：${pickupReviewItems.join("；")}。`);
     }
     if (progressRefresh?.headline || progressRefresh?.current_state || progressRefresh?.currentState) {
-        const refreshState = cleanGroupStatusFollowupText(progressRefresh.current_state || progressRefresh.currentState || progressRefresh.headline, "主 Agent 已整理进度刷新状态。", 220);
+        const refreshState = cleanGroupStatusFollowupText(progressRefresh.current_state || progressRefresh.currentState || progressRefresh.headline, "我已整理进度刷新状态。", 220);
         lines.push(`${cleanGroupStatusFollowupText(progressRefresh.title, "进度刷新提醒", 80)}：${refreshState}`);
     }
     const progressReviewItems = Array.isArray(progressRefresh?.review_items || progressRefresh?.reviewItems)
@@ -751,14 +834,14 @@ function buildGroupStatusFollowupSummary(input) {
     }
     const childAgentSummary = status.child_agent_status_summary || status.childAgentStatusSummary || null;
     if (childAgentSummary?.summary_text) {
-        lines.push(`子 Agent 等待情况：${cleanGroupStatusFollowupText(childAgentSummary.summary_text, "子 Agent 状态已整理。", 220)}。`);
+        lines.push(`执行成员等待情况：${cleanGroupStatusFollowupText(childAgentSummary.summary_text, "执行成员状态已整理。", 220)}。`);
     }
     if (Array.isArray(childAgentSummary?.rows) && childAgentSummary.rows.length) {
         const details = childAgentSummary.rows
             .filter((row) => ["running", "pending", "failed", "blocked"].includes(String(row?.status || "")))
             .slice(0, 4)
             .map((row) => {
-            const agent = cleanGroupStatusFollowupText(row.agent, "子 Agent", 80);
+            const agent = cleanGroupStatusFollowupText(row.agent, "执行成员", 80);
             const label = cleanGroupStatusFollowupText(row.status_label || groupChildAgentStatusLabel(row.status), "处理中", 60);
             const detail = cleanGroupStatusFollowupText(row.detail, "", 120);
             return `${agent} ${label}${detail ? `：${detail}` : ""}`;
@@ -769,13 +852,19 @@ function buildGroupStatusFollowupSummary(input) {
     }
     const runningAgents = Array.isArray(status.running_child_agents) ? status.running_child_agents.filter(Boolean) : [];
     if (!childAgentSummary && runningAgents.length) {
-        lines.push(`子 Agent：${runningAgents.slice(0, 4).join("、")} 正在处理。`);
+        lines.push(`执行成员：${runningAgents.slice(0, 4).join("、")} 正在处理。`);
     }
     else if (!childAgentSummary && status.task_id && !completion) {
-        lines.push("子 Agent：当前没有正在运行的子 Agent。");
+        lines.push("执行成员：当前没有正在运行的执行成员。");
     }
     if (Number(status.open_qa_count || 0) > 0) {
         lines.push(`待确认：还有 ${Number(status.open_qa_count || 0)} 个 Agent 问答需要处理。`);
+    }
+    if (userActionSummary?.headline) {
+        lines.push(`${cleanGroupStatusFollowupText(userActionSummary.title, "需要你处理", 80)}：${cleanGroupStatusFollowupText(userActionSummary.headline, "当前需要你确认或补充信息。", 220)}`);
+    }
+    if (Array.isArray(userActionSummary?.action_items) && userActionSummary.action_items.length) {
+        lines.push(`你可以处理：${userActionSummary.action_items.map((item) => cleanGroupStatusFollowupText(item, "", 120)).filter(Boolean).slice(0, 4).join("；")}。`);
     }
     const blockers = joinGroupStatusItems(status.blockers, "");
     const needs = joinGroupStatusItems(status.needs, "");
@@ -785,9 +874,11 @@ function buildGroupStatusFollowupSummary(input) {
         lines.push(`还需要：${needs}。`);
     const pickupNextAction = cleanGroupStatusFollowupText(pickup?.resume_action || pickup?.resumeAction, "", 220);
     const progressRefreshNextAction = cleanGroupStatusFollowupText(progressRefresh?.next_action || progressRefresh?.nextAction, "", 220);
-    const nextAction = pickupNextAction || progressRefreshNextAction || groupStatusNextAction(status);
+    const userActionNextAction = cleanGroupStatusFollowupText(userActionSummary?.next_action || userActionSummary?.nextAction, "", 220);
+    const phaseNextAction = String(status?.phase || "").toLowerCase() === "reworking" ? groupStatusNextAction(status) : "";
+    const nextAction = userActionNextAction || pickupNextAction || phaseNextAction || progressRefreshNextAction || groupStatusNextAction(status);
     lines.push(`下一步：${nextAction}`);
-    lines.push("我不会猜测还没返回的子 Agent 结果；底层记录默认收在任务卡的技术详情里。");
+    lines.push("我不会猜测还没返回的执行成员结果；底层记录默认收在任务卡的技术详情里。");
     const text = lines
         .map(line => cleanGroupStatusFollowupText(line, line, 260))
         .filter(Boolean)
@@ -813,11 +904,11 @@ function runGroupStatusFollowupSelfTest() {
         phase: "executing",
         label: "正在处理",
         task_id: "task_demo",
-        latest_task_title: "优化群聊主 Agent 工作链路",
+        latest_task_title: "优化协作群工作链路",
         running_child_agents: ["web", "api"],
         child_agent_status_summary: {
             schema: "ccm-group-child-agent-status-summary-v1",
-            title: "子 Agent 等待情况",
+            title: "执行成员等待情况",
             status: "waiting",
             status_label: "等待中",
             completed_agents: ["web"],
@@ -834,7 +925,7 @@ function runGroupStatusFollowupSelfTest() {
         },
         open_qa_count: 1,
         latest_progress_checkpoint: {
-            label: "主 Agent 已派发子 Agent",
+            label: "我已安排执行成员",
             detail: "等待 web 和 api 返回验证结果",
             status: "active",
         },
@@ -858,6 +949,13 @@ function runGroupStatusFollowupSelfTest() {
         agentQa: [],
         getRuntime: () => ({
             taskCard: {
+                live_todo_plan: {
+                    steps: [
+                        { id: "plan", content: "确认目标和范围", activeForm: "已确认目标和范围", status: "completed" },
+                        { id: "execute", content: "等待执行成员提交结果", activeForm: "正在等待执行成员提交结果", status: "in_progress" },
+                    ],
+                    next_action: "等待执行成员提交结果说明，然后我验收。",
+                },
                 agent_progress_summary: {
                     rows: [
                         { agent: "api", status: "running", current_focus: "正在验证接口" },
@@ -908,7 +1006,7 @@ function runGroupStatusFollowupSelfTest() {
         tasks: [{
                 id: "task-progress-refresh-demo",
                 group_id: "group-progress-refresh-demo",
-                title: "长时间等待子 Agent 的任务",
+                title: "长时间等待执行成员的任务",
                 status: "in_progress",
                 updated_at: "2020-01-01T00:00:00.000Z",
                 work_items: [{
@@ -921,7 +1019,7 @@ function runGroupStatusFollowupSelfTest() {
                     }],
                 delivery_summary: {
                     work_item_state: {
-                        last_requeue: { at: "2020-01-01T00:20:00.000Z", reason: "子 Agent 工作项长时间无进展" },
+                        last_requeue: { at: "2020-01-01T00:20:00.000Z", reason: "执行成员工作项长时间无进展" },
                     },
                 },
             }],
@@ -940,11 +1038,66 @@ function runGroupStatusFollowupSelfTest() {
         }),
     });
     const progressRefreshFollowup = buildGroupStatusFollowupSummary({ status: progressRefreshStatus });
+    const reworkStatus = buildGroupMainAgentStatus({
+        groupId: "group-rework-status-demo",
+        tasks: [{
+                id: "task-status-completed-newer",
+                group_id: "group-rework-status-demo",
+                title: "较新的已完成任务",
+                status: "done",
+                updated_at: "2026-07-09T10:00:00.000Z",
+                delivery_summary: { delivery_report: { status: "done", headline: "这项旧任务已完成。" } },
+            }, {
+                id: "task-status-rework",
+                group_id: "group-rework-status-demo",
+                title: "登录复核返工",
+                status: "reworking",
+                updated_at: "2026-07-08T10:00:00.000Z",
+                delivery_summary: {},
+            }],
+        agentQa: [],
+        getRuntime: (task) => task?.id === "task-status-rework" ? ({
+            taskCard: {
+                phase: "reworking",
+                progress_checkpoints: {
+                    items: [
+                        { id: "cp-review-failed", label: "复核未通过", detail: "正在让原执行成员按失败点返工。", status: "active", at: "2026-07-08T10:00:00.000Z" },
+                    ],
+                },
+                agent_progress_summary: {
+                    rows: [{ agent: "web", status: "reworking", current_focus: "修复复核发现的问题" }],
+                },
+            },
+        }) : null,
+    });
+    const reworkFollowup = buildGroupStatusFollowupSummary({ status: reworkStatus });
+    const needsUserFollowup = buildGroupStatusFollowupSummary({
+        status: {
+            schema: "ccm-group-main-agent-status-v1",
+            phase: "needs_user",
+            label: "等待确认",
+            task_id: "task-needs-user-demo",
+            latest_task_title: "执行前计划确认",
+            latest_progress_checkpoint: {
+                label: "计划已整理",
+                detail: "等待你确认影响范围后再派发执行成员",
+                status: "warning",
+            },
+            current_todo_summary: {
+                schema: "ccm-group-main-agent-current-todo-v1",
+                recent_action: "已整理执行前计划",
+                needs_action: "确认执行前计划，确认后才会派发执行成员。",
+            },
+            open_qa_count: 1,
+            blockers: ["CCM_AGENT_RECEIPT trace_id=secret"],
+            needs: ["确认影响范围仅限登录页"],
+        },
+    });
     const checks = {
         groupStatusFollowupRecognized: isGroupProgressStatusRequest("现在进展怎么样了？"),
         groupStatusFollowupAvoidsManagementMutation: !isGroupProgressStatusRequest("把任务状态设置为 done"),
         groupStatusFollowupFriendly: summary.text.includes("最近群聊任务进展") && summary.text.includes("下一步"),
-        groupStatusFollowupShowsChildAgentWaitingState: summary.text.includes("子 Agent 等待情况")
+        groupStatusFollowupShowsChildAgentWaitingState: summary.text.includes("执行成员等待情况")
             && summary.text.includes("已完成：web")
             && summary.text.includes("处理中：api")
             && summary.text.includes("待补齐：docs")
@@ -952,6 +1105,8 @@ function runGroupStatusFollowupSelfTest() {
         groupStatusDerivesChildAgentRows: derivedStatus.child_agent_status_summary?.completed_agents?.includes("web")
             && derivedStatus.child_agent_status_summary?.running_agents?.includes("api")
             && derivedStatus.child_agent_status_summary?.attention_agents?.includes("docs"),
+        groupStatusCurrentTodoPostTurnVisible: derivedStatus.current_todo_summary?.recent_action === "已确认目标和范围"
+            && derivedStatus.current_todo_summary?.needs_action === "等待执行成员提交结果说明，然后我验收。",
         groupStatusDerivesPickupSummary: pickupStatus.pickup_summary?.schema === "ccm-group-main-agent-pickup-summary-v1"
             && pickupStatus.pickup_summary?.title === "回来继续看这里"
             && pickupStatus.pickup_summary?.review_items?.some((item) => item.includes("frontend/src/demo.ts"))
@@ -968,6 +1123,18 @@ function runGroupStatusFollowupSelfTest() {
             && progressRefreshFollowup.text.includes("接续要点")
             && progressRefreshFollowup.text.includes("补齐筛选 UI 验证")
             && !GROUP_PROGRESS_STATUS_INTERNAL_PATTERN.test(progressRefreshFollowup.text),
+        groupStatusFollowupShowsReworkState: reworkStatus.task_id === "task-status-rework"
+            && reworkStatus.phase === "reworking"
+            && reworkStatus.label === "返工中"
+            && reworkFollowup.text.includes("登录复核返工")
+            && reworkFollowup.text.includes("当前状态是返工中")
+            && reworkFollowup.text.includes("重新验收和总结")
+            && !GROUP_PROGRESS_STATUS_INTERNAL_PATTERN.test(reworkFollowup.text),
+        groupStatusFollowupShowsUserActionSummary: needsUserFollowup.text.includes("需要你处理")
+            && needsUserFollowup.text.includes("确认执行前计划")
+            && needsUserFollowup.text.includes("处理 1 个待确认问答")
+            && needsUserFollowup.next_action.includes("确认执行前计划")
+            && !GROUP_PROGRESS_STATUS_INTERNAL_PATTERN.test(needsUserFollowup.text),
         groupStatusFollowupHidesProtocol: !GROUP_PROGRESS_STATUS_INTERNAL_PATTERN.test(summary.text),
         groupStatusFollowupNoTodo: summary.display_policy.todo_visible === false && summary.display_policy.task_card_visible === false,
     };

@@ -77,7 +77,7 @@ const confirmIntake = async () => {
 
 const reviseIntake = async () => {
   if (!confirmation.value?.id) return
-  const feedback = window.prompt('希望主 Agent 怎么调整这份执行前计划？', '')
+  const feedback = window.prompt('希望我怎么调整这份执行前计划？', '')
   if (!feedback?.trim()) return
   intakeBusy.value = true
   try {
@@ -119,7 +119,7 @@ const runAction = async (task, action) => {
       return await confirmIntake()
     }
     if (action === 'edit') {
-      const feedback = window.prompt('希望主 Agent 怎么调整这份执行前计划？', '')
+      const feedback = window.prompt('希望我怎么调整这份执行前计划？', '')
       if (!feedback?.trim()) return
       await api('/api/usability/intake/revise', { task_id: task.id, feedback: feedback.trim() })
     }
@@ -162,7 +162,7 @@ onUnmounted(() => timer && window.clearInterval(timer))
       <div>
         <span class="eyebrow">我的工作台</span>
         <h1>今天想推进什么？</h1>
-        <p>说目标就够了。主 Agent 会先整理范围、验收标准和风险，等你确认后再开始。</p>
+        <p>说目标就够了。我会先整理范围、验收标准和风险，等你确认后再开始。</p>
       </div>
       <button class="ghost" :disabled="refreshing" @click="load()">{{ refreshing ? '刷新中…' : '刷新' }}</button>
     </header>

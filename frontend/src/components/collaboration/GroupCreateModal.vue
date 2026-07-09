@@ -17,7 +17,7 @@ const emit = defineEmits(['close', 'submit', 'update:name', 'toggle-project'])
         <input :value="name" placeholder="如：智评生活开发群" @input="emit('update:name', $event.target.value)">
       </div>
       <div class="form-group">
-        <label>选择加入的项目 Agent</label>
+        <label>选择加入的项目执行成员</label>
         <div class="checkbox-list">
           <label v-for="project in projects" :key="project.name" class="checkbox-item">
             <input

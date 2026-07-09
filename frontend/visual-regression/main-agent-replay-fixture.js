@@ -46,7 +46,7 @@ const ReplayApp = {
   setup() {
     const messages = computed(() => replay.messages || [])
     const workSummary = (msg) => summarizeWorkEvents(msg.workEvents || [])
-    const compactWorkText = (text) => sanitizeUserFacingAgentText(text, '子 Agent 正在执行。', 220)
+    const compactWorkText = (text) => sanitizeUserFacingAgentText(text, '执行成员正在执行。', 220)
     return { replay, messages, getDecision, getTaskCard, workSummary, compactWorkText, agentStyle, timeText }
   },
   template: `
@@ -64,7 +64,7 @@ const ReplayApp = {
           :class="msg.role"
         >
           <div class="replay-meta">
-            <span>{{ msg.role === 'user' ? '用户' : (msg.agent === 'coordinator' ? '主 Agent' : msg.agent || 'Agent') }}</span>
+            <span>{{ msg.role === 'user' ? '用户' : (msg.agent === 'coordinator' ? '协调者' : msg.agent || 'Agent') }}</span>
             <span>{{ msg.type || 'message' }} · {{ timeText(msg.timestamp) }}</span>
           </div>
           <div class="replay-content">{{ msg.content }}</div>
@@ -74,7 +74,7 @@ const ReplayApp = {
             <summary class="work-events-head">
               <div class="work-head-main">
                 <span class="work-agent-dot"></span>
-                <span class="work-title">子 Agent 执行摘要</span>
+                <span class="work-title">执行成员执行摘要</span>
                 <span class="work-state-pill">执行中</span>
               </div>
               <div class="work-head-meta">

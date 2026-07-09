@@ -152,6 +152,8 @@ function browserCandidate(result: BrowserCheckResult) {
       result.pageTextPreview || "",
       (result.consoleMessages || []).join("\n"),
       result.consoleLogPath || "",
+      (result.dialogMessages || []).join("\n"),
+      result.dialogLogPath || "",
       result.consoleErrors.join("\n"),
       result.pageErrors.join("\n"),
       (result.networkRequests || []).join("\n"),

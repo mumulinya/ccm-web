@@ -2,9 +2,9 @@ import * as fs from "fs";
 import { runTestAgent } from "./agent";
 import { TestAgentArtifactVerification, verifyTestAgentArtifactManifest } from "./artifact-verifier";
 import { cliOverrides, parseTestAgentCliArgs, testAgentCliUsage } from "./cli-options";
-import { TestAgentContractIssue, TestAgentWorkOrderContractValidation, validateTestAgentWorkOrderContract } from "./contract";
+import { TestAgentWorkOrderContractValidation, validateTestAgentHandoffContract, validateTestAgentWorkOrderContract } from "./contract";
+import { buildTestAgentExecutionPlan, TestAgentExecutionPlan } from "./execution-plan";
 import { TestAgentArtifactManifest, TestAgentReport, TestAgentRuntimeOptions, TestAgentWorkOrder } from "./types";
-import { buildTestAgentWorkOrderFromHandoff, TestAgentHandoff } from "./work-order-builder";
 
 interface TestAgentCliWriter {
   write(message: string): unknown;
@@ -67,6 +67,8 @@ export function formatTestAgentCliValidationSummary(validation: TestAgentWorkOrd
 export function formatTestAgentCliReportSummary(report: TestAgentReport) {
   const coverage = report.requiredCheckCoverage.map(item => `${item.check}:${item.status}`).join(", ") || "none";
   const acceptance = statusCounts(report.acceptanceCoverage);
+  const networkErrors = (report.browserNetworkSummary || []).reduce((sum, item) => sum + Number(item.errorCount || 0), 0);
+  const failedNetworkUrls = (report.browserNetworkSummary || []).flatMap(item => item.failedUrls || []).slice(0, 3);
   const lines = [
     `TestAgent report: ${report.status} (${report.recommendation})`,
     `Summary: ${report.summary}`,
@@ -74,6 +76,7 @@ export function formatTestAgentCliReportSummary(report: TestAgentReport) {
     `Commands: ${statusCounts(report.commandResults)}`,
     `HTTP checks: ${statusCounts(report.httpResults)}`,
     `Browser checks: ${statusCounts(report.browserResults)}`,
+    `Browser network: errors:${networkErrors}${failedNetworkUrls.length ? ` failed:${failedNetworkUrls.join(", ")}` : ""}`,
     `Required checks: ${coverage}`,
     `Acceptance coverage: ${acceptance}`,
     `Artifacts: ${report.artifactDir}`,
@@ -93,6 +96,23 @@ export function formatTestAgentCliArtifactVerificationSummary(verification: Test
   for (const item of verification.items.filter(item => item.status === "failed").slice(0, 8)) {
     lines.push(`- ${item.type} ${item.path}: ${item.error || "failed"}`);
   }
+  return `${lines.join("\n")}\n`;
+}
+
+export function formatTestAgentCliExecutionPlanSummary(plan: TestAgentExecutionPlan) {
+  const lines = [
+    `TestAgent execution plan: ${plan.valid ? "valid" : "invalid"}`,
+    `Work order: ${plan.workOrderId}`,
+    `Projects: ${plan.projects.map(project => project.name).join(", ") || "none"}`,
+    `Commands: ${plan.summary.commands} (auto-discovered ${plan.summary.autoDiscoveredCommands})`,
+    `Dev servers: ${plan.summary.devServers}`,
+    `HTTP checks: ${plan.summary.httpChecks} (adversarial ${plan.summary.adversarialHttpChecks})`,
+    `Browser checks: ${plan.summary.browserChecks} (auto ${plan.summary.autoBrowserChecks}, adversarial ${plan.summary.adversarialBrowserChecks})`,
+    `Browser provider: ${plan.browserProvider}`,
+    `Expected artifacts: ${plan.summary.expectedArtifactTypes.join(", ") || "none"}`,
+    `Artifact dir: ${plan.artifactDir}`,
+    ...formatIssues("Issues", plan.issues),
+  ];
   return `${lines.join("\n")}\n`;
 }
 
@@ -124,22 +144,6 @@ function isJsonObject(input: any) {
 
 function invalidJsonRootMessage(label: string, file: string) {
   return `Invalid ${label} file "${file}": root value must be a JSON object.`;
-}
-
-function handoffWarningIssues(warnings: string[]): TestAgentContractIssue[] {
-  return warnings.map(message => ({
-    severity: "warning",
-    code: "handoff_builder_warning",
-    message,
-  }));
-}
-
-function withAdditionalWarnings(validation: TestAgentWorkOrderContractValidation, warnings: TestAgentContractIssue[]) {
-  if (!warnings.length) return validation;
-  return {
-    ...validation,
-    warnings: [...warnings, ...validation.warnings],
-  };
 }
 
 export async function runTestAgentCli(args = process.argv.slice(2), io: TestAgentCliIo = {}) {
@@ -195,21 +199,38 @@ export async function runTestAgentCli(args = process.argv.slice(2), io: TestAgen
   }
 
   const overrides = cliOverrides(options);
-  let additionalWarnings: TestAgentContractIssue[] = [];
-  let workOrderInput: TestAgentWorkOrder;
+  let workOrderInput: TestAgentWorkOrder | null = null;
+  let validation: TestAgentWorkOrderContractValidation;
   if (options.handoffPath) {
-    const built = buildTestAgentWorkOrderFromHandoff(workOrderJson.input as TestAgentHandoff);
-    workOrderInput = built.workOrder;
-    additionalWarnings = handoffWarningIssues(built.warnings);
+    const handoffValidation = validateTestAgentHandoffContract(workOrderJson.input, overrides);
+    validation = handoffValidation;
+    workOrderInput = handoffValidation.workOrder || null;
   } else {
     workOrderInput = workOrderJson.input as TestAgentWorkOrder;
+    validation = validateTestAgentWorkOrderContract(workOrderInput, overrides);
   }
-  const validation = withAdditionalWarnings(validateTestAgentWorkOrderContract(workOrderInput, overrides), additionalWarnings);
-  if (options.validateOnly || !validation.valid) {
+  if (!validation.valid) {
     stdout.write(options.summary
       ? formatTestAgentCliValidationSummary(validation)
       : `${JSON.stringify(validation, null, 2)}\n`);
-    return { exitCode: validation.valid ? 0 : 2 };
+    return { exitCode: 2 };
+  }
+  if (options.validateOnly) {
+    stdout.write(options.summary
+      ? formatTestAgentCliValidationSummary(validation)
+      : `${JSON.stringify(validation, null, 2)}\n`);
+    return { exitCode: 0 };
+  }
+  if (!workOrderInput) {
+    stderr.write("Unable to build TestAgent work order from input.\n");
+    return { exitCode: 2 };
+  }
+  if (options.planOnly) {
+    const plan = buildTestAgentExecutionPlan(workOrderInput, overrides, validation);
+    stdout.write(options.summary
+      ? formatTestAgentCliExecutionPlanSummary(plan)
+      : `${JSON.stringify(plan, null, 2)}\n`);
+    return { exitCode: plan.valid ? 0 : 2 };
   }
 
   const report = await runAgent(workOrderInput, overrides);

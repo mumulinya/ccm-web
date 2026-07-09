@@ -20,6 +20,76 @@ export interface GlobalMemoryItem {
     expiresAt?: string;
 }
 export declare const GLOBAL_AGENT_MEMORY_FILE: string;
+export declare function acquireGlobalAgentMemorySelfTestLock(label?: string, options?: any): () => void;
+export declare function scanGlobalAgentMemorySelfTestContamination(options?: any): {
+    schema: string;
+    generatedAt: string;
+    file: string;
+    status: string;
+    pass: boolean;
+    active_contamination_count: number;
+    residue_contamination_count: number;
+    contamination_count: number;
+    contaminated_file_count: number;
+    files: {
+        exists: boolean;
+        contaminated: boolean;
+        sentinelCount: number;
+        hasSelftestSource: boolean;
+        bytes: number;
+        file: string;
+        role: string;
+        active: boolean;
+    }[];
+    rows: any[];
+};
+export declare function archiveGlobalAgentMemorySelfTestResidues(options?: any): {
+    schema: string;
+    dryRun: boolean;
+    reason: string;
+    actor: string;
+    archiveDir: string;
+    selectedCount: number;
+    archivedCount: number;
+    skippedCount: number;
+    archived: any[];
+    skipped: any[];
+    before: {
+        active_contamination_count: number;
+        residue_contamination_count: number;
+    };
+    after: {
+        active_contamination_count: number;
+        residue_contamination_count: number;
+    };
+};
+export declare function runGlobalAgentMemorySelfTestResidueArchiveSelfTest(): {
+    pass: boolean;
+    checks: {
+        beforeDetectsResidue: boolean;
+        dryRunDoesNotMoveFile: boolean;
+        archiveMovesOnlyResidue: boolean;
+        activeMemoryStillClean: boolean;
+        residueNoLongerIncludesTestFile: boolean;
+    };
+    archived: {
+        archiveFile: string;
+        archivedCount: number;
+        skippedCount: number;
+    };
+};
+export declare function runGlobalAgentMemorySelfTestIsolationSelfTest(): {
+    pass: boolean;
+    checks: {
+        detectsActivePollution: boolean;
+        lockFileExists: boolean;
+        startedCleanOrWarnOnly: boolean;
+    };
+    polluted: {
+        status: string;
+        active: number;
+    };
+};
 export declare function loadGlobalAgentTranscript(sessionId: string): {
     version: number;
     sessionId: string;

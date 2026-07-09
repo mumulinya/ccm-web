@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { getDisplayStream, getStreamlinedToolSummary, getStreamlinedUserText, getTechnicalDetailSections, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
+import { getDisplayStream, getStreamlinedToolSummary, getStreamlinedUserText, getTechnicalDetailSections, sanitizeUserFacingPlanStructure, sanitizeUserFacingPlanText, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
 
 const props = defineProps({
   decision: { type: Object, default: null },
@@ -15,10 +15,10 @@ const actionLabels = {
   query_knowledge_base: '查询知识库',
   inspect_task_status: '查看任务状态',
   create_project_task: '创建项目任务',
-  dispatch_child_agent: '派发子 Agent',
+  dispatch_child_agent: '安排执行成员',
   ask_user_clarification: '追问用户',
   govern_task_lifecycle: '任务治理',
-  read_child_agent_receipts: '读取子 Agent 结果说明',
+  read_child_agent_receipts: '读取执行成员结果说明',
   replan_from_observation: '重新规划',
   generate_final_reply: '生成回复',
 }
@@ -27,8 +27,8 @@ const modeInfo = computed(() => {
   const mode = props.decision?.mode || ''
   if (mode === 'project_analysis') return { label: '项目分析', tone: 'analysis', icon: '🔎', summary: '只读查看项目上下文并回答，不创建任务。' }
   if (mode === 'project_task') return { label: '项目任务', tone: 'task', icon: '🧩', summary: '已把明确需求转成项目任务，并进入执行队列。' }
-  if (mode === 'delegation') return { label: '协调派发', tone: 'task', icon: '🧠', summary: '主 Agent 正在拆分计划并派发子 Agent。' }
-  if (mode === 'followup') return { label: '追加要求', tone: 'task', icon: '🔁', summary: '已并入原任务，主 Agent 会基于当前状态继续。' }
+  if (mode === 'delegation') return { label: '协调安排', tone: 'task', icon: '🧠', summary: '我正在拆分计划并安排执行成员。' }
+  if (mode === 'followup') return { label: '追加要求', tone: 'task', icon: '🔁', summary: '已并入原任务，我会基于当前状态继续。' }
   if (mode === 'governance') return { label: '任务治理', tone: 'govern', icon: '🛡️', summary: '停止、取消、归档等动作需要显式授权。' }
   return { label: '普通回复', tone: 'chat', icon: '💬', summary: '只处理当前对话，不创建任务。' }
 })
@@ -44,6 +44,7 @@ const verify = computed(() => props.decision?.verify || {})
 const internalLoop = computed(() => props.decision?.internal_loop || props.decision?.loop || null)
 const loopStages = computed(() => Array.isArray(internalLoop.value?.stages) ? internalLoop.value.stages : [])
 const PLAN_VISIBLE_LIMIT = 7
+const todoPlan = computed(() => props.decision?.todo_plan || props.decision?.todoPlan || null)
 const isQuietCompletedStatus = (status) => ['completed', 'skipped', 'cancelled'].includes(status)
 const prioritizePlanSteps = (steps) => {
   const raw = Array.isArray(steps) ? steps : []
@@ -76,21 +77,45 @@ const prioritizePlanSteps = (steps) => {
 const rawPlanSteps = computed(() => {
   const raw = Array.isArray(props.decision?.user_plan_steps)
     ? props.decision.user_plan_steps
-    : Array.isArray(props.decision?.todo_plan?.steps)
-      ? props.decision.todo_plan.steps
+    : Array.isArray(todoPlan.value?.steps)
+      ? todoPlan.value.steps
       : []
   return raw
 })
+const todoPlanPolicy = computed(() => ({
+  ...(todoPlan.value?.display || {}),
+  ...(todoPlan.value?.display_policy || todoPlan.value?.displayPolicy || {}),
+}))
+const hasTodoVerificationNudge = computed(() => Boolean(
+  todoPlan.value?.verification_nudge === true
+    || todoPlan.value?.verificationNudge === true
+    || todoPlan.value?.verification_reminder
+    || todoPlan.value?.verificationReminder
+))
+const shouldArchiveCompletedPlan = computed(() => {
+  const policy = todoPlanPolicy.value
+  const archiveCompleted = policy.archive_completed_todo === true
+    || policy.archiveCompletedTodo === true
+    || policy.archived_when_complete === true
+    || policy.archivedWhenComplete === true
+    || policy.visible_when_completed === false
+    || policy.visibleWhenCompleted === false
+  if (!archiveCompleted || hasTodoVerificationNudge.value) return false
+  return rawPlanSteps.value.length > 0 && rawPlanSteps.value.every(step => ['completed', 'skipped', 'cancelled'].includes(String(step?.status || '').toLowerCase()))
+})
 const planSteps = computed(() => prioritizePlanSteps(rawPlanSteps.value))
 const shouldHideSimpleConversationPlan = computed(() => {
+  if (shouldArchiveCompletedPlan.value) return true
+  const display = todoPlan.value?.display || {}
+  const policy = todoPlan.value?.display_policy || todoPlan.value?.displayPolicy || {}
+  if (policy.user_visible === false || policy.hide_for_ordinary_conversation === true || policy.hideForOrdinaryConversation === true) return true
   if (props.decision?.mode !== 'conversation') return false
-  const display = props.decision?.todo_plan?.display || {}
   if (display.user_visible === true && display.hide_for_simple_conversation !== true) return false
   const hasBlockingOrAction = blockedPermissions.value.length > 0 || planSteps.value.some(step => ['failed', 'needs_confirmation', 'reworking', 'reviewing', 'in_progress'].includes(step.status))
   return display.user_visible === false || display.hide_for_simple_conversation === true || !hasBlockingOrAction
 })
 const hasExplicitPlan = computed(() => planSteps.value.length > 0 && !shouldHideSimpleConversationPlan.value)
-const planTitle = computed(() => props.decision?.todo_plan?.title || (hasExplicitPlan.value ? '我准备这样处理' : '处理步骤'))
+const planTitle = computed(() => todoPlan.value?.title || (hasExplicitPlan.value ? '我准备这样处理' : '处理步骤'))
 const visiblePlanSteps = computed(() => {
   if (shouldHideSimpleConversationPlan.value) return []
   if (hasExplicitPlan.value) return planSteps.value
@@ -108,16 +133,16 @@ const fallbackVerificationReminder = () => ({
   status: 'needs_verification_step',
   title: '还缺验收步骤',
   headline: '完成前需要补一项真实验证，或者说明为什么当前不能验证。',
-  next_action: '主 Agent 会把验收补进计划，再继续交付总结。',
+  next_action: '我会把验收补进计划，再继续交付总结。',
 })
 const verificationReminder = computed(() => {
   if (!visiblePlanSteps.value.length || props.decision?.mode === 'conversation') return null
-  const raw = props.decision?.todo_plan?.verification_reminder
-    || props.decision?.todo_plan?.verificationReminder
+  const raw = todoPlan.value?.verification_reminder
+    || todoPlan.value?.verificationReminder
     || props.decision?.verification_reminder
     || props.decision?.verificationReminder
     || null
-  const legacyNudge = props.decision?.todo_plan?.verification_nudge === true || props.decision?.todo_plan?.verificationNudge === true
+  const legacyNudge = todoPlan.value?.verification_nudge === true || todoPlan.value?.verificationNudge === true
   const reminder = raw || (legacyNudge ? fallbackVerificationReminder() : null)
   const policy = reminder?.display_policy || reminder?.displayPolicy || {}
   if (!reminder || policy.user_visible === false || policy.show_for_ordinary_conversation === true && props.decision?.mode === 'conversation') return null
@@ -139,7 +164,7 @@ const nextPlanStep = computed(() => {
   return visiblePlanSteps.value.find((step, index) => index > currentIndex && ['pending', 'in_progress', 'reviewing', 'reworking', 'needs_confirmation'].includes(step.status)) || null
 })
 const currentPlanActions = computed(() => Array.isArray(currentPlanStep.value?.actions) ? currentPlanStep.value.actions : [])
-const isLiveTodoPlan = computed(() => props.decision?.todo_plan?.source === 'ccm-live-task-todo')
+const isLiveTodoPlan = computed(() => todoPlan.value?.source === 'ccm-live-task-todo')
 const livePlanActiveStatus = computed(() => visiblePlanSteps.value.find(step => ['failed', 'needs_confirmation', 'reworking', 'reviewing', 'in_progress'].includes(step.status))?.status || '')
 const verifyBadge = computed(() => {
   if (verify.value?.passed) return { label: '已检查', tone: 'ok' }
@@ -218,7 +243,7 @@ const contextLabels = computed(() => {
   if (selectedActions.value.includes('read_project_code_snapshot')) labels.push('项目代码快照')
   if (selectedActions.value.includes('query_knowledge_base')) labels.push('知识库')
   if (selectedActions.value.includes('inspect_task_status')) labels.push('任务状态')
-  if (selectedActions.value.includes('read_child_agent_receipts')) labels.push('子 Agent 结果说明')
+  if (selectedActions.value.includes('read_child_agent_receipts')) labels.push('执行成员结果说明')
   return labels
 })
 
@@ -231,7 +256,7 @@ const workchain = computed(() => displayStream.value?.workchain || props.decisio
 const workchainStages = computed(() => Array.isArray(workchain.value?.stages) ? workchain.value.stages : [])
 const streamlinedText = computed(() => getStreamlinedUserText(props.decision, modeInfo.value.summary))
 const streamlinedToolSummary = computed(() => getStreamlinedToolSummary(props.decision, visibleActions.value.join('、')))
-const dispatchLaunchSummary = computed(() => sanitizeUserFacingStructure(
+const dispatchLaunchSummary = computed(() => sanitizeUserFacingPlanStructure(
   props.decision?.dispatch_launch_summary
     || props.decision?.dispatchLaunchSummary
     || displayStream.value?.dispatch_launch_summary
@@ -239,23 +264,30 @@ const dispatchLaunchSummary = computed(() => sanitizeUserFacingStructure(
     || null,
   { fallback: '派发信息已整理，技术细节已放入技术详情。', max: 260 }
 ))
-const dispatchLaunchRows = computed(() => Array.isArray(dispatchLaunchSummary.value?.rows) ? dispatchLaunchSummary.value.rows : [])
+const dispatchLaunchRows = computed(() => Array.isArray(dispatchLaunchSummary.value?.rows)
+  ? dispatchLaunchSummary.value.rows.map(row => ({
+    ...row,
+    role: sanitizeUserFacingPlanText(row.role || '执行成员', '执行成员', 80),
+    task: row.task ? sanitizeUserFacingPlanText(row.task, '执行任务已整理。', 220) : row.task,
+    reason: row.reason ? sanitizeUserFacingPlanText(row.reason, '安排原因已整理。', 180) : row.reason,
+  }))
+  : [])
 const technicalSections = computed(() => getTechnicalDetailSections(props.decision, {
   trace_id: props.decision?.trace_id,
   blockers: blockedPermissions.value.map(item => item.reason || item.action_id),
 }))
 const decisionExplanation = computed(() => {
   if (blockedPermissions.value.length) return `需要确认：${blockedPermissions.value.map(p => p.reason || actionLabels[p.action_id] || p.action_id).join('；')}`
-  if (!selectedActions.value.includes('dispatch_child_agent') && props.decision?.mode === 'conversation') return '没有派发：这轮是普通对话，主 Agent 只回复用户，不创建任务。'
+  if (!selectedActions.value.includes('dispatch_child_agent') && props.decision?.mode === 'conversation') return '没有安排：这轮是普通对话，我只回复用户，不创建任务。'
   if (!selectedActions.value.includes('dispatch_child_agent') && props.decision?.mode === 'project_analysis') return '没有派发：这轮是只读项目分析，只读取上下文和代码快照，不修改项目。'
   if (selectedActions.value.includes('create_project_task')) return '已创建任务：当前消息包含明确执行意图，允许进入项目任务流程。'
-  if (selectedActions.value.includes('dispatch_child_agent')) return '已派发：主 Agent 已生成工作单，等待子 Agent 执行并提交结果说明。'
+  if (selectedActions.value.includes('dispatch_child_agent')) return '已安排：我已生成执行任务，等待执行成员执行并提交结果说明。'
   return modeInfo.value.summary
 })
 const userSummary = computed(() => {
   if (displayStream.value?.user_visible_text) return streamlinedText.value
   if (blockedPermissions.value.length) return decisionExplanation.value
-  if (props.decision?.mode === 'conversation') return '已判断为普通对话，主 Agent 直接回复用户，不创建任务。'
+  if (props.decision?.mode === 'conversation') return '已判断为普通对话，我会直接回复用户，不创建任务。'
   if (props.decision?.mode === 'project_analysis') return '已判断为只读项目分析，只读取必要上下文并回答，不派发开发任务。'
   return decisionExplanation.value || modeInfo.value.summary
 })
@@ -295,13 +327,13 @@ const actionRows = computed(() => selectedActions.value.map(id => {
     <div v-if="dispatchLaunchRows.length" class="dispatch-launch-summary">
       <div class="dispatch-launch-head">
         <strong>{{ dispatchLaunchSummary.title || '已派发的工作' }}</strong>
-        <span>{{ dispatchLaunchSummary.count_label || `${dispatchLaunchRows.length} 个子 Agent` }}</span>
+        <span>{{ dispatchLaunchSummary.count_label || `${dispatchLaunchRows.length} 个执行成员目标` }}</span>
       </div>
       <p v-if="dispatchLaunchSummary.headline">{{ dispatchLaunchSummary.headline }}</p>
       <div class="dispatch-launch-list">
         <div v-for="row in dispatchLaunchRows" :key="row.id || row.agent" class="dispatch-launch-row">
           <div>
-            <span>{{ row.role || '子 Agent' }} · {{ row.agent }}</span>
+            <span>{{ row.role || '执行成员' }} · {{ row.agent }}</span>
             <em>{{ row.status_label || '已派发' }}</em>
           </div>
           <strong>{{ row.task }}</strong>
@@ -311,7 +343,7 @@ const actionRows = computed(() => selectedActions.value.map(id => {
       </div>
       <small v-if="dispatchLaunchSummary.next_action" class="dispatch-launch-next">下一步：{{ dispatchLaunchSummary.next_action }}</small>
     </div>
-    <div v-if="workchainStages.length" class="decision-workchain" aria-label="主 Agent 工作链路">
+    <div v-if="workchainStages.length" class="decision-workchain" aria-label="处理链路">
       <div v-for="stage in workchainStages" :key="stage.id" :class="['workchain-stage', stage.status]">
         <span>{{ stage.label }}</span>
         <small>{{ loopStatusText(stage.status) }}</small>

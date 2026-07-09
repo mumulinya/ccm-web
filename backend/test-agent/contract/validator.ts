@@ -1,8 +1,11 @@
 import { z } from "zod";
-import { TestAgentOptions, TestAgentReport, TestAgentWorkOrder, WorkOrderIssue } from "../types";
+import { TestAgentOptions, TestAgentReport, TestAgentVerdict, TestAgentWorkOrder, WorkOrderIssue } from "../types";
 import { normalizeTestAgentWorkOrder } from "../work-order";
+import { buildTestAgentWorkOrderFromHandoff, TestAgentBuiltWorkOrder, TestAgentHandoff } from "../work-order-builder";
 import {
+  TestAgentHandoffContractSchema,
   TestAgentReportContractSchema,
+  TestAgentVerdictContractSchema,
   TestAgentWorkOrderContractSchema,
 } from "./schema";
 
@@ -21,7 +24,20 @@ export interface TestAgentWorkOrderContractValidation {
   normalized?: ReturnType<typeof normalizeTestAgentWorkOrder>["workOrder"];
 }
 
+export interface TestAgentHandoffContractValidation extends TestAgentWorkOrderContractValidation {
+  workOrder?: TestAgentWorkOrder;
+  built?: TestAgentBuiltWorkOrder;
+  builderWarnings: string[];
+  workOrderValidation?: TestAgentWorkOrderContractValidation;
+}
+
 export interface TestAgentReportContractValidation {
+  valid: boolean;
+  errors: TestAgentContractIssue[];
+  warnings: TestAgentContractIssue[];
+}
+
+export interface TestAgentVerdictContractValidation {
   valid: boolean;
   errors: TestAgentContractIssue[];
   warnings: TestAgentContractIssue[];
@@ -49,11 +65,50 @@ function workOrderIssue(issue: WorkOrderIssue): TestAgentContractIssue {
   };
 }
 
+export function handoffBuilderWarningIssues(warnings: string[]): TestAgentContractIssue[] {
+  return warnings.map(message => ({
+    severity: "warning",
+    code: "handoff_builder_warning",
+    message,
+  }));
+}
+
 function splitIssues(issues: TestAgentContractIssue[]) {
   return {
     errors: issues.filter(issue => issue.severity === "error"),
     warnings: issues.filter(issue => issue.severity === "warning"),
   };
+}
+
+export function validateTestAgentHandoffContract(input: unknown, overrides: Partial<TestAgentOptions> = {}): TestAgentHandoffContractValidation {
+  const parsed = TestAgentHandoffContractSchema.safeParse(input);
+  if (!parsed.success) {
+    const { errors, warnings } = splitIssues(zodIssues(parsed.error));
+    return { valid: false, errors, warnings, builderWarnings: [] };
+  }
+
+  const built = buildTestAgentWorkOrderFromHandoff(parsed.data as unknown as TestAgentHandoff);
+  const builderWarningIssues = handoffBuilderWarningIssues(built.warnings);
+  const workOrderValidation = validateTestAgentWorkOrderContract(built.workOrder, overrides);
+  return {
+    valid: workOrderValidation.valid,
+    errors: workOrderValidation.errors,
+    warnings: [...builderWarningIssues, ...workOrderValidation.warnings],
+    normalized: workOrderValidation.normalized,
+    workOrder: built.workOrder,
+    built,
+    builderWarnings: built.warnings,
+    workOrderValidation,
+  };
+}
+
+export function assertTestAgentHandoffContract(input: unknown, overrides: Partial<TestAgentOptions> = {}) {
+  const result = validateTestAgentHandoffContract(input, overrides);
+  if (!result.valid) {
+    const message = result.errors.map(issue => `${issue.path ? `${issue.path}: ` : ""}${issue.message}`).join("; ");
+    throw new Error(`Invalid TestAgent handoff contract: ${message || "unknown error"}`);
+  }
+  return result;
 }
 
 export function validateTestAgentWorkOrderContract(input: unknown, overrides: Partial<TestAgentOptions> = {}): TestAgentWorkOrderContractValidation {
@@ -92,6 +147,15 @@ export function validateTestAgentReportContract(input: unknown): TestAgentReport
   return { valid: true, errors: [], warnings: [] };
 }
 
+export function validateTestAgentVerdictContract(input: unknown): TestAgentVerdictContractValidation {
+  const parsed = TestAgentVerdictContractSchema.safeParse(input);
+  if (!parsed.success) {
+    const { errors, warnings } = splitIssues(zodIssues(parsed.error));
+    return { valid: false, errors, warnings };
+  }
+  return { valid: true, errors: [], warnings: [] };
+}
+
 export function assertTestAgentReportContract(input: unknown): TestAgentReport {
   const result = validateTestAgentReportContract(input);
   if (!result.valid) {
@@ -99,4 +163,13 @@ export function assertTestAgentReportContract(input: unknown): TestAgentReport {
     throw new Error(`Invalid TestAgent report contract: ${message || "unknown error"}`);
   }
   return input as TestAgentReport;
+}
+
+export function assertTestAgentVerdictContract(input: unknown): TestAgentVerdict {
+  const result = validateTestAgentVerdictContract(input);
+  if (!result.valid) {
+    const message = result.errors.map(issue => `${issue.path ? `${issue.path}: ` : ""}${issue.message}`).join("; ");
+    throw new Error(`Invalid TestAgent verdict contract: ${message || "unknown error"}`);
+  }
+  return input as TestAgentVerdict;
 }

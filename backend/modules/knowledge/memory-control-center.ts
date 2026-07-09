@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { DEFAULT_CONTEXT_WINDOW_TOKENS } from "../../system/context-budget";
 import { CCM_DIR, GROUP_MESSAGES_DIR } from "../../core/utils";
-import { loadProjectConfigs, loadTasks } from "../../core/db";
+import { loadProjectConfigs, loadTasks, saveTasks } from "../../core/db";
 
 export type MemoryScope = "group" | "project" | "global";
 type MemoryAction = "pin" | "unpin" | "lock" | "unlock" | "edit" | "deprecate" | "delete" | "restore";
@@ -19,10 +19,20 @@ const GLOBAL_MEMORY_FILE = path.join(CCM_DIR, "global-agent-memory", "memory.jso
 const KNOWLEDGE_DIR = path.join(process.env.USERPROFILE || "C:/Users/admin", ".cc-connect", "knowledge");
 const GROUP_MEMORY_REPLAY_REPAIR_DIR = path.join(CCM_DIR, "group-memory-replay-repair");
 const GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = path.join(CCM_DIR, "group-memory-replay-repair-work-items");
+const GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR = path.join(CCM_DIR, "group-memory-replay-repair-dispatch-plans");
+const GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_BINDINGS_DIR = path.join(CCM_DIR, "group-memory-replay-repair-dispatch-bindings");
+const GROUP_MEMORY_REPLAY_REPAIR_TIMELINE_BINDINGS_DIR = path.join(CCM_DIR, "group-memory-replay-repair-timeline-bindings");
+const GROUP_MEMORY_WORKER_CONTEXT_COMPACT_HOOKS_DIR = path.join(CCM_DIR, "group-memory-worker-context-compact-hooks");
+const GROUP_MEMORY_WORKER_CONTEXT_COMPACT_OUTCOMES_DIR = path.join(CCM_DIR, "group-memory-worker-context-compact-outcomes");
+const GROUP_MEMORY_WORKER_CONTEXT_COMPACT_STRATEGIES_DIR = path.join(CCM_DIR, "group-memory-worker-context-compact-strategies");
+const GROUP_MEMORY_WORKER_CONTEXT_PTL_EMERGENCIES_DIR = path.join(CCM_DIR, "group-memory-worker-context-ptl-emergencies");
 const GROUP_SESSION_MEMORY_DIR = path.join(CCM_DIR, "group-session-memory");
 const GROUP_TOOL_CONTINUITY_DIR = path.join(CCM_DIR, "group-tool-continuity");
 const GROUP_COMPACT_FILE_REFERENCE_DIR = path.join(CCM_DIR, "group-memory-file-references");
 const GROUP_GLOBAL_MEMORY_ARBITRATION_DIR = path.join(CCM_DIR, "group-global-memory-arbitration");
+const GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_DIR = path.join(CCM_DIR, "group-api-microcompact-native-apply-proof");
+const GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_DIR = path.join(CCM_DIR, "group-api-microcompact-native-apply-request-telemetry");
+const API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 
 function now() { return new Date().toISOString(); }
 
@@ -75,6 +85,24 @@ function getGroupCompactFileReferenceLedgerFile(groupId: string) {
 
 function getGroupGlobalMemoryArbitrationLedgerFile(groupId: string) {
   return path.join(GROUP_GLOBAL_MEMORY_ARBITRATION_DIR, `${sidecarFileId(groupId)}.json`);
+}
+
+function getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId: string) {
+  return path.join(GROUP_API_MICROCOMPACT_NATIVE_APPLY_PROOF_DIR, `${sidecarFileId(groupId)}.json`);
+}
+
+function getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId: string) {
+  return path.join(GROUP_API_MICROCOMPACT_NATIVE_APPLY_REQUEST_TELEMETRY_DIR, `${sidecarFileId(groupId)}.json`);
+}
+
+function acquireGlobalMemorySelfTestLock(label: string) {
+  try {
+    const api = require("../../agents/global/memory");
+    if (typeof api.acquireGlobalAgentMemorySelfTestLock === "function") {
+      return api.acquireGlobalAgentMemorySelfTestLock(label);
+    }
+  } catch {}
+  return () => {};
 }
 
 function normalizeCompactFileReferencePath(value: any) {
@@ -518,6 +546,9 @@ export function buildGroupPostCompactUsageDiagnostics(groupId: string, memory: a
     const replay = buildGroupCompactBoundaryReplayGate(id, memory, { hookLedger });
     const historicalReplay = buildGroupHistoricalCompactBoundaryReplay(id, memory, { hookLedger });
     const agentTypeReplay = buildGroupChildAgentTypeReplayMatrix(id, memory, { hookLedger });
+    const compactStrategyDecision = buildGroupCompactStrategyDecisionOverview(id, memory);
+    const postCompactCleanupAudit = buildGroupPostCompactCleanupAuditOverview(id, memory);
+    const apiMicroCompactEditPlan = buildGroupApiMicroCompactEditPlanOverview(id, memory);
     const replayRepairWorkItems = replay.repairWorkItems || summarizeReplayRepairPendingWorkItems(id);
     const replayRepairDispatchCandidates = buildReplayRepairMainAgentDispatchCandidates(id);
     const sessionMemory = memory?.sessionMemory?.schema ? memory.sessionMemory : readGroupSessionMemorySnapshotForCenter(id);
@@ -563,11 +594,18 @@ export function buildGroupPostCompactUsageDiagnostics(groupId: string, memory: a
     const compactFileReferenceAccess = summarizeGroupCompactFileReferenceAccess(id, compactFileReferences, memory);
     const compactFileReferenceReadPlanDiscipline = buildCompactFileReferenceReadPlanUsageDisciplineReport({ groupIds: [id] }).groups?.[0] || null;
     const compactFileReferenceReadPlanRevalidationDiscipline = buildCompactFileReferenceReadPlanRevalidationGateReport({ groupIds: [id] }).groups?.[0] || null;
+    const apiMicrocompactReceiptDiscipline = buildApiMicrocompactReceiptDisciplineReport({ groupIds: [id], taskLimit: 160 }).groups?.[0] || null;
+    const apiMicrocompactNativeApplyReadiness = buildApiMicrocompactNativeApplyReadinessReport({ groupIds: [id], taskLimit: 160 }).groups?.[0] || null;
+    const apiMicrocompactNativeApplyProof = buildApiMicrocompactNativeApplyProofReport({ groupIds: [id], taskLimit: 160 }).groups?.[0] || null;
+    const apiMicrocompactNativeApplyProofRepairWorkItems = apiMicrocompactNativeApplyProof
+      ? syncApiMicrocompactNativeApplyProofRepairWorkItems(id, apiMicrocompactNativeApplyProof)
+      : replayRepairWorkItems;
     const readPlanRevalidationRepairWorkItems = compactFileReferenceReadPlanRevalidationDiscipline
       ? syncCompactFileReferenceReadPlanRevalidationRepairWorkItems(id, compactFileReferenceReadPlanRevalidationDiscipline)
-      : replayRepairWorkItems;
+      : apiMicrocompactNativeApplyProofRepairWorkItems;
     const replayRepairWorkItemsFinal = readPlanRevalidationRepairWorkItems || replayRepairWorkItems;
     const replayRepairDispatchCandidatesFinal = buildReplayRepairMainAgentDispatchCandidates(id);
+    const taskAgentMemoryContextSnapshots = buildGroupTaskAgentMemoryContextSnapshotOverview(id);
     const compactFileReferenceReadPlanRevalidationSessionBinding = compactFileReferenceReadPlanRevalidationDiscipline ? {
       schema: "ccm-compact-file-reference-read-plan-revalidation-session-binding-group-v1",
       groupId: id,
@@ -629,6 +667,14 @@ export function buildGroupPostCompactUsageDiagnostics(groupId: string, memory: a
       compactFileReferenceReadPlanRevalidationSessionBinding,
       compactFileReferenceAccess,
       compactFileReferenceDiscipline,
+      taskAgentMemoryContextSnapshots,
+      compactStrategyDecision,
+      postCompactCleanupAudit,
+      apiMicroCompactEditPlan,
+      apiMicrocompactReceiptDiscipline,
+      apiMicrocompactNativeApplyReadiness,
+      apiMicrocompactNativeApplyProof,
+      apiMicrocompactNativeApplyProofRepairWorkItems,
       compactionHooks: hookLedger,
       boundaryReplay: replay,
       replayRepairWorkItems: replayRepairWorkItemsFinal,
@@ -2374,6 +2420,1664 @@ function evaluateCompactBoundaryTimeline(options: any = {}) {
   return check;
 }
 
+function compactStrategyDecisionFromMemory(memory: any = {}) {
+  return memory?.compaction?.compactStrategyDecision
+    || memory?.compactBoundary?.compactStrategyDecision
+    || memory?.compactBoundary?.post_compact_restore?.strategyDecision
+    || memory?.messageCompression?.compactStrategyDecision
+    || null;
+}
+
+function compactStrategyBooleanFailures(decision: any = {}) {
+  const invariants = decision?.invariants || {};
+  return Object.entries(invariants)
+    .filter(([, value]) => typeof value === "boolean" && value === false)
+    .map(([key]) => key);
+}
+
+function buildGroupCompactStrategyDecisionOverview(groupId: string, memory: any = {}) {
+  const compaction = memory?.compaction || {};
+  const boundary = memory?.compactBoundary || {};
+  const hasBoundary = !!boundary.summarizedThroughMessageId
+    || !!compaction.lastCompactedMessageId
+    || Number(compaction.compactedMessageCount || memory?.messageCompression?.compressedMessages || 0) > 0;
+  const storedDecision = compactStrategyDecisionFromMemory(memory);
+  const inferMode = () => {
+    if (compaction.ptlEmergency?.engaged || boundary.ptlEmergency?.engaged) return "ptl_emergency";
+    if (compaction.ptlRecovery?.recovered || memory?.messageCompression?.ptlRecovery?.recovered) return "ptl_recovery";
+    if (compaction.partialCompact?.enabled && compaction.partialCompact?.sidecar !== true) return "partial_compact";
+    if (compaction.partialCompact?.enabled && compaction.partialCompact?.sidecar === true) return "partial_sidecar";
+    if (Number(compaction.microCompact?.compactedMessageCount || 0) > 0 || Number(compaction.microCompact?.tokensFreed || 0) > 0) return "micro_compact";
+    return "normal_compact";
+  };
+  const legacyPreservedSegment = compaction.preservedSegment || boundary.preservedSegment || memory?.messageCompression?.preservedSegment || (hasBoundary ? {
+    schema: "ccm-group-preserved-segment-v1",
+    version: 1,
+    keepIndex: Number(compaction.compactedMessageCount || memory?.messageCompression?.compressedMessages || 0),
+    preservedMessageCount: Number(compaction.preservedRecentMessages || memory?.messageCompression?.recentMessages || 0),
+    preservedTokenEstimate: 0,
+    summarizedThroughMessageId: boundary.summarizedThroughMessageId || compaction.lastCompactedMessageId || "",
+    summaryChecksum: compaction.summaryChecksum || boundary.summaryChecksum || "",
+    transcriptPath: compaction.transcriptPath || boundary.post_compact_restore?.transcriptPath || "",
+    legacyInferred: true,
+  } : null);
+  const inferredDecision = !storedDecision && hasBoundary ? {
+    schema: "ccm-group-compact-strategy-decision-v1",
+    version: 1,
+    decisionId: `legacy-inferred:${groupId}:${compaction.summaryChecksum || boundary.summaryChecksum || compaction.lastCompactedMessageId || boundary.summarizedThroughMessageId || "compact"}`,
+    groupId,
+    mode: inferMode(),
+    strategy: "cc-session-memory-v3-compatible",
+    compacted: true,
+    primaryCompact: true,
+    reason: "legacy compact boundary inferred before compact strategy decision schema existed",
+    reasons: ["legacy compact boundary inferred before compact strategy decision schema existed"],
+    activeMessageCount: Number(compaction.totalMessagesSeen || memory?.messageCompression?.totalMessages || 0),
+    messagesToSummarize: Number(boundary.summarizedMessageCount || compaction.compactedMessageCount || memory?.messageCompression?.compressedMessages || 0),
+    keptMessages: Number(compaction.preservedRecentMessages || memory?.messageCompression?.recentMessages || 0),
+    summarizedFromMessageId: boundary.summarizedFromMessageId || "",
+    summarizedThroughMessageId: boundary.summarizedThroughMessageId || compaction.lastCompactedMessageId || "",
+    preCompactTokenCount: Number(compaction.preCompactTokenCount || boundary.preCompactTokenCount || 0),
+    postCompactTokenEstimate: Number(compaction.postCompactTokenCount || boundary.postCompactTokenCount || 0),
+    tokenPressurePercent: compaction.pressurePercent ?? null,
+    preservedSegment: legacyPreservedSegment,
+    microCompact: compaction.microCompact ? {
+      schema: compaction.microCompact.schema || "ccm-group-micro-compact-v1",
+      recordCount: Number(compaction.microCompact.recordCount || 0),
+      compactedMessageCount: Number(compaction.microCompact.compactedMessageCount || 0),
+      tokensFreed: Number(compaction.microCompact.tokensFreed || 0),
+      timeBasedTriggered: compaction.microCompact.timeBased?.triggered === true,
+    } : null,
+    partialCompact: compaction.partialCompact || boundary.partialCompact || null,
+    ptlEmergency: compaction.ptlEmergency || boundary.ptlEmergency || null,
+    ptlRecovery: compaction.ptlRecovery || memory?.messageCompression?.ptlRecovery || null,
+    transcriptPath: compaction.transcriptPath || boundary.post_compact_restore?.transcriptPath || "",
+    summaryChecksum: compaction.summaryChecksum || boundary.summaryChecksum || "",
+    invariants: {
+      noSplitTaskTransactions: true,
+      noSplitToolResultPairs: true,
+      noSplitThinkingBlocks: true,
+      preservedRecentWindowRecorded: !!legacyPreservedSegment,
+    },
+    invariantPass: true,
+    inferredFromLegacy: true,
+    createdAt: compaction.lastCompactedAt || boundary.createdAt || "",
+    decisionChecksum: hash(["legacy", groupId, compaction.summaryChecksum || boundary.summaryChecksum || "", compaction.lastCompactedMessageId || boundary.summarizedThroughMessageId || ""], 24),
+  } : null;
+  const decision = storedDecision || inferredDecision;
+  const gaps: any[] = [];
+  if (hasBoundary && !decision) {
+    gaps.push({ severity: "fatal", reason: "compact boundary exists but compact strategy decision is missing" });
+  }
+  if (decision) {
+    if (decision.schema !== "ccm-group-compact-strategy-decision-v1") gaps.push({ severity: "fatal", reason: "compact strategy decision schema mismatch" });
+    if (!decision.mode) gaps.push({ severity: "high", reason: "decision mode missing" });
+    if (!decision.reason && !(Array.isArray(decision.reasons) && decision.reasons.length)) gaps.push({ severity: "high", reason: "decision reason missing" });
+    if (hasBoundary && !decision.transcriptPath) gaps.push({ severity: "high", reason: "raw transcript path missing" });
+    if (hasBoundary && !decision.summaryChecksum) gaps.push({ severity: "medium", reason: "summary checksum missing from strategy decision" });
+    if (hasBoundary && Number(decision.preCompactTokenCount || 0) <= 0) gaps.push({ severity: "medium", reason: "pre compact token count missing" });
+    if (hasBoundary && Number(decision.postCompactTokenEstimate || 0) <= 0) gaps.push({ severity: "medium", reason: "post compact token estimate missing" });
+    if (hasBoundary && decision.preservedSegment?.schema !== "ccm-group-preserved-segment-v1") gaps.push({ severity: "high", reason: "preserved segment missing from strategy decision" });
+    for (const key of compactStrategyBooleanFailures(decision)) {
+      gaps.push({ severity: "fatal", reason: `strategy invariant failed: ${key}`, invariant: key });
+    }
+    if (!storedDecision && inferredDecision && gaps.length === 0) {
+      gaps.push({ severity: "low", reason: "legacy compact boundary inferred; next real compact will persist native strategy decision" });
+    }
+  }
+  const fatal = gaps.some(gap => gap.severity === "fatal");
+  const high = gaps.some(gap => gap.severity === "high");
+  const status = !hasBoundary && !decision
+    ? "empty"
+    : fatal ? "fail" : high ? "warn" : "ok";
+  const checked = hasBoundary || !!decision;
+  const micro = decision?.microCompact || {};
+  const partial = decision?.partialCompact || {};
+  return {
+    schema: "ccm-group-compact-strategy-decision-overview-v1",
+    groupId,
+    status,
+    checked,
+    compacted: hasBoundary,
+    mode: decision?.mode || "",
+    reason: compactMemoryCenterText(decision?.reason || "", 360),
+    decisionId: decision?.decisionId || "",
+    decisionChecksum: decision?.decisionChecksum || "",
+    summaryChecksum: decision?.summaryChecksum || compaction.summaryChecksum || boundary.summaryChecksum || "",
+    transcriptPath: decision?.transcriptPath || compaction.transcriptPath || boundary.post_compact_restore?.transcriptPath || "",
+    messagesToSummarize: Number(decision?.messagesToSummarize || boundary.summarizedMessageCount || 0),
+    keptMessages: Number(decision?.keptMessages || compaction.preservedRecentMessages || memory?.messageCompression?.recentMessages || 0),
+    preCompactTokenCount: Number(decision?.preCompactTokenCount || compaction.preCompactTokenCount || boundary.preCompactTokenCount || 0),
+    postCompactTokenEstimate: Number(decision?.postCompactTokenEstimate || compaction.postCompactTokenCount || boundary.postCompactTokenCount || 0),
+    tokenPressurePercent: decision?.tokenPressurePercent ?? compaction.pressurePercent ?? null,
+    invariantPass: decision?.invariantPass === true,
+    failedInvariants: compactStrategyBooleanFailures(decision),
+    stored: !!storedDecision,
+    inferredFromLegacy: decision?.inferredFromLegacy === true,
+    microCompact: {
+      recordCount: Number(micro.recordCount || compaction.microCompact?.recordCount || 0),
+      compactedMessageCount: Number(micro.compactedMessageCount || compaction.microCompact?.compactedMessageCount || 0),
+      tokensFreed: Number(micro.tokensFreed || compaction.microCompact?.tokensFreed || 0),
+      timeBasedTriggered: micro.timeBasedTriggered === true || compaction.microCompact?.timeBased?.triggered === true,
+    },
+    partialCompact: {
+      requested: partial.requested === true || compaction.partialCompact?.requested === true,
+      enabled: partial.enabled === true || compaction.partialCompact?.enabled === true,
+      sidecar: partial.sidecar === true || compaction.partialCompact?.sidecar === true,
+      direction: partial.direction || compaction.partialCompact?.direction || "",
+    },
+    ptlEmergency: decision?.ptlEmergency || compaction.ptlEmergency || boundary.ptlEmergency || null,
+    ptlRecovery: decision?.ptlRecovery || compaction.ptlRecovery || memory?.messageCompression?.ptlRecovery || null,
+    gaps: gaps.slice(0, 12),
+    decision: decision || null,
+  };
+}
+
+function buildCompactStrategyDecisionReport(options: any = {}) {
+  const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
+    ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : null;
+  const files = explicitGroupIds?.length
+    ? explicitGroupIds.map((id: string) => path.join(GROUP_MEMORY_DIR, `${id}.json`))
+    : listJsonFiles(GROUP_MEMORY_DIR);
+  const groups = files.map(file => {
+    const memory = readMemoryFile(file) || {};
+    const groupId = String(memory.groupId || path.basename(file, ".json"));
+    return buildGroupCompactStrategyDecisionOverview(groupId, memory);
+  }).filter(Boolean);
+  const checkedGroups = groups.filter(row => row.checked);
+  const passedGroups = checkedGroups.filter(row => row.status === "ok");
+  const score = checkedGroups.length ? qualityRate(passedGroups.length, checkedGroups.length) : null;
+  return {
+    schema: "ccm-compact-strategy-decision-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: score === null ? "empty" : score >= 90 ? "ok" : score >= 70 ? "warn" : "fail",
+      score,
+      groupCount: groups.length,
+      checkedGroupCount: checkedGroups.length,
+      passedGroupCount: passedGroups.length,
+      compactedGroupCount: groups.filter(row => row.compacted).length,
+      missingDecisionCount: groups.filter(row => row.compacted && !row.decision).length,
+      invariantFailureCount: groups.reduce((sum, row) => sum + Number(row.failedInvariants?.length || 0), 0),
+      gapCount: groups.reduce((sum, row) => sum + Number(row.gaps?.length || 0), 0),
+      legacyInferredCount: groups.filter(row => row.inferredFromLegacy).length,
+    },
+    groups: groups.sort((a, b) => String(a.status).localeCompare(String(b.status))).slice(0, 50),
+    weakGroups: groups.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateCompactStrategyDecision(options: any = {}) {
+  const report = buildCompactStrategyDecisionReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.passedGroupCount || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    mode: row.mode,
+    decisionId: row.decisionId,
+    summaryChecksum: row.summaryChecksum,
+    transcriptPath: row.transcriptPath,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    mode: row.mode,
+    reason: gap.reason || "compact strategy decision 存在缺口",
+    severity: gap.severity || "medium",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "compact_strategy_decision",
+    "压缩策略决策",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "对齐 Claude Code session-memory compact 决策路径：每个压缩边界都要说明为何选择 normal/micro/partial/PTL/recent-window 策略，并记录 token 压力、保留窗口、raw transcript 和 invariants。"
+  );
+  check.report = report;
+  return check;
+}
+
+function postCompactCleanupAuditFromMemory(memory: any = {}) {
+  return memory?.compaction?.postCompactCleanupAudit
+    || memory?.compactBoundary?.post_compact_restore?.cleanupAudit
+    || memory?.messageCompression?.postCompactCleanupAudit
+    || null;
+}
+
+function buildGroupPostCompactCleanupAuditOverview(groupId: string, memory: any = {}) {
+  const compaction = memory?.compaction || {};
+  const boundary = memory?.compactBoundary || {};
+  const restore = boundary.post_compact_restore || {};
+  const hasBoundary = !!boundary.summarizedThroughMessageId
+    || !!compaction.lastCompactedMessageId
+    || Number(compaction.compactedMessageCount || memory?.messageCompression?.compressedMessages || 0) > 0;
+  const storedAudit = postCompactCleanupAuditFromMemory(memory);
+  const strategyDecision = compactStrategyDecisionFromMemory(memory) || restore.strategyDecision || null;
+  const recoveryAudit = compaction.postCompactRecoveryAudit || restore.recoveryAudit || memory?.messageCompression?.postCompactRecoveryAudit || null;
+  const legacyAudit = !storedAudit && hasBoundary ? {
+    schema: "ccm-post-compact-cleanup-audit-v1",
+    version: 1,
+    status: "pass",
+    pass: true,
+    action: "legacy_cleanup_contract_inferred_next_compact_will_persist_native_audit",
+    groupId,
+    boundaryId: boundary.id || "",
+    compactStrategyDecisionId: strategyDecision?.decisionId || "",
+    mode: strategyDecision?.mode || compaction.health || "",
+    transcriptPath: compaction.transcriptPath || restore.transcriptPath || strategyDecision?.transcriptPath || "",
+    summaryChecksum: compaction.summaryChecksum || boundary.summaryChecksum || "",
+    preserveInvokedSkills: true,
+    preserveToolContinuity: true,
+    resetDerivedCompactState: true,
+    childAgentIsolation: "legacy inferred from CCM post compact recovery policy",
+    sourceOfTruth: "group memory json + group messages transcript + typed MEMORY.md sidecars",
+    cleanupActions: [
+      { id: "reset_microcompact_tracking", action: "legacy_inferred_reset_derived_microcompact_state", status: "inferred" },
+      { id: "rebuild_child_context_packets", action: "legacy_inferred_rebuild_child_context_packets", status: "inferred" },
+      { id: "preserve_skill_continuity", action: "legacy_inferred_preserve_invoked_skills", status: "inferred" },
+    ],
+    checks: [],
+    failedChecks: [],
+    passedChecks: 0,
+    checkCount: 0,
+    inferredFromLegacy: true,
+    createdAt: compaction.lastCompactedAt || boundary.createdAt || "",
+  } : null;
+  const audit = storedAudit || legacyAudit;
+  const gaps: any[] = [];
+  if (hasBoundary && !audit) gaps.push({ severity: "fatal", reason: "compact boundary exists but cleanup audit is missing" });
+  if (audit) {
+    if (audit.schema !== "ccm-post-compact-cleanup-audit-v1") gaps.push({ severity: "fatal", reason: "post compact cleanup audit schema mismatch" });
+    if (audit.status === "failed") gaps.push({ severity: "fatal", reason: "post compact cleanup audit failed" });
+    if (audit.status === "degraded") gaps.push({ severity: "high", reason: "post compact cleanup audit degraded" });
+    if (hasBoundary && !audit.transcriptPath && !audit.inferredFromLegacy) gaps.push({ severity: "high", reason: "cleanup audit missing raw transcript path" });
+    if (audit.preserveInvokedSkills !== true) gaps.push({ severity: "high", reason: "cleanup audit must preserve invoked skills" });
+    if (audit.preserveToolContinuity !== true) gaps.push({ severity: "high", reason: "cleanup audit must preserve tool continuity" });
+    if (audit.resetDerivedCompactState !== true) gaps.push({ severity: "medium", reason: "cleanup audit missing derived state reset policy" });
+    for (const id of Array.isArray(audit.failedChecks) ? audit.failedChecks : []) {
+      gaps.push({ severity: "high", reason: `cleanup audit failed check: ${id}`, checkId: id });
+    }
+  }
+  const fatal = gaps.some(gap => gap.severity === "fatal");
+  const high = gaps.some(gap => gap.severity === "high");
+  const status = !hasBoundary && !audit
+    ? "empty"
+    : fatal ? "fail" : high ? "warn" : "ok";
+  return {
+    schema: "ccm-group-post-compact-cleanup-audit-overview-v1",
+    groupId,
+    status,
+    checked: hasBoundary || !!audit,
+    compacted: hasBoundary,
+    stored: !!storedAudit,
+    inferredFromLegacy: audit?.inferredFromLegacy === true,
+    auditStatus: audit?.status || "",
+    action: audit?.action || "",
+    mode: audit?.mode || strategyDecision?.mode || "",
+    boundaryId: audit?.boundaryId || boundary.id || "",
+    summaryChecksum: audit?.summaryChecksum || compaction.summaryChecksum || boundary.summaryChecksum || "",
+    transcriptPath: audit?.transcriptPath || compaction.transcriptPath || restore.transcriptPath || "",
+    preserveInvokedSkills: audit?.preserveInvokedSkills === true,
+    preserveToolContinuity: audit?.preserveToolContinuity === true,
+    resetDerivedCompactState: audit?.resetDerivedCompactState === true,
+    cleanupActionCount: Array.isArray(audit?.cleanupActions) ? audit.cleanupActions.length : 0,
+    passedChecks: Number(audit?.passedChecks || 0),
+    checkCount: Number(audit?.checkCount || 0),
+    failedChecks: Array.isArray(audit?.failedChecks) ? audit.failedChecks : [],
+    skillHints: Array.isArray(audit?.skillHints) ? audit.skillHints.slice(0, 12) : [],
+    cleanupActions: Array.isArray(audit?.cleanupActions) ? audit.cleanupActions.slice(0, 12) : [],
+    gaps: gaps.slice(0, 12),
+    audit: audit || null,
+    recoveryAuditLinked: recoveryAudit?.schema === "ccm-post-compact-recovery-audit-v1",
+  };
+}
+
+function buildPostCompactCleanupAuditReport(options: any = {}) {
+  const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
+    ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : null;
+  const files = explicitGroupIds?.length
+    ? explicitGroupIds.map((id: string) => path.join(GROUP_MEMORY_DIR, `${id}.json`))
+    : listJsonFiles(GROUP_MEMORY_DIR);
+  const groups = files.map(file => {
+    const memory = readMemoryFile(file) || {};
+    const groupId = String(memory.groupId || path.basename(file, ".json"));
+    return buildGroupPostCompactCleanupAuditOverview(groupId, memory);
+  }).filter(Boolean);
+  const checkedGroups = groups.filter(row => row.checked);
+  const passedGroups = checkedGroups.filter(row => row.status === "ok");
+  const score = checkedGroups.length ? qualityRate(passedGroups.length, checkedGroups.length) : null;
+  return {
+    schema: "ccm-post-compact-cleanup-audit-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: score === null ? "empty" : score >= 90 ? "ok" : score >= 70 ? "warn" : "fail",
+      score,
+      groupCount: groups.length,
+      checkedGroupCount: checkedGroups.length,
+      passedGroupCount: passedGroups.length,
+      compactedGroupCount: groups.filter(row => row.compacted).length,
+      missingAuditCount: groups.filter(row => row.compacted && !row.audit).length,
+      failedCheckCount: groups.reduce((sum, row) => sum + Number(row.failedChecks?.length || 0), 0),
+      gapCount: groups.reduce((sum, row) => sum + Number(row.gaps?.length || 0), 0),
+      legacyInferredCount: groups.filter(row => row.inferredFromLegacy).length,
+    },
+    groups: groups.sort((a, b) => String(a.status).localeCompare(String(b.status))).slice(0, 50),
+    weakGroups: groups.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluatePostCompactCleanupAudit(options: any = {}) {
+  const report = buildPostCompactCleanupAuditReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.passedGroupCount || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    status: row.auditStatus,
+    mode: row.mode,
+    transcriptPath: row.transcriptPath,
+    preserveInvokedSkills: row.preserveInvokedSkills,
+    preserveToolContinuity: row.preserveToolContinuity,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "post compact cleanup audit 存在缺口",
+    severity: gap.severity || "medium",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "post_compact_cleanup_audit",
+    "压缩后清理审计",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "对齐 Claude Code runPostCompactCleanup：压缩后必须记录派生状态清理、子 Agent 上下文重建、raw transcript 保留、invoked skills/tool continuity 不清除，以及 ledger 可审计性。"
+  );
+  check.report = report;
+  return check;
+}
+
+function apiMicroCompactEditPlanFromMemory(memory: any = {}) {
+  return memory?.compaction?.apiMicroCompactEditPlan
+    || memory?.compactBoundary?.apiMicroCompactEditPlan
+    || memory?.compactBoundary?.post_compact_restore?.apiMicroCompactEditPlan
+    || memory?.messageCompression?.apiMicroCompactEditPlan
+    || null;
+}
+
+function buildGroupApiMicroCompactEditPlanOverview(groupId: string, memory: any = {}) {
+  const compaction = memory?.compaction || {};
+  const boundary = memory?.compactBoundary || {};
+  const hasBoundary = !!boundary.summarizedThroughMessageId
+    || !!compaction.lastCompactedMessageId
+    || Number(compaction.compactedMessageCount || memory?.messageCompression?.compressedMessages || 0) > 0;
+  const storedPlan = apiMicroCompactEditPlanFromMemory(memory);
+  const legacyPlan = !storedPlan && hasBoundary ? {
+    schema: "ccm-api-microcompact-edit-plan-v1",
+    version: 1,
+    groupId,
+    source: "claude-code-api-microcompact-compatible",
+    advisoryOnly: true,
+    canApplyNatively: false,
+    activeTokens: Number(compaction.preCompactTokenCount || boundary.preCompactTokenCount || 0),
+    maxInputTokens: 180000,
+    targetInputTokens: 40000,
+    clearAtLeastTokens: 140000,
+    trigger: { type: "input_tokens", value: 180000 },
+    aboveTrigger: false,
+    signalCounts: { thinkingBlocks: 0, redactedThinkingBlocks: 0, toolUses: 0, toolResults: 0 },
+    strategies: [],
+    contextManagement: null,
+    editCount: 0,
+    recommended: false,
+    reason: "legacy compact boundary inferred before API microcompact edit plan schema existed",
+    inferredFromLegacy: true,
+    createdAt: compaction.lastCompactedAt || boundary.createdAt || "",
+    planChecksum: hash(["legacy-api-microcompact", groupId, compaction.summaryChecksum || boundary.summaryChecksum || ""], 24),
+  } : null;
+  const plan = storedPlan || legacyPlan;
+  const gaps: any[] = [];
+  if (hasBoundary && !plan) gaps.push({ severity: "fatal", reason: "compact boundary exists but API microcompact edit plan is missing" });
+  if (plan) {
+    if (plan.schema !== "ccm-api-microcompact-edit-plan-v1") gaps.push({ severity: "fatal", reason: "API microcompact edit plan schema mismatch" });
+    if (Number(plan.maxInputTokens || 0) <= 0) gaps.push({ severity: "high", reason: "max input tokens missing" });
+    if (Number(plan.targetInputTokens || 0) <= 0) gaps.push({ severity: "high", reason: "target input tokens missing" });
+    if (!plan.trigger?.type || Number(plan.trigger?.value || 0) <= 0) gaps.push({ severity: "high", reason: "input token trigger missing" });
+    if (!Array.isArray(plan.strategies)) gaps.push({ severity: "medium", reason: "strategies list missing" });
+    if (plan.contextManagement && !Array.isArray(plan.contextManagement.edits)) gaps.push({ severity: "high", reason: "context management edits must be an array" });
+    if (plan.editCount > 0 && !plan.contextManagement?.edits?.length) gaps.push({ severity: "high", reason: "edit count is positive but context management config is missing" });
+  }
+  const fatal = gaps.some(gap => gap.severity === "fatal");
+  const high = gaps.some(gap => gap.severity === "high");
+  const status = !hasBoundary && !plan
+    ? "empty"
+    : fatal ? "fail" : high ? "warn" : "ok";
+  const counts = plan?.signalCounts || {};
+  return {
+    schema: "ccm-group-api-microcompact-edit-plan-overview-v1",
+    groupId,
+    status,
+    checked: hasBoundary || !!plan,
+    compacted: hasBoundary,
+    stored: !!storedPlan,
+    inferredFromLegacy: plan?.inferredFromLegacy === true,
+    advisoryOnly: plan?.advisoryOnly !== false,
+    canApplyNatively: plan?.canApplyNatively === true,
+    recommended: plan?.recommended === true,
+    editCount: Number(plan?.editCount || 0),
+    activeTokens: Number(plan?.activeTokens || 0),
+    maxInputTokens: Number(plan?.maxInputTokens || 0),
+    targetInputTokens: Number(plan?.targetInputTokens || 0),
+    clearAtLeastTokens: Number(plan?.clearAtLeastTokens || 0),
+    trigger: plan?.trigger || null,
+    aboveTrigger: plan?.aboveTrigger === true,
+    thinkingBlocks: Number(counts.thinkingBlocks || 0),
+    toolUses: Number(counts.toolUses || 0),
+    toolResults: Number(counts.toolResults || 0),
+    strategies: Array.isArray(plan?.strategies) ? plan.strategies.slice(0, 12) : [],
+    contextManagement: plan?.contextManagement || null,
+    reason: compactMemoryCenterText(plan?.reason || "", 360),
+    planChecksum: plan?.planChecksum || "",
+    gaps: gaps.slice(0, 12),
+    plan: plan || null,
+  };
+}
+
+function buildApiMicroCompactEditPlanReport(options: any = {}) {
+  const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
+    ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : null;
+  const files = explicitGroupIds?.length
+    ? explicitGroupIds.map((id: string) => path.join(GROUP_MEMORY_DIR, `${id}.json`))
+    : listJsonFiles(GROUP_MEMORY_DIR);
+  const groups = files.map(file => {
+    const memory = readMemoryFile(file) || {};
+    const groupId = String(memory.groupId || path.basename(file, ".json"));
+    return buildGroupApiMicroCompactEditPlanOverview(groupId, memory);
+  }).filter(Boolean);
+  const checkedGroups = groups.filter(row => row.checked);
+  const passedGroups = checkedGroups.filter(row => row.status === "ok");
+  const score = checkedGroups.length ? qualityRate(passedGroups.length, checkedGroups.length) : null;
+  return {
+    schema: "ccm-api-microcompact-edit-plan-report-v1",
+    generatedAt: now(),
+    overall: {
+      status: score === null ? "empty" : score >= 90 ? "ok" : score >= 70 ? "warn" : "fail",
+      score,
+      groupCount: groups.length,
+      checkedGroupCount: checkedGroups.length,
+      passedGroupCount: passedGroups.length,
+      compactedGroupCount: groups.filter(row => row.compacted).length,
+      missingPlanCount: groups.filter(row => row.compacted && !row.plan).length,
+      recommendedEditCount: groups.reduce((sum, row) => sum + Number(row.editCount || 0), 0),
+      gapCount: groups.reduce((sum, row) => sum + Number(row.gaps?.length || 0), 0),
+      legacyInferredCount: groups.filter(row => row.inferredFromLegacy).length,
+    },
+    groups: groups.sort((a, b) => String(a.status).localeCompare(String(b.status))).slice(0, 50),
+    weakGroups: groups.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateApiMicroCompactEditPlan(options: any = {}) {
+  const report = buildApiMicroCompactEditPlanReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.passedGroupCount || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    editCount: row.editCount,
+    activeTokens: row.activeTokens,
+    trigger: row.trigger?.value,
+    advisoryOnly: row.advisoryOnly,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "API microcompact edit plan 存在缺口",
+    severity: gap.severity || "medium",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "api_microcompact_edit_plan",
+    "API Microcompact Edit Plan",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "对齐 Claude Code apiMicrocompact：为支持 native context-management 的执行器下发 clear thinking / clear tool result / keep recent tool use 的可审计计划；不支持时作为上下文压力提示。"
+  );
+  check.report = report;
+  return check;
+}
+
+function extractApiMicrocompactReceiptRowsFromTask(task: any = {}, fallbackPlan: any = null) {
+  const summary = task?.delivery_summary || {};
+  const explicitPlans = Array.isArray(summary.api_microcompact_edit_plans || summary.apiMicrocompactEditPlans)
+    ? (summary.api_microcompact_edit_plans || summary.apiMicrocompactEditPlans)
+    : [];
+  const plans = explicitPlans.length
+    ? explicitPlans
+    : fallbackPlan?.schema === "ccm-api-microcompact-edit-plan-v1"
+      ? [{
+        plan_checksum: fallbackPlan.planChecksum || fallbackPlan.plan_checksum || "",
+        edit_count: Number(fallbackPlan.editCount || fallbackPlan.edit_count || 0),
+        advisory_only: fallbackPlan.advisoryOnly !== false,
+        can_apply_natively: fallbackPlan.canApplyNatively === true,
+      }]
+      : [];
+  const planChecksums = plans.map((plan: any) => String(plan.plan_checksum || plan.planChecksum || plan.checksum || "").trim()).filter(Boolean);
+  const receiptRows = Array.isArray(summary.api_microcompact_receipt_rows || summary.apiMicrocompactReceiptRows)
+    ? (summary.api_microcompact_receipt_rows || summary.apiMicrocompactReceiptRows)
+    : [];
+  const qualityRows = Array.isArray(summary.receipt_quality || summary.receiptQuality)
+    ? (summary.receipt_quality || summary.receiptQuality).filter((row: any) => row?.api_microcompact?.required || row?.apiMicrocompact?.required)
+      .map((row: any) => ({ ...row, api_microcompact: row.api_microcompact || row.apiMicrocompact }))
+    : [];
+  const rows = (receiptRows.length ? receiptRows : qualityRows).map((row: any) => {
+    const gate = row.api_microcompact || row.apiMicrocompact || row.api_microcompact_receipt || row.apiMicrocompactReceipt || row;
+    const gateRows = Array.isArray(gate.rows) ? gate.rows : [];
+    return {
+      taskId: task.id || task.task_id || "",
+      title: compactMemoryCenterText(task.title || summary.business_goal || "", 180),
+      agent: row.agent || row.project || task.target_project || "",
+      required: gate.required === true || row.required === true,
+      pass: gate.pass === true || row.pass === true,
+      plan_checksums: normalizeQualityStringList(gate.plan_checksums || gate.planChecksums || row.plan_checksums || row.planChecksums || planChecksums).slice(0, 20),
+      missing_plan_checksums: normalizeQualityStringList(gate.missing_plan_checksums || gate.missingPlanChecksums || row.missing_plan_checksums || row.missingPlanChecksums).slice(0, 20),
+      unsafe_native_applied_plan_checksums: normalizeQualityStringList(gate.unsafe_native_applied_plan_checksums || gate.unsafeNativeAppliedPlanChecksums || row.unsafe_native_applied_plan_checksums || row.unsafeNativeAppliedPlanChecksums).slice(0, 20),
+      session_mismatch_plan_checksums: normalizeQualityStringList(gate.session_mismatch_plan_checksums || gate.sessionMismatchPlanChecksums || row.session_mismatch_plan_checksums || row.sessionMismatchPlanChecksums).slice(0, 20),
+      native_applied_count: Number(gate.native_applied_count || row.native_applied_count || 0),
+      advisory_count: Number(gate.advisory_count || row.advisory_count || 0),
+      ignored_count: Number(gate.ignored_count || row.ignored_count || 0),
+      rows: gateRows.slice(0, 12),
+    };
+  });
+  const summaryRequired = Number(summary.api_microcompact_edit_plan_count || summary.apiMicrocompactEditPlanCount || 0) > 0
+    || plans.some((plan: any) => Number(plan.edit_count || plan.editCount || 0) > 0)
+    || rows.some((row: any) => row.required);
+  return {
+    required: summaryRequired,
+    summaryPassed: summary.api_microcompact_receipt_passed === true || summary.apiMicrocompactReceiptPassed === true,
+    planChecksums,
+    rows,
+  };
+}
+
+function buildApiMicrocompactReceiptDisciplineReport(options: any = {}) {
+  const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
+    ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : null;
+  const taskLimit = Math.max(10, Number(options.taskLimit || options.task_limit || 160));
+  const tasks = Array.isArray(options.tasks) ? options.tasks : loadTasks().slice(-taskLimit);
+  const files = explicitGroupIds?.length
+    ? explicitGroupIds.map((id: string) => path.join(GROUP_MEMORY_DIR, `${id}.json`))
+    : listJsonFiles(GROUP_MEMORY_DIR);
+  const rows = files.map(file => {
+    const memory = readMemoryFile(file) || {};
+    const groupId = String(memory.groupId || path.basename(file, ".json"));
+    const fallbackPlan = apiMicroCompactEditPlanFromMemory(memory);
+    const groupTasks = tasks.filter((task: any) => String(task.group_id || task.groupId || "") === groupId);
+    let checked = 0;
+    let passed = 0;
+    let nativeApplied = 0;
+    let advisory = 0;
+    let ignored = 0;
+    let sessionMismatch = 0;
+    const taskRows: any[] = [];
+    const gaps: any[] = [];
+    for (const task of groupTasks) {
+      const extracted = extractApiMicrocompactReceiptRowsFromTask(task, fallbackPlan);
+      if (!extracted.required) continue;
+      const taskPlanCount = Math.max(1, extracted.planChecksums.length || extracted.rows.reduce((sum: number, row: any) => Math.max(sum, row.plan_checksums.length), 0));
+      checked += taskPlanCount;
+      const taskPassed = (extracted.summaryPassed && extracted.rows.length > 0
+        ? extracted.rows.every((row: any) => row.pass === true)
+        : extracted.summaryPassed)
+        || (extracted.rows.length > 0 && extracted.rows.every((row: any) => row.pass === true));
+      if (taskPassed) passed += taskPlanCount;
+      for (const row of extracted.rows) {
+        nativeApplied += Number(row.native_applied_count || 0);
+        advisory += Number(row.advisory_count || 0);
+        ignored += Number(row.ignored_count || 0);
+        taskRows.push(row);
+        if (row.pass === true) continue;
+        const missing = row.missing_plan_checksums || [];
+        const unsafe = row.unsafe_native_applied_plan_checksums || [];
+        const session = row.session_mismatch_plan_checksums || [];
+        sessionMismatch += session.length;
+        gaps.push({
+          taskId: row.taskId,
+          agent: row.agent,
+          severity: unsafe.length || session.length ? "high" : "medium",
+          reason: unsafe.length
+            ? `API microcompact plan 在非 native 执行器中被声明为 native_applied：${unsafe.join("、")}`
+            : session.length
+              ? `API microcompact 使用声明来自错误或缺失的子 Agent 会话/记忆快照：${session.join("、")}`
+            : `API microcompact edit plan 缺少使用状态声明：${(missing.length ? missing : row.plan_checksums || []).join("、") || "unknown"}`,
+          planChecksums: missing.length ? missing : row.plan_checksums || [],
+          unsafeNativeAppliedPlanChecksums: unsafe,
+          sessionMismatchPlanChecksums: session,
+        });
+      }
+      if (!extracted.rows.length && !taskPassed) {
+        gaps.push({
+          taskId: task.id || "",
+          agent: task.target_project || "",
+          severity: "medium",
+          reason: "任务下发了 API microcompact edit plan，但交付摘要没有 api_microcompact_receipt_rows",
+          planChecksums: extracted.planChecksums,
+        });
+      }
+    }
+    const score = qualityRate(passed, checked);
+    const status = checked === 0 ? "empty" : Number(score) >= 90 ? "ok" : Number(score) >= 70 ? "warn" : "fail";
+    return {
+      schema: "ccm-api-microcompact-receipt-discipline-group-v1",
+      groupId,
+      status,
+      score,
+      checked,
+      passed,
+      missing: Math.max(0, checked - passed),
+      taskCount: groupTasks.length,
+      checkedTaskCount: taskRows.length,
+      nativeApplied,
+      advisory,
+      ignored,
+      sessionMismatch,
+      planChecksum: fallbackPlan?.planChecksum || "",
+      rows: taskRows.slice(0, 20),
+      gaps: gaps.slice(0, 20),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.checked || 0) > 0);
+  const checked = checkedRows.reduce((sum, row) => sum + Number(row.checked || 0), 0);
+  const passed = checkedRows.reduce((sum, row) => sum + Number(row.passed || 0), 0);
+  const score = qualityRate(passed, checked);
+  const status = checked === 0 ? "empty" : Number(score) >= 90 ? "ok" : Number(score) >= 70 ? "warn" : "fail";
+  return {
+    schema: "ccm-api-microcompact-receipt-discipline-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      score,
+      checked,
+      passed,
+      missing: Math.max(0, checked - passed),
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: checkedRows.filter(row => row.status === "ok").length,
+      nativeAppliedCount: checkedRows.reduce((sum, row) => sum + Number(row.nativeApplied || 0), 0),
+      advisoryCount: checkedRows.reduce((sum, row) => sum + Number(row.advisory || 0), 0),
+      ignoredCount: checkedRows.reduce((sum, row) => sum + Number(row.ignored || 0), 0),
+      sessionMismatchCount: checkedRows.reduce((sum, row) => sum + Number(row.sessionMismatch || 0), 0),
+      gapCount: checkedRows.reduce((sum, row) => sum + Number(row.gaps?.length || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.checked || 0) - Number(a.checked || 0) || Number(b.missing || 0) - Number(a.missing || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateApiMicrocompactReceiptDiscipline(options: any = {}) {
+  const report = buildApiMicrocompactReceiptDisciplineReport(options);
+  const checked = Number(report.overall.checked || 0);
+  const passed = Number(report.overall.passed || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    checked: row.checked,
+    passed: row.passed,
+    advisory: row.advisory,
+    nativeApplied: row.nativeApplied,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    taskId: gap.taskId || "",
+    agent: gap.agent || "",
+    reason: gap.reason || "API microcompact receipt discipline 异常",
+    severity: gap.severity || "medium",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "api_microcompact_receipt_discipline",
+    "API Microcompact 使用回执纪律",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "API microcompact edit plan 一旦下发给子 Agent，结果说明必须声明 native_applied/advisory/ignored/not_supported；第三方 CLI 不得误报 native applied。"
+  );
+  check.report = report;
+  return check;
+}
+
+function apiMicrocompactNativeApplyRowsFromTask(task: any = {}) {
+  const summary = task?.delivery_summary || {};
+  const plans = Array.isArray(summary.api_microcompact_edit_plans || summary.apiMicrocompactEditPlans)
+    ? (summary.api_microcompact_edit_plans || summary.apiMicrocompactEditPlans)
+    : [];
+  return plans
+    .filter((plan: any) => Number(plan.edit_count || plan.editCount || 0) > 0 || plan.recommended === true)
+    .map((plan: any) => {
+      const nativePlan = plan.native_apply_plan || plan.nativeApplyPlan || plan.api_microcompact_native_apply_plan || null;
+      const requestPatch = nativePlan?.requestPatch || nativePlan?.request_patch || null;
+      const betaHeaders = Array.isArray(requestPatch?.beta_headers) ? requestPatch.beta_headers : [];
+      const nativeReady = nativePlan?.nativeApplyReady === true || nativePlan?.native_apply_ready === true;
+      const hasRequestPatch = !!requestPatch?.body?.context_management;
+      const hasBetaHeader = betaHeaders.includes("context-management-2025-06-27");
+      const editPlanChecksum = String(plan.plan_checksum || plan.planChecksum || "");
+      const applyPlanChecksum = String(nativePlan?.applyPlanChecksum || nativePlan?.apply_plan_checksum || plan.apply_plan_checksum || "");
+      const requestPatchChecksum = String(nativePlan?.requestPatchChecksum || nativePlan?.request_patch_checksum || plan.request_patch_checksum || "");
+      const taskAgentSessionId = String(plan.task_agent_session_id || plan.taskAgentSessionId || nativePlan?.task_agent_session_id || nativePlan?.taskAgentSessionId || "");
+      const nativeSessionId = String(plan.native_session_id || plan.nativeSessionId || nativePlan?.native_session_id || nativePlan?.nativeSessionId || "");
+      const memoryContextSnapshotId = String(plan.memory_context_snapshot_id || plan.memoryContextSnapshotId || nativePlan?.memory_context_snapshot_id || nativePlan?.memoryContextSnapshotId || "");
+      const memoryContextSnapshotChecksum = String(plan.memory_context_snapshot_checksum || plan.memoryContextSnapshotChecksum || nativePlan?.memory_context_snapshot_checksum || nativePlan?.memoryContextSnapshotChecksum || "");
+      const sessionBindingRequired = nativePlan?.sessionBindingRequired === true
+        || nativePlan?.session_binding_required === true
+        || !!(taskAgentSessionId || nativeSessionId || memoryContextSnapshotId || memoryContextSnapshotChecksum);
+      const sessionBound = !sessionBindingRequired || !!(taskAgentSessionId || nativeSessionId || memoryContextSnapshotId || memoryContextSnapshotChecksum);
+      const editPlanBound = String(nativePlan?.apiEditPlanChecksum || nativePlan?.api_edit_plan_checksum || "") === editPlanChecksum;
+      const schemaValid = nativePlan?.schema === "ccm-api-microcompact-native-apply-plan-v1";
+      const contractValid = schemaValid
+        && !!applyPlanChecksum
+        && editPlanBound
+        && sessionBound
+        && (nativeReady ? hasRequestPatch && hasBetaHeader && !!requestPatchChecksum : !requestPatch);
+      const failedChecks = [
+        !schemaValid ? "native_apply_plan_missing" : "",
+        schemaValid && !applyPlanChecksum ? "apply_plan_checksum_missing" : "",
+        schemaValid && !editPlanBound ? "edit_plan_checksum_not_bound" : "",
+        schemaValid && !sessionBound ? "session_binding_missing" : "",
+        nativeReady && !hasRequestPatch ? "request_patch_missing" : "",
+        nativeReady && !hasBetaHeader ? "context_management_beta_missing" : "",
+        nativeReady && !requestPatchChecksum ? "request_patch_checksum_missing" : "",
+        !nativeReady && requestPatch ? "advisory_plan_contains_request_patch" : "",
+      ].filter(Boolean);
+      return {
+        taskId: task.id || task.task_id || "",
+        title: compactMemoryCenterText(task.title || summary.business_goal || "", 180),
+        groupId: String(task.group_id || task.groupId || ""),
+        agent: plan.target_project || task.target_project || "",
+        editPlanChecksum,
+        applyPlanChecksum,
+        requestPatchChecksum,
+        taskAgentSessionId,
+        nativeSessionId,
+        memoryContextSnapshotId,
+        memoryContextSnapshotChecksum,
+        sessionBindingRequired,
+        sessionBound,
+        mode: nativePlan?.mode || "missing",
+        nativeReady,
+        advisoryOnly: !nativeReady,
+        executor: nativePlan?.executor || null,
+        contractValid,
+        failedChecks,
+      };
+    });
+}
+
+function buildApiMicrocompactNativeApplyReadinessReport(options: any = {}) {
+  const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
+    ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : null;
+  const taskLimit = Math.max(10, Number(options.taskLimit || options.task_limit || 160));
+  const tasks = Array.isArray(options.tasks) ? options.tasks : loadTasks().slice(-taskLimit);
+  const files = explicitGroupIds?.length
+    ? explicitGroupIds.map((id: string) => path.join(GROUP_MEMORY_DIR, `${id}.json`))
+    : listJsonFiles(GROUP_MEMORY_DIR);
+  const groups = files.map(file => {
+    const memory = readMemoryFile(file) || {};
+    const groupId = String(memory.groupId || path.basename(file, ".json"));
+    const taskRows = tasks
+      .filter((task: any) => String(task.group_id || task.groupId || "") === groupId)
+      .flatMap((task: any) => apiMicrocompactNativeApplyRowsFromTask(task));
+    const checked = taskRows.length;
+    const passed = taskRows.filter((row: any) => row.contractValid).length;
+    const nativeReady = taskRows.filter((row: any) => row.nativeReady && row.contractValid).length;
+    const advisory = taskRows.filter((row: any) => !row.nativeReady && row.contractValid).length;
+    const sessionBound = taskRows.filter((row: any) => row.sessionBound).length;
+    const score = qualityRate(passed, checked);
+    const status = checked === 0 ? "empty" : Number(score) >= 90 ? "ok" : Number(score) >= 70 ? "warn" : "fail";
+    const gaps = taskRows.filter((row: any) => !row.contractValid).map((row: any) => ({
+      taskId: row.taskId,
+      agent: row.agent,
+      severity: row.nativeReady ? "high" : "medium",
+      reason: `API microcompact native apply contract 无效：${row.failedChecks.join("、") || "unknown"}`,
+      editPlanChecksum: row.editPlanChecksum,
+      failedChecks: row.failedChecks,
+    }));
+    return {
+      schema: "ccm-api-microcompact-native-apply-readiness-group-v1",
+      groupId,
+      status,
+      score,
+      checked,
+      passed,
+      missing: Math.max(0, checked - passed),
+      nativeReady,
+      advisory,
+      sessionBound,
+      taskCount: new Set(taskRows.map((row: any) => row.taskId).filter(Boolean)).size,
+      rows: taskRows.slice(0, 30),
+      gaps: gaps.slice(0, 20),
+    };
+  });
+  const checkedGroups = groups.filter((row: any) => row.checked > 0);
+  const checked = checkedGroups.reduce((sum: number, row: any) => sum + row.checked, 0);
+  const passed = checkedGroups.reduce((sum: number, row: any) => sum + row.passed, 0);
+  const score = qualityRate(passed, checked);
+  const status = checked === 0 ? "empty" : Number(score) >= 90 ? "ok" : Number(score) >= 70 ? "warn" : "fail";
+  return {
+    schema: "ccm-api-microcompact-native-apply-readiness-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      score,
+      checked,
+      passed,
+      missing: Math.max(0, checked - passed),
+      groupCount: groups.length,
+      checkedGroupCount: checkedGroups.length,
+      nativeReadyCount: checkedGroups.reduce((sum: number, row: any) => sum + row.nativeReady, 0),
+      advisoryCount: checkedGroups.reduce((sum: number, row: any) => sum + row.advisory, 0),
+      sessionBoundCount: checkedGroups.reduce((sum: number, row: any) => sum + row.sessionBound, 0),
+    },
+    groups: groups.sort((a: any, b: any) => b.checked - a.checked || b.missing - a.missing).slice(0, 50),
+    weakGroups: groups.filter((row: any) => row.status === "warn" || row.status === "fail").slice(0, 20),
+  };
+}
+
+function evaluateApiMicrocompactNativeApplyReadiness(options: any = {}) {
+  const report = buildApiMicrocompactNativeApplyReadinessReport(options);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    checked: row.checked,
+    nativeReady: row.nativeReady,
+    advisory: row.advisory,
+    sessionBound: row.sessionBound,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    taskId: gap.taskId,
+    agent: gap.agent,
+    reason: gap.reason,
+    severity: gap.severity,
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "api_microcompact_native_apply_readiness",
+    "API Microcompact 原生应用就绪度",
+    Number(report.overall.checked || 0),
+    Number(report.overall.passed || 0),
+    evidence,
+    gaps,
+    "原生应用必须绑定 edit/apply/request patch checksum、context_management 请求体和 context-management beta；CLI 执行器保持 advisory。"
+  );
+  check.report = report;
+  return check;
+}
+
+function readApiMicrocompactNativeApplyProofLedgerForCenter(groupId: string) {
+  try {
+    const api = require("../collaboration/memory");
+    if (typeof api.readGroupApiMicrocompactNativeApplyProofLedger === "function") {
+      return api.readGroupApiMicrocompactNativeApplyProofLedger(groupId);
+    }
+  } catch {}
+  const file = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId);
+  const parsed = readJson(file, null);
+  return {
+    ...(parsed || {}),
+    schema: parsed?.schema || "ccm-group-api-microcompact-native-apply-proof-ledger-v1",
+    groupId,
+    file,
+    entries: Array.isArray(parsed?.entries) ? parsed.entries : [],
+    totals: parsed?.totals && typeof parsed.totals === "object" ? parsed.totals : {},
+    updatedAt: parsed?.updatedAt || "",
+  };
+}
+
+function readApiMicrocompactNativeApplyRequestTelemetryLedgerForCenter(groupId: string) {
+  try {
+    const api = require("../collaboration/memory");
+    if (typeof api.readGroupApiMicrocompactNativeApplyRequestTelemetryLedger === "function") {
+      return api.readGroupApiMicrocompactNativeApplyRequestTelemetryLedger(groupId);
+    }
+  } catch {}
+  const file = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+  const parsed = readJson(file, null);
+  return {
+    ...(parsed || {}),
+    schema: parsed?.schema || "ccm-group-api-microcompact-native-apply-request-telemetry-ledger-v1",
+    groupId,
+    file,
+    entries: Array.isArray(parsed?.entries) ? parsed.entries : [],
+    totals: parsed?.totals && typeof parsed.totals === "object" ? parsed.totals : {},
+    updatedAt: parsed?.updatedAt || "",
+  };
+}
+
+function apiMicrocompactNativeApplyClaimRowsFromTask(task: any = {}) {
+  const extracted = extractApiMicrocompactReceiptRowsFromTask(task, null);
+  return (Array.isArray(extracted.rows) ? extracted.rows : []).flatMap((receiptRow: any) => {
+    const rows = Array.isArray(receiptRow.rows) ? receiptRow.rows : [];
+    return rows
+      .filter((row: any) => row.native_applied === true || row.usage_state === "native_applied")
+      .map((row: any) => ({
+        taskId: task.id || task.task_id || receiptRow.taskId || "",
+        title: compactMemoryCenterText(task.title || task.delivery_summary?.business_goal || "", 180),
+        agent: receiptRow.agent || task.target_project || "",
+        planChecksum: String(row.plan_checksum || ""),
+        applyPlanChecksum: String(row.apply_plan_checksum || row.receipt_apply_plan_checksum || ""),
+        requestPatchChecksum: String(row.request_patch_checksum || row.receipt_request_patch_checksum || ""),
+        taskAgentSessionId: String(row.receipt_task_agent_session_id || row.expected_task_agent_session_id || ""),
+        nativeSessionId: String(row.receipt_native_session_id || row.expected_native_session_id || ""),
+        memoryContextSnapshotId: String(row.receipt_memory_context_snapshot_id || row.expected_memory_context_snapshot_id || ""),
+        memoryContextSnapshotChecksum: String(row.receipt_memory_context_snapshot_checksum || row.expected_memory_context_snapshot_checksum || ""),
+        receiptPass: row.pass === true,
+        unsafeNativeApplied: row.unsafe_native_applied === true,
+        sessionMatched: row.session_matched !== false,
+      }));
+  });
+}
+
+function apiMicrocompactProofEntryMatchesClaim(entry: any = {}, claim: any = {}) {
+  const sameTask = !claim.taskId || !entry.task_id || String(entry.task_id) === String(claim.taskId);
+  const samePlan = !claim.planChecksum || String(entry.plan_checksum || "") === String(claim.planChecksum);
+  const sameApply = !claim.applyPlanChecksum
+    || [entry.apply_plan_checksum, entry.receipt_apply_plan_checksum].some(value => String(value || "") === String(claim.applyPlanChecksum));
+  const sameRequest = !claim.requestPatchChecksum
+    || [entry.request_patch_checksum, entry.receipt_request_patch_checksum].some(value => String(value || "") === String(claim.requestPatchChecksum));
+  const sameTaskSession = !claim.taskAgentSessionId
+    || [entry.task_agent_session_id, entry.receipt_task_agent_session_id, entry.expected_task_agent_session_id].some(value => String(value || "") === String(claim.taskAgentSessionId));
+  const sameNativeSession = !claim.nativeSessionId
+    || [entry.native_session_id, entry.receipt_native_session_id, entry.expected_native_session_id].some(value => String(value || "") === String(claim.nativeSessionId));
+  const sameSnapshot = !claim.memoryContextSnapshotId
+    || [entry.memory_context_snapshot_id, entry.receipt_memory_context_snapshot_id, entry.expected_memory_context_snapshot_id].some(value => String(value || "") === String(claim.memoryContextSnapshotId));
+  return sameTask && samePlan && sameApply && sameRequest && sameTaskSession && sameNativeSession && sameSnapshot;
+}
+
+function apiMicrocompactTelemetryEntryMatchesProof(entry: any = {}, proof: any = {}) {
+  const sameTask = !proof.task_id || !entry.task_id || String(entry.task_id) === String(proof.task_id);
+  const samePlan = !proof.plan_checksum || String(entry.plan_checksum || "") === String(proof.plan_checksum || "");
+  const sameApply = !proof.apply_plan_checksum && !proof.receipt_apply_plan_checksum
+    || [proof.apply_plan_checksum, proof.receipt_apply_plan_checksum].some(value => String(value || "") === String(entry.apply_plan_checksum || ""));
+  const sameRequest = !proof.request_patch_checksum && !proof.receipt_request_patch_checksum
+    || [proof.request_patch_checksum, proof.receipt_request_patch_checksum].some(value => String(value || "") === String(entry.request_patch_checksum || ""));
+  const sameTaskSession = !proof.task_agent_session_id && !proof.receipt_task_agent_session_id
+    || [proof.task_agent_session_id, proof.receipt_task_agent_session_id, proof.expected_task_agent_session_id].some(value => String(value || "") === String(entry.task_agent_session_id || ""));
+  const sameNativeSession = !proof.native_session_id && !proof.receipt_native_session_id
+    || [proof.native_session_id, proof.receipt_native_session_id, proof.expected_native_session_id].some(value => String(value || "") === String(entry.native_session_id || ""));
+  const sameSnapshot = !proof.memory_context_snapshot_id && !proof.receipt_memory_context_snapshot_id
+    || [proof.memory_context_snapshot_id, proof.receipt_memory_context_snapshot_id, proof.expected_memory_context_snapshot_id].some(value => String(value || "") === String(entry.memory_context_snapshot_id || ""));
+  return sameTask && samePlan && sameApply && sameRequest && sameTaskSession && sameNativeSession && sameSnapshot;
+}
+
+function apiMicrocompactTelemetryEntryMatchesProofCore(entry: any = {}, proof: any = {}) {
+  const sameTask = !proof.task_id || !entry.task_id || String(entry.task_id) === String(proof.task_id);
+  const samePlan = !proof.plan_checksum || String(entry.plan_checksum || "") === String(proof.plan_checksum || "");
+  const sameApply = !proof.apply_plan_checksum && !proof.receipt_apply_plan_checksum
+    || [proof.apply_plan_checksum, proof.receipt_apply_plan_checksum].some(value => String(value || "") === String(entry.apply_plan_checksum || ""));
+  const sameRequest = !proof.request_patch_checksum && !proof.receipt_request_patch_checksum
+    || [proof.request_patch_checksum, proof.receipt_request_patch_checksum].some(value => String(value || "") === String(entry.request_patch_checksum || ""));
+  return sameTask && samePlan && sameApply && sameRequest;
+}
+
+function apiMicrocompactCleanText(value: any) {
+  return String(value || "").trim();
+}
+
+function loadTaskAgentSessionsForApiMicrocompactProof(groupId = "") {
+  try {
+    const api = require("../../tasks/agent-sessions");
+    if (typeof api.listTaskAgentSessions === "function") {
+      return api.listTaskAgentSessions(groupId ? { groupId } : {});
+    }
+  } catch {}
+  return [];
+}
+
+function loadExecutionForApiMicrocompactProof(executionId = "") {
+  const id = apiMicrocompactCleanText(executionId);
+  if (!id) return null;
+  try {
+    const api = require("../../agents/execution-kernel");
+    if (typeof api.loadExecution === "function") {
+      const direct = api.loadExecution(id);
+      if (direct) return direct;
+      const canonicalId = safeExecutionKernelRecordId(id);
+      if (canonicalId && canonicalId !== id) return api.loadExecution(canonicalId);
+    }
+  } catch {}
+  return null;
+}
+
+function safeExecutionKernelRecordId(value: any) {
+  return String(value || "execution")
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 100)
+    .replace(/^-+|-+$/g, "")
+    || "execution";
+}
+
+function getExecutionKernelRecordFileForCenter(executionId: string) {
+  return path.join(CCM_DIR, "execution-kernel", "executions", `${safeExecutionKernelRecordId(executionId)}.json`);
+}
+
+function apiMicrocompactSessionSnapshotRef(session: any = {}, snapshotId = "") {
+  const wanted = apiMicrocompactCleanText(snapshotId);
+  if (!wanted) return null;
+  if (apiMicrocompactCleanText(session.memoryContextSnapshotId) === wanted) {
+    return {
+      snapshotId: apiMicrocompactCleanText(session.memoryContextSnapshotId),
+      checksum: apiMicrocompactCleanText(session.memoryContextSnapshotChecksum),
+      current: true,
+    };
+  }
+  const refs = Array.isArray(session.memoryContextSnapshots) ? session.memoryContextSnapshots : [];
+  return refs.find((ref: any) => apiMicrocompactCleanText(ref.snapshotId || ref.snapshot_id) === wanted) || null;
+}
+
+function evaluateApiMicrocompactTelemetryBindingForProof(telemetry: any = null, proof: any = {}, options: any = {}) {
+  const groupId = apiMicrocompactCleanText(telemetry?.group_id || proof.group_id || options.groupId || options.group_id);
+  const taskId = apiMicrocompactCleanText(telemetry?.task_id || proof.task_id);
+  const targetProject = apiMicrocompactCleanText(telemetry?.target_project || proof.target_project || proof.agent);
+  const taskAgentSessionId = apiMicrocompactCleanText(
+    telemetry?.task_agent_session_id
+    || proof.task_agent_session_id
+    || proof.receipt_task_agent_session_id
+    || proof.expected_task_agent_session_id
+  );
+  const nativeSessionId = apiMicrocompactCleanText(
+    telemetry?.native_session_id
+    || proof.native_session_id
+    || proof.receipt_native_session_id
+    || proof.expected_native_session_id
+  );
+  const memoryContextSnapshotId = apiMicrocompactCleanText(
+    telemetry?.memory_context_snapshot_id
+    || proof.memory_context_snapshot_id
+    || proof.receipt_memory_context_snapshot_id
+    || proof.expected_memory_context_snapshot_id
+  );
+  const memoryContextSnapshotChecksum = apiMicrocompactCleanText(
+    telemetry?.memory_context_snapshot_checksum
+    || proof.memory_context_snapshot_checksum
+    || proof.receipt_memory_context_snapshot_checksum
+    || proof.expected_memory_context_snapshot_checksum
+  );
+  const executionId = apiMicrocompactCleanText(telemetry?.execution_id || proof.execution_id || options.executionId || options.execution_id);
+  const runnerRequestId = apiMicrocompactCleanText(
+    telemetry?.runner_request_id
+    || telemetry?.external_runner_request_id
+    || proof.runner_request_id
+    || proof.external_runner_request_id
+  );
+  const sessions = Array.isArray(options.taskAgentSessions) ? options.taskAgentSessions : loadTaskAgentSessionsForApiMicrocompactProof(groupId);
+  const session = taskAgentSessionId ? sessions.find((item: any) => apiMicrocompactCleanText(item.id) === taskAgentSessionId) : null;
+  const sessionIssues: string[] = [];
+  let snapshotMatched = false;
+  if (!taskAgentSessionId) sessionIssues.push("missing_task_agent_session_id");
+  else if (!session) sessionIssues.push("missing_task_agent_session");
+  else {
+    if (groupId && apiMicrocompactCleanText(session.groupId) && apiMicrocompactCleanText(session.groupId) !== groupId) sessionIssues.push("group_mismatch");
+    if (taskId && ![session.taskId, session.scopeId].map(apiMicrocompactCleanText).includes(taskId)) sessionIssues.push("task_mismatch");
+    if (targetProject && apiMicrocompactCleanText(session.project) && apiMicrocompactCleanText(session.project) !== targetProject) sessionIssues.push("project_mismatch");
+    if (!nativeSessionId) sessionIssues.push("missing_native_session_id");
+    else {
+      const history = Array.isArray(session.nativeSessionHistory) ? session.nativeSessionHistory.map(apiMicrocompactCleanText) : [];
+      if (![apiMicrocompactCleanText(session.nativeSessionId), ...history].includes(nativeSessionId)) sessionIssues.push("native_session_mismatch");
+    }
+    if (!memoryContextSnapshotId) sessionIssues.push("missing_memory_context_snapshot_id");
+    else {
+      const ref = apiMicrocompactSessionSnapshotRef(session, memoryContextSnapshotId);
+      snapshotMatched = !!ref;
+      if (!ref) sessionIssues.push("memory_context_snapshot_mismatch");
+      else if (memoryContextSnapshotChecksum) {
+        const refChecksum = apiMicrocompactCleanText(ref.checksum || ref.memoryContextSnapshotChecksum || ref.memory_context_snapshot_checksum);
+        if (refChecksum && refChecksum !== memoryContextSnapshotChecksum) sessionIssues.push("memory_context_snapshot_checksum_mismatch");
+      }
+    }
+  }
+  const execution = loadExecutionForApiMicrocompactProof(executionId);
+  const dispatchIssues: string[] = [];
+  let runnerMatched = false;
+  if (!executionId) dispatchIssues.push("missing_execution_id");
+  else if (!execution) dispatchIssues.push("missing_execution");
+  else {
+    if (taskId && apiMicrocompactCleanText(execution.taskId) && apiMicrocompactCleanText(execution.taskId) !== taskId) dispatchIssues.push("execution_task_mismatch");
+    if (targetProject && apiMicrocompactCleanText(execution.project) && apiMicrocompactCleanText(execution.project) !== targetProject) dispatchIssues.push("execution_project_mismatch");
+    if (runnerRequestId) {
+      const ids = Array.isArray(execution.externalRunnerRequestIds) ? execution.externalRunnerRequestIds.map(apiMicrocompactCleanText) : [];
+      runnerMatched = ids.includes(runnerRequestId);
+      if (!runnerMatched) dispatchIssues.push("runner_request_mismatch");
+    }
+  }
+  const sessionBound = !!session && sessionIssues.length === 0 && snapshotMatched;
+  const dispatchBound = !!execution && dispatchIssues.length === 0;
+  const runnerMissing = !runnerRequestId;
+  const sessionStatus = sessionBound ? "bound" : !taskAgentSessionId ? "missing_session_id" : !session ? "missing_session" : "mismatch";
+  const dispatchStatus = dispatchBound
+    ? runnerRequestId ? "runner_bound" : "execution_bound"
+    : !executionId ? "missing_execution_id" : !execution ? "missing_execution" : runnerRequestId && !runnerMatched ? "runner_mismatch" : "mismatch";
+  const weakReasons = [
+    ...sessionIssues.map(item => `session:${item}`),
+    ...dispatchIssues.map(item => `dispatch:${item}`),
+  ];
+  return {
+    schema: "ccm-api-microcompact-native-apply-telemetry-binding-v1",
+    sessionBound,
+    sessionStatus,
+    sessionIssues,
+    taskAgentSessionId,
+    nativeSessionId,
+    memoryContextSnapshotId,
+    memoryContextSnapshotChecksum,
+    dispatchBound,
+    dispatchStatus,
+    dispatchIssues,
+    executionId,
+    runnerRequestId,
+    runnerMatched,
+    runnerMissing,
+    strongBinding: sessionBound && dispatchBound,
+    weakReason: weakReasons.join(","),
+  };
+}
+
+function classifyApiMicrocompactNativeApplyTelemetryForProof(telemetry: any = null, options: any = {}) {
+  const nowMs = Number(options.nowMs || options.now_ms || Date.now());
+  const maxAgeMs = Number(options.telemetryMaxAgeMs || options.telemetry_max_age_ms || API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS);
+  if (!telemetry) {
+    return {
+      matched: false,
+      strong: false,
+      fresh: false,
+      stale: false,
+      adapterCaptured: false,
+      source: "",
+      ageMs: null,
+      status: "missing",
+      weakReason: "missing",
+      maxAgeMs,
+    };
+  }
+  const source = String(telemetry.telemetry_source || "").trim();
+  const matched = telemetry?.telemetry_status === "matched_contract" || telemetry?.matched_contract === true;
+  const sentMs = Date.parse(telemetry.sent_at || "");
+  const ageMs = Number.isFinite(sentMs) && sentMs > 0 ? Math.max(0, nowMs - sentMs) : null;
+  const fresh = matched && ageMs !== null && ageMs <= maxAgeMs;
+  const stale = matched && !fresh;
+  const adapterCaptured = source === "native_request_adapter";
+  const strong = matched && fresh && adapterCaptured;
+  const status = !matched
+    ? String(telemetry.telemetry_status || "invalid")
+    : stale
+      ? "stale"
+      : adapterCaptured
+        ? "matched"
+        : "receipt_only";
+  return {
+    matched,
+    strong,
+    fresh,
+    stale,
+    adapterCaptured,
+    source,
+    ageMs,
+    status,
+    weakReason: strong ? "" : stale ? "stale" : adapterCaptured ? status : "receipt_only",
+    maxAgeMs,
+  };
+}
+
+function summarizeApiMicrocompactNativeApplyProofEntry(entry: any = {}) {
+  return {
+    entryId: entry.entry_id || "",
+    taskId: entry.task_id || "",
+    agent: entry.agent || entry.target_project || "",
+    targetProject: entry.target_project || "",
+    planChecksum: entry.plan_checksum || "",
+    applyPlanChecksum: entry.apply_plan_checksum || entry.receipt_apply_plan_checksum || "",
+    requestPatchChecksum: entry.request_patch_checksum || entry.receipt_request_patch_checksum || "",
+    taskAgentSessionId: entry.task_agent_session_id || entry.receipt_task_agent_session_id || "",
+    nativeSessionId: entry.native_session_id || entry.receipt_native_session_id || "",
+    memoryContextSnapshotId: entry.memory_context_snapshot_id || entry.receipt_memory_context_snapshot_id || "",
+    memoryContextSnapshotChecksum: entry.memory_context_snapshot_checksum || entry.receipt_memory_context_snapshot_checksum || "",
+    executionId: entry.execution_id || "",
+    usageState: entry.usage_state || "",
+    proofStatus: entry.proof_status || "",
+    strongProof: entry.strong_proof === true || entry.proof_status === "verified",
+    requestTelemetryMatched: entry.request_telemetry_matched === true,
+    requestTelemetryStrong: entry.request_telemetry_strong === true,
+    requestTelemetryFresh: entry.request_telemetry_fresh === true,
+    requestTelemetryStale: entry.request_telemetry_stale === true,
+    requestTelemetryStatus: entry.request_telemetry_status || "",
+    requestTelemetryEntryId: entry.request_telemetry_entry_id || "",
+    requestTelemetrySentAt: entry.request_telemetry_sent_at || "",
+    requestTelemetrySource: entry.request_telemetry_source || "",
+    requestTelemetryAgeMs: entry.request_telemetry_age_ms ?? null,
+    requestTelemetryWeakReason: entry.request_telemetry_weak_reason || "",
+    requestTelemetrySessionBound: entry.request_telemetry_session_bound === true,
+    requestTelemetrySessionStatus: entry.request_telemetry_session_status || "",
+    requestTelemetryDispatchBound: entry.request_telemetry_dispatch_bound === true,
+    requestTelemetryDispatchStatus: entry.request_telemetry_dispatch_status || "",
+    requestTelemetryRunnerRequestId: entry.request_telemetry_runner_request_id || "",
+    requestTelemetryRunnerMatched: entry.request_telemetry_runner_matched === true,
+    requestTelemetryRunnerMissing: entry.request_telemetry_runner_missing === true,
+    externalRunnerRequestId: entry.external_runner_request_id || "",
+    nativeApplyStrongProof: entry.proof_status === "verified" && entry.request_telemetry_strong === true,
+    sessionMatched: entry.session_matched !== false,
+    checksumMatched: entry.apply_plan_checksum_matched === true && entry.request_patch_checksum_matched === true,
+    reason: compactMemoryCenterText(entry.reason || "", 220),
+    generatedAt: entry.generated_at || "",
+  };
+}
+
+function buildApiMicrocompactNativeApplyProofReport(options: any = {}) {
+  const nowMs = Number(options.nowMs || options.now_ms || Date.now());
+  const telemetryMaxAgeMs = Number(options.telemetryMaxAgeMs || options.telemetry_max_age_ms || API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS);
+  const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
+    ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : null;
+  const taskLimit = Math.max(10, Number(options.taskLimit || options.task_limit || 160));
+  const tasks = Array.isArray(options.tasks) ? options.tasks : loadTasks().slice(-taskLimit);
+  const files = explicitGroupIds?.length
+    ? explicitGroupIds.map((id: string) => path.join(GROUP_MEMORY_DIR, `${id}.json`))
+    : listJsonFiles(GROUP_MEMORY_DIR);
+  const groups = files.map(file => {
+    const memory = readMemoryFile(file) || {};
+    const groupId = String(memory.groupId || path.basename(file, ".json"));
+    const groupTasks = tasks.filter((task: any) => String(task.group_id || task.groupId || "") === groupId);
+    const claims = groupTasks.flatMap((task: any) => apiMicrocompactNativeApplyClaimRowsFromTask(task));
+    const ledger = readApiMicrocompactNativeApplyProofLedgerForCenter(groupId);
+    const telemetryLedger = readApiMicrocompactNativeApplyRequestTelemetryLedgerForCenter(groupId);
+    const entries = Array.isArray(ledger.entries) ? ledger.entries : [];
+    const telemetryEntries = Array.isArray(telemetryLedger.entries) ? telemetryLedger.entries : [];
+    const proofEntries = entries.filter((entry: any) => ["verified", "failed"].includes(String(entry.proof_status || "")));
+    const verifiedEntriesRaw = proofEntries.filter((entry: any) => entry.proof_status === "verified");
+    const verifiedEntries = verifiedEntriesRaw.map((entry: any) => {
+      const telemetry = telemetryEntries.find((item: any) => apiMicrocompactTelemetryEntryMatchesProof(item, entry))
+        || telemetryEntries.find((item: any) => apiMicrocompactTelemetryEntryMatchesProofCore(item, entry));
+      const telemetryProof = classifyApiMicrocompactNativeApplyTelemetryForProof(telemetry, { nowMs, telemetryMaxAgeMs });
+      const bindingProof = evaluateApiMicrocompactTelemetryBindingForProof(telemetry, entry, { groupId });
+      const requestTelemetryStrong = telemetryProof.strong && bindingProof.strongBinding;
+      return {
+        ...entry,
+        request_telemetry_matched: telemetryProof.matched,
+        request_telemetry_strong: requestTelemetryStrong,
+        request_telemetry_fresh: telemetryProof.fresh,
+        request_telemetry_stale: telemetryProof.stale,
+        request_telemetry_status: telemetryProof.status,
+        request_telemetry_entry_id: telemetry?.entry_id || "",
+        request_telemetry_sent_at: telemetry?.sent_at || "",
+        request_telemetry_source: telemetryProof.source,
+        request_telemetry_age_ms: telemetryProof.ageMs,
+        request_telemetry_max_age_ms: telemetryProof.maxAgeMs,
+        request_telemetry_adapter_captured: telemetryProof.adapterCaptured,
+        request_telemetry_session_bound: bindingProof.sessionBound,
+        request_telemetry_session_status: bindingProof.sessionStatus,
+        request_telemetry_session_issues: bindingProof.sessionIssues,
+        request_telemetry_dispatch_bound: bindingProof.dispatchBound,
+        request_telemetry_dispatch_status: bindingProof.dispatchStatus,
+        request_telemetry_dispatch_issues: bindingProof.dispatchIssues,
+        request_telemetry_runner_request_id: bindingProof.runnerRequestId,
+        request_telemetry_runner_matched: bindingProof.runnerMatched,
+        request_telemetry_runner_missing: bindingProof.runnerMissing,
+        request_telemetry_binding_weak_reason: bindingProof.weakReason,
+        request_telemetry_weak_reason: requestTelemetryStrong
+          ? ""
+          : telemetryProof.strong && bindingProof.weakReason
+            ? bindingProof.weakReason
+            : telemetryProof.weakReason,
+      };
+    });
+    const failedEntries = proofEntries.filter((entry: any) => entry.proof_status === "failed");
+    const advisoryEntries = entries.filter((entry: any) => entry.proof_status === "advisory" || entry.proof_status === "not_supported");
+    const telemetryMatchedEntries = verifiedEntries.filter((entry: any) => entry.request_telemetry_matched === true);
+    const telemetryAdapterMatchedEntries = telemetryMatchedEntries.filter((entry: any) => entry.request_telemetry_source === "native_request_adapter");
+    const telemetryReceiptMatchedEntries = telemetryMatchedEntries.filter((entry: any) => entry.request_telemetry_source !== "native_request_adapter");
+    const telemetryStrongEntries = verifiedEntries.filter((entry: any) => entry.request_telemetry_strong === true);
+    const telemetryReceiptOnlyEntries = verifiedEntries.filter((entry: any) => entry.request_telemetry_status === "receipt_only");
+    const telemetryStaleEntries = verifiedEntries.filter((entry: any) => entry.request_telemetry_status === "stale");
+    const telemetryMissingEntries = verifiedEntries.filter((entry: any) => entry.request_telemetry_status === "missing");
+    const telemetryInvalidEntries = verifiedEntries.filter((entry: any) => entry.request_telemetry_status && !["matched", "missing", "receipt_only", "stale"].includes(entry.request_telemetry_status));
+    const telemetrySessionBoundEntries = verifiedEntries.filter((entry: any) => entry.request_telemetry_matched === true && entry.request_telemetry_session_bound === true);
+    const telemetrySessionMismatchEntries = verifiedEntries.filter((entry: any) => entry.request_telemetry_matched === true && entry.request_telemetry_session_bound !== true);
+    const telemetryDispatchBoundEntries = verifiedEntries.filter((entry: any) => entry.request_telemetry_matched === true && entry.request_telemetry_dispatch_bound === true);
+    const telemetryDispatchUnboundEntries = verifiedEntries.filter((entry: any) => entry.request_telemetry_matched === true && entry.request_telemetry_dispatch_bound !== true);
+    const telemetryRunnerBoundEntries = verifiedEntries.filter((entry: any) => entry.request_telemetry_runner_matched === true);
+    const telemetryRunnerMissingEntries = verifiedEntries.filter((entry: any) => entry.request_telemetry_matched === true && entry.request_telemetry_runner_missing === true);
+    const telemetryRunnerMismatchEntries = verifiedEntries.filter((entry: any) => entry.request_telemetry_dispatch_status === "runner_mismatch");
+    const telemetryNativeAdapterEntries = telemetryEntries.filter((entry: any) => entry.telemetry_source === "native_request_adapter");
+    const telemetryAgentReceiptEntries = telemetryEntries.filter((entry: any) => entry.telemetry_source !== "native_request_adapter");
+    const claimRows = claims.map((claim: any) => {
+      const matchingProof = [...verifiedEntries, ...failedEntries].find((entry: any) => apiMicrocompactProofEntryMatchesClaim(entry, claim));
+      const proofStatus = matchingProof?.proof_status || "";
+      return {
+        ...claim,
+        proofStatus,
+        proofEntryId: matchingProof?.entry_id || "",
+        proofStrong: proofStatus === "verified",
+        requestTelemetryMatched: matchingProof?.request_telemetry_matched === true,
+        requestTelemetryStrong: matchingProof?.request_telemetry_strong === true,
+        requestTelemetryFresh: matchingProof?.request_telemetry_fresh === true,
+        requestTelemetryStatus: matchingProof?.request_telemetry_status || "",
+        requestTelemetrySource: matchingProof?.request_telemetry_source || "",
+        proofMissing: !matchingProof,
+      };
+    });
+    const missingProof = claimRows.filter((row: any) => row.proofMissing);
+    const checked = Math.max(claimRows.length, proofEntries.length);
+    const passed = Math.min(telemetryStrongEntries.length, checked);
+    const score = qualityRate(passed, checked);
+    const status = checked === 0
+      ? "empty"
+      : failedEntries.length > 0 || missingProof.length > 0 || telemetryMissingEntries.length > 0 || telemetryInvalidEntries.length > 0 || telemetryReceiptOnlyEntries.length > 0 || telemetryStaleEntries.length > 0 || telemetrySessionMismatchEntries.length > 0 || telemetryDispatchUnboundEntries.length > 0
+        ? Number(score) >= 70 ? "warn" : "fail"
+        : Number(score) >= 90 ? "ok" : Number(score) >= 70 ? "warn" : "fail";
+    const gaps = [
+      ...missingProof.map((row: any) => ({
+        taskId: row.taskId,
+        agent: row.agent,
+        severity: "high",
+        reason: `native_applied 声明缺少 proof ledger：plan=${row.planChecksum || "unknown"} requestPatch=${row.requestPatchChecksum || "missing"}`,
+        planChecksum: row.planChecksum,
+        requestPatchChecksum: row.requestPatchChecksum,
+      })),
+      ...telemetryMissingEntries.map((entry: any) => ({
+        taskId: entry.task_id || "",
+        agent: entry.agent || "",
+        severity: "high",
+        reason: `verified native_applied proof 缺少 provider request telemetry：plan=${entry.plan_checksum || "unknown"} requestPatch=${entry.receipt_request_patch_checksum || entry.request_patch_checksum || "missing"}`,
+        planChecksum: entry.plan_checksum || "",
+        requestPatchChecksum: entry.receipt_request_patch_checksum || entry.request_patch_checksum || "",
+      })),
+      ...telemetryInvalidEntries.map((entry: any) => ({
+        taskId: entry.task_id || "",
+        agent: entry.agent || "",
+        severity: "high",
+        reason: `provider request telemetry 未匹配 context_management contract：status=${entry.request_telemetry_status || "invalid"} plan=${entry.plan_checksum || "unknown"}`,
+        planChecksum: entry.plan_checksum || "",
+        requestPatchChecksum: entry.receipt_request_patch_checksum || entry.request_patch_checksum || "",
+      })),
+      ...telemetryReceiptOnlyEntries.map((entry: any) => ({
+        taskId: entry.task_id || "",
+        agent: entry.agent || "",
+        severity: "high",
+        reason: `verified native_applied proof 只有 Agent 回执来源 telemetry，缺少 native_request_adapter 捕获：plan=${entry.plan_checksum || "unknown"} requestPatch=${entry.receipt_request_patch_checksum || entry.request_patch_checksum || "missing"}`,
+        planChecksum: entry.plan_checksum || "",
+        requestPatchChecksum: entry.receipt_request_patch_checksum || entry.request_patch_checksum || "",
+      })),
+      ...telemetryStaleEntries.map((entry: any) => ({
+        taskId: entry.task_id || "",
+        agent: entry.agent || "",
+        severity: "high",
+        reason: `verified native_applied proof 的 provider request telemetry 已过期：ageMs=${entry.request_telemetry_age_ms ?? "unknown"} maxAgeMs=${entry.request_telemetry_max_age_ms ?? telemetryMaxAgeMs} plan=${entry.plan_checksum || "unknown"}`,
+        planChecksum: entry.plan_checksum || "",
+        requestPatchChecksum: entry.receipt_request_patch_checksum || entry.request_patch_checksum || "",
+      })),
+      ...telemetrySessionMismatchEntries.map((entry: any) => ({
+        taskId: entry.task_id || "",
+        agent: entry.agent || "",
+        severity: "high",
+        reason: `verified native_applied proof 的 adapter telemetry 未绑定到 task-agent session/snapshot：status=${entry.request_telemetry_session_status || "mismatch"} reason=${entry.request_telemetry_binding_weak_reason || "unknown"} session=${entry.task_agent_session_id || entry.receipt_task_agent_session_id || "missing"} snapshot=${entry.memory_context_snapshot_id || entry.receipt_memory_context_snapshot_id || "missing"}`,
+        planChecksum: entry.plan_checksum || "",
+        requestPatchChecksum: entry.receipt_request_patch_checksum || entry.request_patch_checksum || "",
+      })),
+      ...telemetryDispatchUnboundEntries.map((entry: any) => ({
+        taskId: entry.task_id || "",
+        agent: entry.agent || "",
+        severity: "high",
+        reason: `verified native_applied proof 的 adapter telemetry 未绑定到 execution/runner dispatch：status=${entry.request_telemetry_dispatch_status || "unbound"} runner=${entry.request_telemetry_runner_request_id || "missing"} execution=${entry.execution_id || "missing"}`,
+        planChecksum: entry.plan_checksum || "",
+        requestPatchChecksum: entry.receipt_request_patch_checksum || entry.request_patch_checksum || "",
+      })),
+      ...failedEntries.map((entry: any) => ({
+        taskId: entry.task_id || "",
+        agent: entry.agent || "",
+        severity: "high",
+        reason: `native_applied proof 失败：plan=${entry.plan_checksum || "unknown"} requestPatch=${entry.receipt_request_patch_checksum || entry.request_patch_checksum || "missing"} session=${entry.receipt_task_agent_session_id || entry.task_agent_session_id || "unbound"}`,
+        planChecksum: entry.plan_checksum || "",
+        requestPatchChecksum: entry.receipt_request_patch_checksum || entry.request_patch_checksum || "",
+      })),
+    ];
+    return {
+      schema: "ccm-api-microcompact-native-apply-proof-group-v1",
+      groupId,
+      status,
+      score,
+      checked,
+      passed,
+      missing: Math.max(0, checked - passed),
+      taskCount: groupTasks.length,
+      nativeClaimCount: claimRows.length,
+      verifiedProofCount: verifiedEntries.length,
+      failedProofCount: failedEntries.length,
+      missingProofCount: missingProof.length,
+      requestTelemetryMatchedCount: telemetryMatchedEntries.length,
+      requestTelemetryStrongCount: telemetryStrongEntries.length,
+      requestTelemetryReceiptOnlyCount: telemetryReceiptOnlyEntries.length,
+      requestTelemetryStaleCount: telemetryStaleEntries.length,
+      requestTelemetryMaxAgeMs: telemetryMaxAgeMs,
+      requestTelemetryAdapterMatchedCount: telemetryAdapterMatchedEntries.length,
+      requestTelemetryReceiptMatchedCount: telemetryReceiptMatchedEntries.length,
+      requestTelemetryMissingCount: telemetryMissingEntries.length,
+      requestTelemetryInvalidCount: telemetryInvalidEntries.length,
+      requestTelemetrySessionBoundCount: telemetrySessionBoundEntries.length,
+      requestTelemetrySessionMismatchCount: telemetrySessionMismatchEntries.length,
+      requestTelemetryDispatchBoundCount: telemetryDispatchBoundEntries.length,
+      requestTelemetryDispatchUnboundCount: telemetryDispatchUnboundEntries.length,
+      requestTelemetryRunnerBoundCount: telemetryRunnerBoundEntries.length,
+      requestTelemetryRunnerMissingCount: telemetryRunnerMissingEntries.length,
+      requestTelemetryRunnerMismatchCount: telemetryRunnerMismatchEntries.length,
+      requestTelemetryEntryCount: telemetryEntries.length,
+      requestTelemetryNativeAdapterEntryCount: telemetryNativeAdapterEntries.length,
+      requestTelemetryAgentReceiptEntryCount: telemetryAgentReceiptEntries.length,
+      requestTelemetryLedgerFile: telemetryLedger.file || getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId),
+      advisoryProofCount: advisoryEntries.length,
+      ledgerEntryCount: entries.length,
+      ledgerFile: ledger.file || getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId),
+      updatedAt: ledger.updatedAt || "",
+      rows: [
+        ...verifiedEntries.slice(-12).reverse().map(summarizeApiMicrocompactNativeApplyProofEntry),
+        ...failedEntries.slice(-12).reverse().map(summarizeApiMicrocompactNativeApplyProofEntry),
+        ...advisoryEntries.slice(-8).reverse().map(summarizeApiMicrocompactNativeApplyProofEntry),
+      ].slice(0, 30),
+      claims: claimRows.slice(0, 30),
+      gaps: gaps.slice(0, 20),
+    };
+  });
+  const checkedGroups = groups.filter((row: any) => row.checked > 0);
+  const checked = checkedGroups.reduce((sum: number, row: any) => sum + Number(row.checked || 0), 0);
+  const passed = checkedGroups.reduce((sum: number, row: any) => sum + Number(row.passed || 0), 0);
+  const score = qualityRate(passed, checked);
+  const status = checked === 0 ? "empty" : Number(score) >= 90 ? "ok" : Number(score) >= 70 ? "warn" : "fail";
+  return {
+    schema: "ccm-api-microcompact-native-apply-proof-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      score,
+      checked,
+      passed,
+      missing: Math.max(0, checked - passed),
+      groupCount: groups.length,
+      checkedGroupCount: checkedGroups.length,
+      nativeClaimCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.nativeClaimCount || 0), 0),
+      verifiedProofCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.verifiedProofCount || 0), 0),
+      failedProofCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.failedProofCount || 0), 0),
+      missingProofCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.missingProofCount || 0), 0),
+      requestTelemetryMatchedCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryMatchedCount || 0), 0),
+      requestTelemetryStrongCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryStrongCount || 0), 0),
+      requestTelemetryReceiptOnlyCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryReceiptOnlyCount || 0), 0),
+      requestTelemetryStaleCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryStaleCount || 0), 0),
+      requestTelemetryMaxAgeMs: telemetryMaxAgeMs,
+      requestTelemetryAdapterMatchedCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryAdapterMatchedCount || 0), 0),
+      requestTelemetryReceiptMatchedCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryReceiptMatchedCount || 0), 0),
+      requestTelemetryMissingCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryMissingCount || 0), 0),
+      requestTelemetryInvalidCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryInvalidCount || 0), 0),
+      requestTelemetrySessionBoundCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetrySessionBoundCount || 0), 0),
+      requestTelemetrySessionMismatchCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetrySessionMismatchCount || 0), 0),
+      requestTelemetryDispatchBoundCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryDispatchBoundCount || 0), 0),
+      requestTelemetryDispatchUnboundCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryDispatchUnboundCount || 0), 0),
+      requestTelemetryRunnerBoundCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryRunnerBoundCount || 0), 0),
+      requestTelemetryRunnerMissingCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryRunnerMissingCount || 0), 0),
+      requestTelemetryRunnerMismatchCount: checkedGroups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryRunnerMismatchCount || 0), 0),
+      requestTelemetryEntryCount: groups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryEntryCount || 0), 0),
+      requestTelemetryNativeAdapterEntryCount: groups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryNativeAdapterEntryCount || 0), 0),
+      requestTelemetryAgentReceiptEntryCount: groups.reduce((sum: number, row: any) => sum + Number(row.requestTelemetryAgentReceiptEntryCount || 0), 0),
+      advisoryProofCount: groups.reduce((sum: number, row: any) => sum + Number(row.advisoryProofCount || 0), 0),
+    },
+    groups: groups.sort((a: any, b: any) => b.checked - a.checked || b.failedProofCount - a.failedProofCount || b.missingProofCount - a.missingProofCount).slice(0, 50),
+    weakGroups: groups.filter((row: any) => row.status === "warn" || row.status === "fail").slice(0, 20),
+  };
+}
+
+function evaluateApiMicrocompactNativeApplyProof(options: any = {}) {
+  const report = buildApiMicrocompactNativeApplyProofReport(options);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    checked: row.checked,
+    verifiedProofCount: row.verifiedProofCount,
+    nativeClaimCount: row.nativeClaimCount,
+    ledgerFile: row.ledgerFile,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    taskId: gap.taskId,
+    agent: gap.agent,
+    reason: gap.reason,
+    severity: gap.severity,
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "api_microcompact_native_apply_proof",
+    "API Microcompact Native Apply Proof",
+    Number(report.overall.checked || 0),
+    Number(report.overall.passed || 0),
+    evidence,
+    gaps,
+    "native_applied 强证明必须同时满足 verified proof、fresh native_request_adapter telemetry、requestPatchChecksum、task-agent session/snapshot 绑定、execution/runner dispatch 绑定；agent_receipt 来源、stale telemetry 或未绑定 dispatch 都只能算弱证据。"
+  );
+  check.report = report;
+  return check;
+}
+
+function buildApiMicrocompactNativeApplyProofRepairWorkItemReport(options: any = {}) {
+  const proofReport = buildApiMicrocompactNativeApplyProofReport(options);
+  const rows = (proofReport.groups || []).map((group: any) => {
+    const groupId = String(group.groupId || "");
+    const activeGaps = apiMicrocompactNativeApplyProofRepairActiveGaps(group);
+    const workItems = syncApiMicrocompactNativeApplyProofRepairWorkItems(groupId, group, { at: options.generatedAt || options.generated_at || now() });
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const repairItems = (Array.isArray(ledger.items) ? ledger.items : [])
+      .filter((item: any) => String(item.source || "") === "api_microcompact_native_apply_binding_repair");
+    const openItems = repairItems.filter((item: any) => replayRepairWorkItemOpen(item.status));
+    const completedItems = repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "completed");
+    const requiredActionCount = activeGaps.length;
+    const coveredItemCount = requiredActionCount > 0 ? openItems.length + completedItems.length : completedItems.length;
+    const status = requiredActionCount > 0
+      ? coveredItemCount >= requiredActionCount ? "ok" : "fail"
+      : openItems.length > 0 ? "warn" : "ok";
+    return {
+      schema: "ccm-api-microcompact-native-apply-proof-repair-work-item-group-v1",
+      groupId,
+      status,
+      proofStatus: group.status || "",
+      proofScore: group.score ?? null,
+      requiredActionCount,
+      openItemCount: openItems.length,
+      coveredItemCount,
+      total: repairItems.length,
+      pendingCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "pending").length,
+      inProgressCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "in_progress").length,
+      completedCount: completedItems.length,
+      sessionBindingRepairCount: repairItems.filter((item: any) => String(item.component || "").includes("session")).length,
+      dispatchBindingRepairCount: repairItems.filter((item: any) => String(item.component || "").includes("dispatch")).length,
+      runnerMismatchRepairCount: repairItems.filter((item: any) => String(item.request_telemetry_dispatch_status || "") === "runner_mismatch").length,
+      file: workItems.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      latestApiMicrocompactNativeApplyProof: ledger.latestApiMicrocompactNativeApplyProof || null,
+      items: repairItems.slice(0, 12).map((item: any) => ({
+        id: item.id || item.work_item_id || "",
+        status: replayRepairWorkItemStatus(item.status),
+        priority: item.priority || "",
+        component: item.component || "",
+        target_project: item.target_project || "",
+        taskId: item.taskId || "",
+        plan_checksum: item.plan_checksum || "",
+        request_patch_checksum: item.request_patch_checksum || "",
+        request_telemetry_status: item.request_telemetry_status || "",
+        request_telemetry_session_status: item.request_telemetry_session_status || "",
+        request_telemetry_dispatch_status: item.request_telemetry_dispatch_status || "",
+        runner_request_id: item.runner_request_id || "",
+        instruction: compactMemoryCenterText(item.instruction || "", 260),
+      })),
+      gaps: status === "fail" ? [{
+        reason: `API microcompact native apply proof gaps=${requiredActionCount} 但 repair work items covered=${coveredItemCount}`,
+      }] : [],
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.requiredActionCount || 0) > 0 || Number(row.openItemCount || 0) > 0);
+  const groupsNeedingWork = checkedRows.filter(row => Number(row.requiredActionCount || 0) > 0);
+  const groupsCovered = groupsNeedingWork.filter(row => Number(row.coveredItemCount || 0) >= Number(row.requiredActionCount || 0));
+  const coverageRate = groupsNeedingWork.length ? Math.round((groupsCovered.length / groupsNeedingWork.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? checkedRows.some(row => row.status === "warn") ? "warn" : "empty"
+    : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-api-microcompact-native-apply-proof-repair-work-item-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsNeedingWork: groupsNeedingWork.length,
+      groupsCovered: groupsCovered.length,
+      requiredActionCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredActionCount || 0), 0),
+      openItemCount: checkedRows.reduce((sum, row) => sum + Number(row.openItemCount || 0), 0),
+      coveredItemCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredItemCount || 0), 0),
+      sessionBindingRepairCount: checkedRows.reduce((sum, row) => sum + Number(row.sessionBindingRepairCount || 0), 0),
+      dispatchBindingRepairCount: checkedRows.reduce((sum, row) => sum + Number(row.dispatchBindingRepairCount || 0), 0),
+      runnerMismatchRepairCount: checkedRows.reduce((sum, row) => sum + Number(row.runnerMismatchRepairCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.openItemCount || 0) - Number(a.openItemCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateApiMicrocompactNativeApplyProofRepairWorkItems(options: any = {}) {
+  const report = buildApiMicrocompactNativeApplyProofRepairWorkItemReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = checked === 0
+    ? 0
+    : (report.groups || []).filter((row: any) => (Number(row.requiredActionCount || 0) > 0 || Number(row.openItemCount || 0) > 0) && row.status === "ok").length;
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok" && Number(row.openItemCount || 0) > 0).slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    requiredActionCount: row.requiredActionCount,
+    openItemCount: row.openItemCount,
+    sessionBindingRepairCount: row.sessionBindingRepairCount,
+    dispatchBindingRepairCount: row.dispatchBindingRepairCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    reason: row.gaps?.[0]?.reason || "API microcompact native apply proof repair work items 未覆盖强证明缺口",
+    requiredActionCount: row.requiredActionCount,
+    openItemCount: row.openItemCount,
+    coveredItemCount: row.coveredItemCount,
+  }));
+  const check: any = makeQualityCheck(
+    "api_microcompact_native_apply_proof_repair_work_items",
+    "API Microcompact Native Apply Proof Repair Work Items",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "把 native_applied 强证明的 session/snapshot/dispatch/runner/telemetry 缺口物化为群聊主 Agent 可读 sidecar work items；只作为修复队列，不自动创建真实任务。"
+  );
+  check.report = report;
+  return check;
+}
+
 function summarizeCompactionHookLedger(groupId: string, memory: any = {}, ledger: any = {}) {
   const compaction = memory?.compaction || {};
   const legacyPre = Array.isArray(compaction.hookResults?.pre) ? compaction.hookResults.pre : [];
@@ -2763,6 +4467,546 @@ export function getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId: string
   return path.join(GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR, `${sidecarFileId(groupId)}.json`);
 }
 
+export function getGroupReplayRepairDispatchPlanLedgerFile(groupId: string) {
+  return path.join(GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR, `${sidecarFileId(groupId)}.json`);
+}
+
+function getGroupReplayRepairDispatchBindingLedgerFile(groupId: string) {
+  return path.join(GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_BINDINGS_DIR, `${sidecarFileId(groupId)}.json`);
+}
+
+function getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId: string) {
+  return path.join(GROUP_MEMORY_REPLAY_REPAIR_TIMELINE_BINDINGS_DIR, `${sidecarFileId(groupId)}.json`);
+}
+
+function getGroupWorkerContextCompactHookLedgerFile(groupId: string) {
+  return path.join(GROUP_MEMORY_WORKER_CONTEXT_COMPACT_HOOKS_DIR, `${sidecarFileId(groupId)}.json`);
+}
+
+function getGroupWorkerContextCompactOutcomeLedgerFile(groupId: string) {
+  return path.join(GROUP_MEMORY_WORKER_CONTEXT_COMPACT_OUTCOMES_DIR, `${sidecarFileId(groupId)}.json`);
+}
+
+function getGroupWorkerContextCompactStrategyMemoryFile(groupId: string) {
+  return path.join(GROUP_MEMORY_WORKER_CONTEXT_COMPACT_STRATEGIES_DIR, `${sidecarFileId(groupId)}.json`);
+}
+
+function getGroupWorkerContextPtlEmergencyHintFile(groupId: string) {
+  return path.join(GROUP_MEMORY_WORKER_CONTEXT_PTL_EMERGENCIES_DIR, `${sidecarFileId(groupId)}.json`);
+}
+
+function readGroupReplayRepairDispatchPlanLedger(groupId: string) {
+  const file = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+  const ledger = readJson(file, null);
+  if (ledger?.schema === "ccm-replay-repair-main-agent-dispatch-brief-ledger-v1") {
+    return {
+      ...ledger,
+      file,
+      briefs: Array.isArray(ledger.briefs) ? ledger.briefs : [],
+    };
+  }
+  return {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-ledger-v1",
+    version: 1,
+    groupId,
+    file,
+    updatedAt: "",
+    briefCount: 0,
+    readyCount: 0,
+    supersededCount: 0,
+    shouldCreateRealTask: false,
+    briefs: [],
+  };
+}
+
+function readGroupReplayRepairDispatchBindingLedger(groupId: string) {
+  const file = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const ledger = readJson(file, null);
+  if (ledger?.schema === "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1") {
+    return {
+      ...ledger,
+      file,
+      entries: Array.isArray(ledger.entries) ? ledger.entries : [],
+    };
+  }
+  return {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+    version: 1,
+    groupId,
+    file,
+    updatedAt: "",
+    bindingCount: 0,
+    nativeBindingCount: 0,
+    entries: [],
+  };
+}
+
+function readGroupReplayRepairDispatchTimelineBindingLedger(groupId: string) {
+  const file = getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId);
+  const ledger = readJson(file, null);
+  if (ledger?.schema === "ccm-replay-repair-main-agent-dispatch-brief-timeline-ledger-v1") {
+    return {
+      ...ledger,
+      file,
+      entries: Array.isArray(ledger.entries) ? ledger.entries : [],
+    };
+  }
+  return {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-timeline-ledger-v1",
+    version: 1,
+    groupId,
+    file,
+    updatedAt: "",
+    bindingCount: 0,
+    nativeBindingCount: 0,
+    entries: [],
+  };
+}
+
+function normalizeWorkerContextCompactHookEntryForCenter(raw: any = {}) {
+  const ok = raw.ok !== false && String(raw.status || "ok") !== "fail";
+  return {
+    schema: "ccm-worker-context-compact-hook-entry-v1",
+    entry_id: String(raw.entry_id || raw.entryId || ""),
+    hook_run_id: String(raw.hook_run_id || raw.hookRunId || ""),
+    group_id: String(raw.group_id || raw.groupId || ""),
+    phase: String(raw.phase || "") === "post" ? "post" : "pre",
+    ok,
+    status: ok ? String(raw.status || "ok") : "fail",
+    assignment_id: String(raw.assignment_id || raw.assignmentId || ""),
+    dispatch_key: String(raw.dispatch_key || raw.dispatchKey || ""),
+    project: String(raw.project || ""),
+    from_packet_id: String(raw.from_packet_id || raw.fromPacketId || ""),
+    retry_packet_id: String(raw.retry_packet_id || raw.retryPacketId || ""),
+    method: String(raw.method || ""),
+    memory_first: raw.memory_first === true || raw.memoryFirst === true,
+    initial_usage_status: String(raw.initial_usage_status || raw.initialUsageStatus || ""),
+    final_usage_status: String(raw.final_usage_status || raw.finalUsageStatus || ""),
+    dispatch_ready: raw.dispatch_ready === false || raw.dispatchReady === false ? false : true,
+    result_summary: raw.result_summary || raw.resultSummary || {},
+    error: compactMemoryCenterText(raw.error || "", 500),
+    at: String(raw.at || ""),
+  };
+}
+
+function readGroupWorkerContextCompactHookLedger(groupId: string) {
+  const file = getGroupWorkerContextCompactHookLedgerFile(groupId);
+  const ledger = readJson(file, null);
+  if (ledger?.schema === "ccm-worker-context-compact-hook-ledger-v1") {
+    return {
+      ...ledger,
+      file,
+      entries: Array.isArray(ledger.entries) ? ledger.entries.map(normalizeWorkerContextCompactHookEntryForCenter) : [],
+    };
+  }
+  return {
+    schema: "ccm-worker-context-compact-hook-ledger-v1",
+    version: 1,
+    groupId,
+    file,
+    entries: [],
+    stats: {},
+    updatedAt: "",
+  };
+}
+
+function normalizeWorkerContextCompactOutcomeEntryForCenter(raw: any = {}) {
+  const policy = raw.partial_compact_policy || raw.partialCompactPolicy || null;
+  const ptlHint = raw.ptl_emergency_hint || raw.ptlEmergencyHint || null;
+  return {
+    schema: "ccm-worker-context-compact-outcome-entry-v1",
+    outcome_id: String(raw.outcome_id || raw.outcomeId || ""),
+    group_id: String(raw.group_id || raw.groupId || ""),
+    assignment_id: String(raw.assignment_id || raw.assignmentId || ""),
+    dispatch_key: String(raw.dispatch_key || raw.dispatchKey || ""),
+    project: String(raw.project || ""),
+    hook_run_id: String(raw.hook_run_id || raw.hookRunId || ""),
+    retry_id: String(raw.retry_id || raw.retryId || ""),
+    method: String(raw.method || ""),
+    status: String(raw.status || ""),
+    dispatch_ready: raw.dispatch_ready === false || raw.dispatchReady === false ? false : true,
+    from_packet_id: String(raw.from_packet_id || raw.fromPacketId || ""),
+    retry_packet_id: String(raw.retry_packet_id || raw.retryPacketId || ""),
+    initial_usage_status: String(raw.initial_usage_status || raw.initialUsageStatus || ""),
+    final_usage_status: String(raw.final_usage_status || raw.finalUsageStatus || ""),
+    from_total_tokens: Number(raw.from_total_tokens || raw.fromTotalTokens || 0),
+    retry_total_tokens: Number(raw.retry_total_tokens || raw.retryTotalTokens || 0),
+    from_free_tokens: Number(raw.from_free_tokens || raw.fromFreeTokens || 0),
+    retry_free_tokens: Number(raw.retry_free_tokens || raw.retryFreeTokens || 0),
+    token_delta: Number(raw.token_delta || raw.tokenDelta || 0),
+    free_token_delta: Number(raw.free_token_delta || raw.freeTokenDelta || 0),
+    memory_first: raw.memory_first === true || raw.memoryFirst === true,
+    partial_compact: raw.partial_compact === true || raw.partialCompact === true,
+    task_compacted: raw.task_compacted === true || raw.taskCompacted === true,
+    task_hash_unchanged: raw.task_hash_unchanged === true || raw.taskHashUnchanged === true,
+    partial_compaction_categories: Array.isArray(raw.partial_compaction_categories || raw.partialCompactionCategories)
+      ? (raw.partial_compaction_categories || raw.partialCompactionCategories).map((item: any) => String(item || "")).filter(Boolean)
+      : [],
+    partial_compact_policy: policy?.schema ? {
+      schema: String(policy.schema || ""),
+      method: String(policy.method || ""),
+      selected_categories: Array.isArray(policy.selected_categories || policy.selectedCategories)
+        ? (policy.selected_categories || policy.selectedCategories).map((item: any) => String(item || "")).filter(Boolean)
+        : [],
+      skipped_categories: Array.isArray(policy.skipped_categories || policy.skippedCategories)
+        ? (policy.skipped_categories || policy.skippedCategories).map((item: any) => String(item || "")).filter(Boolean)
+        : [],
+      max_categories: Number(policy.max_categories || policy.maxCategories || 0),
+      fallback_used: policy.fallback_used === true || policy.fallbackUsed === true,
+    } : null,
+    omitted_chars: Number(raw.omitted_chars || raw.omittedChars || 0),
+    memory_omitted_chars: Number(raw.memory_omitted_chars || raw.memoryOmittedChars || 0),
+    partial_omitted_chars: Number(raw.partial_omitted_chars || raw.partialOmittedChars || 0),
+    original_task_hash: String(raw.original_task_hash || raw.originalTaskHash || ""),
+    compacted_task_hash: String(raw.compacted_task_hash || raw.compactedTaskHash || ""),
+    ptl_emergency_hint: ptlHint?.schema ? {
+      schema: String(ptlHint.schema || ""),
+      hint_id: String(ptlHint.hint_id || ptlHint.hintId || ""),
+      engaged: ptlHint.engaged === true,
+      emergency_level: String(ptlHint.emergency_level || ptlHint.emergencyLevel || ""),
+      reason: compactMemoryCenterText(ptlHint.reason || "", 500),
+      blocked_outcome_count: Number(ptlHint.blocked_outcome_count || ptlHint.blockedOutcomeCount || 0),
+      task_compacted_blocked_count: Number(ptlHint.task_compacted_blocked_count || ptlHint.taskCompactedBlockedCount || 0),
+      repeated_failed_categories: Array.isArray(ptlHint.repeated_failed_categories || ptlHint.repeatedFailedCategories)
+        ? (ptlHint.repeated_failed_categories || ptlHint.repeatedFailedCategories).map((item: any) => String(item || "")).filter(Boolean)
+        : [],
+    } : null,
+    distillation_candidate: raw.distillation_candidate === false || raw.distillationCandidate === false ? false : true,
+    at: String(raw.at || ""),
+  };
+}
+
+function buildWorkerContextCompactOutcomeStatsForCenter(entries: any[] = []) {
+  const selectedCategoryCounts: Record<string, number> = {};
+  for (const entry of entries) {
+    for (const category of entry.partial_compact_policy?.selected_categories || []) {
+      selectedCategoryCounts[category] = Number(selectedCategoryCounts[category] || 0) + 1;
+    }
+  }
+  return {
+    total: entries.length,
+    recovered: entries.filter((item: any) => item.status === "recovered" || item.dispatch_ready === true).length,
+    blocked: entries.filter((item: any) => item.status === "blocked" || item.dispatch_ready === false).length,
+    partialCompactPolicy: entries.filter((item: any) => item.partial_compact_policy?.schema === "ccm-worker-context-partial-compact-policy-v1").length,
+    taskPreserved: entries.filter((item: any) => item.task_hash_unchanged === true).length,
+    taskCompacted: entries.filter((item: any) => item.task_compacted === true).length,
+    totalOmittedChars: entries.reduce((sum, item) => sum + Number(item.omitted_chars || 0), 0),
+    partialOmittedChars: entries.reduce((sum, item) => sum + Number(item.partial_omitted_chars || 0), 0),
+    selectedCategoryCounts,
+  };
+}
+
+function readGroupWorkerContextCompactOutcomeLedger(groupId: string) {
+  const file = getGroupWorkerContextCompactOutcomeLedgerFile(groupId);
+  const ledger = readJson(file, null);
+  if (ledger?.schema === "ccm-worker-context-compact-outcome-ledger-v1") {
+    const entries = Array.isArray(ledger.entries) ? ledger.entries.map(normalizeWorkerContextCompactOutcomeEntryForCenter) : [];
+    return {
+      ...ledger,
+      file,
+      entries,
+      stats: buildWorkerContextCompactOutcomeStatsForCenter(entries),
+    };
+  }
+  return {
+    schema: "ccm-worker-context-compact-outcome-ledger-v1",
+    version: 1,
+    groupId,
+    file,
+    entries: [],
+    stats: buildWorkerContextCompactOutcomeStatsForCenter([]),
+    updatedAt: "",
+  };
+}
+
+const WORKER_CONTEXT_METADATA_COMPACT_CATEGORIES_FOR_CENTER = [
+  "constraints_and_documents",
+  "contract_injections",
+  "dependencies",
+];
+
+function workerContextCompactOutcomeCategoriesForCenter(entry: any = {}) {
+  const selected = Array.isArray(entry.partial_compact_policy?.selected_categories)
+    ? entry.partial_compact_policy.selected_categories
+    : [];
+  const fallback = Array.isArray(entry.partial_compaction_categories)
+    ? entry.partial_compaction_categories
+    : [];
+  const supported = new Set(WORKER_CONTEXT_METADATA_COMPACT_CATEGORIES_FOR_CENTER);
+  return [...new Set([...selected, ...fallback]
+    .map((item: any) => String(item || "").trim())
+    .filter((item: string) => supported.has(item)))];
+}
+
+function normalizeWorkerContextCompactStrategyMemoryForCenter(raw: any = {}, groupId = "") {
+  const categories = Array.isArray(raw.categories) ? raw.categories.map((item: any = {}) => ({
+    category: String(item.category || ""),
+    attempts: Number(item.attempts || 0),
+    recovered: Number(item.recovered || 0),
+    blocked: Number(item.blocked || 0),
+    recovery_rate: Number(item.recovery_rate || 0),
+    task_preserved: Number(item.task_preserved || 0),
+    task_compacted: Number(item.task_compacted || 0),
+    avg_token_delta: Number(item.avg_token_delta || 0),
+    avg_free_token_delta: Number(item.avg_free_token_delta || 0),
+    avg_partial_omitted_chars: Number(item.avg_partial_omitted_chars || 0),
+    strategy_score: Number(item.strategy_score || 0),
+    recommendation: String(item.recommendation || "observe"),
+    latest_at: String(item.latest_at || ""),
+  })).filter((item: any) => item.category) : [];
+  return {
+    schema: "ccm-worker-context-compact-strategy-memory-v1",
+    version: 1,
+    strategy_id: String(raw.strategy_id || raw.strategyId || `wccs:${hash([groupId || raw.groupId || raw.group_id || "", categories], 14)}`),
+    groupId: String(raw.groupId || raw.group_id || groupId || ""),
+    file: String(raw.file || ""),
+    source_ledger_file: String(raw.source_ledger_file || raw.sourceLedgerFile || ""),
+    source_ledger_updated_at: String(raw.source_ledger_updated_at || raw.sourceLedgerUpdatedAt || ""),
+    sample_count: Number(raw.sample_count || raw.sampleCount || 0),
+    category_count: Number(raw.category_count || raw.categoryCount || categories.length),
+    preferred_categories: Array.isArray(raw.preferred_categories || raw.preferredCategories)
+      ? (raw.preferred_categories || raw.preferredCategories).map((item: any) => String(item || "")).filter(Boolean)
+      : categories.filter((item: any) => item.recommendation === "prefer").map((item: any) => item.category),
+    avoid_categories: Array.isArray(raw.avoid_categories || raw.avoidCategories)
+      ? (raw.avoid_categories || raw.avoidCategories).map((item: any) => String(item || "")).filter(Boolean)
+      : categories.filter((item: any) => item.recommendation === "avoid").map((item: any) => item.category),
+    categories,
+    generated_at: String(raw.generated_at || raw.generatedAt || now()),
+    updatedAt: String(raw.updatedAt || raw.updated_at || raw.generated_at || raw.generatedAt || now()),
+  };
+}
+
+function buildWorkerContextCompactStrategyMemoryForCenter(groupId: string, entries: any[] = [], options: any = {}) {
+  const file = getGroupWorkerContextCompactStrategyMemoryFile(groupId);
+  const sourceLedgerFile = String(options.sourceLedgerFile || options.source_ledger_file || getGroupWorkerContextCompactOutcomeLedgerFile(groupId));
+  const sourceLedgerUpdatedAt = String(options.sourceLedgerUpdatedAt || options.source_ledger_updated_at || "");
+  const nowIso = String(options.generatedAt || options.generated_at || now());
+  const byCategory: Record<string, any> = {};
+  let sampleCount = 0;
+  for (const entry of entries || []) {
+    if (entry?.distillation_candidate === false) continue;
+    const categories = workerContextCompactOutcomeCategoriesForCenter(entry);
+    if (!categories.length) continue;
+    sampleCount++;
+    for (const category of categories) {
+      const row = byCategory[category] || {
+        category,
+        attempts: 0,
+        recovered: 0,
+        blocked: 0,
+        task_preserved: 0,
+        task_compacted: 0,
+        total_token_delta: 0,
+        total_free_token_delta: 0,
+        total_partial_omitted_chars: 0,
+        latest_at: "",
+      };
+      row.attempts += 1;
+      if (entry.status === "recovered" || entry.dispatch_ready === true) row.recovered += 1;
+      if (entry.status === "blocked" || entry.dispatch_ready === false) row.blocked += 1;
+      if (entry.task_hash_unchanged === true) row.task_preserved += 1;
+      if (entry.task_compacted === true) row.task_compacted += 1;
+      row.total_token_delta += Math.max(0, Number(entry.token_delta || 0));
+      row.total_free_token_delta += Math.max(0, Number(entry.free_token_delta || 0));
+      row.total_partial_omitted_chars += Math.max(0, Number(entry.partial_omitted_chars || 0));
+      if (entry.at && (!row.latest_at || String(entry.at) > row.latest_at)) row.latest_at = String(entry.at);
+      byCategory[category] = row;
+    }
+  }
+  const categories = Object.values(byCategory).map((row: any) => {
+    const attempts = Math.max(1, Number(row.attempts || 0));
+    const recoveryRate = Number(row.recovered || 0) / attempts;
+    const taskPreservedRate = Number(row.task_preserved || 0) / attempts;
+    const blockedRate = Number(row.blocked || 0) / attempts;
+    const avgTokenDelta = Math.round(Number(row.total_token_delta || 0) / attempts);
+    const avgFreeTokenDelta = Math.round(Number(row.total_free_token_delta || 0) / attempts);
+    const avgPartialOmittedChars = Math.round(Number(row.total_partial_omitted_chars || 0) / attempts);
+    const strategyScore = Math.round(
+      recoveryRate * 1000
+      + Math.min(500, avgFreeTokenDelta / 8)
+      + taskPreservedRate * 120
+      - blockedRate * 300
+      - Number(row.task_compacted || 0) * 35
+    );
+    const recommendation = Number(row.recovered || 0) > 0 && avgFreeTokenDelta > 0
+      ? "prefer"
+      : Number(row.attempts || 0) >= 2 && Number(row.recovered || 0) === 0 ? "avoid" : "observe";
+    return {
+      category: row.category,
+      attempts: Number(row.attempts || 0),
+      recovered: Number(row.recovered || 0),
+      blocked: Number(row.blocked || 0),
+      recovery_rate: Math.round(recoveryRate * 1000) / 1000,
+      task_preserved: Number(row.task_preserved || 0),
+      task_compacted: Number(row.task_compacted || 0),
+      avg_token_delta: avgTokenDelta,
+      avg_free_token_delta: avgFreeTokenDelta,
+      avg_partial_omitted_chars: avgPartialOmittedChars,
+      strategy_score: strategyScore,
+      recommendation,
+      latest_at: row.latest_at || "",
+    };
+  }).sort((a: any, b: any) =>
+    Number(b.strategy_score || 0) - Number(a.strategy_score || 0)
+    || Number(b.avg_free_token_delta || 0) - Number(a.avg_free_token_delta || 0)
+    || a.category.localeCompare(b.category)
+  );
+  const preferred = categories.filter((item: any) => item.recommendation === "prefer").map((item: any) => item.category);
+  const avoid = categories.filter((item: any) => item.recommendation === "avoid").map((item: any) => item.category);
+  return normalizeWorkerContextCompactStrategyMemoryForCenter({
+    schema: "ccm-worker-context-compact-strategy-memory-v1",
+    version: 1,
+    strategy_id: `wccs:${hash([groupId, sourceLedgerUpdatedAt, categories], 14)}`,
+    groupId,
+    file,
+    source_ledger_file: sourceLedgerFile,
+    source_ledger_updated_at: sourceLedgerUpdatedAt,
+    sample_count: sampleCount,
+    category_count: categories.length,
+    preferred_categories: preferred.length ? preferred : categories.map((item: any) => item.category),
+    avoid_categories: avoid,
+    categories,
+    generated_at: nowIso,
+    updatedAt: nowIso,
+  }, groupId);
+}
+
+function syncGroupWorkerContextCompactStrategyMemory(groupId: string, options: any = {}) {
+  const outcomeLedger = readGroupWorkerContextCompactOutcomeLedger(groupId);
+  const strategy = buildWorkerContextCompactStrategyMemoryForCenter(groupId, outcomeLedger.entries || [], {
+    sourceLedgerFile: outcomeLedger.file || getGroupWorkerContextCompactOutcomeLedgerFile(groupId),
+    sourceLedgerUpdatedAt: outcomeLedger.updatedAt || "",
+    generatedAt: options.generatedAt || options.generated_at || now(),
+  });
+  if (Number(strategy.sample_count || 0) > 0 || options.writeEmpty === true || options.write_empty === true) {
+    writeJsonAtomic(strategy.file || getGroupWorkerContextCompactStrategyMemoryFile(groupId), strategy);
+  }
+  return strategy;
+}
+
+function readGroupWorkerContextCompactStrategyMemory(groupId: string) {
+  const file = getGroupWorkerContextCompactStrategyMemoryFile(groupId);
+  const strategy = readJson(file, null);
+  if (strategy?.schema === "ccm-worker-context-compact-strategy-memory-v1") {
+    return normalizeWorkerContextCompactStrategyMemoryForCenter({ ...strategy, file }, groupId);
+  }
+  return syncGroupWorkerContextCompactStrategyMemory(groupId);
+}
+
+function normalizeWorkerContextPtlEmergencyHintForCenter(raw: any = {}, groupId = "") {
+  const recommendedRetryOptions = raw.recommended_retry_options || raw.recommendedRetryOptions || {};
+  return {
+    schema: "ccm-worker-context-ptl-emergency-hint-v1",
+    version: 1,
+    hint_id: String(raw.hint_id || raw.hintId || `wcptl:${hash([groupId || raw.groupId || raw.group_id || "", raw.reason || "", raw.generated_at || now()], 14)}`),
+    groupId: String(raw.groupId || raw.group_id || groupId || ""),
+    file: String(raw.file || getGroupWorkerContextPtlEmergencyHintFile(groupId || raw.groupId || raw.group_id || "")),
+    engaged: raw.engaged === true,
+    emergency_level: String(raw.emergency_level || raw.emergencyLevel || (raw.engaged ? "warning" : "none")),
+    reason: compactMemoryCenterText(raw.reason || "", 500),
+    blocked_outcome_count: Number(raw.blocked_outcome_count || raw.blockedOutcomeCount || 0),
+    task_compacted_blocked_count: Number(raw.task_compacted_blocked_count || raw.taskCompactedBlockedCount || 0),
+    repeated_failed_categories: Array.isArray(raw.repeated_failed_categories || raw.repeatedFailedCategories)
+      ? (raw.repeated_failed_categories || raw.repeatedFailedCategories).map((item: any) => String(item || "")).filter(Boolean)
+      : [],
+    source_ledger_file: String(raw.source_ledger_file || raw.sourceLedgerFile || ""),
+    source_strategy_file: String(raw.source_strategy_file || raw.sourceStrategyFile || ""),
+    recommended_retry_options: {
+      memory: recommendedRetryOptions.memory || recommendedRetryOptions.memoryOptions || {},
+      replayRepairDispatchBriefs: recommendedRetryOptions.replayRepairDispatchBriefs || recommendedRetryOptions.replay_repair_dispatch_briefs || {},
+      metadata: recommendedRetryOptions.metadata || recommendedRetryOptions.metadataPartialCompact || {},
+      maxTaskChars: Number(recommendedRetryOptions.maxTaskChars || recommendedRetryOptions.max_task_chars || 0),
+    },
+    generated_at: String(raw.generated_at || raw.generatedAt || now()),
+    updatedAt: String(raw.updatedAt || raw.updated_at || raw.generated_at || raw.generatedAt || now()),
+  };
+}
+
+function buildWorkerContextPtlEmergencyHintForCenter(groupId: string, entries: any[] = [], strategy: any = {}, options: any = {}) {
+  const sourceLedgerFile = String(options.sourceLedgerFile || options.source_ledger_file || getGroupWorkerContextCompactOutcomeLedgerFile(groupId));
+  const sourceStrategyFile = String(options.sourceStrategyFile || options.source_strategy_file || strategy?.file || getGroupWorkerContextCompactStrategyMemoryFile(groupId));
+  const nowIso = String(options.generatedAt || options.generated_at || now());
+  const distillable = (entries || []).filter((entry: any) => entry?.distillation_candidate !== false);
+  const blocked = distillable.filter((entry: any) => entry.status === "blocked" || entry.dispatch_ready === false);
+  const taskCompactedBlocked = blocked.filter((entry: any) => entry.task_compacted === true);
+  const repeatedFailedCategories = (Array.isArray(strategy?.categories) ? strategy.categories : [])
+    .filter((item: any) =>
+      Number(item.attempts || 0) >= 2
+      && (Number(item.recovered || 0) === 0 || String(item.recommendation || "") === "avoid")
+    )
+    .map((item: any) => String(item.category || ""))
+    .filter(Boolean);
+  const engaged = blocked.length >= 2 || taskCompactedBlocked.length > 0 || repeatedFailedCategories.length > 0;
+  const emergencyLevel = taskCompactedBlocked.length > 0 || blocked.length >= 3 ? "critical" : engaged ? "warning" : "none";
+  const reasonParts = [
+    blocked.length >= 2 ? `blocked_outcomes=${blocked.length}` : "",
+    taskCompactedBlocked.length > 0 ? `task_compacted_still_blocked=${taskCompactedBlocked.length}` : "",
+    repeatedFailedCategories.length ? `failed_categories=${repeatedFailedCategories.join(",")}` : "",
+  ].filter(Boolean);
+  return normalizeWorkerContextPtlEmergencyHintForCenter({
+    schema: "ccm-worker-context-ptl-emergency-hint-v1",
+    version: 1,
+    hint_id: `wcptl:${hash([groupId, sourceLedgerFile, sourceStrategyFile, blocked.length, taskCompactedBlocked.length, repeatedFailedCategories], 14)}`,
+    groupId,
+    file: getGroupWorkerContextPtlEmergencyHintFile(groupId),
+    engaged,
+    emergency_level: emergencyLevel,
+    reason: engaged
+      ? `WorkerContextPacket repeated compact failure requires PTL emergency downgrade: ${reasonParts.join("; ")}`
+      : "WorkerContextPacket compact outcomes do not require PTL emergency downgrade.",
+    blocked_outcome_count: blocked.length,
+    task_compacted_blocked_count: taskCompactedBlocked.length,
+    repeated_failed_categories: repeatedFailedCategories,
+    source_ledger_file: sourceLedgerFile,
+    source_strategy_file: sourceStrategyFile,
+    recommended_retry_options: {
+      memory: {
+        maxRenderedChars: emergencyLevel === "critical" ? 900 : 1400,
+        maxJsonChars: emergencyLevel === "critical" ? 700 : 1000,
+        maxRecallItems: emergencyLevel === "critical" ? 3 : 5,
+      },
+      replayRepairDispatchBriefs: {
+        maxBriefs: emergencyLevel === "critical" ? 4 : 6,
+        maxStringChars: emergencyLevel === "critical" ? 120 : 180,
+        maxIdChars: emergencyLevel === "critical" ? 100 : 140,
+      },
+      metadata: {
+        maxCategories: 1,
+        maxItems: emergencyLevel === "critical" ? 2 : 3,
+        maxStringChars: emergencyLevel === "critical" ? 100 : 140,
+        maxDependencyReasonChars: emergencyLevel === "critical" ? 100 : 140,
+        maxContractSummaryChars: emergencyLevel === "critical" ? 100 : 140,
+      },
+      maxTaskChars: emergencyLevel === "critical" ? 1400 : 2200,
+    },
+    generated_at: nowIso,
+    updatedAt: nowIso,
+  }, groupId);
+}
+
+function syncGroupWorkerContextPtlEmergencyHint(groupId: string, options: any = {}) {
+  const outcomeLedger = readGroupWorkerContextCompactOutcomeLedger(groupId);
+  const strategy = syncGroupWorkerContextCompactStrategyMemory(groupId, { generatedAt: options.generatedAt || options.generated_at || now() });
+  const hint = buildWorkerContextPtlEmergencyHintForCenter(groupId, outcomeLedger.entries || [], strategy, {
+    sourceLedgerFile: outcomeLedger.file || getGroupWorkerContextCompactOutcomeLedgerFile(groupId),
+    sourceStrategyFile: strategy.file || getGroupWorkerContextCompactStrategyMemoryFile(groupId),
+    generatedAt: options.generatedAt || options.generated_at || now(),
+  });
+  if (hint.engaged || options.writeEmpty === true || options.write_empty === true) {
+    writeJsonAtomic(hint.file || getGroupWorkerContextPtlEmergencyHintFile(groupId), hint);
+  }
+  return hint;
+}
+
+function readGroupWorkerContextPtlEmergencyHint(groupId: string) {
+  const file = getGroupWorkerContextPtlEmergencyHintFile(groupId);
+  const hint = readJson(file, null);
+  if (hint?.schema === "ccm-worker-context-ptl-emergency-hint-v1") {
+    return normalizeWorkerContextPtlEmergencyHintForCenter({ ...hint, file }, groupId);
+  }
+  return syncGroupWorkerContextPtlEmergencyHint(groupId);
+}
+
 export function readGroupCompactBoundaryReplayRepairWorkItems(groupId: string) {
   const file = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
   const ledger = readJson(file, null);
@@ -2824,6 +5068,18 @@ function replayRepairWorkItemSignature(item: any = {}) {
     revalidationGateId: item.revalidation_gate_id || "",
     readPlanId: item.read_plan_id || "",
     expectedTaskAgentSessionId: item.expected_task_agent_session_id || "",
+    proofEntryId: item.proof_entry_id || "",
+    planChecksum: item.plan_checksum || "",
+    requestPatchChecksum: item.request_patch_checksum || "",
+    requestTelemetryStatus: item.request_telemetry_status || "",
+    requestTelemetrySessionStatus: item.request_telemetry_session_status || "",
+    requestTelemetryDispatchStatus: item.request_telemetry_dispatch_status || "",
+    runnerRequestId: item.runner_request_id || item.request_telemetry_runner_request_id || "",
+    providerReproofStatus: item.provider_reproof_status || "",
+    providerReproofReason: item.provider_reproof_reason || "",
+    reproofCandidateId: item.reproof_candidate_id || "",
+    timelineBindingId: item.timeline_binding_id || "",
+    originalWorkItemId: item.original_work_item_id || "",
   });
 }
 
@@ -3018,6 +5274,227 @@ function buildReadPlanRevalidationRepairWorkItem(groupId: string, discipline: an
   };
 }
 
+function classifyApiMicrocompactNativeApplyProofRepairGap(gap: any = {}) {
+  const reason = String(gap.reason || "").toLowerCase();
+  if (reason.includes("task-agent session") || reason.includes("session/snapshot") || reason.includes("snapshot")) {
+    return {
+      component: "api_microcompact_native_session_binding",
+      priority: "critical",
+      subject: "修复 native apply session/snapshot 绑定",
+      nextStep: "rerun_or_rebind_task_agent_session_snapshot",
+    };
+  }
+  if (reason.includes("execution/runner") || reason.includes("runner") || reason.includes("dispatch")) {
+    return {
+      component: "api_microcompact_native_dispatch_binding",
+      priority: "critical",
+      subject: "修复 native apply execution/runner 绑定",
+      nextStep: "repair_execution_runner_request_binding",
+    };
+  }
+  if (reason.includes("只有 agent 回执") || reason.includes("receipt")) {
+    return {
+      component: "api_microcompact_native_adapter_telemetry",
+      priority: "critical",
+      subject: "补齐 native_request_adapter 请求遥测",
+      nextStep: "rerun_native_request_adapter_capture",
+    };
+  }
+  if (reason.includes("过期") || reason.includes("stale")) {
+    return {
+      component: "api_microcompact_native_telemetry_freshness",
+      priority: "high",
+      subject: "刷新 native apply request telemetry",
+      nextStep: "refresh_native_request_adapter_telemetry",
+    };
+  }
+  if (reason.includes("缺少 provider request telemetry") || reason.includes("missing")) {
+    return {
+      component: "api_microcompact_native_request_telemetry",
+      priority: "critical",
+      subject: "补齐 provider request telemetry",
+      nextStep: "record_provider_request_telemetry",
+    };
+  }
+  if (reason.includes("proof 失败") || reason.includes("失败")) {
+    return {
+      component: "api_microcompact_native_proof_ledger",
+      priority: "critical",
+      subject: "修复 native_applied proof ledger",
+      nextStep: "reconcile_native_apply_proof_ledger",
+    };
+  }
+  return {
+    component: "api_microcompact_native_apply_proof",
+    priority: "high",
+    subject: "修复 API microcompact native apply 强证明",
+    nextStep: "repair_native_apply_proof_chain",
+  };
+}
+
+function apiMicrocompactNativeApplyProofRowForGap(proof: any = {}, gap: any = {}) {
+  const taskId = String(gap.taskId || gap.task_id || "").trim();
+  const planChecksum = String(gap.planChecksum || gap.plan_checksum || "").trim();
+  const requestPatchChecksum = String(gap.requestPatchChecksum || gap.request_patch_checksum || "").trim();
+  const rows = Array.isArray(proof.rows) ? proof.rows : [];
+  return rows.find((row: any) => {
+    const sameTask = !taskId || String(row.taskId || row.task_id || "") === taskId;
+    const samePlan = !planChecksum || String(row.planChecksum || row.plan_checksum || "") === planChecksum;
+    const sameRequest = !requestPatchChecksum || String(row.requestPatchChecksum || row.request_patch_checksum || "") === requestPatchChecksum;
+    return sameTask && samePlan && sameRequest;
+  }) || {};
+}
+
+function buildApiMicrocompactNativeApplyProofRepairWorkItem(groupId: string, proof: any = {}, gap: any = {}, index = 0, existing: any = {}, at = now()) {
+  const row = apiMicrocompactNativeApplyProofRowForGap(proof, gap);
+  const classified = classifyApiMicrocompactNativeApplyProofRepairGap(gap);
+  const taskId = String(gap.taskId || gap.task_id || row.taskId || row.task_id || "").trim();
+  const targetProject = String(gap.agent || gap.targetProject || gap.target_project || row.targetProject || row.target_project || row.agent || "").trim();
+  const planChecksum = String(gap.planChecksum || gap.plan_checksum || row.planChecksum || row.plan_checksum || "").trim();
+  const applyPlanChecksum = String(row.applyPlanChecksum || row.apply_plan_checksum || "").trim();
+  const requestPatchChecksum = String(gap.requestPatchChecksum || gap.request_patch_checksum || row.requestPatchChecksum || row.request_patch_checksum || "").trim();
+  const taskAgentSessionId = String(row.taskAgentSessionId || row.task_agent_session_id || "").trim();
+  const nativeSessionId = String(row.nativeSessionId || row.native_session_id || "").trim();
+  const snapshotId = String(row.memoryContextSnapshotId || row.memory_context_snapshot_id || "").trim();
+  const snapshotChecksum = String(row.memoryContextSnapshotChecksum || row.memory_context_snapshot_checksum || "").trim();
+  const runnerRequestId = String(row.requestTelemetryRunnerRequestId || row.request_telemetry_runner_request_id || row.runnerRequestId || row.runner_request_id || "").trim();
+  const executionId = String(row.executionId || row.execution_id || "").trim();
+  const reason = compactMemoryCenterText(gap.reason || row.requestTelemetryWeakReason || "native apply proof binding gap", 360);
+  const id = `api-native-proof-repair:${hash([
+    groupId,
+    classified.component,
+    taskId,
+    planChecksum,
+    requestPatchChecksum,
+    taskAgentSessionId,
+    runnerRequestId,
+  ], 14)}`;
+  const previousStatus = replayRepairWorkItemStatus(existing.status);
+  const status = ["in_progress", "blocked", "completed", "cancelled"].includes(previousStatus) ? previousStatus : "pending";
+  const instruction = [
+    `修复 ${targetProject || "目标子 Agent"} 的 API microcompact native_applied 强证明链。`,
+    planChecksum ? `planChecksum=${planChecksum}` : "",
+    requestPatchChecksum ? `requestPatchChecksum=${requestPatchChecksum}` : "",
+    taskId ? `taskId=${taskId}` : "",
+    taskAgentSessionId ? `必须能回查 taskAgentSessionId=${taskAgentSessionId}` : "必须补齐 taskAgentSessionId",
+    nativeSessionId ? `nativeSessionId=${nativeSessionId}` : "必须补齐 nativeSessionId",
+    snapshotId ? `memoryContextSnapshotId=${snapshotId}` : "必须补齐 memoryContextSnapshotId",
+    runnerRequestId ? `runnerRequestId=${runnerRequestId} 必须命中 execution.externalRunnerRequestIds` : "如通过外部 Runner 派发，必须记录 runnerRequestId/externalRunnerRequestId",
+    "重新派发、重放或修复 ledger 后，Memory Center 需要显示 nativeApplyStrongProof=true、requestTelemetrySessionBound=true、requestTelemetryDispatchBound=true。",
+  ].filter(Boolean).join(" ");
+  const expected = [
+    "nativeApplyStrongProof=true",
+    "requestTelemetrySource=native_request_adapter",
+    "requestTelemetryFresh=true",
+    "requestTelemetrySessionBound=true",
+    "requestTelemetryDispatchBound=true",
+    runnerRequestId ? `runnerRequestId=${runnerRequestId}` : "",
+  ].filter(Boolean).join("; ");
+  return {
+    id,
+    work_item_id: id,
+    taskId,
+    scopeId: groupId,
+    group_id: groupId,
+    subject: compactMemoryCenterText(classified.subject, 150),
+    description: reason,
+    activeForm: compactMemoryCenterText(`修复 native apply proof：${classified.component}`, 180),
+    owner: existing.owner && previousStatus !== "pending" ? existing.owner : "group-main-agent",
+    target: compactMemoryCenterText(targetProject || "memory-context", 120),
+    agentType: "group-main-agent",
+    status,
+    priority: classified.priority,
+    component: classified.component,
+    source: "api_microcompact_native_apply_binding_repair",
+    source_action_id: `api-native-proof:${classified.component}:${taskId || index}:${planChecksum || "plan"}:${requestPatchChecksum || "request"}`,
+    repair_target: requestPatchChecksum || planChecksum || taskId || classified.component,
+    instruction: compactMemoryCenterText(instruction, 900),
+    expected: compactMemoryCenterText(expected, 420),
+    source_reason: reason,
+    attempt: Math.max(1, Number(existing.attempt || 1) || 1),
+    replay_attempt_id: "",
+    replay_status: String(proof.status || ""),
+    replay_score: proof.score ?? null,
+    replay_rendered_hash: "",
+    target_project: targetProject,
+    dispatch_target: targetProject,
+    boundary_checksum: "",
+    summarized_through_message_id: "",
+    prompt_patch: compactMemoryCenterText([
+      "API microcompact native apply proof 修复要求：",
+      `- group=${groupId}`,
+      targetProject ? `- target_project=${targetProject}` : "",
+      taskId ? `- task_id=${taskId}` : "",
+      planChecksum ? `- plan_checksum=${planChecksum}` : "",
+      applyPlanChecksum ? `- apply_plan_checksum=${applyPlanChecksum}` : "",
+      requestPatchChecksum ? `- request_patch_checksum=${requestPatchChecksum}` : "",
+      taskAgentSessionId ? `- task_agent_session_id=${taskAgentSessionId}` : "",
+      nativeSessionId ? `- native_session_id=${nativeSessionId}` : "",
+      snapshotId ? `- memory_context_snapshot_id=${snapshotId}` : "",
+      runnerRequestId ? `- runner_request_id=${runnerRequestId}` : "",
+      "- 修复后必须重新运行 API microcompact native apply proof report。",
+    ].filter(Boolean).join("\n"), 1800),
+    dispatch_hint: {
+      claim_policy: "group_main_agent_before_child_dispatch",
+      next_step: classified.nextStep,
+      should_create_real_task: false,
+      reason: "Memory Center diagnostic sidecar; main Agent may claim and dispatch deliberately.",
+    },
+    raw_recovery: {
+      rule: "api_microcompact_native_apply_strong_proof_binding",
+      proof_status: row.proofStatus || row.proof_status || "",
+      request_telemetry_status: row.requestTelemetryStatus || row.request_telemetry_status || "",
+      request_telemetry_source: row.requestTelemetrySource || row.request_telemetry_source || "",
+      request_telemetry_session_status: row.requestTelemetrySessionStatus || row.request_telemetry_session_status || "",
+      request_telemetry_dispatch_status: row.requestTelemetryDispatchStatus || row.request_telemetry_dispatch_status || "",
+      request_telemetry_runner_matched: row.requestTelemetryRunnerMatched === true || row.request_telemetry_runner_matched === true,
+      request_telemetry_runner_missing: row.requestTelemetryRunnerMissing === true || row.request_telemetry_runner_missing === true,
+    },
+    proof_entry_id: String(row.entryId || row.entry_id || "").trim(),
+    plan_checksum: planChecksum,
+    apply_plan_checksum: applyPlanChecksum,
+    request_patch_checksum: requestPatchChecksum,
+    task_agent_session_id: taskAgentSessionId,
+    expected_task_agent_session_id: taskAgentSessionId,
+    native_session_id: nativeSessionId,
+    expected_native_session_id: nativeSessionId,
+    memory_context_snapshot_id: snapshotId,
+    memory_context_snapshot_checksum: snapshotChecksum,
+    execution_id: executionId,
+    runner_request_id: runnerRequestId,
+    request_telemetry_entry_id: row.requestTelemetryEntryId || row.request_telemetry_entry_id || "",
+    request_telemetry_status: row.requestTelemetryStatus || row.request_telemetry_status || "",
+    request_telemetry_source: row.requestTelemetrySource || row.request_telemetry_source || "",
+    request_telemetry_session_status: row.requestTelemetrySessionStatus || row.request_telemetry_session_status || "",
+    request_telemetry_dispatch_status: row.requestTelemetryDispatchStatus || row.request_telemetry_dispatch_status || "",
+    request_telemetry_runner_request_id: runnerRequestId,
+    evidence: [
+      proof.ledgerFile ? `proof_ledger=${proof.ledgerFile}` : "",
+      proof.requestTelemetryLedgerFile ? `request_telemetry_ledger=${proof.requestTelemetryLedgerFile}` : "",
+      reason,
+    ].filter(Boolean),
+    filesChanged: [],
+    verification: ["重新运行 API microcompact native apply proof report", "确认 requestTelemetrySessionBound/requestTelemetryDispatchBound/nativeApplyStrongProof 均为 true"],
+    blockers: [],
+    needs: ["task-agent session/snapshot ledger", "execution externalRunnerRequestIds", "native_request_adapter telemetry ledger"],
+    requeueReason: "",
+    createdAt: existing.createdAt || existing.created_at || at,
+    updatedAt: existing.updatedAt || existing.updated_at || at,
+    lastSeenAt: existing.lastSeenAt || existing.last_seen_at || at,
+    completedAt: existing.completedAt || existing.completed_at || "",
+    seenCount: Math.max(1, Number(existing.seenCount || existing.seen_count || 1) || 1),
+  };
+}
+
+function apiMicrocompactNativeApplyProofRepairActiveGaps(proof: any = {}) {
+  const gaps = Array.isArray(proof.gaps) ? proof.gaps : [];
+  return gaps.filter((gap: any) => {
+    const reason = String(gap?.reason || "");
+    return gap?.severity === "high"
+      && /native_applied|native apply|provider request telemetry|request telemetry|session\/snapshot|execution\/runner|runner|native_request_adapter/i.test(reason);
+  });
+}
+
 function replayRepairWorkItemStats(items: any[] = []) {
   const normalized = (Array.isArray(items) ? items : []).map(item => replayRepairWorkItemStatus(item.status));
   return {
@@ -3084,6 +5561,13 @@ function summarizeReplayRepairPendingWorkItems(groupId: string, ledgerInput: any
         target_project: item.target_project || "",
         revalidation_gate_id: item.revalidation_gate_id || "",
         read_plan_id: item.read_plan_id || "",
+        proof_entry_id: item.proof_entry_id || "",
+        plan_checksum: item.plan_checksum || "",
+        request_patch_checksum: item.request_patch_checksum || "",
+        request_telemetry_status: item.request_telemetry_status || "",
+        request_telemetry_session_status: item.request_telemetry_session_status || "",
+        request_telemetry_dispatch_status: item.request_telemetry_dispatch_status || "",
+        runner_request_id: item.runner_request_id || item.request_telemetry_runner_request_id || "",
         expected_task_agent_session_id: item.expected_task_agent_session_id || "",
         receipt_task_agent_session_id: item.receipt_task_agent_session_id || "",
         session_mismatch: item.session_mismatch === true,
@@ -3113,6 +5597,13 @@ function summarizeReplayRepairPendingWorkItems(groupId: string, ledgerInput: any
       target_project: item.target_project || "",
       revalidation_gate_id: item.revalidation_gate_id || "",
       read_plan_id: item.read_plan_id || "",
+      proof_entry_id: item.proof_entry_id || "",
+      plan_checksum: item.plan_checksum || "",
+      request_patch_checksum: item.request_patch_checksum || "",
+      request_telemetry_status: item.request_telemetry_status || "",
+      request_telemetry_session_status: item.request_telemetry_session_status || "",
+      request_telemetry_dispatch_status: item.request_telemetry_dispatch_status || "",
+      runner_request_id: item.runner_request_id || item.request_telemetry_runner_request_id || "",
       expected_task_agent_session_id: item.expected_task_agent_session_id || "",
       receipt_task_agent_session_id: item.receipt_task_agent_session_id || "",
       session_mismatch: item.session_mismatch === true,
@@ -3185,6 +5676,28 @@ function buildReplayRepairDispatchCandidate(groupId: string, item: any = {}, ind
     boundary_checksum: item.boundary_checksum || "",
     revalidation_gate_id: item.revalidation_gate_id || "",
     read_plan_id: item.read_plan_id || "",
+    proof_entry_id: item.proof_entry_id || "",
+    plan_checksum: item.plan_checksum || "",
+    apply_plan_checksum: item.apply_plan_checksum || "",
+    request_patch_checksum: item.request_patch_checksum || "",
+    worker_context_packet_id: item.worker_context_packet_id || item.packet_id || "",
+    worker_context_packet_binding_id: item.worker_context_packet_binding_id || item.binding_id || "",
+    worker_context_packet_memory_policy_reason: item.worker_context_packet_memory_policy_reason || "",
+    binding_id: item.binding_id || item.worker_context_packet_binding_id || "",
+    assignment_id: item.assignment_id || "",
+    dispatch_key: item.dispatch_key || "",
+    request_telemetry_entry_id: item.request_telemetry_entry_id || "",
+    request_telemetry_status: item.request_telemetry_status || "",
+    request_telemetry_source: item.request_telemetry_source || "",
+    request_telemetry_session_status: item.request_telemetry_session_status || "",
+    request_telemetry_dispatch_status: item.request_telemetry_dispatch_status || "",
+    provider_reproof_status: item.provider_reproof_status || "",
+    provider_reproof_reason: item.provider_reproof_reason || "",
+    reproof_candidate_id: item.reproof_candidate_id || "",
+    timeline_binding_id: item.timeline_binding_id || "",
+    original_work_item_id: item.original_work_item_id || "",
+    runner_request_id: item.runner_request_id || item.request_telemetry_runner_request_id || "",
+    execution_id: item.execution_id || "",
     expected_task_agent_session_id: item.expected_task_agent_session_id || "",
     expected_native_session_id: item.expected_native_session_id || "",
     receipt_task_agent_session_id: item.receipt_task_agent_session_id || "",
@@ -3560,6 +6073,118 @@ function syncCompactFileReferenceReadPlanRevalidationRepairWorkItems(groupId: st
   const nextComparable = JSON.stringify({
     latestReadPlanRevalidation: nextLedger.latestReadPlanRevalidation || null,
     items: nextItems.filter((item: any) => String(item.source || "") === "compact_read_plan_revalidation_repair"),
+  });
+  if (changed || currentComparable !== nextComparable || !fs.existsSync(ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId))) {
+    return summarizeReplayRepairPendingWorkItems(groupId, writeGroupCompactBoundaryReplayRepairWorkItems(groupId, nextLedger));
+  }
+  return summarizeReplayRepairPendingWorkItems(groupId, ledger);
+}
+
+function syncApiMicrocompactNativeApplyProofRepairWorkItems(groupId: string, proof: any = {}, options: any = {}) {
+  if (!groupId || !proof?.schema) return summarizeReplayRepairPendingWorkItems(groupId);
+  const at = String(options.at || now());
+  const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+  const previousItems = Array.isArray(ledger.items) ? ledger.items : [];
+  const previousById = new Map<string, any>(previousItems.map((item: any) => [String(item.id || item.work_item_id || ""), item]));
+  const activeGaps = apiMicrocompactNativeApplyProofRepairActiveGaps(proof);
+  const currentIds = new Set<string>();
+  const nextRepairItems: any[] = [];
+  let changed = false;
+
+  for (const [index, gap] of activeGaps.entries()) {
+    const draft = buildApiMicrocompactNativeApplyProofRepairWorkItem(groupId, proof, gap, index, {}, at);
+    const existing = previousById.get(draft.id) || {};
+    let item = buildApiMicrocompactNativeApplyProofRepairWorkItem(groupId, proof, gap, index, existing, at);
+    const previousSignature = replayRepairWorkItemSignature(existing);
+    const nextSignature = replayRepairWorkItemSignature(item);
+    if (existing.id && previousSignature === nextSignature) {
+      item = {
+        ...existing,
+        ...item,
+        createdAt: existing.createdAt || item.createdAt,
+        updatedAt: existing.updatedAt || item.updatedAt,
+        lastSeenAt: existing.lastSeenAt || item.lastSeenAt,
+        seenCount: Number(existing.seenCount || 1),
+      };
+    } else {
+      item = {
+        ...item,
+        updatedAt: at,
+        lastSeenAt: at,
+        seenCount: existing.id ? Number(existing.seenCount || 1) + 1 : 1,
+      };
+      changed = true;
+    }
+    currentIds.add(item.id);
+    nextRepairItems.push(item);
+  }
+
+  const untouchedItems: any[] = [];
+  for (const existing of previousItems) {
+    const id = String(existing.id || existing.work_item_id || "");
+    const source = String(existing.source || "");
+    if (source !== "api_microcompact_native_apply_binding_repair") {
+      untouchedItems.push(existing);
+      continue;
+    }
+    if (!id || currentIds.has(id)) continue;
+    const currentStatus = replayRepairWorkItemStatus(existing.status);
+    if (!replayRepairWorkItemOpen(currentStatus)) {
+      nextRepairItems.push(existing);
+      continue;
+    }
+    const resolved = String(proof.status || "") === "ok" || activeGaps.length === 0;
+    nextRepairItems.push({
+      ...existing,
+      status: resolved ? "completed" : "cancelled",
+      updatedAt: at,
+      completedAt: resolved ? (existing.completedAt || at) : existing.completedAt || "",
+      resolutionReason: resolved ? "api_microcompact_native_apply_proof_ok" : "superseded_by_latest_native_apply_proof_report",
+      latestNativeApplyProof: {
+        status: proof.status || "",
+        score: proof.score ?? null,
+        checked: proof.checked || 0,
+        passed: proof.passed || 0,
+        strong: proof.requestTelemetryStrongCount || 0,
+      },
+    });
+    changed = true;
+  }
+
+  const nextItems = [...untouchedItems, ...nextRepairItems]
+    .sort((a, b) => {
+      const statusRank = replayRepairWorkItemOpen(a.status) === replayRepairWorkItemOpen(b.status) ? 0 : replayRepairWorkItemOpen(a.status) ? -1 : 1;
+      if (statusRank) return statusRank;
+      const priority = replayRepairPriorityRank(a.priority) - replayRepairPriorityRank(b.priority);
+      if (priority) return priority;
+      return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    })
+    .slice(0, 160);
+  const stats = replayRepairWorkItemStats(nextItems);
+  const nextLedger = {
+    ...ledger,
+    latestApiMicrocompactNativeApplyProof: {
+      status: proof.status || "",
+      score: proof.score ?? null,
+      checked: proof.checked || 0,
+      passed: proof.passed || 0,
+      gapCount: activeGaps.length,
+      strong: proof.requestTelemetryStrongCount || 0,
+      sessionMismatch: proof.requestTelemetrySessionMismatchCount || 0,
+      dispatchUnbound: proof.requestTelemetryDispatchUnboundCount || 0,
+      runnerMismatch: proof.requestTelemetryRunnerMismatchCount || 0,
+    },
+    items: nextItems,
+    stats,
+    updatedAt: changed || !ledger.updatedAt ? at : ledger.updatedAt,
+  };
+  const currentComparable = JSON.stringify({
+    latestApiMicrocompactNativeApplyProof: ledger.latestApiMicrocompactNativeApplyProof || null,
+    items: previousItems.filter((item: any) => String(item.source || "") === "api_microcompact_native_apply_binding_repair"),
+  });
+  const nextComparable = JSON.stringify({
+    latestApiMicrocompactNativeApplyProof: nextLedger.latestApiMicrocompactNativeApplyProof || null,
+    items: nextItems.filter((item: any) => String(item.source || "") === "api_microcompact_native_apply_binding_repair"),
   });
   if (changed || currentComparable !== nextComparable || !fs.existsSync(ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId))) {
     return summarizeReplayRepairPendingWorkItems(groupId, writeGroupCompactBoundaryReplayRepairWorkItems(groupId, nextLedger));
@@ -4713,6 +7338,5614 @@ function evaluateReplayRepairDispatchCandidates(options: any = {}) {
   return check;
 }
 
+function isApiMicrocompactNativeApplyProofRepairWorkItem(item: any = {}) {
+  return String(item.source || "") === "api_microcompact_native_apply_binding_repair";
+}
+
+const API_MICROCOMPACT_NATIVE_APPLY_PROOF_DISPATCH_SOURCES = new Set([
+  "api_microcompact_native_apply_binding_repair",
+  "api_microcompact_native_apply_provider_reproof",
+]);
+
+function isApiMicrocompactNativeApplyProofDispatchSource(source: any) {
+  return API_MICROCOMPACT_NATIVE_APPLY_PROOF_DISPATCH_SOURCES.has(String(source || "").trim());
+}
+
+function isApiMicrocompactNativeApplyProofDispatchWorkItem(item: any = {}) {
+  return isApiMicrocompactNativeApplyProofDispatchSource(item.source);
+}
+
+function isApiMicrocompactNativeApplyTimelineClosableSource(source: any) {
+  return String(source || "").trim() === "api_microcompact_native_apply_binding_repair";
+}
+
+function replayRepairWorkItemId(item: any = {}) {
+  return String(item.id || item.work_item_id || "").trim();
+}
+
+function shouldRequireApiMicrocompactNativeProofRepairDispatchCandidate(item: any = {}) {
+  if (!isApiMicrocompactNativeApplyProofRepairWorkItem(item)) return false;
+  const status = replayRepairWorkItemStatus(item.status);
+  if (!replayRepairWorkItemOpen(status)) return false;
+  const dispatchTarget = String(item.dispatch_target || item.dispatchTarget || "").trim();
+  const owner = String(item.owner || "").trim();
+  const priority = String(item.priority || "").toLowerCase();
+  return !!dispatchTarget
+    || (status === "in_progress" && owner === "group-main-agent")
+    || (["critical", "high"].includes(priority) && status === "pending");
+}
+
+function apiMicrocompactNativeProofRepairCandidateMetadataGaps(item: any = {}, candidate: any = {}) {
+  const gaps: string[] = [];
+  if (!candidate || !candidate.work_item_id) {
+    gaps.push("candidate_missing");
+    return gaps;
+  }
+  if (candidate.source !== "api_microcompact_native_apply_binding_repair") gaps.push("source");
+  const mirroredFields = [
+    "proof_entry_id",
+    "plan_checksum",
+    "request_patch_checksum",
+    "provider_reproof_status",
+    "provider_reproof_reason",
+    "reproof_candidate_id",
+    "timeline_binding_id",
+    "original_work_item_id",
+    "request_telemetry_status",
+    "request_telemetry_source",
+    "request_telemetry_session_status",
+    "request_telemetry_dispatch_status",
+    "runner_request_id",
+    "execution_id",
+  ];
+  for (const field of mirroredFields) {
+    const expectedValue = field === "runner_request_id"
+      ? item.runner_request_id || item.request_telemetry_runner_request_id || ""
+      : item[field] || "";
+    const expected = String(expectedValue).trim();
+    if (expected && String(candidate[field] || "").trim() !== expected) gaps.push(field);
+  }
+  if (!String(candidate.request_patch_checksum || candidate.plan_checksum || "").trim()) gaps.push("native_request_or_plan_checksum");
+  if (!String(candidate.request_telemetry_session_status || "").trim()) gaps.push("request_telemetry_session_status");
+  if (!String(candidate.request_telemetry_dispatch_status || "").trim()) gaps.push("request_telemetry_dispatch_status");
+  return [...new Set(gaps)];
+}
+
+function apiMicrocompactNativeProofRepairDispatchCandidateGroupIds(options: any = {}, repairWorkItemReport: any = {}) {
+  const explicit = Array.isArray(options.groupIds || options.group_ids)
+    ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : null;
+  if (explicit?.length) return explicit;
+  const repairReportGroupIds = Array.isArray(repairWorkItemReport.groups)
+    ? repairWorkItemReport.groups.map((row: any) => String(row.groupId || "").trim()).filter(Boolean)
+    : [];
+  return [...new Set([
+    ...replayRepairDispatchCandidateGroupIds(options),
+    ...repairReportGroupIds,
+  ])].filter(Boolean);
+}
+
+function buildApiMicrocompactNativeApplyProofRepairDispatchCandidateReport(options: any = {}) {
+  const repairWorkItemReport = options.repairWorkItemReport
+    || options.repair_work_item_report
+    || buildApiMicrocompactNativeApplyProofRepairWorkItemReport(options);
+  const groupIds = apiMicrocompactNativeProofRepairDispatchCandidateGroupIds(options, repairWorkItemReport);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const items = Array.isArray(ledger.items) ? ledger.items : [];
+    const nativeItems = items.filter(isApiMicrocompactNativeApplyProofRepairWorkItem);
+    const openNativeItems = nativeItems.filter((item: any) => replayRepairWorkItemOpen(item.status));
+    const requiredItems = openNativeItems.filter(shouldRequireApiMicrocompactNativeProofRepairDispatchCandidate);
+    const limit = Math.max(Number(options.limit || 24), requiredItems.length + 8);
+    const summary = buildReplayRepairMainAgentDispatchCandidates(groupId, { limit, ledger });
+    const candidateByWorkId = new Map((summary.candidates || []).map((candidate: any) => [String(candidate.work_item_id || ""), candidate]));
+    const missing = requiredItems.filter((item: any) => !candidateByWorkId.has(replayRepairWorkItemId(item)));
+    const matched = requiredItems.map((item: any) => ({
+      item,
+      candidate: candidateByWorkId.get(replayRepairWorkItemId(item)) || null,
+    })).filter((entry: any) => entry.candidate);
+    const metadataGaps = matched
+      .map((entry: any) => ({
+        work_item_id: replayRepairWorkItemId(entry.item),
+        candidate_id: entry.candidate.candidate_id || "",
+        gaps: apiMicrocompactNativeProofRepairCandidateMetadataGaps(entry.item, entry.candidate),
+        proof_entry_id: entry.candidate.proof_entry_id || "",
+        request_patch_checksum: entry.candidate.request_patch_checksum || "",
+        request_telemetry_session_status: entry.candidate.request_telemetry_session_status || "",
+        request_telemetry_dispatch_status: entry.candidate.request_telemetry_dispatch_status || "",
+        runner_request_id: entry.candidate.runner_request_id || "",
+      }))
+      .filter((entry: any) => entry.gaps.length > 0);
+    const status = requiredItems.length === 0
+      ? openNativeItems.length > 0 ? "warn" : "empty"
+      : missing.length > 0 ? "fail" : metadataGaps.length > 0 ? "warn" : "ok";
+    return {
+      schema: "ccm-api-microcompact-native-apply-proof-repair-dispatch-candidate-group-v1",
+      groupId,
+      status,
+      file: summary.file,
+      updatedAt: summary.updatedAt,
+      expectedCandidateCount: requiredItems.length,
+      coveredCandidateCount: requiredItems.length - missing.length,
+      candidateCount: (summary.candidates || []).filter((candidate: any) => candidate.source === "api_microcompact_native_apply_binding_repair").length,
+      nativeOpenItemCount: openNativeItems.length,
+      dispatchMarkedCount: openNativeItems.filter((item: any) => String(item.dispatch_target || item.dispatchTarget || "").trim()).length,
+      readyCount: (summary.candidates || []).filter((candidate: any) => candidate.source === "api_microcompact_native_apply_binding_repair" && (candidate.dispatchMarked || candidate.claimedByMainAgent)).length,
+      metadataGapCount: metadataGaps.length,
+      proofEntryCandidateCount: (summary.candidates || []).filter((candidate: any) => candidate.source === "api_microcompact_native_apply_binding_repair" && candidate.proof_entry_id).length,
+      runnerBoundCandidateCount: (summary.candidates || []).filter((candidate: any) => candidate.source === "api_microcompact_native_apply_binding_repair" && candidate.runner_request_id).length,
+      candidates: (summary.candidates || [])
+        .filter((candidate: any) => candidate.source === "api_microcompact_native_apply_binding_repair")
+        .slice(0, 12),
+      missingCandidates: missing.slice(0, 8).map((item: any) => ({
+        work_item_id: replayRepairWorkItemId(item),
+        reason: "native apply proof repair work item 未进入主 Agent replay repair dispatch candidates",
+        status: replayRepairWorkItemStatus(item.status),
+        priority: item.priority || "",
+        component: item.component || "",
+        dispatch_target: item.dispatch_target || item.dispatchTarget || "",
+        proof_entry_id: item.proof_entry_id || "",
+        request_patch_checksum: item.request_patch_checksum || "",
+      })),
+      metadataGaps: metadataGaps.slice(0, 8),
+      gaps: [
+        ...missing.slice(0, 8).map((item: any) => ({
+          work_item_id: replayRepairWorkItemId(item),
+          reason: "native apply proof repair work item 未进入主 Agent 派发候选",
+          status: replayRepairWorkItemStatus(item.status),
+          priority: item.priority || "",
+        })),
+        ...metadataGaps.slice(0, 8).map((gap: any) => ({
+          work_item_id: gap.work_item_id,
+          reason: `native apply proof dispatch candidate 缺少证明字段：${gap.gaps.join(",")}`,
+          candidate_id: gap.candidate_id,
+        })),
+      ].slice(0, 12),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.expectedCandidateCount || 0) > 0 || Number(row.nativeOpenItemCount || 0) > 0);
+  const requiredRows = checkedRows.filter(row => Number(row.expectedCandidateCount || 0) > 0);
+  const coveredRows = requiredRows.filter(row => Number(row.coveredCandidateCount || 0) >= Number(row.expectedCandidateCount || 0));
+  const metadataCompleteRows = requiredRows.filter(row => row.metadataGapCount === 0);
+  const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+  const metadataCoverageRate = requiredRows.length ? Math.round((metadataCompleteRows.length / requiredRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? checkedRows.some(row => row.status === "warn") ? "warn" : "empty"
+    : coverageRate < 100 ? coverageRate >= 75 ? "warn" : "fail" : metadataCoverageRate === 100 ? "ok" : "warn";
+  return {
+    schema: "ccm-api-microcompact-native-apply-proof-repair-dispatch-candidate-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      metadataCoverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsNeedingCandidates: requiredRows.length,
+      groupsCovered: coveredRows.length,
+      groupsMetadataComplete: metadataCompleteRows.length,
+      expectedCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedCandidateCount || 0), 0),
+      coveredCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredCandidateCount || 0), 0),
+      candidateCount: checkedRows.reduce((sum, row) => sum + Number(row.candidateCount || 0), 0),
+      nativeOpenItemCount: checkedRows.reduce((sum, row) => sum + Number(row.nativeOpenItemCount || 0), 0),
+      readyCount: checkedRows.reduce((sum, row) => sum + Number(row.readyCount || 0), 0),
+      dispatchMarkedCount: checkedRows.reduce((sum, row) => sum + Number(row.dispatchMarkedCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      proofEntryCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.proofEntryCandidateCount || 0), 0),
+      runnerBoundCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.runnerBoundCandidateCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.expectedCandidateCount || 0) - Number(a.expectedCandidateCount || 0) || Number(b.readyCount || 0) - Number(a.readyCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateApiMicrocompactNativeApplyProofRepairDispatchCandidates(options: any = {}) {
+  const report = buildApiMicrocompactNativeApplyProofRepairDispatchCandidateReport(options);
+  const checked = Number(report.overall.groupsNeedingCandidates || 0);
+  const passed = (report.groups || []).filter((row: any) => Number(row.expectedCandidateCount || 0) > 0 && row.status === "ok").length;
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    expectedCandidateCount: row.expectedCandidateCount,
+    coveredCandidateCount: row.coveredCandidateCount,
+    candidateCount: row.candidateCount,
+    readyCount: row.readyCount,
+    dispatchMarkedCount: row.dispatchMarkedCount,
+    proofEntryCandidateCount: row.proofEntryCandidateCount,
+    runnerBoundCandidateCount: row.runnerBoundCandidateCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "API microcompact native proof repair dispatch candidate 缺失",
+    work_item_id: gap.work_item_id || "",
+    candidate_id: gap.candidate_id || "",
+    status: gap.status || "",
+    priority: gap.priority || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "api_microcompact_native_apply_proof_repair_dispatch_candidates",
+    "API Microcompact Native Apply Proof Repair Dispatch Candidates",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "把 native_applied 强证明修复 work items 转成群聊主 Agent 可读派发候选，并保留 proof/session/dispatch/runner/request checksum 元数据；仍只作为上下文，不自动创建真实任务。"
+  );
+  check.report = report;
+  return check;
+}
+
+function syncReplayRepairDispatchPlanLedgerForCenter(groupId: string, candidateSummary: any = {}, options: any = {}) {
+  try {
+    const api = require("../collaboration/group-orchestrator");
+    if (typeof api.syncReplayRepairDispatchPlansForCoordinator === "function") {
+      return api.syncReplayRepairDispatchPlansForCoordinator(groupId, candidateSummary, {
+        at: options.at || options.generatedAt || options.generated_at || now(),
+        limit: options.limit || 24,
+      });
+    }
+  } catch {}
+  return readGroupReplayRepairDispatchPlanLedger(groupId);
+}
+
+function replayRepairDispatchBriefMetadataGaps(candidate: any = {}, brief: any = {}) {
+  const gaps: string[] = [];
+  if (!brief || !brief.brief_id) {
+    gaps.push("brief_missing");
+    return gaps;
+  }
+  if (brief.should_create_real_task !== false && brief.shouldCreateRealTask !== false) gaps.push("should_create_real_task_false");
+  if (!String(brief.worker_task || "").trim()) gaps.push("worker_task");
+  const mirroredFields = [
+    "proof_entry_id",
+    "plan_checksum",
+    "request_patch_checksum",
+    "request_telemetry_status",
+    "request_telemetry_source",
+    "request_telemetry_session_status",
+    "request_telemetry_dispatch_status",
+    "runner_request_id",
+    "execution_id",
+  ];
+  for (const field of mirroredFields) {
+    const expected = String(candidate[field] || "").trim();
+    if (expected && String(brief[field] || "").trim() !== expected) gaps.push(field);
+  }
+  const workerTask = String(brief.worker_task || "");
+  if (candidate.request_patch_checksum && !workerTask.includes(String(candidate.request_patch_checksum))) gaps.push("worker_task_request_patch_checksum");
+  if (candidate.runner_request_id && !workerTask.includes(String(candidate.runner_request_id))) gaps.push("worker_task_runner_request_id");
+  if (candidate.proof_entry_id && !workerTask.includes(String(candidate.proof_entry_id))) gaps.push("worker_task_proof_entry_id");
+  if (candidate.provider_reproof_status && !workerTask.includes(String(candidate.provider_reproof_status))) gaps.push("worker_task_provider_reproof_status");
+  if (!/CCM_AGENT_RECEIPT/i.test(workerTask)) gaps.push("worker_task_receipt_contract");
+  return [...new Set(gaps)];
+}
+
+function buildApiMicrocompactNativeApplyProofRepairDispatchBriefReport(options: any = {}) {
+  const candidateReport = options.candidateReport
+    || options.candidate_report
+    || buildApiMicrocompactNativeApplyProofRepairDispatchCandidateReport(options);
+  const rows = (candidateReport.groups || []).map((candidateGroup: any) => {
+    const groupId = String(candidateGroup.groupId || "");
+    const nativeCandidates = Array.isArray(candidateGroup.candidates)
+      ? candidateGroup.candidates.filter((candidate: any) => isApiMicrocompactNativeApplyProofDispatchSource(candidate.source))
+      : [];
+    const candidateSummary = {
+      schema: "ccm-replay-repair-main-agent-dispatch-candidates-v1",
+      groupId,
+      file: candidateGroup.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      updatedAt: candidateGroup.updatedAt || "",
+      candidateCount: nativeCandidates.length,
+      openItemCount: candidateGroup.nativeOpenItemCount || nativeCandidates.length,
+      readyCount: candidateGroup.readyCount || nativeCandidates.length,
+      dispatchMarkedCount: candidateGroup.dispatchMarkedCount || 0,
+      shouldCreateRealTask: false,
+      candidates: nativeCandidates,
+    };
+    const ledger = syncReplayRepairDispatchPlanLedgerForCenter(groupId, candidateSummary, options);
+    const readyBriefs = (Array.isArray(ledger.briefs) ? ledger.briefs : [])
+      .filter((brief: any) => String(brief.status || "") === "ready" && isApiMicrocompactNativeApplyProofDispatchSource(brief.source));
+    const briefByWorkId = new Map<string, any>(readyBriefs.map((brief: any) => [String(brief.work_item_id || ""), brief]));
+    const requiredCandidates = nativeCandidates.filter((candidate: any) => candidate.work_item_id);
+    const missing = requiredCandidates.filter((candidate: any) => !briefByWorkId.has(String(candidate.work_item_id || "")));
+    const metadataGaps = requiredCandidates
+      .map((candidate: any) => {
+        const brief = briefByWorkId.get(String(candidate.work_item_id || "")) || null;
+        return {
+          work_item_id: candidate.work_item_id || "",
+          candidate_id: candidate.candidate_id || "",
+          brief_id: brief?.brief_id || "",
+          gaps: replayRepairDispatchBriefMetadataGaps(candidate, brief),
+        };
+      })
+      .filter((entry: any) => entry.gaps.length > 0);
+    const status = requiredCandidates.length === 0
+      ? "empty"
+      : missing.length > 0 ? "fail" : metadataGaps.length > 0 ? "warn" : "ok";
+    return {
+      schema: "ccm-api-microcompact-native-apply-proof-repair-dispatch-brief-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchPlanLedgerFile(groupId),
+      sourceCandidateFile: ledger.sourceCandidateFile || candidateGroup.file || "",
+      expectedBriefCount: requiredCandidates.length,
+      coveredBriefCount: requiredCandidates.length - missing.length,
+      readyBriefCount: readyBriefs.length,
+      metadataGapCount: metadataGaps.length,
+      proofEntryBriefCount: readyBriefs.filter((brief: any) => brief.proof_entry_id).length,
+      runnerBoundBriefCount: readyBriefs.filter((brief: any) => brief.runner_request_id).length,
+      shouldCreateRealTask: ledger.shouldCreateRealTask === false || ledger.should_create_real_task === false,
+      briefs: readyBriefs.slice(0, 12).map((brief: any) => ({
+        brief_id: brief.brief_id || "",
+        work_item_id: brief.work_item_id || "",
+        source: brief.source || "",
+        target_project: brief.target_project || "",
+        proof_entry_id: brief.proof_entry_id || "",
+        request_patch_checksum: brief.request_patch_checksum || "",
+        provider_reproof_status: brief.provider_reproof_status || "",
+        provider_reproof_reason: brief.provider_reproof_reason || "",
+        reproof_candidate_id: brief.reproof_candidate_id || "",
+        timeline_binding_id: brief.timeline_binding_id || "",
+        original_work_item_id: brief.original_work_item_id || "",
+        request_telemetry_session_status: brief.request_telemetry_session_status || "",
+        request_telemetry_dispatch_status: brief.request_telemetry_dispatch_status || "",
+        runner_request_id: brief.runner_request_id || "",
+        worker_task: compactMemoryCenterText(brief.worker_task || "", 360),
+      })),
+      missingBriefs: missing.slice(0, 8).map((candidate: any) => ({
+        work_item_id: candidate.work_item_id || "",
+        candidate_id: candidate.candidate_id || "",
+        reason: "native apply proof repair dispatch candidate 缺少主 Agent 派发简报",
+      })),
+      metadataGaps: metadataGaps.slice(0, 8),
+      gaps: [
+        ...missing.slice(0, 8).map((candidate: any) => ({
+          work_item_id: candidate.work_item_id || "",
+          candidate_id: candidate.candidate_id || "",
+          reason: "native apply proof repair dispatch candidate 缺少可恢复派发简报",
+        })),
+        ...metadataGaps.slice(0, 8).map((gap: any) => ({
+          work_item_id: gap.work_item_id || "",
+          candidate_id: gap.candidate_id || "",
+          brief_id: gap.brief_id || "",
+          reason: `native proof repair dispatch brief 缺少字段：${gap.gaps.join(",")}`,
+        })),
+      ].slice(0, 12),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.expectedBriefCount || 0) > 0 || Number(row.readyBriefCount || 0) > 0);
+  const requiredRows = checkedRows.filter(row => Number(row.expectedBriefCount || 0) > 0);
+  const coveredRows = requiredRows.filter(row => Number(row.coveredBriefCount || 0) >= Number(row.expectedBriefCount || 0));
+  const metadataCompleteRows = requiredRows.filter(row => Number(row.metadataGapCount || 0) === 0);
+  const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+  const metadataCoverageRate = requiredRows.length ? Math.round((metadataCompleteRows.length / requiredRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? "empty"
+    : coverageRate < 100 ? coverageRate >= 75 ? "warn" : "fail" : metadataCoverageRate === 100 ? "ok" : "warn";
+  return {
+    schema: "ccm-api-microcompact-native-apply-proof-repair-dispatch-brief-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      metadataCoverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsNeedingBriefs: requiredRows.length,
+      groupsCovered: coveredRows.length,
+      groupsMetadataComplete: metadataCompleteRows.length,
+      expectedBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedBriefCount || 0), 0),
+      coveredBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredBriefCount || 0), 0),
+      readyBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.readyBriefCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      proofEntryBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.proofEntryBriefCount || 0), 0),
+      runnerBoundBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.runnerBoundBriefCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.expectedBriefCount || 0) - Number(a.expectedBriefCount || 0) || Number(b.readyBriefCount || 0) - Number(a.readyBriefCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateApiMicrocompactNativeApplyProofRepairDispatchBriefs(options: any = {}) {
+  const report = buildApiMicrocompactNativeApplyProofRepairDispatchBriefReport(options);
+  const checked = Number(report.overall.groupsNeedingBriefs || 0);
+  const passed = (report.groups || []).filter((row: any) => Number(row.expectedBriefCount || 0) > 0 && row.status === "ok").length;
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    expectedBriefCount: row.expectedBriefCount,
+    coveredBriefCount: row.coveredBriefCount,
+    readyBriefCount: row.readyBriefCount,
+    proofEntryBriefCount: row.proofEntryBriefCount,
+    runnerBoundBriefCount: row.runnerBoundBriefCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "API microcompact native proof repair dispatch brief 缺失",
+    work_item_id: gap.work_item_id || "",
+    candidate_id: gap.candidate_id || "",
+    brief_id: gap.brief_id || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "api_microcompact_native_apply_proof_repair_dispatch_briefs",
+    "API Microcompact Native Apply Proof Repair Dispatch Briefs",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "把 native proof repair dispatch candidates 编译成主 Agent 可恢复、可复制到 targets[].task 的自包含 worker brief；brief 必须保留 proof/request/session/dispatch/runner 元数据，仍不自动创建真实任务。"
+  );
+  check.report = report;
+  return check;
+}
+
+function replayRepairDispatchBindingGroupIds(options: any = {}) {
+  const explicit = Array.isArray(options.groupIds || options.group_ids)
+    ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : null;
+  if (explicit?.length) return explicit;
+  return listJsonFiles(GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_BINDINGS_DIR)
+    .map(file => {
+      const ledger = readJson(file, null);
+      return String(ledger?.groupId || path.basename(file, ".json") || "").trim();
+    })
+    .filter(Boolean);
+}
+
+function replayRepairDispatchBriefAssignmentBindingGaps(entry: any = {}) {
+  const gaps: string[] = [];
+  if (!entry.binding_id) gaps.push("binding_id");
+  if (!entry.brief_id) gaps.push("brief_id");
+  if (!entry.work_item_id) gaps.push("work_item_id");
+  if (!entry.assignment_id) gaps.push("assignment_id");
+  if (!entry.dispatch_key) gaps.push("dispatch_key");
+  if (!entry.worker_context_packet_id) gaps.push("worker_context_packet_id");
+  if (entry.should_create_real_task !== false && entry.shouldCreateRealTask !== false) gaps.push("should_create_real_task_false");
+  if (isApiMicrocompactNativeApplyProofDispatchSource(entry.source)) {
+    if (!entry.proof_entry_id) gaps.push("proof_entry_id");
+    if (!entry.request_patch_checksum) gaps.push("request_patch_checksum");
+    if (!entry.request_telemetry_session_status) gaps.push("request_telemetry_session_status");
+    if (!entry.request_telemetry_dispatch_status) gaps.push("request_telemetry_dispatch_status");
+    if (!entry.runner_request_id) gaps.push("runner_request_id");
+  }
+  if (String(entry.source || "") === "api_microcompact_native_apply_provider_reproof") {
+    if (!entry.provider_reproof_status) gaps.push("provider_reproof_status");
+    if (!entry.provider_reproof_reason) gaps.push("provider_reproof_reason");
+    if (!entry.reproof_candidate_id) gaps.push("reproof_candidate_id");
+    if (!entry.original_work_item_id) gaps.push("original_work_item_id");
+  }
+  return [...new Set(gaps)];
+}
+
+function buildApiMicrocompactNativeApplyProofRepairAssignmentBindingReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = Array.isArray(ledger.entries) ? ledger.entries : [];
+    const nativeEntries = entries.filter((entry: any) => isApiMicrocompactNativeApplyProofDispatchSource(entry.source));
+    const gapEntries = nativeEntries
+      .map((entry: any) => ({
+        entry,
+        gaps: replayRepairDispatchBriefAssignmentBindingGaps(entry),
+      }))
+      .filter((item: any) => item.gaps.length > 0);
+    const status = nativeEntries.length === 0
+      ? "empty"
+      : gapEntries.length === 0 ? "ok" : "fail";
+    return {
+      schema: "ccm-api-microcompact-native-apply-proof-repair-assignment-binding-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      bindingCount: nativeEntries.length,
+      validBindingCount: nativeEntries.length - gapEntries.length,
+      metadataGapCount: gapEntries.length,
+      proofEntryBindingCount: nativeEntries.filter((entry: any) => entry.proof_entry_id).length,
+      runnerBoundBindingCount: nativeEntries.filter((entry: any) => entry.runner_request_id).length,
+      workerContextPacketBindingCount: nativeEntries.filter((entry: any) => entry.worker_context_packet_id).length,
+      shouldCreateRealTask: nativeEntries.every((entry: any) => entry.should_create_real_task === false || entry.shouldCreateRealTask === false),
+      bindings: nativeEntries.slice(-12).reverse().map((entry: any) => ({
+        binding_id: entry.binding_id || "",
+        brief_id: entry.brief_id || "",
+        work_item_id: entry.work_item_id || "",
+        project: entry.project || "",
+        assignment_id: entry.assignment_id || "",
+        dispatch_key: entry.dispatch_key || "",
+        worker_context_packet_id: entry.worker_context_packet_id || "",
+        source: entry.source || "",
+        proof_entry_id: entry.proof_entry_id || "",
+        request_patch_checksum: entry.request_patch_checksum || "",
+        provider_reproof_status: entry.provider_reproof_status || "",
+        provider_reproof_reason: entry.provider_reproof_reason || "",
+        reproof_candidate_id: entry.reproof_candidate_id || "",
+        timeline_binding_id: entry.timeline_binding_id || "",
+        original_work_item_id: entry.original_work_item_id || "",
+        request_telemetry_session_status: entry.request_telemetry_session_status || "",
+        request_telemetry_dispatch_status: entry.request_telemetry_dispatch_status || "",
+        runner_request_id: entry.runner_request_id || "",
+        match_score: entry.match_score || 0,
+        matched_by: entry.matched_by || [],
+      })),
+      gaps: gapEntries.slice(0, 8).map((item: any) => ({
+        binding_id: item.entry.binding_id || "",
+        brief_id: item.entry.brief_id || "",
+        work_item_id: item.entry.work_item_id || "",
+        assignment_id: item.entry.assignment_id || "",
+        reason: `native proof repair dispatch brief assignment binding 缺少字段：${item.gaps.join(",")}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.bindingCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-api-microcompact-native-apply-proof-repair-assignment-binding-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      bindingCount: checkedRows.reduce((sum, row) => sum + Number(row.bindingCount || 0), 0),
+      validBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.validBindingCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      proofEntryBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.proofEntryBindingCount || 0), 0),
+      runnerBoundBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.runnerBoundBindingCount || 0), 0),
+      workerContextPacketBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.workerContextPacketBindingCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.bindingCount || 0) - Number(a.bindingCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateApiMicrocompactNativeApplyProofRepairAssignmentBindings(options: any = {}) {
+  const report = buildApiMicrocompactNativeApplyProofRepairAssignmentBindingReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    bindingCount: row.bindingCount,
+    validBindingCount: row.validBindingCount,
+    proofEntryBindingCount: row.proofEntryBindingCount,
+    runnerBoundBindingCount: row.runnerBoundBindingCount,
+    workerContextPacketBindingCount: row.workerContextPacketBindingCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "API microcompact native proof repair assignment binding 缺失",
+    binding_id: gap.binding_id || "",
+    brief_id: gap.brief_id || "",
+    work_item_id: gap.work_item_id || "",
+    assignment_id: gap.assignment_id || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "api_microcompact_native_apply_proof_repair_assignment_bindings",
+    "API Microcompact Native Apply Proof Repair Assignment Bindings",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当主 Agent 把 native proof repair dispatch brief 整理成 assignment 时，必须持久化 brief->assignment->WorkerContextPacket 绑定，并保留 proof/request/session/dispatch/runner 元数据。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPacketContextUsage(entry: any = {}) {
+  return entry.worker_context_packet_context_usage
+    || entry.workerContextPacketContextUsage
+    || entry.worker_context_packet?.context_usage
+    || entry.workerContextPacket?.contextUsage
+    || null;
+}
+
+function workerContextPacketContextUsageGaps(entry: any = {}) {
+  const gaps: string[] = [];
+  const usage = workerContextPacketContextUsage(entry);
+  if (!entry.worker_context_packet_id) gaps.push("worker_context_packet_id");
+  if (!usage || usage.schema !== "ccm-worker-context-usage-v1") return [...gaps, "worker_context_packet_context_usage"];
+  const categories = Array.isArray(usage.categories) ? usage.categories : [];
+  const categoryIds = new Set(categories.map((item: any) => String(item.id || "")));
+  if (Number(usage.total_tokens || 0) <= 0) gaps.push("context_usage_total_tokens");
+  if (Number(usage.max_tokens || 0) <= 0) gaps.push("context_usage_max_tokens");
+  if (!categories.length) gaps.push("context_usage_categories");
+  for (const required of ["task_goal", "verification_and_acceptance", "free_space", "autocompact_buffer"]) {
+    if (!categoryIds.has(required)) gaps.push(`category:${required}`);
+  }
+  if (Array.isArray(entry.worker_context_packet_replay_briefs) && entry.worker_context_packet_replay_briefs.length > 0 && !categoryIds.has("replay_repair_dispatch_briefs")) {
+    gaps.push("category:replay_repair_dispatch_briefs");
+  }
+  if (workerContextPacketRequiresIgnoreMemoryPolicy(entry) && !categoryIds.has("memory_policy")) {
+    gaps.push("category:memory_policy");
+  }
+  const status = String(usage.status || "").trim();
+  if (!status) gaps.push("context_usage_status");
+  if (status === "over_budget") gaps.push("context_usage_over_budget");
+  const renderFlags = entry.worker_context_packet_render_probe?.rendered_flags || entry.workerContextPacketRenderProbe?.renderedFlags || {};
+  if (Object.keys(renderFlags).length && renderFlags.has_context_usage_budget !== true) gaps.push("rendered_context_usage_budget");
+  return [...new Set(gaps)];
+}
+
+function buildWorkerContextPacketContextUsageReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(ledger.entries) ? ledger.entries : [])
+      .filter((entry: any) => entry.worker_context_packet_id || workerContextPacketContextUsage(entry));
+    const checked = entries.map((entry: any) => {
+      const usage = workerContextPacketContextUsage(entry) || {};
+      const gaps = workerContextPacketContextUsageGaps(entry);
+      return { entry, usage, gaps };
+    });
+    const gapRows = checked.filter((row: any) => row.gaps.length > 0);
+    const status = checked.length === 0 ? "empty" : gapRows.length === 0 ? "ok" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-context-usage-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      packetBindingCount: checked.length,
+      validUsageCount: checked.length - gapRows.length,
+      metadataGapCount: gapRows.length,
+      overBudgetCount: checked.filter((row: any) => row.gaps.includes("context_usage_over_budget")).length,
+      compactRecommendedCount: checked.filter((row: any) => row.usage?.compact_recommended === true).length,
+      renderedBudgetCount: checked.filter((row: any) => row.entry?.worker_context_packet_render_probe?.rendered_flags?.has_context_usage_budget === true).length,
+      totalTokens: checked.reduce((sum, row) => sum + Number(row.usage?.total_tokens || 0), 0),
+      maxPressure: checked.reduce((max, row) => Math.max(max, Number(row.usage?.pressure || 0)), 0),
+      packets: checked.slice(-12).reverse().map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        packet_id: row.entry.worker_context_packet_id || row.usage?.packet_id || "",
+        project: row.entry.project || row.usage?.project || "",
+        source: row.entry.source || "",
+        status: row.usage?.status || "",
+        total_tokens: row.usage?.total_tokens || 0,
+        max_tokens: row.usage?.max_tokens || 0,
+        pressure: row.usage?.pressure || 0,
+        free_tokens: row.usage?.free_tokens || 0,
+        category_count: Array.isArray(row.usage?.categories) ? row.usage.categories.length : 0,
+        top_categories: row.usage?.top_categories || [],
+        rendered_context_usage_budget: row.entry?.worker_context_packet_render_probe?.rendered_flags?.has_context_usage_budget === true,
+      })),
+      gaps: gapRows.slice(0, 8).map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        packet_id: row.entry.worker_context_packet_id || "",
+        project: row.entry.project || "",
+        reason: `WorkerContextPacket context usage 缺少/异常：${row.gaps.join(",")}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.packetBindingCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-context-usage-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      packetBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.packetBindingCount || 0), 0),
+      validUsageCount: checkedRows.reduce((sum, row) => sum + Number(row.validUsageCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      overBudgetCount: checkedRows.reduce((sum, row) => sum + Number(row.overBudgetCount || 0), 0),
+      compactRecommendedCount: checkedRows.reduce((sum, row) => sum + Number(row.compactRecommendedCount || 0), 0),
+      renderedBudgetCount: checkedRows.reduce((sum, row) => sum + Number(row.renderedBudgetCount || 0), 0),
+      totalTokens: checkedRows.reduce((sum, row) => sum + Number(row.totalTokens || 0), 0),
+      maxPressure: checkedRows.reduce((max, row) => Math.max(max, Number(row.maxPressure || 0)), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.packetBindingCount || 0) - Number(a.packetBindingCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketContextUsage(options: any = {}) {
+  const report = buildWorkerContextPacketContextUsageReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    packetBindingCount: row.packetBindingCount,
+    validUsageCount: row.validUsageCount,
+    renderedBudgetCount: row.renderedBudgetCount,
+    maxPressure: row.maxPressure,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "WorkerContextPacket context usage 缺失",
+    binding_id: gap.binding_id || "",
+    packet_id: gap.packet_id || "",
+    project: gap.project || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_context_usage",
+    "WorkerContextPacket Context Usage Budget",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "对齐 Claude Code /context：每个下发给第三方子 Agent 的 WorkerContextPacket 必须携带按类别拆分的上下文用量、free space、autocompact buffer，并在渲染文本中可见。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPacketContextUsagePressureStatus(usage: any = {}) {
+  const status = String(usage.status || "").trim();
+  if (["compact_recommended", "critical", "over_budget"].includes(status)) return status;
+  const pressure = Number(usage.pressure || 0);
+  const freeTokens = Number(usage.free_tokens || 0);
+  if (usage.compact_recommended === true || pressure >= 82 || freeTokens < 0) {
+    if (pressure >= 100 || freeTokens < 0) return "over_budget";
+    if (pressure >= 90) return "critical";
+    return "compact_recommended";
+  }
+  return "";
+}
+
+function workerContextPacketContextUsageNeedsRepair(usage: any = {}) {
+  return !!workerContextPacketContextUsagePressureStatus(usage);
+}
+
+function workerContextPacketContextUsageTopCategories(usage: any = {}) {
+  const top = Array.isArray(usage.top_categories || usage.topCategories)
+    ? (usage.top_categories || usage.topCategories)
+    : [];
+  const fallback = Array.isArray(usage.categories) ? usage.categories : [];
+  return (top.length ? top : fallback)
+    .filter((item: any) => Number(item.tokens || 0) > 0 && !["free_space", "autocompact_buffer"].includes(String(item.id || item.category_id || "")))
+    .sort((a: any, b: any) => Number(b.tokens || 0) - Number(a.tokens || 0))
+    .slice(0, 8)
+    .map((item: any) => ({
+      id: String(item.id || item.category_id || item.categoryId || ""),
+      name: String(item.name || item.label || item.id || item.category_id || ""),
+      tokens: Number(item.tokens || 0),
+      chars: Number(item.chars || 0),
+    }));
+}
+
+function workerContextPacketContextUsageSuggestedReductions(usage: any = {}) {
+  const explicit = Array.isArray(usage.suggested_reductions || usage.suggestedReductions)
+    ? (usage.suggested_reductions || usage.suggestedReductions)
+    : [];
+  if (explicit.length) {
+    return explicit.slice(0, 8).map((item: any) => ({
+      category_id: String(item.category_id || item.categoryId || item.id || ""),
+      name: String(item.name || item.label || item.category_id || item.id || ""),
+      tokens: Number(item.tokens || 0),
+      suggestion: compactMemoryCenterText(item.suggestion || item.instruction || item.reason || "", 260),
+    }));
+  }
+  return workerContextPacketContextUsageTopCategories(usage)
+    .filter((item: any) => !["task_goal", "verification_and_acceptance", "worker_packet_envelope", "context_compaction_retry", "memory_reinjection_proof"].includes(String(item.id || "")))
+    .slice(0, 5)
+    .map((item: any) => {
+      const categoryId = String(item.id || "");
+      const suggestion = categoryId === "group_memory_rendered"
+        ? "优先把群聊记忆渲染文本替换为最新压缩摘要、typed MEMORY.md 引用或 read plan 指针。"
+        : categoryId === "typed_memory_recall"
+          ? "去重 typed MEMORY.md 召回，只保留本任务直接相关的 reference/caution 条目。"
+          : categoryId === "global_memory"
+            ? "若本任务不需要跨群/全局事实，先抑制 global memory 召回。"
+            : categoryId === "replay_repair_dispatch_briefs"
+              ? "保留 brief/work/proof/request/session/runner id，裁掉重复叙述。"
+              : "压缩该类别内容，保留 required receipt/proof 标识。";
+      return {
+        category_id: categoryId,
+        name: item.name,
+        tokens: item.tokens,
+        suggestion,
+      };
+    });
+}
+
+function workerContextPacketContextUsagePressureRows(groupId: string) {
+  const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+  const entries = (Array.isArray(ledger.entries) ? ledger.entries : [])
+    .filter((entry: any) => entry.worker_context_packet_id || workerContextPacketContextUsage(entry));
+  return entries
+    .map((entry: any, index: number) => {
+      const usage = workerContextPacketContextUsage(entry) || {};
+      const status = workerContextPacketContextUsagePressureStatus(usage);
+      return { groupId, ledger, entry, usage, status, index };
+    })
+    .filter((row: any) => row.usage?.schema === "ccm-worker-context-usage-v1" && workerContextPacketContextUsageNeedsRepair(row.usage));
+}
+
+function buildWorkerContextPacketContextUsageRepairWorkItem(groupId: string, row: any = {}, index = 0, existing: any = {}, at = now()) {
+  const entry = row.entry || row.binding || {};
+  const usage = row.usage || workerContextPacketContextUsage(entry) || {};
+  const status = workerContextPacketContextUsagePressureStatus(usage) || String(usage.status || "compact_recommended");
+  const packetId = String(entry.worker_context_packet_id || usage.packet_id || "").trim();
+  const bindingId = String(entry.binding_id || "").trim();
+  const targetProject = String(entry.project || usage.project || entry.target_project || "").trim();
+  const topCategories = workerContextPacketContextUsageTopCategories(usage);
+  const reductions = workerContextPacketContextUsageSuggestedReductions(usage);
+  const priority = ["over_budget", "critical"].includes(status) ? "critical" : "high";
+  const id = `worker-context-usage-repair:${hash([
+    groupId,
+    bindingId,
+    packetId,
+    targetProject,
+  ], 14)}`;
+  const previousStatus = replayRepairWorkItemStatus(existing.status);
+  const itemStatus = ["in_progress", "blocked"].includes(previousStatus) ? previousStatus : "pending";
+  const topCategoryText = topCategories.slice(0, 4).map((item: any) => `${item.id || item.name}:${item.tokens}`).join("; ");
+  const reductionText = reductions.slice(0, 4).map((item: any) => `${item.category_id || item.name}: ${item.suggestion}`).join(" ");
+  const reason = compactMemoryCenterText(
+    `WorkerContextPacket ${packetId || "unknown"} context usage ${status}; ${Number(usage.total_tokens || 0)}/${Number(usage.max_tokens || 0)} tokens; free=${Number(usage.free_tokens || 0)}; pressure=${Number(usage.pressure || 0)}%.`,
+    360
+  );
+  const instruction = [
+    `在继续派发 ${targetProject || "目标项目"} 子 Agent 前，先对 WorkerContextPacket 执行反应式压缩/裁剪。`,
+    packetId ? `packet_id=${packetId}` : "",
+    bindingId ? `assignment_binding=${bindingId}` : "",
+    topCategoryText ? `top_categories=${topCategoryText}` : "",
+    reductionText ? `suggested_reductions=${reductionText}` : "",
+    "必须保留 task_goal、verification_and_acceptance，以及 replay repair brief 的 brief/work/proof/request/session/runner 标识。",
+    "重新生成 WorkerContextPacket 后，要求 context_usage.status <= warn、free_tokens >= autocompact_buffer_tokens，且渲染文本仍包含 Context usage budget。",
+  ].filter(Boolean).join(" ");
+  const expected = [
+    "context_usage.status<=warn",
+    "free_tokens>=autocompact_buffer_tokens",
+    "rendered Context usage budget present",
+    packetId ? `original_packet_id=${packetId}` : "",
+  ].filter(Boolean).join("; ");
+  return {
+    id,
+    work_item_id: id,
+    taskId: String(entry.assignment_id || usage.task_id || ""),
+    scopeId: groupId,
+    group_id: groupId,
+    subject: compactMemoryCenterText(status === "over_budget" ? "修复 WorkerContextPacket 超预算" : "压缩 WorkerContextPacket 上下文压力", 150),
+    description: reason,
+    activeForm: compactMemoryCenterText(`修复 WorkerContextPacket context usage：${status}`, 180),
+    owner: existing.owner && previousStatus !== "pending" ? existing.owner : "group-main-agent",
+    target: compactMemoryCenterText(targetProject || "memory-context", 120),
+    agentType: "group-main-agent",
+    status: itemStatus,
+    priority,
+    component: "worker_context_packet_context_pressure",
+    source: "worker_context_packet_context_usage_repair",
+    source_action_id: `worker-context-usage:${bindingId || packetId || index}`,
+    repair_target: packetId || bindingId || "worker_context_packet",
+    instruction: compactMemoryCenterText(instruction, 1100),
+    expected: compactMemoryCenterText(expected, 420),
+    source_reason: reason,
+    attempt: Math.max(1, Number(existing.attempt || 1) || 1),
+    replay_attempt_id: "",
+    replay_status: status,
+    replay_score: usage.pressure ?? null,
+    replay_rendered_hash: "",
+    target_project: targetProject,
+    dispatch_target: targetProject,
+    boundary_checksum: "",
+    summarized_through_message_id: "",
+    prompt_patch: compactMemoryCenterText([
+      "WorkerContextPacket context usage reactive repair:",
+      `- group=${groupId}`,
+      targetProject ? `- target_project=${targetProject}` : "",
+      packetId ? `- packet_id=${packetId}` : "",
+      bindingId ? `- binding_id=${bindingId}` : "",
+      `- usage_status=${status}`,
+      `- total_tokens=${Number(usage.total_tokens || 0)}`,
+      `- max_tokens=${Number(usage.max_tokens || 0)}`,
+      `- free_tokens=${Number(usage.free_tokens || 0)}`,
+      topCategoryText ? `- top_categories=${topCategoryText}` : "",
+      reductionText ? `- suggested_reductions=${reductionText}` : "",
+      "- Re-render the child Agent context packet after compacting/cropping memory; keep required proof and receipt identifiers.",
+    ].filter(Boolean).join("\n"), 1800),
+    dispatch_hint: {
+      claim_policy: "group_main_agent_before_child_dispatch",
+      next_step: "compact_worker_context_packet_before_child_dispatch",
+      should_create_real_task: false,
+      reason: "Memory Center diagnostic sidecar; main Agent may claim and dispatch deliberately.",
+    },
+    raw_recovery: {
+      rule: "worker_context_packet_context_usage_reactive_compact",
+      usage_status: status,
+      pressure: Number(usage.pressure || 0),
+      total_tokens: Number(usage.total_tokens || 0),
+      max_tokens: Number(usage.max_tokens || 0),
+      free_tokens: Number(usage.free_tokens || 0),
+      autocompact_buffer_tokens: Number(usage.autocompact_buffer_tokens || 0),
+      top_categories: topCategories,
+      suggested_reductions: reductions,
+    },
+    worker_context_packet_id: packetId,
+    worker_context_packet_binding_id: bindingId,
+    worker_context_packet_usage_status: status,
+    worker_context_packet_pressure: Number(usage.pressure || 0),
+    worker_context_packet_total_tokens: Number(usage.total_tokens || 0),
+    worker_context_packet_max_tokens: Number(usage.max_tokens || 0),
+    worker_context_packet_free_tokens: Number(usage.free_tokens || 0),
+    worker_context_packet_autocompact_buffer_tokens: Number(usage.autocompact_buffer_tokens || 0),
+    worker_context_packet_top_categories: topCategories,
+    worker_context_packet_suggested_reductions: reductions,
+    binding_id: bindingId,
+    brief_id: entry.brief_id || "",
+    assignment_id: entry.assignment_id || "",
+    dispatch_key: entry.dispatch_key || "",
+    proof_entry_id: entry.proof_entry_id || "",
+    request_patch_checksum: entry.request_patch_checksum || "",
+    provider_reproof_status: entry.provider_reproof_status || "",
+    provider_reproof_reason: entry.provider_reproof_reason || "",
+    reproof_candidate_id: entry.reproof_candidate_id || "",
+    timeline_binding_id: entry.timeline_binding_id || "",
+    original_work_item_id: entry.original_work_item_id || "",
+    runner_request_id: entry.runner_request_id || "",
+    execution_id: entry.execution_id || "",
+    evidence: [
+      packetId ? `worker_context_packet_id=${packetId}` : "",
+      bindingId ? `binding_id=${bindingId}` : "",
+      reason,
+      topCategoryText ? `top_categories=${topCategoryText}` : "",
+    ].filter(Boolean),
+    filesChanged: [],
+    verification: ["重新运行 WorkerContextPacket context usage repair work items check", "确认新 WorkerContextPacket context_usage.status <= warn"],
+    blockers: [],
+    needs: ["最新群聊记忆压缩摘要", "typed MEMORY.md 去重召回", "重新渲染 WorkerContextPacket"],
+    requeueReason: "",
+    createdAt: existing.createdAt || existing.created_at || at,
+    updatedAt: existing.updatedAt || existing.updated_at || at,
+    lastSeenAt: existing.lastSeenAt || existing.last_seen_at || at,
+    completedAt: existing.completedAt || existing.completed_at || "",
+    seenCount: Math.max(1, Number(existing.seenCount || existing.seen_count || 1) || 1),
+  };
+}
+
+function syncWorkerContextPacketContextUsageRepairWorkItems(groupId: string, pressureRows: any[] = [], options: any = {}) {
+  if (!groupId) return summarizeReplayRepairPendingWorkItems(groupId);
+  const at = String(options.at || now());
+  const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+  const previousItems = Array.isArray(ledger.items) ? ledger.items : [];
+  const previousById = new Map<string, any>(previousItems.map((item: any) => [String(item.id || item.work_item_id || ""), item]));
+  const currentIds = new Set<string>();
+  const nextRepairItems: any[] = [];
+  let changed = false;
+
+  for (const [index, row] of pressureRows.entries()) {
+    const draft = buildWorkerContextPacketContextUsageRepairWorkItem(groupId, row, index, {}, at);
+    const existing = previousById.get(draft.id) || {};
+    let item = buildWorkerContextPacketContextUsageRepairWorkItem(groupId, row, index, existing, at);
+    const previousSignature = replayRepairWorkItemSignature(existing);
+    const nextSignature = replayRepairWorkItemSignature(item);
+    if (existing.id && previousSignature === nextSignature) {
+      item = {
+        ...existing,
+        ...item,
+        createdAt: existing.createdAt || item.createdAt,
+        updatedAt: existing.updatedAt || item.updatedAt,
+        lastSeenAt: existing.lastSeenAt || item.lastSeenAt,
+        seenCount: Number(existing.seenCount || 1),
+      };
+    } else {
+      item = {
+        ...item,
+        updatedAt: at,
+        lastSeenAt: at,
+        seenCount: existing.id ? Number(existing.seenCount || 1) + 1 : 1,
+      };
+      changed = true;
+    }
+    currentIds.add(item.id);
+    nextRepairItems.push(item);
+  }
+
+  const untouchedItems: any[] = [];
+  for (const existing of previousItems) {
+    const id = String(existing.id || existing.work_item_id || "");
+    const source = String(existing.source || "");
+    if (source !== "worker_context_packet_context_usage_repair") {
+      untouchedItems.push(existing);
+      continue;
+    }
+    if (!id || currentIds.has(id)) continue;
+    const currentStatus = replayRepairWorkItemStatus(existing.status);
+    if (!replayRepairWorkItemOpen(currentStatus)) {
+      nextRepairItems.push(existing);
+      continue;
+    }
+    const resolved = pressureRows.length === 0;
+    nextRepairItems.push({
+      ...existing,
+      status: resolved ? "completed" : "cancelled",
+      updatedAt: at,
+      completedAt: resolved ? (existing.completedAt || at) : existing.completedAt || "",
+      resolutionReason: resolved ? "worker_context_packet_context_usage_back_under_budget" : "superseded_by_latest_worker_context_usage_report",
+      latestWorkerContextPacketContextUsage: {
+        pressureCount: pressureRows.length,
+        statuses: [...new Set(pressureRows.map((row: any) => workerContextPacketContextUsagePressureStatus(row.usage || {})).filter(Boolean))],
+      },
+    });
+    changed = true;
+  }
+
+  const nextItems = [...untouchedItems, ...nextRepairItems]
+    .sort((a, b) => {
+      const statusRank = replayRepairWorkItemOpen(a.status) === replayRepairWorkItemOpen(b.status) ? 0 : replayRepairWorkItemOpen(a.status) ? -1 : 1;
+      if (statusRank) return statusRank;
+      const priority = replayRepairPriorityRank(a.priority) - replayRepairPriorityRank(b.priority);
+      if (priority) return priority;
+      return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    })
+    .slice(0, 160);
+  const stats = replayRepairWorkItemStats(nextItems);
+  const latestWorkerContextPacketContextUsage = {
+    pressureCount: pressureRows.length,
+    overBudgetCount: pressureRows.filter((row: any) => workerContextPacketContextUsagePressureStatus(row.usage || {}) === "over_budget").length,
+    criticalCount: pressureRows.filter((row: any) => workerContextPacketContextUsagePressureStatus(row.usage || {}) === "critical").length,
+    compactRecommendedCount: pressureRows.filter((row: any) => workerContextPacketContextUsagePressureStatus(row.usage || {}) === "compact_recommended").length,
+    maxPressure: pressureRows.reduce((max, row: any) => Math.max(max, Number(row.usage?.pressure || 0)), 0),
+  };
+  const nextLedger = {
+    ...ledger,
+    latestWorkerContextPacketContextUsage,
+    items: nextItems,
+    stats,
+    updatedAt: changed || !ledger.updatedAt ? at : ledger.updatedAt,
+  };
+  const currentComparable = JSON.stringify({
+    latestWorkerContextPacketContextUsage: ledger.latestWorkerContextPacketContextUsage || null,
+    items: previousItems.filter((item: any) => String(item.source || "") === "worker_context_packet_context_usage_repair"),
+  });
+  const nextComparable = JSON.stringify({
+    latestWorkerContextPacketContextUsage: nextLedger.latestWorkerContextPacketContextUsage || null,
+    items: nextItems.filter((item: any) => String(item.source || "") === "worker_context_packet_context_usage_repair"),
+  });
+  if (changed || currentComparable !== nextComparable || !fs.existsSync(ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId))) {
+    return summarizeReplayRepairPendingWorkItems(groupId, writeGroupCompactBoundaryReplayRepairWorkItems(groupId, nextLedger));
+  }
+  return summarizeReplayRepairPendingWorkItems(groupId, ledger);
+}
+
+function buildWorkerContextPacketContextUsageRepairWorkItemReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const pressureRows = workerContextPacketContextUsagePressureRows(groupId);
+    const workItems = syncWorkerContextPacketContextUsageRepairWorkItems(groupId, pressureRows, { at: options.generatedAt || options.generated_at || now() });
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const repairItems = (Array.isArray(ledger.items) ? ledger.items : [])
+      .filter((item: any) => String(item.source || "") === "worker_context_packet_context_usage_repair");
+    const expectedIds = new Set(pressureRows.map((row: any, index: number) => buildWorkerContextPacketContextUsageRepairWorkItem(groupId, row, index, {}, options.generatedAt || options.generated_at || now()).id));
+    const currentRepairItems = repairItems.filter((item: any) => expectedIds.has(String(item.id || item.work_item_id || "")));
+    const openItems = currentRepairItems.filter((item: any) => replayRepairWorkItemOpen(item.status));
+    const staleOpenItems = repairItems.filter((item: any) => replayRepairWorkItemOpen(item.status) && !expectedIds.has(String(item.id || item.work_item_id || "")));
+    const requiredActionCount = pressureRows.length;
+    const coveredItemCount = openItems.length;
+    const status = requiredActionCount > 0
+      ? coveredItemCount >= requiredActionCount ? "ok" : "fail"
+      : staleOpenItems.length > 0 ? "warn" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-context-usage-repair-work-item-group-v1",
+      groupId,
+      status,
+      requiredActionCount,
+      openItemCount: openItems.length + staleOpenItems.length,
+      currentOpenItemCount: openItems.length,
+      staleOpenItemCount: staleOpenItems.length,
+      coveredItemCount,
+      total: repairItems.length,
+      pendingCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "pending").length,
+      inProgressCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "in_progress").length,
+      completedCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "completed").length,
+      overBudgetCount: pressureRows.filter((row: any) => workerContextPacketContextUsagePressureStatus(row.usage || {}) === "over_budget").length,
+      criticalCount: pressureRows.filter((row: any) => workerContextPacketContextUsagePressureStatus(row.usage || {}) === "critical").length,
+      compactRecommendedCount: pressureRows.filter((row: any) => workerContextPacketContextUsagePressureStatus(row.usage || {}) === "compact_recommended").length,
+      maxPressure: pressureRows.reduce((max, row: any) => Math.max(max, Number(row.usage?.pressure || 0)), 0),
+      file: workItems.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      packets: pressureRows.slice(0, 12).map((row: any) => ({
+        binding_id: row.entry?.binding_id || "",
+        packet_id: row.entry?.worker_context_packet_id || row.usage?.packet_id || "",
+        project: row.entry?.project || row.usage?.project || "",
+        status: workerContextPacketContextUsagePressureStatus(row.usage || {}),
+        total_tokens: row.usage?.total_tokens || 0,
+        max_tokens: row.usage?.max_tokens || 0,
+        free_tokens: row.usage?.free_tokens || 0,
+        pressure: row.usage?.pressure || 0,
+        top_categories: workerContextPacketContextUsageTopCategories(row.usage || {}).slice(0, 4),
+        suggested_reductions: workerContextPacketContextUsageSuggestedReductions(row.usage || {}).slice(0, 4),
+      })),
+      items: repairItems.slice(0, 12).map((item: any) => ({
+        id: item.id || item.work_item_id || "",
+        status: replayRepairWorkItemStatus(item.status),
+        priority: item.priority || "",
+        target_project: item.target_project || "",
+        packet_id: item.worker_context_packet_id || "",
+        binding_id: item.worker_context_packet_binding_id || item.binding_id || "",
+        usage_status: item.worker_context_packet_usage_status || "",
+        pressure: item.worker_context_packet_pressure || 0,
+        top_categories: item.worker_context_packet_top_categories || [],
+        instruction: compactMemoryCenterText(item.instruction || "", 260),
+      })),
+      gaps: status === "fail" ? [{
+        reason: `WorkerContextPacket pressure packets=${requiredActionCount} 但 current open repair work items=${coveredItemCount}`,
+      }] : status === "warn" ? [{
+        reason: `WorkerContextPacket pressure 已解除但仍有 stale open repair work items=${staleOpenItems.length}`,
+      }] : [],
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.requiredActionCount || 0) > 0 || Number(row.openItemCount || 0) > 0);
+  const groupsNeedingWork = checkedRows.filter(row => Number(row.requiredActionCount || 0) > 0);
+  const groupsCovered = groupsNeedingWork.filter(row => Number(row.coveredItemCount || 0) >= Number(row.requiredActionCount || 0));
+  const coverageRate = groupsNeedingWork.length ? Math.round((groupsCovered.length / groupsNeedingWork.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? checkedRows.some(row => row.status === "warn") ? "warn" : "empty"
+    : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-context-usage-repair-work-item-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsNeedingWork: groupsNeedingWork.length,
+      groupsCovered: groupsCovered.length,
+      requiredActionCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredActionCount || 0), 0),
+      openItemCount: checkedRows.reduce((sum, row) => sum + Number(row.openItemCount || 0), 0),
+      currentOpenItemCount: checkedRows.reduce((sum, row) => sum + Number(row.currentOpenItemCount || 0), 0),
+      coveredItemCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredItemCount || 0), 0),
+      overBudgetCount: checkedRows.reduce((sum, row) => sum + Number(row.overBudgetCount || 0), 0),
+      criticalCount: checkedRows.reduce((sum, row) => sum + Number(row.criticalCount || 0), 0),
+      compactRecommendedCount: checkedRows.reduce((sum, row) => sum + Number(row.compactRecommendedCount || 0), 0),
+      maxPressure: checkedRows.reduce((max, row) => Math.max(max, Number(row.maxPressure || 0)), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.requiredActionCount || 0) - Number(a.requiredActionCount || 0) || Number(b.openItemCount || 0) - Number(a.openItemCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketContextUsageRepairWorkItems(options: any = {}) {
+  const report = buildWorkerContextPacketContextUsageRepairWorkItemReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = checked === 0
+    ? 0
+    : (report.groups || []).filter((row: any) => (Number(row.requiredActionCount || 0) > 0 || Number(row.openItemCount || 0) > 0) && row.status === "ok").length;
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok" && Number(row.currentOpenItemCount || 0) > 0).slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    requiredActionCount: row.requiredActionCount,
+    currentOpenItemCount: row.currentOpenItemCount,
+    overBudgetCount: row.overBudgetCount,
+    maxPressure: row.maxPressure,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    reason: row.gaps?.[0]?.reason || "WorkerContextPacket context usage pressure repair work items 未覆盖",
+    requiredActionCount: row.requiredActionCount,
+    openItemCount: row.openItemCount,
+    coveredItemCount: row.coveredItemCount,
+    overBudgetCount: row.overBudgetCount,
+    maxPressure: row.maxPressure,
+  }));
+  const check: any = makeQualityCheck(
+    "worker_context_packet_context_usage_repair_work_items",
+    "WorkerContextPacket Context Usage Reactive Repair Work Items",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "对齐 Claude Code prompt-too-long/reactive compact：当子 Agent WorkerContextPacket 达到 compact_recommended/critical/over_budget 时，Memory Center 必须物化主 Agent 可领取的上下文压缩修复 work item。"
+  );
+  check.report = report;
+  return check;
+}
+
+function buildWorkerContextPacketContextUsageRepairTypedMemoryReport(options: any = {}) {
+  const repairReport = options.repairWorkItemReport
+    || options.repair_work_item_report
+    || buildWorkerContextPacketContextUsageRepairWorkItemReport(options);
+  const {
+    buildGroupTypedMemoryRecall,
+    distillContextUsageRepairToTypedMemory,
+    readGroupTypedMemoryDistillationLedger,
+    scanGroupTypedMemoryDocuments,
+  } = require("../collaboration/group-memory-index");
+  const rows = (repairReport.groups || []).map((group: any) => {
+    const groupId = String(group.groupId || "").trim();
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const repairItems = (Array.isArray(ledger.items) ? ledger.items : [])
+      .filter((item: any) => String(item.source || "") === "worker_context_packet_context_usage_repair");
+    const inputRows = [
+      ...repairItems,
+      ...(Array.isArray(group.packets) ? group.packets : []),
+      ...(Array.isArray(group.gaps) ? group.gaps : []),
+    ];
+    let distillation: any = null;
+    let distillationError = "";
+    try {
+      distillation = inputRows.length
+        ? distillContextUsageRepairToTypedMemory(groupId, {
+          items: repairItems,
+          packets: group.packets || [],
+          gaps: group.gaps || [],
+        }, {
+          reason: "memory-center-context-usage-repair-typed-memory-report",
+          updatedAt: options.generatedAt || options.generated_at || now(),
+        })
+        : null;
+    } catch (error: any) {
+      distillationError = String(error?.message || error);
+    }
+    const distillationLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = distillationLedger.contextUsageRepairArchive || {};
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const disciplineDoc = (Array.isArray(docs) ? docs : []).find((doc: any) => doc.relPath === "worker-context-usage-pressure-discipline.md" || String(doc.source || "") === "auto:context-usage-repair-distillation");
+    const docText = String(disciplineDoc?.body || "");
+    const recall = inputRows.length
+      ? buildGroupTypedMemoryRecall(groupId, "WorkerContextPacket context pressure context_usage free_tokens autocompact_buffer typed_memory_recall group_memory_rendered Context usage budget", {
+        max: 8,
+        disableLedger: true,
+        forceMemory: true,
+        snippetChars: 260,
+      })
+      : { recalled: [] };
+    const recallText = JSON.stringify(Array.isArray(recall.recalled) ? recall.recalled : []);
+    const gaps: any[] = [];
+    if (distillationError) gaps.push({ reason: `context usage repair typed memory 蒸馏失败：${distillationError}` });
+    if (inputRows.length && !distillation) gaps.push({ reason: "存在 context usage repair 行但未触发 typed memory 蒸馏" });
+    if (inputRows.length && Number(archive.archived_count || 0) < 1) gaps.push({ reason: "context usage repair archive 为空" });
+    if (inputRows.length && !disciplineDoc) gaps.push({ reason: "未写入 WorkerContextPacket context usage pressure typed MEMORY.md 文档" });
+    if (disciplineDoc && !/context_usage\.status<=warn|context_usage\.status/i.test(docText)) gaps.push({ reason: "typed memory 文档缺少 context_usage.status 目标" });
+    if (disciplineDoc && !/free_tokens>=autocompact_buffer_tokens|autocompact_buffer/i.test(docText)) gaps.push({ reason: "typed memory 文档缺少 free_tokens / autocompact buffer 约束" });
+    if (disciplineDoc && !/Context usage budget/i.test(docText)) gaps.push({ reason: "typed memory 文档缺少 Context usage budget 渲染约束" });
+    if (inputRows.length && !/worker-context-usage-pressure-discipline\.md|context usage|Context usage budget|autocompact_buffer/i.test(recallText)) gaps.push({ reason: "context usage pressure discipline typed memory 无法通过 recall probe 召回" });
+    const status = inputRows.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-context-usage-repair-typed-memory-group-v1",
+      groupId,
+      status,
+      inputRowCount: inputRows.length,
+      repairItemCount: repairItems.length,
+      packetCount: Array.isArray(group.packets) ? group.packets.length : 0,
+      archivedCount: Number(archive.archived_count || 0),
+      typedMemoryDocCount: disciplineDoc ? 1 : 0,
+      recallMatchCount: Array.isArray(recall.recalled) ? recall.recalled.length : 0,
+      overBudgetCount: Number(archive.over_budget_count || group.overBudgetCount || 0),
+      criticalCount: Number(archive.critical_count || group.criticalCount || 0),
+      compactRecommendedCount: Number(archive.compact_recommended_count || group.compactRecommendedCount || 0),
+      maxPressure: Number(archive.max_pressure || group.maxPressure || 0),
+      typedMemoryLedgerFile: distillationLedger.file || "",
+      distillation: distillation ? {
+        incomingRowCount: distillation.incomingRowCount || 0,
+        archivedCount: distillation.archivedCount || 0,
+        writeCount: distillation.writeCount || 0,
+        maxPressure: distillation.maxPressure || 0,
+      } : null,
+      docs: disciplineDoc ? [{
+        relPath: disciplineDoc.relPath,
+        type: disciplineDoc.type,
+        source: disciplineDoc.source,
+        file: disciplineDoc.file,
+      }] : [],
+      gaps: gaps.slice(0, 8),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.inputRowCount || 0) > 0 || Number(row.archivedCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-context-usage-repair-typed-memory-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      inputRowCount: checkedRows.reduce((sum, row) => sum + Number(row.inputRowCount || 0), 0),
+      repairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.repairItemCount || 0), 0),
+      archivedCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedCount || 0), 0),
+      typedMemoryDocCount: checkedRows.reduce((sum, row) => sum + Number(row.typedMemoryDocCount || 0), 0),
+      recallMatchCount: checkedRows.reduce((sum, row) => sum + Number(row.recallMatchCount || 0), 0),
+      overBudgetCount: checkedRows.reduce((sum, row) => sum + Number(row.overBudgetCount || 0), 0),
+      criticalCount: checkedRows.reduce((sum, row) => sum + Number(row.criticalCount || 0), 0),
+      compactRecommendedCount: checkedRows.reduce((sum, row) => sum + Number(row.compactRecommendedCount || 0), 0),
+      maxPressure: checkedRows.reduce((max, row) => Math.max(max, Number(row.maxPressure || 0)), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.inputRowCount || 0) - Number(a.inputRowCount || 0) || Number(b.maxPressure || 0) - Number(a.maxPressure || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketContextUsageRepairTypedMemory(options: any = {}) {
+  const report = buildWorkerContextPacketContextUsageRepairTypedMemoryReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    inputRowCount: row.inputRowCount,
+    archivedCount: row.archivedCount,
+    typedMemoryDocCount: row.typedMemoryDocCount,
+    recallMatchCount: row.recallMatchCount,
+    maxPressure: row.maxPressure,
+    typedMemoryLedgerFile: row.typedMemoryLedgerFile,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "WorkerContextPacket context usage repair typed memory 缺失",
+    inputRowCount: row.inputRowCount || 0,
+    archivedCount: row.archivedCount || 0,
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_context_usage_repair_typed_memory",
+    "WorkerContextPacket Context Usage Repair Typed Memory",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 WorkerContextPacket context usage repair 反复出现时，必须沉淀为 feedback typed MEMORY.md，让后续子 Agent 会话召回 compact/crop、free_tokens、autocompact buffer 和 Context usage budget 纪律。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPacketPreDispatchGate(entry: any = {}) {
+  return entry.worker_context_pre_dispatch_gate
+    || entry.workerContextPreDispatchGate
+    || entry.pre_dispatch_gate
+    || entry.preDispatchGate
+    || null;
+}
+
+function workerContextPacketPreDispatchGateGaps(entry: any = {}) {
+  const gaps: string[] = [];
+  const gate = workerContextPacketPreDispatchGate(entry);
+  const usage = workerContextPacketContextUsage(entry) || {};
+  const pressureStatus = workerContextPacketContextUsagePressureStatus(usage);
+  if (!entry.binding_id) gaps.push("binding_id");
+  if (!entry.assignment_id) gaps.push("assignment_id");
+  if (!entry.dispatch_key) gaps.push("dispatch_key");
+  if (!entry.worker_context_packet_id) gaps.push("worker_context_packet_id");
+  if (!gate || gate.schema !== "ccm-worker-context-pre-dispatch-gate-v1") return [...gaps, "worker_context_pre_dispatch_gate"];
+  if (pressureStatus === "over_budget" && gate.dispatch_ready !== false && gate.dispatchReady !== false) gaps.push("over_budget_not_blocked");
+  if (pressureStatus === "over_budget" && gate.must_repair_before_dispatch !== true) gaps.push("missing_must_repair_before_dispatch");
+  if (gate.dispatch_ready === false && String(gate.repair_source || "") !== "worker_context_packet_context_usage_repair") gaps.push("missing_repair_source");
+  if (entry.dispatch_ready === false && gate.dispatch_ready !== false) gaps.push("entry_gate_mismatch");
+  if (gate.dispatch_ready === false && entry.dispatch_ready !== false && entry.dispatchReady !== false) gaps.push("binding_dispatch_ready_mismatch");
+  if (gate.dispatch_ready === false && !String(gate.next_step || "").includes("compact_worker_context_packet")) gaps.push("missing_compact_next_step");
+  return [...new Set(gaps)];
+}
+
+function buildWorkerContextPacketPreDispatchGateReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(ledger.entries) ? ledger.entries : [])
+      .filter((entry: any) => String(entry.source || "") === "worker_context_packet_pre_dispatch_gate" || workerContextPacketPreDispatchGate(entry));
+    const checked = entries.map((entry: any) => {
+      const usage = workerContextPacketContextUsage(entry) || {};
+      const gate = workerContextPacketPreDispatchGate(entry) || {};
+      const gaps = workerContextPacketPreDispatchGateGaps(entry);
+      return { entry, usage, gate, gaps, pressureStatus: workerContextPacketContextUsagePressureStatus(usage) };
+    });
+    const gapRows = checked.filter((row: any) => row.gaps.length > 0);
+    const overBudgetRows = checked.filter((row: any) => row.pressureStatus === "over_budget");
+    const blockedOverBudgetRows = overBudgetRows.filter((row: any) => row.gate?.dispatch_ready === false || row.gate?.dispatchReady === false);
+    const blockedRows = checked.filter((row: any) => row.gate?.dispatch_ready === false || row.gate?.dispatchReady === false || row.entry?.dispatch_ready === false || row.entry?.dispatchReady === false);
+    const status = checked.length === 0
+      ? "empty"
+      : gapRows.length === 0 ? "ok" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-pre-dispatch-gate-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      gateBindingCount: checked.length,
+      validGateCount: checked.length - gapRows.length,
+      metadataGapCount: gapRows.length,
+      overBudgetCount: overBudgetRows.length,
+      blockedOverBudgetCount: blockedOverBudgetRows.length,
+      blockedGateCount: blockedRows.length,
+      compactRecommendedCount: checked.filter((row: any) => ["compact_recommended", "critical", "over_budget"].includes(row.pressureStatus)).length,
+      gates: checked.slice(-12).reverse().map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        dispatch_key: row.entry.dispatch_key || "",
+        packet_id: row.entry.worker_context_packet_id || row.usage?.packet_id || "",
+        project: row.entry.project || row.gate?.project || row.usage?.project || "",
+        pressure_status: row.pressureStatus || row.gate?.pressure_status || "",
+        usage_status: row.usage?.status || "",
+        dispatch_ready: row.gate?.dispatch_ready !== false && row.entry?.dispatch_ready !== false,
+        must_repair_before_dispatch: row.gate?.must_repair_before_dispatch === true,
+        total_tokens: row.usage?.total_tokens || row.gate?.total_tokens || 0,
+        max_tokens: row.usage?.max_tokens || row.gate?.max_tokens || 0,
+        free_tokens: row.usage?.free_tokens || row.gate?.free_tokens || 0,
+        repair_source: row.gate?.repair_source || "",
+        next_step: row.gate?.next_step || "",
+      })),
+      gaps: gapRows.slice(0, 8).map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        packet_id: row.entry.worker_context_packet_id || "",
+        project: row.entry.project || "",
+        reason: `WorkerContextPacket pre-dispatch gate 缺少/异常：${row.gaps.join(",")}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.gateBindingCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pre-dispatch-gate-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      gateBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.gateBindingCount || 0), 0),
+      validGateCount: checkedRows.reduce((sum, row) => sum + Number(row.validGateCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      overBudgetCount: checkedRows.reduce((sum, row) => sum + Number(row.overBudgetCount || 0), 0),
+      blockedOverBudgetCount: checkedRows.reduce((sum, row) => sum + Number(row.blockedOverBudgetCount || 0), 0),
+      blockedGateCount: checkedRows.reduce((sum, row) => sum + Number(row.blockedGateCount || 0), 0),
+      compactRecommendedCount: checkedRows.reduce((sum, row) => sum + Number(row.compactRecommendedCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.gateBindingCount || 0) - Number(a.gateBindingCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPreDispatchGate(options: any = {}) {
+  const report = buildWorkerContextPacketPreDispatchGateReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    gateBindingCount: row.gateBindingCount,
+    blockedOverBudgetCount: row.blockedOverBudgetCount,
+    overBudgetCount: row.overBudgetCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "WorkerContextPacket pre-dispatch gate 缺失",
+    binding_id: gap.binding_id || "",
+    assignment_id: gap.assignment_id || "",
+    packet_id: gap.packet_id || "",
+    project: gap.project || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pre_dispatch_gate",
+    "WorkerContextPacket Pre-Dispatch Gate",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 WorkerContextPacket 在子 Agent 派发前 over_budget 时，主 Agent 必须把 assignment 标成 dispatchReady=false，并记录 compact_worker_context_packet_before_child_dispatch gate。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPacketCompactionRetry(entry: any = {}) {
+  return entry.worker_context_packet_compaction_retry
+    || entry.workerContextPacketCompactionRetry
+    || entry.worker_context_pre_dispatch_gate?.context_compaction_retry
+    || entry.workerContextPreDispatchGate?.contextCompactionRetry
+    || entry.worker_context_packet?.context_compaction_retry
+    || entry.workerContextPacket?.contextCompactionRetry
+    || null;
+}
+
+function workerContextPacketPartialCompaction(entry: any = {}) {
+  const retry = workerContextPacketCompactionRetry(entry) || {};
+  return retry.partial_compaction
+    || retry.partialCompaction
+    || entry.worker_context_packet_partial_compaction
+    || entry.workerContextPacketPartialCompaction
+    || null;
+}
+
+function workerContextPacketPartialCompactPolicy(entry: any = {}) {
+  const retry = workerContextPacketCompactionRetry(entry) || {};
+  const partial = workerContextPacketPartialCompaction(entry) || {};
+  const items = workerContextPacketPartialCompactionItems(entry);
+  return retry.partial_compact_policy
+    || retry.partialCompactPolicy
+    || entry.worker_context_packet_partial_compact_policy
+    || entry.workerContextPacketPartialCompactPolicy
+    || partial.partial_compact_policy
+    || partial.partialCompactPolicy
+    || items.find((item: any) => item?.partial_compact_policy || item?.partialCompactPolicy)?.partial_compact_policy
+    || items.find((item: any) => item?.partial_compact_policy || item?.partialCompactPolicy)?.partialCompactPolicy
+    || null;
+}
+
+function workerContextPacketPartialCompactPolicyValid(entry: any = {}) {
+  const policy = workerContextPacketPartialCompactPolicy(entry);
+  if (!policy) return false;
+  const selected = Array.isArray(policy.selected_categories || policy.selectedCategories)
+    ? (policy.selected_categories || policy.selectedCategories).map((item: any) => String(item || "")).filter(Boolean)
+    : [];
+  const supported = Array.isArray(policy.supported_categories || policy.supportedCategories)
+    ? (policy.supported_categories || policy.supportedCategories).map((item: any) => String(item || "")).filter(Boolean)
+    : [];
+  return policy.schema === "ccm-worker-context-partial-compact-policy-v1"
+    && policy.method === "usage_top_category_pressure"
+    && selected.length > 0
+    && selected.every((category: string) => supported.includes(category))
+    && Array.isArray(policy.candidates)
+    && Number(policy.max_categories || policy.maxCategories || 0) >= selected.length;
+}
+
+function workerContextPacketPartialCompactionItems(entry: any = {}) {
+  const retry = workerContextPacketCompactionRetry(entry) || {};
+  const explicit = Array.isArray(retry.partial_compactions || retry.partialCompactions)
+    ? (retry.partial_compactions || retry.partialCompactions)
+    : [];
+  const partial = workerContextPacketPartialCompaction(entry);
+  if (explicit.length) return explicit.filter((item: any) => item?.schema);
+  if (partial?.schema === "ccm-worker-context-partial-compaction-set-v1") {
+    return (Array.isArray(partial.items) ? partial.items : []).filter((item: any) => item?.schema);
+  }
+  return partial?.schema ? [partial] : [];
+}
+
+function workerContextPacketReplayBriefPartialCompactionValid(partialCompaction: any = {}) {
+  return !!partialCompaction
+    && partialCompaction.schema === "ccm-worker-context-replay-brief-partial-compaction-v1"
+    && partialCompaction.category === "replay_repair_dispatch_briefs"
+    && partialCompaction.status === "compacted"
+    && Number(partialCompaction.original_briefs_chars || 0) > Number(partialCompaction.compacted_briefs_chars || 0)
+    && Number(partialCompaction.omitted_chars || 0) > 0
+    && !!partialCompaction.original_briefs_hash
+    && !!partialCompaction.compacted_briefs_hash
+    && Array.isArray(partialCompaction.preserved_fields)
+    && partialCompaction.preserved_fields.includes("brief_id")
+    && partialCompaction.preserved_fields.includes("work_item_id")
+    && partialCompaction.preserves_receipt_reference === true
+    && partialCompaction.preserves_real_task_suppression === true;
+}
+
+function workerContextPacketMetadataPartialCompactionValid(partialCompaction: any = {}) {
+  return !!partialCompaction
+    && partialCompaction.schema === "ccm-worker-context-metadata-partial-compaction-v1"
+    && partialCompaction.category === "worker_context_metadata"
+    && partialCompaction.status === "compacted"
+    && Number(partialCompaction.original_metadata_chars || 0) > Number(partialCompaction.compacted_metadata_chars || 0)
+    && Number(partialCompaction.omitted_chars || 0) > 0
+    && !!partialCompaction.original_metadata_hash
+    && !!partialCompaction.compacted_metadata_hash
+    && Array.isArray(partialCompaction.categories)
+    && partialCompaction.categories.some((category: any) => ["constraints_and_documents", "contract_injections", "dependencies"].includes(String(category || "")))
+    && Array.isArray(partialCompaction.preserved_fields)
+    && partialCompaction.preserved_fields.includes("contract.injection_id")
+    && partialCompaction.preserved_fields.includes("dependency.project")
+    && partialCompaction.preserves_receipt_reference === true;
+}
+
+function workerContextPacketPartialCompactionValid(entry: any = {}) {
+  const partialCompaction = workerContextPacketPartialCompaction(entry);
+  const items = workerContextPacketPartialCompactionItems(entry);
+  if (!partialCompaction?.schema || !items.length) return false;
+  if (partialCompaction.schema === "ccm-worker-context-partial-compaction-set-v1") {
+    return partialCompaction.status === "compacted"
+      && Number(partialCompaction.omitted_chars || 0) > 0
+      && Array.isArray(partialCompaction.items)
+      && items.every((item: any) => workerContextPacketReplayBriefPartialCompactionValid(item) || workerContextPacketMetadataPartialCompactionValid(item));
+  }
+  return workerContextPacketReplayBriefPartialCompactionValid(partialCompaction)
+    || workerContextPacketMetadataPartialCompactionValid(partialCompaction);
+}
+
+function workerContextPacketPartialCompactionOmittedChars(entry: any = {}) {
+  const partial = workerContextPacketPartialCompaction(entry);
+  if (Number(partial?.omitted_chars || 0) > 0) return Number(partial.omitted_chars || 0);
+  return workerContextPacketPartialCompactionItems(entry).reduce((sum: number, item: any) => sum + Number(item?.omitted_chars || 0), 0);
+}
+
+function workerContextPacketPartialCompactionCategories(entry: any = {}) {
+  const partial = workerContextPacketPartialCompaction(entry);
+  if (Array.isArray(partial?.categories) && partial.categories.length) return partial.categories.map((item: any) => String(item || "")).filter(Boolean);
+  return workerContextPacketPartialCompactionItems(entry).flatMap((item: any) => Array.isArray(item?.categories) ? item.categories : [item?.category]).map((item: any) => String(item || "")).filter(Boolean);
+}
+
+function workerContextPacketCompactionRetryGaps(entry: any = {}) {
+  const gaps: string[] = [];
+  const retry = workerContextPacketCompactionRetry(entry);
+  const usage = workerContextPacketContextUsage(entry) || {};
+  const gate = workerContextPacketPreDispatchGate(entry) || {};
+  if (!entry.binding_id) gaps.push("binding_id");
+  if (!entry.assignment_id) gaps.push("assignment_id");
+  if (!entry.worker_context_packet_id) gaps.push("worker_context_packet_id");
+  if (!retry || retry.schema !== "ccm-worker-context-compaction-retry-v1") return [...gaps, "worker_context_packet_compaction_retry"];
+  if (!retry.from_packet_id) gaps.push("from_packet_id");
+  if (!retry.retry_packet_id) gaps.push("retry_packet_id");
+  if (!retry.original_task_hash) gaps.push("original_task_hash");
+  if (!retry.compacted_task_hash) gaps.push("compacted_task_hash");
+  if (String(retry.from_usage_status || "") !== "over_budget") gaps.push("from_usage_status_over_budget");
+  if (!["recovered", "blocked"].includes(String(retry.status || ""))) gaps.push("retry_status");
+  if (retry.status === "recovered" && (String(retry.retry_usage_status || "") === "over_budget" || gate.dispatch_ready === false || entry.dispatch_ready === false)) {
+    gaps.push("recovered_but_not_dispatch_ready");
+  }
+  if (retry.status === "blocked" && gate.dispatch_ready !== false && entry.dispatch_ready !== false) gaps.push("blocked_retry_without_gate_hold");
+  const method = String(retry.method || "");
+  const memoryFirst = retry.memory_first === true || method.startsWith("memory_first");
+  const memoryCompaction = retry.memory_compaction || retry.memoryCompaction || null;
+  const partialCompaction = workerContextPacketPartialCompaction(entry);
+  const partialCompact = retry.partial_compact === true || retry.partialCompact === true || !!partialCompaction?.schema;
+  const taskCompactionValid = Number(retry.compacted_task_chars || 0) > 0
+    && Number(retry.original_task_chars || 0) > Number(retry.compacted_task_chars || 0);
+  const partialCompactionValid = workerContextPacketPartialCompactionValid(entry);
+  if (workerContextPacketPartialCompactPolicy(entry) && !workerContextPacketPartialCompactPolicyValid(entry)) gaps.push("partial_compact_policy_schema");
+  if (Number(retry.compacted_task_chars || 0) <= 0 || Number(retry.original_task_chars || 0) <= 0) gaps.push("task_size_metadata");
+  if (partialCompact && !partialCompactionValid) gaps.push("partial_compaction_schema");
+  if (memoryFirst) {
+    if (!memoryCompaction || memoryCompaction.schema !== "ccm-worker-context-memory-first-compaction-v1") gaps.push("memory_compaction_schema");
+    if (memoryCompaction && memoryCompaction.status !== "compacted") gaps.push("memory_compaction_status");
+    if (memoryCompaction && Number(memoryCompaction.original_memory_chars || 0) <= Number(memoryCompaction.compacted_memory_chars || 0)) gaps.push("memory_compaction_delta");
+    if (memoryCompaction && Number(memoryCompaction.omitted_chars || 0) <= 0) gaps.push("memory_omitted_chars");
+    if (memoryCompaction && (!memoryCompaction.original_memory_hash || !memoryCompaction.compacted_memory_hash)) gaps.push("memory_compaction_hash");
+    if (method === "memory_first_then_deterministic_head_tail_critical_lines" && !taskCompactionValid) gaps.push("task_compaction_delta");
+  } else if (!taskCompactionValid && !partialCompactionValid) {
+    gaps.push("task_compaction_delta");
+  }
+  if (retry.status === "recovered" && usage.status === "over_budget") gaps.push("final_usage_still_over_budget");
+  if (retry.preserved_receipt_contract !== true) gaps.push("preserved_receipt_contract");
+  return [...new Set(gaps)];
+}
+
+function buildWorkerContextPacketCompactionRetryReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(ledger.entries) ? ledger.entries : [])
+      .filter((entry: any) => workerContextPacketCompactionRetry(entry));
+    const checked = entries.map((entry: any) => {
+      const retry = workerContextPacketCompactionRetry(entry) || {};
+      const usage = workerContextPacketContextUsage(entry) || {};
+      const gate = workerContextPacketPreDispatchGate(entry) || {};
+      const gaps = workerContextPacketCompactionRetryGaps(entry);
+      return { entry, retry, usage, gate, gaps };
+    });
+    const gapRows = checked.filter((row: any) => row.gaps.length > 0);
+    const recoveredRows = checked.filter((row: any) => row.retry?.status === "recovered");
+    const blockedRows = checked.filter((row: any) => row.retry?.status === "blocked");
+    const memoryFirstRows = checked.filter((row: any) => row.retry?.memory_first === true || String(row.retry?.method || "").startsWith("memory_first"));
+    const partialCompactRows = checked.filter((row: any) => row.retry?.partial_compact === true || row.retry?.partialCompact === true || !!workerContextPacketPartialCompaction(row.entry)?.schema);
+    const partialPolicyRows = checked.filter((row: any) => workerContextPacketPartialCompactPolicyValid(row.entry));
+    const status = checked.length === 0
+      ? "empty"
+      : gapRows.length === 0 ? "ok" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-compaction-retry-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      retryBindingCount: checked.length,
+      validRetryCount: checked.length - gapRows.length,
+      metadataGapCount: gapRows.length,
+      recoveredCount: recoveredRows.length,
+      blockedCount: blockedRows.length,
+      memoryFirstCount: memoryFirstRows.length,
+      partialCompactCount: partialCompactRows.length,
+      partialCompactPolicyCount: partialPolicyRows.length,
+      totalOmittedChars: checked.reduce((sum, row) => sum + Number(row.retry?.omitted_chars || 0), 0),
+      memoryOmittedChars: checked.reduce((sum, row) => sum + Number(row.retry?.memory_compaction?.omitted_chars || row.retry?.memoryCompaction?.omitted_chars || 0), 0),
+      partialOmittedChars: checked.reduce((sum, row) => sum + workerContextPacketPartialCompactionOmittedChars(row.entry), 0),
+      retries: checked.slice(-12).reverse().map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        packet_id: row.entry.worker_context_packet_id || "",
+        project: row.entry.project || "",
+        status: row.retry?.status || "",
+        from_usage_status: row.retry?.from_usage_status || "",
+        retry_usage_status: row.retry?.retry_usage_status || "",
+        from_total_tokens: row.retry?.from_total_tokens || 0,
+        retry_total_tokens: row.retry?.retry_total_tokens || 0,
+        memory_first: row.retry?.memory_first === true || String(row.retry?.method || "").startsWith("memory_first"),
+        memory_compaction_schema: row.retry?.memory_compaction?.schema || row.retry?.memoryCompaction?.schema || "",
+        memory_omitted_chars: row.retry?.memory_compaction?.omitted_chars || row.retry?.memoryCompaction?.omitted_chars || 0,
+        partial_compact: row.retry?.partial_compact === true || row.retry?.partialCompact === true || !!workerContextPacketPartialCompaction(row.entry)?.schema,
+        partial_compaction_schema: workerContextPacketPartialCompaction(row.entry)?.schema || "",
+        partial_compaction_category: workerContextPacketPartialCompaction(row.entry)?.category || "",
+        partial_compaction_categories: workerContextPacketPartialCompactionCategories(row.entry),
+        partial_compact_policy: workerContextPacketPartialCompactPolicy(row.entry) ? {
+          schema: workerContextPacketPartialCompactPolicy(row.entry)?.schema || "",
+          selected_categories: workerContextPacketPartialCompactPolicy(row.entry)?.selected_categories || workerContextPacketPartialCompactPolicy(row.entry)?.selectedCategories || [],
+          skipped_categories: workerContextPacketPartialCompactPolicy(row.entry)?.skipped_categories || workerContextPacketPartialCompactPolicy(row.entry)?.skippedCategories || [],
+          max_categories: workerContextPacketPartialCompactPolicy(row.entry)?.max_categories || workerContextPacketPartialCompactPolicy(row.entry)?.maxCategories || 0,
+          valid: workerContextPacketPartialCompactPolicyValid(row.entry),
+        } : null,
+        partial_omitted_chars: workerContextPacketPartialCompactionOmittedChars(row.entry),
+        original_task_chars: row.retry?.original_task_chars || 0,
+        compacted_task_chars: row.retry?.compacted_task_chars || 0,
+        omitted_chars: row.retry?.omitted_chars || 0,
+        dispatch_ready: row.gate?.dispatch_ready !== false && row.entry?.dispatch_ready !== false,
+      })),
+      gaps: gapRows.slice(0, 8).map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        packet_id: row.entry.worker_context_packet_id || "",
+        project: row.entry.project || "",
+        reason: `WorkerContextPacket compaction retry 缺少/异常：${row.gaps.join(",")}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.retryBindingCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-compaction-retry-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      retryBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.retryBindingCount || 0), 0),
+      validRetryCount: checkedRows.reduce((sum, row) => sum + Number(row.validRetryCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      recoveredCount: checkedRows.reduce((sum, row) => sum + Number(row.recoveredCount || 0), 0),
+      blockedCount: checkedRows.reduce((sum, row) => sum + Number(row.blockedCount || 0), 0),
+      memoryFirstCount: checkedRows.reduce((sum, row) => sum + Number(row.memoryFirstCount || 0), 0),
+      partialCompactCount: checkedRows.reduce((sum, row) => sum + Number(row.partialCompactCount || 0), 0),
+      partialCompactPolicyCount: checkedRows.reduce((sum, row) => sum + Number(row.partialCompactPolicyCount || 0), 0),
+      totalOmittedChars: checkedRows.reduce((sum, row) => sum + Number(row.totalOmittedChars || 0), 0),
+      memoryOmittedChars: checkedRows.reduce((sum, row) => sum + Number(row.memoryOmittedChars || 0), 0),
+      partialOmittedChars: checkedRows.reduce((sum, row) => sum + Number(row.partialOmittedChars || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.retryBindingCount || 0) - Number(a.retryBindingCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketCompactionRetry(options: any = {}) {
+  const report = buildWorkerContextPacketCompactionRetryReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    retryBindingCount: row.retryBindingCount,
+    recoveredCount: row.recoveredCount,
+    blockedCount: row.blockedCount,
+    memoryFirstCount: row.memoryFirstCount,
+    partialCompactCount: row.partialCompactCount,
+    partialCompactPolicyCount: row.partialCompactPolicyCount,
+    totalOmittedChars: row.totalOmittedChars,
+    memoryOmittedChars: row.memoryOmittedChars,
+    partialOmittedChars: row.partialOmittedChars,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "WorkerContextPacket compaction retry 缺失",
+    binding_id: gap.binding_id || "",
+    assignment_id: gap.assignment_id || "",
+    packet_id: gap.packet_id || "",
+    project: gap.project || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_compaction_retry",
+    "WorkerContextPacket Auto Compact Retry",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 pre-dispatch gate 发现 over_budget 时，主 Agent 应先执行确定性 compact/rerender retry；若恢复到预算内则放行，若仍超预算则保留 hold 与 repair work item。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPacketCompactOutcomeGaps(entry: any = {}, outcomeLedger: any = {}) {
+  const gaps: string[] = [];
+  const retry = workerContextPacketCompactionRetry(entry) || {};
+  const hookRunId = workerContextPacketCompactHookRunId(entry);
+  if (!entry.binding_id) gaps.push("binding_id");
+  if (!entry.assignment_id) gaps.push("assignment_id");
+  if (!entry.worker_context_packet_id) gaps.push("worker_context_packet_id");
+  if (!retry || retry.schema !== "ccm-worker-context-compaction-retry-v1") gaps.push("worker_context_packet_compaction_retry");
+  const outcomes = (Array.isArray(outcomeLedger.entries) ? outcomeLedger.entries : []).filter((item: any) =>
+    (hookRunId && item.hook_run_id === hookRunId)
+    || (retry.retry_id && item.retry_id === retry.retry_id)
+  );
+  if (!outcomes.length) return [...new Set([...gaps, "compact_outcome_entry"])];
+  const outcome = outcomes[0] || {};
+  if (hookRunId && outcome.hook_run_id !== hookRunId) gaps.push("outcome_hook_run_id");
+  if (retry.retry_id && outcome.retry_id !== retry.retry_id) gaps.push("outcome_retry_id");
+  if (String(outcome.assignment_id || "") !== String(entry.assignment_id || "")) gaps.push("outcome_assignment_id");
+  if (retry.status === "recovered" && outcome.dispatch_ready !== true) gaps.push("outcome_recovered_dispatch_ready");
+  if (retry.status === "blocked" && outcome.dispatch_ready !== false) gaps.push("outcome_blocked_dispatch_hold");
+  if (retry.method && outcome.method !== retry.method) gaps.push("outcome_method");
+  if (Number(outcome.from_total_tokens || 0) <= 0 || Number(outcome.retry_total_tokens || 0) <= 0) gaps.push("outcome_token_metadata");
+  if (retry.status === "recovered" && Number(outcome.free_token_delta || 0) <= 0) gaps.push("outcome_free_token_delta");
+  if ((retry.partial_compact === true || retry.partialCompact === true) && outcome.partial_compact !== true) gaps.push("outcome_partial_compact");
+  if (workerContextPacketPartialCompactPolicy(entry) && outcome.partial_compact_policy?.schema !== "ccm-worker-context-partial-compact-policy-v1") gaps.push("outcome_partial_compact_policy");
+  if (retry.original_task_hash && retry.original_task_hash === retry.compacted_task_hash && outcome.task_hash_unchanged !== true) gaps.push("outcome_task_preserved");
+  return [...new Set(gaps)];
+}
+
+function buildWorkerContextPacketCompactOutcomeLedgerReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const outcomeLedger = readGroupWorkerContextCompactOutcomeLedger(groupId);
+    const entries = (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+      .filter((entry: any) => workerContextPacketCompactionRetry(entry));
+    const checked = entries.map((entry: any) => {
+      const retry = workerContextPacketCompactionRetry(entry) || {};
+      const hookRunId = workerContextPacketCompactHookRunId(entry);
+      const outcomes = (Array.isArray(outcomeLedger.entries) ? outcomeLedger.entries : []).filter((item: any) =>
+        (hookRunId && item.hook_run_id === hookRunId)
+        || (retry.retry_id && item.retry_id === retry.retry_id)
+      );
+      const gaps = workerContextPacketCompactOutcomeGaps(entry, outcomeLedger);
+      return { entry, retry, hookRunId, outcome: outcomes[0] || null, gaps };
+    });
+    const gapRows = checked.filter((row: any) => row.gaps.length > 0);
+    const outcomeRows = checked.filter((row: any) => row.outcome);
+    const status = checked.length === 0
+      ? "empty"
+      : gapRows.length === 0 ? "ok" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-compact-outcome-ledger-group-v1",
+      groupId,
+      status,
+      file: outcomeLedger.file || getGroupWorkerContextCompactOutcomeLedgerFile(groupId),
+      bindingFile: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      retryBindingCount: checked.length,
+      outcomeCount: outcomeRows.length,
+      validOutcomeCount: checked.length - gapRows.length,
+      metadataGapCount: gapRows.length,
+      recoveredOutcomeCount: outcomeRows.filter((row: any) => row.outcome?.status === "recovered" || row.outcome?.dispatch_ready === true).length,
+      blockedOutcomeCount: outcomeRows.filter((row: any) => row.outcome?.status === "blocked" || row.outcome?.dispatch_ready === false).length,
+      partialCompactPolicyOutcomeCount: outcomeRows.filter((row: any) => row.outcome?.partial_compact_policy?.schema === "ccm-worker-context-partial-compact-policy-v1").length,
+      taskPreservedOutcomeCount: outcomeRows.filter((row: any) => row.outcome?.task_hash_unchanged === true).length,
+      totalTokenDelta: outcomeRows.reduce((sum, row) => sum + Number(row.outcome?.token_delta || 0), 0),
+      totalFreeTokenDelta: outcomeRows.reduce((sum, row) => sum + Number(row.outcome?.free_token_delta || 0), 0),
+      selectedCategoryCounts: outcomeLedger.stats?.selectedCategoryCounts || {},
+      outcomes: checked.slice(-12).reverse().map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        project: row.entry.project || "",
+        retry_status: row.retry?.status || "",
+        retry_method: row.retry?.method || "",
+        hook_run_id: row.hookRunId || "",
+        outcome_id: row.outcome?.outcome_id || "",
+        outcome_status: row.outcome?.status || "",
+        dispatch_ready: row.outcome?.dispatch_ready === true,
+        token_delta: row.outcome?.token_delta || 0,
+        free_token_delta: row.outcome?.free_token_delta || 0,
+        selected_categories: row.outcome?.partial_compact_policy?.selected_categories || [],
+        task_hash_unchanged: row.outcome?.task_hash_unchanged === true,
+      })),
+      gaps: gapRows.slice(0, 8).map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        packet_id: row.entry.worker_context_packet_id || "",
+        project: row.entry.project || "",
+        hook_run_id: row.hookRunId || "",
+        reason: `WorkerContextPacket compact outcome ledger 缺少/异常：${row.gaps.join(",")}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.retryBindingCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-compact-outcome-ledger-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      retryBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.retryBindingCount || 0), 0),
+      outcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.outcomeCount || 0), 0),
+      validOutcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.validOutcomeCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      recoveredOutcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.recoveredOutcomeCount || 0), 0),
+      blockedOutcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.blockedOutcomeCount || 0), 0),
+      partialCompactPolicyOutcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.partialCompactPolicyOutcomeCount || 0), 0),
+      taskPreservedOutcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.taskPreservedOutcomeCount || 0), 0),
+      totalTokenDelta: checkedRows.reduce((sum, row) => sum + Number(row.totalTokenDelta || 0), 0),
+      totalFreeTokenDelta: checkedRows.reduce((sum, row) => sum + Number(row.totalFreeTokenDelta || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.outcomeCount || 0) - Number(a.outcomeCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketCompactOutcomeLedger(options: any = {}) {
+  const report = buildWorkerContextPacketCompactOutcomeLedgerReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    retryBindingCount: row.retryBindingCount,
+    outcomeCount: row.outcomeCount,
+    recoveredOutcomeCount: row.recoveredOutcomeCount,
+    partialCompactPolicyOutcomeCount: row.partialCompactPolicyOutcomeCount,
+    taskPreservedOutcomeCount: row.taskPreservedOutcomeCount,
+    totalTokenDelta: row.totalTokenDelta,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "WorkerContextPacket compact outcome ledger 缺失",
+    binding_id: gap.binding_id || "",
+    assignment_id: gap.assignment_id || "",
+    packet_id: gap.packet_id || "",
+    project: gap.project || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_compact_outcome_ledger",
+    "WorkerContextPacket Compact Outcome Ledger",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "每次 WorkerContextPacket 自动 compact retry 完成后，都应写入 outcome ledger，保存 token 恢复、policy 选择、任务正文是否保留等长期策略样本，供后续日志蒸馏使用。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPacketCompactStrategyMemoryGaps(strategy: any = {}, outcomeLedger: any = {}, expectedSampleCount = 0) {
+  const gaps: string[] = [];
+  if (expectedSampleCount <= 0) return gaps;
+  if (strategy.schema !== "ccm-worker-context-compact-strategy-memory-v1") gaps.push("strategy_memory_schema");
+  if (Number(strategy.sample_count || 0) < expectedSampleCount) gaps.push("strategy_sample_count");
+  if (!Array.isArray(strategy.categories) || !strategy.categories.length) gaps.push("strategy_categories");
+  if (!Array.isArray(strategy.preferred_categories) || !strategy.preferred_categories.length) gaps.push("strategy_preferred_categories");
+  if (outcomeLedger.file && strategy.source_ledger_file !== outcomeLedger.file) gaps.push("strategy_source_ledger_file");
+  const preferred = new Set((strategy.preferred_categories || []).map((item: any) => String(item || "")));
+  const knownCategories = new Set((strategy.categories || []).map((item: any) => String(item.category || "")));
+  for (const category of preferred) {
+    if (!knownCategories.has(category)) gaps.push("strategy_preferred_category_stats");
+  }
+  return [...new Set(gaps)];
+}
+
+function buildWorkerContextPacketCompactStrategyMemoryReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const outcomeLedger = readGroupWorkerContextCompactOutcomeLedger(groupId);
+    const outcomeEntries = Array.isArray(outcomeLedger.entries) ? outcomeLedger.entries : [];
+    const distillationRows = outcomeEntries.filter((entry: any) =>
+      entry.distillation_candidate !== false
+      && workerContextCompactOutcomeCategoriesForCenter(entry).length > 0
+    );
+    const strategy = syncGroupWorkerContextCompactStrategyMemory(groupId, { generatedAt: options.generatedAt || options.generated_at || now() });
+    const gaps = workerContextPacketCompactStrategyMemoryGaps(strategy, outcomeLedger, distillationRows.length);
+    const status = distillationRows.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-compact-strategy-memory-group-v1",
+      groupId,
+      status,
+      file: strategy.file || getGroupWorkerContextCompactStrategyMemoryFile(groupId),
+      outcomeFile: outcomeLedger.file || getGroupWorkerContextCompactOutcomeLedgerFile(groupId),
+      distilledOutcomeCount: distillationRows.length,
+      sampleCount: Number(strategy.sample_count || 0),
+      categoryCount: Number(strategy.category_count || strategy.categories?.length || 0),
+      preferredCategories: strategy.preferred_categories || [],
+      avoidCategories: strategy.avoid_categories || [],
+      categories: (strategy.categories || []).slice(0, 8),
+      gaps: gaps.map(reason => ({
+        groupId,
+        reason: `WorkerContextPacket compact strategy memory 缺少/异常：${reason}`,
+        outcomeFile: outcomeLedger.file || getGroupWorkerContextCompactOutcomeLedgerFile(groupId),
+        file: strategy.file || getGroupWorkerContextCompactStrategyMemoryFile(groupId),
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.distilledOutcomeCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-compact-strategy-memory-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      distilledOutcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.distilledOutcomeCount || 0), 0),
+      strategyMemoryCount: checkedRows.filter(row => Number(row.sampleCount || 0) > 0).length,
+      categoryCount: checkedRows.reduce((sum, row) => sum + Number(row.categoryCount || 0), 0),
+      preferredCategoryCount: checkedRows.reduce((sum, row) => sum + (Array.isArray(row.preferredCategories) ? row.preferredCategories.length : 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + (Array.isArray(row.gaps) ? row.gaps.length : 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.distilledOutcomeCount || 0) - Number(a.distilledOutcomeCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketCompactStrategyMemory(options: any = {}) {
+  const report = buildWorkerContextPacketCompactStrategyMemoryReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    distilledOutcomeCount: row.distilledOutcomeCount,
+    sampleCount: row.sampleCount,
+    categoryCount: row.categoryCount,
+    preferredCategories: row.preferredCategories,
+    file: row.file,
+    outcomeFile: row.outcomeFile,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "WorkerContextPacket compact strategy memory 缺失",
+    file: gap.file || row.file,
+    outcomeFile: gap.outcomeFile || row.outcomeFile,
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_compact_strategy_memory",
+    "WorkerContextPacket Compact Strategy Memory",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "把 WorkerContextPacket compact outcome ledger 蒸馏成可复用策略记忆，记录哪些 metadata category 更容易恢复预算，并让后续子 Agent 上下文压缩策略可引用。"
+  );
+  check.report = report;
+  return check;
+}
+
+function buildWorkerContextPacketPtlEmergencyDowngradeReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const outcomeLedger = readGroupWorkerContextCompactOutcomeLedger(groupId);
+    const strategy = syncGroupWorkerContextCompactStrategyMemory(groupId, { generatedAt: options.generatedAt || options.generated_at || now() });
+    const hint = syncGroupWorkerContextPtlEmergencyHint(groupId, { generatedAt: options.generatedAt || options.generated_at || now() });
+    const outcomes = Array.isArray(outcomeLedger.entries) ? outcomeLedger.entries : [];
+    const blocked = outcomes.filter((entry: any) =>
+      entry.distillation_candidate !== false
+      && (entry.status === "blocked" || entry.dispatch_ready === false)
+    );
+    const taskCompactedBlocked = blocked.filter((entry: any) => entry.task_compacted === true);
+    const shouldEngage = blocked.length >= 2
+      || taskCompactedBlocked.length > 0
+      || (strategy.categories || []).some((item: any) =>
+        Number(item.attempts || 0) >= 2
+        && (Number(item.recovered || 0) === 0 || String(item.recommendation || "") === "avoid")
+      );
+    const gaps: string[] = [];
+    if (shouldEngage && hint.schema !== "ccm-worker-context-ptl-emergency-hint-v1") gaps.push("ptl_hint_schema");
+    if (shouldEngage && hint.engaged !== true) gaps.push("ptl_hint_not_engaged");
+    if (shouldEngage && !["warning", "critical"].includes(String(hint.emergency_level || ""))) gaps.push("ptl_hint_level");
+    if (shouldEngage && !hint.recommended_retry_options?.maxTaskChars) gaps.push("ptl_retry_task_budget");
+    if (shouldEngage && !hint.recommended_retry_options?.metadata?.maxStringChars) gaps.push("ptl_retry_metadata_budget");
+    if (shouldEngage && outcomeLedger.file && hint.source_ledger_file !== outcomeLedger.file) gaps.push("ptl_source_ledger_file");
+    const status = !shouldEngage ? "empty" : gaps.length ? "fail" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-ptl-emergency-downgrade-group-v1",
+      groupId,
+      status,
+      file: hint.file || getGroupWorkerContextPtlEmergencyHintFile(groupId),
+      outcomeFile: outcomeLedger.file || getGroupWorkerContextCompactOutcomeLedgerFile(groupId),
+      strategyFile: strategy.file || getGroupWorkerContextCompactStrategyMemoryFile(groupId),
+      shouldEngage,
+      engaged: hint.engaged === true,
+      emergencyLevel: hint.emergency_level || "",
+      blockedOutcomeCount: blocked.length,
+      taskCompactedBlockedCount: taskCompactedBlocked.length,
+      repeatedFailedCategories: hint.repeated_failed_categories || [],
+      recommendedRetryOptions: hint.recommended_retry_options || {},
+      gaps: gaps.map(reason => ({
+        groupId,
+        reason: `WorkerContextPacket PTL emergency downgrade 缺少/异常：${reason}`,
+        outcomeFile: outcomeLedger.file || getGroupWorkerContextCompactOutcomeLedgerFile(groupId),
+        file: hint.file || getGroupWorkerContextPtlEmergencyHintFile(groupId),
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => row.shouldEngage);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-ptl-emergency-downgrade-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      engagedCount: checkedRows.filter(row => row.engaged).length,
+      criticalCount: checkedRows.filter(row => row.emergencyLevel === "critical").length,
+      blockedOutcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.blockedOutcomeCount || 0), 0),
+      taskCompactedBlockedCount: checkedRows.reduce((sum, row) => sum + Number(row.taskCompactedBlockedCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + (Array.isArray(row.gaps) ? row.gaps.length : 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.blockedOutcomeCount || 0) - Number(a.blockedOutcomeCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPtlEmergencyDowngrade(options: any = {}) {
+  const report = buildWorkerContextPacketPtlEmergencyDowngradeReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    emergencyLevel: row.emergencyLevel,
+    blockedOutcomeCount: row.blockedOutcomeCount,
+    taskCompactedBlockedCount: row.taskCompactedBlockedCount,
+    repeatedFailedCategories: row.repeatedFailedCategories,
+    file: row.file,
+    outcomeFile: row.outcomeFile,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "WorkerContextPacket PTL emergency downgrade 缺失",
+    file: gap.file || row.file,
+    outcomeFile: gap.outcomeFile || row.outcomeFile,
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_ptl_emergency_downgrade",
+    "WorkerContextPacket PTL Emergency Downgrade",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 WorkerContextPacket compact outcome ledger 显示 repeated blocked/任务压缩后仍超预算时，必须生成 PTL emergency hint，并给下一次 retry 提供更短的 memory/replay/metadata/task 压缩预算。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPacketMemoryPolicy(entry: any = {}) {
+  return entry.worker_context_packet_memory_policy
+    || entry.workerContextPacketMemoryPolicy
+    || entry.worker_context_packet?.memory_policy
+    || entry.workerContextPacket?.memoryPolicy
+    || null;
+}
+
+function workerContextPacketAcceptance(entry: any = {}) {
+  return entry.worker_context_packet_acceptance
+    || entry.workerContextPacketAcceptance
+    || entry.worker_context_packet?.acceptance
+    || entry.workerContextPacket?.acceptance
+    || null;
+}
+
+function workerContextPacketRenderFlags(entry: any = {}) {
+  return entry.worker_context_packet_render_probe?.rendered_flags
+    || entry.workerContextPacketRenderProbe?.renderedFlags
+    || {};
+}
+
+function workerContextPacketUsageCategoryIds(entry: any = {}) {
+  const usage = workerContextPacketContextUsage(entry) || {};
+  return new Set((Array.isArray(usage.categories) ? usage.categories : [])
+    .map((item: any) => String(item.id || item.category_id || item.categoryId || "").trim())
+    .filter(Boolean));
+}
+
+function workerContextPacketMemoryPolicyReason(policy: any = {}) {
+  return String(policy.reason || policy.ignore_reason || policy.ignoreReason || "").trim();
+}
+
+function workerContextPacketRequiresIgnoreMemoryPolicy(entry: any = {}) {
+  const policy = workerContextPacketMemoryPolicy(entry) || {};
+  const acceptance = workerContextPacketAcceptance(entry) || {};
+  const proof = workerContextPacketMemoryReinjectionProof(entry) || {};
+  const flags = workerContextPacketRenderFlags(entry);
+  return policy.ignored === true
+    || policy.use === "must_not_use_group_memory"
+    || acceptance.memory_ignored_receipt_required === true
+    || proof.status === "ignored_by_policy"
+    || proof.memory_ignored === true
+    || flags.has_memory_ignored_policy === true;
+}
+
+function workerContextPacketIgnoreMemoryPolicyGaps(entry: any = {}) {
+  const gaps: string[] = [];
+  const policy = workerContextPacketMemoryPolicy(entry) || {};
+  const acceptance = workerContextPacketAcceptance(entry) || {};
+  const proof = workerContextPacketMemoryReinjectionProof(entry) || {};
+  const flags = workerContextPacketRenderFlags(entry);
+  const categoryIds = workerContextPacketUsageCategoryIds(entry);
+  const reason = workerContextPacketMemoryPolicyReason(policy);
+  if (!entry.binding_id) gaps.push("binding_id");
+  if (!entry.assignment_id) gaps.push("assignment_id");
+  if (!entry.worker_context_packet_id) gaps.push("worker_context_packet_id");
+  if (policy.schema !== "ccm-worker-context-memory-policy-v1") gaps.push("memory_policy_schema");
+  if (policy.ignored !== true) gaps.push("memory_policy_ignored");
+  if (policy.use !== "must_not_use_group_memory") gaps.push("memory_policy_use");
+  if (!reason) gaps.push("memory_policy_reason");
+  else if (!/user_requested_ignore_memory|ignore_memory|ignored_memory|user.*ignore/i.test(reason)) gaps.push("memory_policy_user_reason");
+  if (acceptance.memory_ignored_receipt_required !== true) gaps.push("memory_ignored_receipt_required");
+  if (proof.schema !== "ccm-worker-context-memory-reinjection-proof-v1") gaps.push("memory_reinjection_proof_schema");
+  if (proof.status !== "ignored_by_policy") gaps.push("proof_ignored_by_policy");
+  if (proof.memory_ignored !== true) gaps.push("proof_memory_ignored");
+  if (!categoryIds.has("memory_policy")) gaps.push("usage_category_memory_policy");
+  if (Object.keys(flags).length && flags.has_memory_policy !== true) gaps.push("rendered_memory_policy");
+  if (Object.keys(flags).length && flags.has_memory_ignored_policy !== true) gaps.push("rendered_memory_ignored_policy");
+  return [...new Set(gaps)];
+}
+
+function buildWorkerContextPacketIgnoreMemoryPolicyReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(ledger.entries) ? ledger.entries : [])
+      .filter((entry: any) => workerContextPacketRequiresIgnoreMemoryPolicy(entry));
+    const checked = entries.map((entry: any) => {
+      const policy = workerContextPacketMemoryPolicy(entry) || {};
+      const acceptance = workerContextPacketAcceptance(entry) || {};
+      const proof = workerContextPacketMemoryReinjectionProof(entry) || {};
+      const flags = workerContextPacketRenderFlags(entry);
+      const categoryIds = workerContextPacketUsageCategoryIds(entry);
+      const gaps = workerContextPacketIgnoreMemoryPolicyGaps(entry);
+      return { entry, policy, acceptance, proof, flags, categoryIds, gaps };
+    });
+    const gapRows = checked.filter((row: any) => row.gaps.length > 0);
+    const status = checked.length === 0
+      ? "empty"
+      : gapRows.length === 0 ? "ok" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-ignore-memory-policy-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      ignoredPolicyBindingCount: checked.length,
+      validIgnoredPolicyCount: checked.length - gapRows.length,
+      metadataGapCount: gapRows.length,
+      receiptRequiredCount: checked.filter((row: any) => row.acceptance?.memory_ignored_receipt_required === true).length,
+      ignoredProofCount: checked.filter((row: any) => row.proof?.status === "ignored_by_policy" && row.proof?.memory_ignored === true).length,
+      usagePolicyCategoryCount: checked.filter((row: any) => row.categoryIds.has("memory_policy")).length,
+      renderedIgnoredPolicyCount: checked.filter((row: any) => row.flags?.has_memory_ignored_policy === true).length,
+      policies: checked.slice(-12).reverse().map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        packet_id: row.entry.worker_context_packet_id || row.proof?.packet_id || "",
+        project: row.entry.project || row.proof?.project || "",
+        ignored: row.policy?.ignored === true,
+        use: row.policy?.use || "",
+        reason: workerContextPacketMemoryPolicyReason(row.policy),
+        receipt_required: row.acceptance?.memory_ignored_receipt_required === true,
+        proof_status: row.proof?.status || "",
+        usage_has_memory_policy: row.categoryIds.has("memory_policy"),
+        rendered_ignored_policy: row.flags?.has_memory_ignored_policy === true,
+      })),
+      gaps: gapRows.slice(0, 8).map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        packet_id: row.entry.worker_context_packet_id || "",
+        project: row.entry.project || "",
+        reason: `WorkerContextPacket ignore-memory policy 缺少/异常：${row.gaps.join(",")}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.ignoredPolicyBindingCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-ignore-memory-policy-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      ignoredPolicyBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.ignoredPolicyBindingCount || 0), 0),
+      validIgnoredPolicyCount: checkedRows.reduce((sum, row) => sum + Number(row.validIgnoredPolicyCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      receiptRequiredCount: checkedRows.reduce((sum, row) => sum + Number(row.receiptRequiredCount || 0), 0),
+      ignoredProofCount: checkedRows.reduce((sum, row) => sum + Number(row.ignoredProofCount || 0), 0),
+      usagePolicyCategoryCount: checkedRows.reduce((sum, row) => sum + Number(row.usagePolicyCategoryCount || 0), 0),
+      renderedIgnoredPolicyCount: checkedRows.reduce((sum, row) => sum + Number(row.renderedIgnoredPolicyCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.ignoredPolicyBindingCount || 0) - Number(a.ignoredPolicyBindingCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketIgnoreMemoryPolicy(options: any = {}) {
+  const report = buildWorkerContextPacketIgnoreMemoryPolicyReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    ignoredPolicyBindingCount: row.ignoredPolicyBindingCount,
+    receiptRequiredCount: row.receiptRequiredCount,
+    ignoredProofCount: row.ignoredProofCount,
+    usagePolicyCategoryCount: row.usagePolicyCategoryCount,
+    renderedIgnoredPolicyCount: row.renderedIgnoredPolicyCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "WorkerContextPacket ignore-memory policy 缺失",
+    binding_id: gap.binding_id || "",
+    assignment_id: gap.assignment_id || "",
+    packet_id: gap.packet_id || "",
+    project: gap.project || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_ignore_memory_policy",
+    "WorkerContextPacket Ignore Memory Policy",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当用户显式要求忽略记忆时，WorkerContextPacket 必须把群聊/typed/global memory 当作空，同时保留可审计的 policy、ignored_by_policy proof、memoryIgnored 回执要求和渲染标记。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPacketReceiptStringList(value: any): string[] {
+  if (Array.isArray(value)) return value.map((item: any) => typeof item === "string" ? item : JSON.stringify(item || {})).map(item => item.trim()).filter(Boolean);
+  if (value === undefined || value === null || value === "") return [];
+  return [typeof value === "string" ? value : JSON.stringify(value || {})].map(item => item.trim()).filter(Boolean);
+}
+
+function normalizeWorkerContextPacketReceiptSource(raw: any = {}, source = "", fallback: any = {}) {
+  if (!raw || typeof raw !== "object") return null;
+  const memoryIgnored = normalizeQualityStringList(raw.memoryIgnored || raw.memory_ignored || raw.ignored);
+  const memoryUsed = normalizeQualityStringList(raw.memoryUsed || raw.memory_used || raw.used || raw.memoryReferences || raw.memory_references);
+  const text = [
+    raw.summary,
+    raw.status,
+    raw.reason,
+    raw.message,
+    JSON.stringify(raw || {}),
+    ...memoryIgnored,
+    ...memoryUsed,
+  ].filter(Boolean).join("\n");
+  if (!text.trim() && !memoryIgnored.length && !memoryUsed.length) return null;
+  return {
+    source,
+    agent: String(raw.agent || raw.project || raw.target_project || raw.targetProject || fallback.project || fallback.agent || "").trim(),
+    project: String(raw.project || raw.target_project || raw.targetProject || raw.agent || fallback.project || "").trim(),
+    status: String(raw.status || raw.receipt_status || raw.receiptStatus || fallback.status || "").trim(),
+    task_id: String(raw.task_id || raw.taskId || fallback.task_id || fallback.taskId || "").trim(),
+    assignment_id: String(raw.assignment_id || raw.assignmentId || fallback.assignment_id || fallback.assignmentId || "").trim(),
+    dispatch_key: String(raw.dispatch_key || raw.dispatchKey || fallback.dispatch_key || fallback.dispatchKey || "").trim(),
+    worker_context_packet_id: String(raw.worker_context_packet_id || raw.workerContextPacketId || raw.packet_id || raw.packetId || fallback.worker_context_packet_id || fallback.workerContextPacketId || "").trim(),
+    task_agent_session_id: String(raw.task_agent_session_id || raw.taskAgentSessionId || fallback.task_agent_session_id || fallback.taskAgentSessionId || "").trim(),
+    native_session_id: String(raw.native_session_id || raw.nativeSessionId || fallback.native_session_id || fallback.nativeSessionId || "").trim(),
+    execution_id: String(raw.execution_id || raw.executionId || fallback.execution_id || fallback.executionId || "").trim(),
+    memoryIgnored,
+    memoryUsed,
+    text,
+    raw,
+  };
+}
+
+function collectWorkerContextPacketReceiptSources(groupId: string, entry: any = {}, options: any = {}) {
+  const sources: any[] = [];
+  const pushReceipt = (raw: any, source: string, fallback: any = {}) => {
+    const normalized = normalizeWorkerContextPacketReceiptSource(raw, source, fallback);
+    if (normalized) sources.push(normalized);
+  };
+  for (const raw of [
+    entry.worker_context_packet_receipt,
+    entry.workerContextPacketReceipt,
+    entry.child_agent_receipt,
+    entry.childAgentReceipt,
+    entry.ccm_receipt,
+    entry.ccmReceipt,
+    entry.receipt,
+  ]) {
+    pushReceipt(raw, "assignment_binding", entry);
+  }
+  const tasks = Array.isArray(options.tasks) ? options.tasks : loadTasks();
+  for (const task of tasks.filter((item: any) => String(item.group_id || item.groupId || item.scopeId || item.scope_id || "") === groupId)) {
+    const summary = task.delivery_summary || task.deliverySummary || {};
+    pushReceipt(task.receipt, "task.receipt", { ...task, project: task.target_project || task.targetProject || task.agent });
+    for (const raw of [
+      ...(Array.isArray(summary.receipts) ? summary.receipts : []),
+      ...(Array.isArray(summary.receipt_statuses) ? summary.receipt_statuses : []),
+      ...(Array.isArray(summary.receiptEvidence) ? summary.receiptEvidence : []),
+      ...(Array.isArray(summary.receipt_evidence) ? summary.receipt_evidence : []),
+    ]) {
+      pushReceipt(raw, "task.delivery_summary", { ...task, project: raw?.agent || raw?.project || task.target_project || task.targetProject });
+    }
+  }
+  const messages = readJson(path.join(GROUP_MESSAGES_DIR, `${groupId}.json`), []);
+  for (const message of (Array.isArray(messages) ? messages : []).slice(-240)) {
+    const fallback = {
+      task_id: message.task_id || message.taskId || "",
+      project: message.agent || message.project || message.target || "",
+      worker_context_packet_id: message.worker_context_packet_id || message.workerContextPacketId || "",
+      task_agent_session_id: message.task_agent_session_id || message.taskAgentSessionId || "",
+      native_session_id: message.native_session_id || message.nativeSessionId || "",
+      execution_id: message.execution_id || message.executionId || "",
+    };
+    pushReceipt(message.receipt || message.ccm_agent_receipt || message.ccmAgentReceipt, "group_message.receipt", fallback);
+    pushReceipt(message.delivery_summary || message.deliverySummary, "group_message.delivery_summary", fallback);
+  }
+  const timeline = readGroupReplayRepairDispatchTimelineBindingLedger(groupId);
+  for (const timelineEntry of (Array.isArray(timeline.entries) ? timeline.entries : []).filter((item: any) => String(item.worker_context_packet_id || "") === String(entry.worker_context_packet_id || ""))) {
+    pushReceipt(timelineEntry.receipt || timelineEntry.ccm_receipt || timelineEntry.delivery_summary, "timeline_binding", timelineEntry);
+    if (timelineEntry.receipt_status) {
+      pushReceipt({
+        status: timelineEntry.receipt_status,
+        worker_context_packet_id: timelineEntry.worker_context_packet_id,
+        memoryIgnored: timelineEntry.memoryIgnored || timelineEntry.memory_ignored || [],
+        memoryUsed: timelineEntry.memoryUsed || timelineEntry.memory_used || [],
+      }, "timeline_binding.status", timelineEntry);
+    }
+  }
+  return sources;
+}
+
+function workerContextPacketReceiptMatchesBinding(receipt: any = {}, entry: any = {}) {
+  const packetId = String(entry.worker_context_packet_id || "").trim();
+  const receiptPacketId = String(receipt.worker_context_packet_id || "").trim();
+  if (packetId && receiptPacketId) return packetId === receiptPacketId;
+  const assignmentId = String(entry.assignment_id || "").trim();
+  const receiptAssignmentId = String(receipt.assignment_id || "").trim();
+  if (assignmentId && receiptAssignmentId) return assignmentId === receiptAssignmentId;
+  const dispatchKey = String(entry.dispatch_key || "").trim();
+  const receiptDispatchKey = String(receipt.dispatch_key || "").trim();
+  if (dispatchKey && receiptDispatchKey) return dispatchKey === receiptDispatchKey;
+  const project = String(entry.project || "").trim().toLowerCase();
+  const receiptProject = String(receipt.project || receipt.agent || "").trim().toLowerCase();
+  if (project && receiptProject && project === receiptProject) {
+    const taskId = String(receipt.task_id || "").trim();
+    const taskFingerprint = String(entry.task_fingerprint || entry.assignment_id || "").trim();
+    return !taskId || !taskFingerprint || taskId === taskFingerprint || taskFingerprint.includes(taskId) || taskId.includes(taskFingerprint);
+  }
+  return false;
+}
+
+function workerContextPacketIgnoreMemoryReceiptReasonMatches(receipt: any = {}, policy: any = {}) {
+  const reason = workerContextPacketMemoryPolicyReason(policy) || "user_requested_ignore_memory";
+  const text = workerContextPacketReceiptStringList(receipt.memoryIgnored || receipt.memory_ignored || receipt.ignored).join("\n");
+  if (!text.trim()) return false;
+  const lower = text.toLowerCase();
+  return lower.includes(reason.toLowerCase())
+    || lower.includes("must_not_use_group_memory")
+    || /user.*ignore.*memory|ignore.*memory|memory.*ignored|ignored.*policy|忽略.*记忆|不使用.*记忆|按用户要求.*记忆/i.test(text);
+}
+
+function workerContextPacketIgnoreMemoryReceiptRow(groupId: string, entry: any = {}, options: any = {}) {
+  const policy = workerContextPacketMemoryPolicy(entry) || {};
+  const acceptance = workerContextPacketAcceptance(entry) || {};
+  const proof = workerContextPacketMemoryReinjectionProof(entry) || {};
+  const sources = collectWorkerContextPacketReceiptSources(groupId, entry, options);
+  const matchingReceipts = sources.filter(source => workerContextPacketReceiptMatchesBinding(source, entry));
+  const receipts = matchingReceipts.length ? matchingReceipts : sources.filter(source => {
+    const project = String(source.project || source.agent || "").trim().toLowerCase();
+    return project && project === String(entry.project || "").trim().toLowerCase();
+  });
+  const receiptWithMemoryIgnored = receipts.find(receipt => (receipt.memoryIgnored || []).length > 0) || null;
+  const receiptWithReason = receipts.find(receipt => workerContextPacketIgnoreMemoryReceiptReasonMatches(receipt, policy)) || null;
+  const receiptWithMemoryUsed = receipts.find(receipt => (receipt.memoryUsed || []).length > 0) || null;
+  const gaps: string[] = [];
+  if (!entry.binding_id) gaps.push("binding_id");
+  if (!entry.worker_context_packet_id) gaps.push("worker_context_packet_id");
+  if (acceptance.memory_ignored_receipt_required !== true) gaps.push("memory_ignored_receipt_required");
+  if (proof.status !== "ignored_by_policy" || proof.memory_ignored !== true) gaps.push("proof_ignored_by_policy");
+  if (!receipts.length) gaps.push("child_agent_receipt");
+  else {
+    if (!receiptWithMemoryIgnored) gaps.push("receipt_memoryIgnored");
+    if (receiptWithMemoryIgnored && !receiptWithReason) gaps.push("receipt_memoryIgnored_reason");
+    if (receiptWithMemoryUsed) gaps.push("receipt_memoryUsed_despite_ignore_policy");
+  }
+  return {
+    entry,
+    policy,
+    acceptance,
+    proof,
+    receipts,
+    receipt: receiptWithReason || receiptWithMemoryIgnored || receipts[0] || null,
+    receiptWithMemoryIgnored,
+    receiptWithReason,
+    receiptWithMemoryUsed,
+    gaps: [...new Set(gaps)],
+  };
+}
+
+function buildWorkerContextPacketIgnoreMemoryReceiptComplianceReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(ledger.entries) ? ledger.entries : [])
+      .filter((entry: any) => workerContextPacketRequiresIgnoreMemoryPolicy(entry));
+    const checked = entries.map((entry: any) => workerContextPacketIgnoreMemoryReceiptRow(groupId, entry, options));
+    const gapRows = checked.filter((row: any) => row.gaps.length > 0);
+    const status = checked.length === 0 ? "empty" : gapRows.length === 0 ? "ok" : gapRows.length < checked.length ? "warn" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-ignore-memory-receipt-compliance-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      ignoredPolicyBindingCount: checked.length,
+      compliantReceiptCount: checked.length - gapRows.length,
+      metadataGapCount: gapRows.length,
+      missingReceiptCount: checked.filter((row: any) => row.gaps.includes("child_agent_receipt")).length,
+      missingMemoryIgnoredCount: checked.filter((row: any) => row.gaps.includes("receipt_memoryIgnored")).length,
+      missingReasonCount: checked.filter((row: any) => row.gaps.includes("receipt_memoryIgnored_reason")).length,
+      memoryUsedViolationCount: checked.filter((row: any) => row.gaps.includes("receipt_memoryUsed_despite_ignore_policy")).length,
+      receipts: checked.slice(-12).reverse().map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        packet_id: row.entry.worker_context_packet_id || "",
+        project: row.entry.project || "",
+        receipt_source: row.receipt?.source || "",
+        receipt_status: row.receipt?.status || "",
+        memoryIgnored: row.receipt?.memoryIgnored || [],
+        memoryUsed: row.receipt?.memoryUsed || [],
+        compliant: row.gaps.length === 0,
+        gaps: row.gaps,
+      })),
+      gaps: gapRows.slice(0, 8).map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        packet_id: row.entry.worker_context_packet_id || "",
+        project: row.entry.project || "",
+        reason: `WorkerContextPacket ignore-memory receipt 缺少/异常：${row.gaps.join(",")}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.ignoredPolicyBindingCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-ignore-memory-receipt-compliance-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      ignoredPolicyBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.ignoredPolicyBindingCount || 0), 0),
+      compliantReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.compliantReceiptCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      missingReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.missingReceiptCount || 0), 0),
+      missingMemoryIgnoredCount: checkedRows.reduce((sum, row) => sum + Number(row.missingMemoryIgnoredCount || 0), 0),
+      missingReasonCount: checkedRows.reduce((sum, row) => sum + Number(row.missingReasonCount || 0), 0),
+      memoryUsedViolationCount: checkedRows.reduce((sum, row) => sum + Number(row.memoryUsedViolationCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.ignoredPolicyBindingCount || 0) - Number(a.ignoredPolicyBindingCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketIgnoreMemoryReceiptCompliance(options: any = {}) {
+  const report = buildWorkerContextPacketIgnoreMemoryReceiptComplianceReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    ignoredPolicyBindingCount: row.ignoredPolicyBindingCount,
+    compliantReceiptCount: row.compliantReceiptCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "WorkerContextPacket ignore-memory receipt compliance 缺失",
+    binding_id: gap.binding_id || "",
+    assignment_id: gap.assignment_id || "",
+    packet_id: gap.packet_id || "",
+    project: gap.project || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_ignore_memory_receipt_compliance",
+    "WorkerContextPacket Ignore Memory Receipt Compliance",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 WorkerContextPacket 声明 memory_policy.ignored=true 时，后续子 Agent 回执必须写 memoryIgnored 并说明 user_requested_ignore_memory，且不得写 memoryUsed 使用历史记忆。"
+  );
+  check.report = report;
+  return check;
+}
+
+function buildWorkerContextPacketIgnoreMemoryReceiptRepairWorkItem(groupId: string, row: any = {}, index = 0, existing: any = {}, at = now()) {
+  const entry = row.entry || {};
+  const policy = row.policy || workerContextPacketMemoryPolicy(entry) || {};
+  const packetId = String(entry.worker_context_packet_id || "").trim();
+  const bindingId = String(entry.binding_id || "").trim();
+  const targetProject = String(entry.project || "").trim();
+  const reason = compactMemoryCenterText(`ignore-memory packet ${packetId || "unknown"} receipt gaps: ${(row.gaps || []).join(",")}`, 360);
+  const id = `worker-context-ignore-memory-receipt-repair:${hash([
+    groupId,
+    bindingId,
+    packetId,
+    targetProject,
+  ], 14)}`;
+  const previousStatus = replayRepairWorkItemStatus(existing.status);
+  const status = ["in_progress", "blocked"].includes(previousStatus) ? previousStatus : "pending";
+  const expectedReason = workerContextPacketMemoryPolicyReason(policy) || "user_requested_ignore_memory";
+  const instruction = [
+    `要求 ${targetProject || "目标子 Agent"} 补齐 ignore-memory 回执，不要重跑无关实现。`,
+    packetId ? `worker_context_packet_id=${packetId}` : "",
+    bindingId ? `binding_id=${bindingId}` : "",
+    `memoryIgnored 必须声明 ${expectedReason} / must_not_use_group_memory。`,
+    "回执不得写 memoryUsed 使用群聊记忆、typed MEMORY.md 或全局记忆；如已误写，必须更正为 memoryIgnored 并说明只使用当前任务文本与实时检查证据。",
+  ].filter(Boolean).join(" ");
+  return {
+    id,
+    work_item_id: id,
+    taskId: String(entry.assignment_id || ""),
+    scopeId: groupId,
+    group_id: groupId,
+    subject: "补齐 ignore-memory 子 Agent 回执",
+    description: reason,
+    activeForm: compactMemoryCenterText(`补齐 memoryIgnored receipt：${targetProject || packetId || "worker"}`, 180),
+    owner: existing.owner && previousStatus !== "pending" ? existing.owner : "group-main-agent",
+    target: compactMemoryCenterText(targetProject || "memory-context", 120),
+    agentType: "group-main-agent",
+    status,
+    priority: row.gaps?.includes("receipt_memoryUsed_despite_ignore_policy") ? "critical" : "high",
+    component: "worker_context_ignore_memory_receipt_contract",
+    source: "worker_context_ignore_memory_receipt_repair",
+    source_action_id: `ignore-memory-receipt:${bindingId || packetId || index}`,
+    repair_target: packetId || bindingId || "worker_context_packet",
+    instruction: compactMemoryCenterText(instruction, 900),
+    expected: "CCM_AGENT_RECEIPT.memoryIgnored includes user_requested_ignore_memory; memoryUsed empty for platform memory",
+    source_reason: reason,
+    attempt: Math.max(1, Number(existing.attempt || 1) || 1),
+    replay_status: "ignore_memory_receipt_gap",
+    target_project: targetProject,
+    dispatch_target: targetProject,
+    prompt_patch: compactMemoryCenterText([
+      "Ignore-memory receipt repair:",
+      `- group=${groupId}`,
+      targetProject ? `- target_project=${targetProject}` : "",
+      packetId ? `- worker_context_packet_id=${packetId}` : "",
+      bindingId ? `- binding_id=${bindingId}` : "",
+      `- expected_memory_policy_reason=${expectedReason}`,
+      "- Return only a corrected CCM_AGENT_RECEIPT when implementation work is already done.",
+      "- memoryIgnored must state that platform/group/typed/global memory was intentionally ignored by user request.",
+      "- memoryUsed must not claim historical memory use.",
+    ].filter(Boolean).join("\n"), 1800),
+    dispatch_hint: {
+      claim_policy: "group_main_agent_before_child_dispatch",
+      next_step: "request_corrected_child_agent_receipt",
+      should_create_real_task: false,
+      reason: "Memory Center diagnostic sidecar; main Agent may claim and request a corrected receipt deliberately.",
+    },
+    raw_recovery: {
+      rule: "worker_context_ignore_memory_receipt_compliance",
+      gaps: row.gaps || [],
+      memory_policy_reason: expectedReason,
+    },
+    worker_context_packet_id: packetId,
+    worker_context_packet_binding_id: bindingId,
+    worker_context_packet_memory_policy_reason: expectedReason,
+    binding_id: bindingId,
+    assignment_id: entry.assignment_id || "",
+    dispatch_key: entry.dispatch_key || "",
+    evidence: [
+      packetId ? `worker_context_packet_id=${packetId}` : "",
+      bindingId ? `binding_id=${bindingId}` : "",
+      reason,
+    ].filter(Boolean),
+    filesChanged: [],
+    verification: ["重新运行 worker_context_packet_ignore_memory_receipt_compliance", "确认 memoryIgnored 声明 user_requested_ignore_memory"],
+    blockers: [],
+    needs: ["子 Agent 更正 CCM_AGENT_RECEIPT.memoryIgnored"],
+    createdAt: existing.createdAt || existing.created_at || at,
+    updatedAt: existing.updatedAt || existing.updated_at || at,
+    lastSeenAt: existing.lastSeenAt || existing.last_seen_at || at,
+    completedAt: existing.completedAt || existing.completed_at || "",
+    seenCount: Math.max(1, Number(existing.seenCount || existing.seen_count || 1) || 1),
+  };
+}
+
+function syncWorkerContextPacketIgnoreMemoryReceiptRepairWorkItems(groupId: string, gapRows: any[] = [], options: any = {}) {
+  if (!groupId) return summarizeReplayRepairPendingWorkItems(groupId);
+  const at = String(options.at || now());
+  const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+  const previousItems = Array.isArray(ledger.items) ? ledger.items : [];
+  const previousById = new Map<string, any>(previousItems.map((item: any) => [String(item.id || item.work_item_id || ""), item]));
+  const currentIds = new Set<string>();
+  const nextRepairItems: any[] = [];
+  let changed = false;
+  for (const [index, row] of gapRows.entries()) {
+    const draft = buildWorkerContextPacketIgnoreMemoryReceiptRepairWorkItem(groupId, row, index, {}, at);
+    const existing = previousById.get(draft.id) || {};
+    let item = buildWorkerContextPacketIgnoreMemoryReceiptRepairWorkItem(groupId, row, index, existing, at);
+    const previousSignature = replayRepairWorkItemSignature(existing);
+    const nextSignature = replayRepairWorkItemSignature(item);
+    if (existing.id && previousSignature === nextSignature) {
+      item = { ...existing, ...item, createdAt: existing.createdAt || item.createdAt, updatedAt: existing.updatedAt || item.updatedAt, lastSeenAt: existing.lastSeenAt || item.lastSeenAt, seenCount: Number(existing.seenCount || 1) };
+    } else {
+      item = { ...item, updatedAt: at, lastSeenAt: at, seenCount: existing.id ? Number(existing.seenCount || 1) + 1 : 1 };
+      changed = true;
+    }
+    currentIds.add(item.id);
+    nextRepairItems.push(item);
+  }
+  const untouchedItems: any[] = [];
+  for (const existing of previousItems) {
+    const id = String(existing.id || existing.work_item_id || "");
+    const source = String(existing.source || "");
+    if (source !== "worker_context_ignore_memory_receipt_repair") {
+      untouchedItems.push(existing);
+      continue;
+    }
+    if (!id || currentIds.has(id)) continue;
+    const currentStatus = replayRepairWorkItemStatus(existing.status);
+    if (!replayRepairWorkItemOpen(currentStatus)) {
+      nextRepairItems.push(existing);
+      continue;
+    }
+    nextRepairItems.push({
+      ...existing,
+      status: "completed",
+      updatedAt: at,
+      completedAt: existing.completedAt || at,
+      resolutionReason: "worker_context_ignore_memory_receipt_compliant",
+      latestWorkerContextIgnoreMemoryReceiptCompliance: { gapCount: gapRows.length },
+    });
+    changed = true;
+  }
+  const nextItems = [...untouchedItems, ...nextRepairItems]
+    .sort((a, b) => {
+      const statusRank = replayRepairWorkItemOpen(a.status) === replayRepairWorkItemOpen(b.status) ? 0 : replayRepairWorkItemOpen(a.status) ? -1 : 1;
+      if (statusRank) return statusRank;
+      const priority = replayRepairPriorityRank(a.priority) - replayRepairPriorityRank(b.priority);
+      if (priority) return priority;
+      return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    })
+    .slice(0, 160);
+  const stats = replayRepairWorkItemStats(nextItems);
+  const nextLedger = {
+    ...ledger,
+    latestWorkerContextIgnoreMemoryReceiptCompliance: {
+      gapCount: gapRows.length,
+      packetIds: gapRows.map((row: any) => row.entry?.worker_context_packet_id || "").filter(Boolean).slice(0, 20),
+    },
+    items: nextItems,
+    stats,
+    updatedAt: changed || !ledger.updatedAt ? at : ledger.updatedAt,
+  };
+  const currentComparable = JSON.stringify(previousItems.filter((item: any) => String(item.source || "") === "worker_context_ignore_memory_receipt_repair"));
+  const nextComparable = JSON.stringify(nextItems.filter((item: any) => String(item.source || "") === "worker_context_ignore_memory_receipt_repair"));
+  if (changed || currentComparable !== nextComparable || !fs.existsSync(ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId))) {
+    return summarizeReplayRepairPendingWorkItems(groupId, writeGroupCompactBoundaryReplayRepairWorkItems(groupId, nextLedger));
+  }
+  return summarizeReplayRepairPendingWorkItems(groupId, ledger);
+}
+
+function buildWorkerContextPacketIgnoreMemoryReceiptRepairWorkItemReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(ledger.entries) ? ledger.entries : []).filter((entry: any) => workerContextPacketRequiresIgnoreMemoryPolicy(entry));
+    const complianceRows = entries.map((entry: any) => workerContextPacketIgnoreMemoryReceiptRow(groupId, entry, options));
+    const gapRows = complianceRows.filter((row: any) => row.gaps.length > 0);
+    const workItems = syncWorkerContextPacketIgnoreMemoryReceiptRepairWorkItems(groupId, gapRows, { at: options.generatedAt || options.generated_at || now() });
+    const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const repairItems = (Array.isArray(workLedger.items) ? workLedger.items : []).filter((item: any) => String(item.source || "") === "worker_context_ignore_memory_receipt_repair");
+    const expectedIds = new Set(gapRows.map((row: any, index: number) => buildWorkerContextPacketIgnoreMemoryReceiptRepairWorkItem(groupId, row, index, {}, options.generatedAt || options.generated_at || now()).id));
+    const currentRepairItems = repairItems.filter((item: any) => expectedIds.has(String(item.id || item.work_item_id || "")));
+    const openItems = currentRepairItems.filter((item: any) => replayRepairWorkItemOpen(item.status));
+    const staleOpenItems = repairItems.filter((item: any) => replayRepairWorkItemOpen(item.status) && !expectedIds.has(String(item.id || item.work_item_id || "")));
+    const requiredActionCount = gapRows.length;
+    const coveredItemCount = openItems.length;
+    const status = requiredActionCount > 0 ? coveredItemCount >= requiredActionCount ? "ok" : "fail" : staleOpenItems.length ? "warn" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-ignore-memory-receipt-repair-work-item-group-v1",
+      groupId,
+      status,
+      requiredActionCount,
+      openItemCount: openItems.length + staleOpenItems.length,
+      currentOpenItemCount: openItems.length,
+      staleOpenItemCount: staleOpenItems.length,
+      coveredItemCount,
+      total: repairItems.length,
+      pendingCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "pending").length,
+      completedCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "completed").length,
+      missingReceiptCount: gapRows.filter((row: any) => row.gaps.includes("child_agent_receipt")).length,
+      memoryUsedViolationCount: gapRows.filter((row: any) => row.gaps.includes("receipt_memoryUsed_despite_ignore_policy")).length,
+      file: workItems.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      items: repairItems.slice(0, 12).map((item: any) => ({
+        id: item.id || item.work_item_id || "",
+        status: replayRepairWorkItemStatus(item.status),
+        priority: item.priority || "",
+        packet_id: item.worker_context_packet_id || "",
+        binding_id: item.worker_context_packet_binding_id || item.binding_id || "",
+        target_project: item.target_project || "",
+      })),
+      gaps: status === "ok" ? [] : [{
+        reason: requiredActionCount > 0
+          ? `ignore-memory receipt gaps=${requiredActionCount} 但 current open repair work items=${coveredItemCount}`
+          : `ignore-memory receipt 已合规但仍有 stale open repair work items=${staleOpenItems.length}`,
+      }],
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.requiredActionCount || 0) > 0 || Number(row.total || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-ignore-memory-receipt-repair-work-item-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      requiredActionCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredActionCount || 0), 0),
+      openItemCount: checkedRows.reduce((sum, row) => sum + Number(row.openItemCount || 0), 0),
+      currentOpenItemCount: checkedRows.reduce((sum, row) => sum + Number(row.currentOpenItemCount || 0), 0),
+      staleOpenItemCount: checkedRows.reduce((sum, row) => sum + Number(row.staleOpenItemCount || 0), 0),
+      coveredItemCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredItemCount || 0), 0),
+      total: checkedRows.reduce((sum, row) => sum + Number(row.total || 0), 0),
+      missingReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.missingReceiptCount || 0), 0),
+      memoryUsedViolationCount: checkedRows.reduce((sum, row) => sum + Number(row.memoryUsedViolationCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.requiredActionCount || 0) - Number(a.requiredActionCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketIgnoreMemoryReceiptRepairWorkItems(options: any = {}) {
+  const report = buildWorkerContextPacketIgnoreMemoryReceiptRepairWorkItemReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    requiredActionCount: row.requiredActionCount,
+    currentOpenItemCount: row.currentOpenItemCount,
+    total: row.total,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "ignore-memory receipt repair work items 缺失",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_ignore_memory_receipt_repair_work_items",
+    "WorkerContextPacket Ignore Memory Receipt Repair Work Items",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 ignore-memory WorkerContextPacket 的子 Agent 回执缺失 memoryIgnored 或误写 memoryUsed 时，Memory Center 必须物化主 Agent 可认领的修复待办。"
+  );
+  check.report = report;
+  return check;
+}
+
+function isWorkerContextIgnoreMemoryReceiptRepairSource(source: any) {
+  return String(source || "").trim() === "worker_context_ignore_memory_receipt_repair";
+}
+
+function isWorkerContextIgnoreMemoryReceiptRepairWorkItem(item: any = {}) {
+  return isWorkerContextIgnoreMemoryReceiptRepairSource(item.source);
+}
+
+function workerContextIgnoreMemoryReceiptRepairDispatchGroupIds(options: any = {}, repairWorkItemReport: any = {}) {
+  const explicit = Array.isArray(options.groupIds || options.group_ids)
+    ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : null;
+  if (explicit?.length) return explicit;
+  const repairReportGroupIds = Array.isArray(repairWorkItemReport.groups)
+    ? repairWorkItemReport.groups.map((row: any) => String(row.groupId || "").trim()).filter(Boolean)
+    : [];
+  return [...new Set([
+    ...replayRepairDispatchCandidateGroupIds(options),
+    ...repairReportGroupIds,
+  ])].filter(Boolean);
+}
+
+function workerContextIgnoreMemoryReceiptRepairCandidateMetadataGaps(item: any = {}, candidate: any = {}) {
+  const gaps: string[] = [];
+  if (!candidate || !candidate.work_item_id) {
+    gaps.push("candidate_missing");
+    return gaps;
+  }
+  if (!isWorkerContextIgnoreMemoryReceiptRepairSource(candidate.source)) gaps.push("source");
+  if (candidate.component !== "worker_context_ignore_memory_receipt_contract") gaps.push("component");
+  if (candidate.shouldCreateRealTask !== false && candidate.should_create_real_task !== false) gaps.push("should_create_real_task_false");
+  const mirroredFields = [
+    "worker_context_packet_id",
+    "worker_context_packet_binding_id",
+    "worker_context_packet_memory_policy_reason",
+    "binding_id",
+    "assignment_id",
+    "dispatch_key",
+  ];
+  for (const field of mirroredFields) {
+    const expectedValue = field === "worker_context_packet_binding_id"
+      ? item.worker_context_packet_binding_id || item.binding_id || ""
+      : item[field] || "";
+    const expected = String(expectedValue || "").trim();
+    if (expected && String(candidate[field] || "").trim() !== expected) gaps.push(field);
+  }
+  const text = [
+    candidate.instruction,
+    candidate.expected,
+    candidate.prompt_patch,
+    candidate.source_reason,
+  ].filter(Boolean).join("\n");
+  if (!/memoryIgnored/i.test(text)) gaps.push("memoryIgnored_prompt");
+  if (!/user_requested_ignore_memory|must_not_use_group_memory/i.test(text)) gaps.push("ignore_reason_prompt");
+  if (!/memoryUsed/i.test(text)) gaps.push("memoryUsed_violation_guard");
+  return [...new Set(gaps)];
+}
+
+function buildWorkerContextPacketIgnoreMemoryReceiptRepairDispatchCandidateReport(options: any = {}) {
+  const repairWorkItemReport = options.repairWorkItemReport
+    || options.repair_work_item_report
+    || buildWorkerContextPacketIgnoreMemoryReceiptRepairWorkItemReport(options);
+  const groupIds = workerContextIgnoreMemoryReceiptRepairDispatchGroupIds(options, repairWorkItemReport);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const items = Array.isArray(ledger.items) ? ledger.items : [];
+    const ignoreItems = items.filter(isWorkerContextIgnoreMemoryReceiptRepairWorkItem);
+    const openIgnoreItems = ignoreItems.filter((item: any) => replayRepairWorkItemOpen(item.status));
+    const requiredItems = openIgnoreItems;
+    const limit = Math.max(Number(options.limit || 24), requiredItems.length + 8);
+    const summary = buildReplayRepairMainAgentDispatchCandidates(groupId, { limit, ledger });
+    const candidateByWorkId = new Map((summary.candidates || []).map((candidate: any) => [String(candidate.work_item_id || ""), candidate]));
+    const missing = requiredItems.filter((item: any) => !candidateByWorkId.has(replayRepairWorkItemId(item)));
+    const matched = requiredItems.map((item: any) => ({
+      item,
+      candidate: candidateByWorkId.get(replayRepairWorkItemId(item)) || null,
+    })).filter((entry: any) => entry.candidate);
+    const metadataGaps = matched
+      .map((entry: any) => ({
+        work_item_id: replayRepairWorkItemId(entry.item),
+        candidate_id: entry.candidate.candidate_id || "",
+        gaps: workerContextIgnoreMemoryReceiptRepairCandidateMetadataGaps(entry.item, entry.candidate),
+        worker_context_packet_id: entry.candidate.worker_context_packet_id || "",
+        binding_id: entry.candidate.binding_id || entry.candidate.worker_context_packet_binding_id || "",
+        memory_policy_reason: entry.candidate.worker_context_packet_memory_policy_reason || "",
+      }))
+      .filter((entry: any) => entry.gaps.length > 0);
+    const ignoreCandidates = (summary.candidates || []).filter((candidate: any) => isWorkerContextIgnoreMemoryReceiptRepairSource(candidate.source));
+    const status = requiredItems.length === 0
+      ? ignoreItems.length > 0 ? "warn" : "empty"
+      : missing.length > 0 ? "fail" : metadataGaps.length > 0 ? "warn" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-ignore-memory-receipt-repair-dispatch-candidate-group-v1",
+      groupId,
+      status,
+      file: summary.file,
+      updatedAt: summary.updatedAt,
+      ignoreRepairItemCount: ignoreItems.length,
+      ignoreOpenItemCount: openIgnoreItems.length,
+      expectedCandidateCount: requiredItems.length,
+      coveredCandidateCount: requiredItems.length - missing.length,
+      candidateCount: ignoreCandidates.length,
+      readyCount: ignoreCandidates.filter((candidate: any) => candidate.dispatchMarked || candidate.claimedByMainAgent || candidate.status === "in_progress").length,
+      dispatchMarkedCount: ignoreCandidates.filter((candidate: any) => candidate.dispatchMarked || String(candidate.dispatch_target || "").trim()).length,
+      metadataGapCount: metadataGaps.length,
+      promptPatchCandidateCount: ignoreCandidates.filter((candidate: any) => /memoryIgnored/i.test(String(candidate.prompt_patch || ""))).length,
+      packetBoundCandidateCount: ignoreCandidates.filter((candidate: any) => candidate.worker_context_packet_id).length,
+      candidates: ignoreCandidates.slice(0, 12),
+      missingCandidates: missing.slice(0, 8).map((item: any) => ({
+        work_item_id: replayRepairWorkItemId(item),
+        status: replayRepairWorkItemStatus(item.status),
+        priority: item.priority || "",
+        reason: "ignore-memory receipt repair work item 缺少主 Agent 派发候选",
+      })),
+      metadataGaps: metadataGaps.slice(0, 8),
+      gaps: [
+        ...missing.slice(0, 8).map((item: any) => ({
+          work_item_id: replayRepairWorkItemId(item),
+          reason: "ignore-memory receipt repair work item 未进入主 Agent 派发候选",
+          status: replayRepairWorkItemStatus(item.status),
+          priority: item.priority || "",
+        })),
+        ...metadataGaps.slice(0, 8).map((gap: any) => ({
+          work_item_id: gap.work_item_id || "",
+          candidate_id: gap.candidate_id || "",
+          reason: `ignore-memory receipt repair dispatch candidate 缺少字段：${gap.gaps.join(",")}`,
+        })),
+      ].slice(0, 12),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.expectedCandidateCount || 0) > 0 || Number(row.candidateCount || 0) > 0);
+  const requiredRows = checkedRows.filter(row => Number(row.expectedCandidateCount || 0) > 0);
+  const coveredRows = requiredRows.filter(row => Number(row.coveredCandidateCount || 0) >= Number(row.expectedCandidateCount || 0));
+  const metadataCompleteRows = requiredRows.filter(row => Number(row.metadataGapCount || 0) === 0);
+  const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+  const metadataCoverageRate = requiredRows.length ? Math.round((metadataCompleteRows.length / requiredRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? "empty"
+    : coverageRate < 100 ? coverageRate >= 75 ? "warn" : "fail" : metadataCoverageRate === 100 ? "ok" : "warn";
+  return {
+    schema: "ccm-worker-context-packet-ignore-memory-receipt-repair-dispatch-candidate-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      metadataCoverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsNeedingCandidates: requiredRows.length,
+      groupsCovered: coveredRows.length,
+      groupsMetadataComplete: metadataCompleteRows.length,
+      expectedCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedCandidateCount || 0), 0),
+      coveredCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredCandidateCount || 0), 0),
+      candidateCount: checkedRows.reduce((sum, row) => sum + Number(row.candidateCount || 0), 0),
+      readyCount: checkedRows.reduce((sum, row) => sum + Number(row.readyCount || 0), 0),
+      dispatchMarkedCount: checkedRows.reduce((sum, row) => sum + Number(row.dispatchMarkedCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      promptPatchCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.promptPatchCandidateCount || 0), 0),
+      packetBoundCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.packetBoundCandidateCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.expectedCandidateCount || 0) - Number(a.expectedCandidateCount || 0) || Number(b.candidateCount || 0) - Number(a.candidateCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketIgnoreMemoryReceiptRepairDispatchCandidates(options: any = {}) {
+  const report = buildWorkerContextPacketIgnoreMemoryReceiptRepairDispatchCandidateReport(options);
+  const checked = Number(report.overall.groupsNeedingCandidates || 0);
+  const passed = (report.groups || []).filter((row: any) => Number(row.expectedCandidateCount || 0) > 0 && row.status === "ok").length;
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    expectedCandidateCount: row.expectedCandidateCount,
+    coveredCandidateCount: row.coveredCandidateCount,
+    candidateCount: row.candidateCount,
+    packetBoundCandidateCount: row.packetBoundCandidateCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "ignore-memory receipt repair dispatch candidate 缺失",
+    work_item_id: gap.work_item_id || "",
+    candidate_id: gap.candidate_id || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_ignore_memory_receipt_repair_dispatch_candidates",
+    "WorkerContextPacket Ignore Memory Receipt Repair Dispatch Candidates",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "把 ignore-memory receipt repair work items 转成主 Agent 可读派发候选，并保留 worker_context_packet_id、binding、memoryIgnored 修复 prompt；仍只作为规划上下文，不自动创建真实任务。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextIgnoreMemoryReceiptDispatchBriefMetadataGaps(candidate: any = {}, brief: any = {}) {
+  const gaps = replayRepairDispatchBriefMetadataGaps(candidate, brief);
+  if (!brief || !brief.brief_id) return gaps;
+  if (!isWorkerContextIgnoreMemoryReceiptRepairSource(brief.source)) gaps.push("source");
+  const mirroredFields = [
+    "worker_context_packet_id",
+    "worker_context_packet_binding_id",
+    "worker_context_packet_memory_policy_reason",
+    "binding_id",
+    "assignment_id",
+    "dispatch_key",
+  ];
+  for (const field of mirroredFields) {
+    const expected = String(candidate[field] || "").trim();
+    if (expected && String(brief[field] || "").trim() !== expected) gaps.push(field);
+  }
+  const workerTask = String(brief.worker_task || "");
+  if (!/memoryIgnored/i.test(workerTask)) gaps.push("worker_task_memoryIgnored");
+  if (!/user_requested_ignore_memory|must_not_use_group_memory/i.test(workerTask)) gaps.push("worker_task_ignore_reason");
+  if (!/memoryUsed/i.test(workerTask)) gaps.push("worker_task_memoryUsed_guard");
+  if (candidate.worker_context_packet_id && !workerTask.includes(String(candidate.worker_context_packet_id))) gaps.push("worker_task_packet_id");
+  return [...new Set(gaps)];
+}
+
+function buildWorkerContextPacketIgnoreMemoryReceiptRepairDispatchBriefReport(options: any = {}) {
+  const candidateReport = options.candidateReport
+    || options.candidate_report
+    || buildWorkerContextPacketIgnoreMemoryReceiptRepairDispatchCandidateReport(options);
+  const rows = (candidateReport.groups || []).map((candidateGroup: any) => {
+    const groupId = String(candidateGroup.groupId || "");
+    const ignoreCandidates = Array.isArray(candidateGroup.candidates)
+      ? candidateGroup.candidates.filter((candidate: any) => isWorkerContextIgnoreMemoryReceiptRepairSource(candidate.source))
+      : [];
+    const candidateSummary = {
+      schema: "ccm-replay-repair-main-agent-dispatch-candidates-v1",
+      groupId,
+      file: candidateGroup.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      updatedAt: candidateGroup.updatedAt || "",
+      candidateCount: ignoreCandidates.length,
+      openItemCount: candidateGroup.ignoreOpenItemCount || ignoreCandidates.length,
+      readyCount: candidateGroup.readyCount || ignoreCandidates.length,
+      dispatchMarkedCount: candidateGroup.dispatchMarkedCount || 0,
+      shouldCreateRealTask: false,
+      candidates: ignoreCandidates,
+    };
+    const ledger = syncReplayRepairDispatchPlanLedgerForCenter(groupId, candidateSummary, options);
+    const readyBriefs = (Array.isArray(ledger.briefs) ? ledger.briefs : [])
+      .filter((brief: any) => String(brief.status || "") === "ready" && isWorkerContextIgnoreMemoryReceiptRepairSource(brief.source));
+    const briefByWorkId = new Map<string, any>(readyBriefs.map((brief: any) => [String(brief.work_item_id || ""), brief]));
+    const requiredCandidates = ignoreCandidates.filter((candidate: any) => candidate.work_item_id);
+    const missing = requiredCandidates.filter((candidate: any) => !briefByWorkId.has(String(candidate.work_item_id || "")));
+    const metadataGaps = requiredCandidates
+      .map((candidate: any) => {
+        const brief = briefByWorkId.get(String(candidate.work_item_id || "")) || null;
+        return {
+          work_item_id: candidate.work_item_id || "",
+          candidate_id: candidate.candidate_id || "",
+          brief_id: brief?.brief_id || "",
+          gaps: workerContextIgnoreMemoryReceiptDispatchBriefMetadataGaps(candidate, brief),
+        };
+      })
+      .filter((entry: any) => entry.gaps.length > 0);
+    const status = requiredCandidates.length === 0
+      ? "empty"
+      : missing.length > 0 ? "fail" : metadataGaps.length > 0 ? "warn" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-ignore-memory-receipt-repair-dispatch-brief-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchPlanLedgerFile(groupId),
+      sourceCandidateFile: ledger.sourceCandidateFile || candidateGroup.file || "",
+      expectedBriefCount: requiredCandidates.length,
+      coveredBriefCount: requiredCandidates.length - missing.length,
+      readyBriefCount: readyBriefs.length,
+      metadataGapCount: metadataGaps.length,
+      packetBoundBriefCount: readyBriefs.filter((brief: any) => brief.worker_context_packet_id).length,
+      memoryIgnoredPromptBriefCount: readyBriefs.filter((brief: any) => /memoryIgnored/i.test(String(brief.worker_task || ""))).length,
+      shouldCreateRealTask: ledger.shouldCreateRealTask === false || ledger.should_create_real_task === false,
+      briefs: readyBriefs.slice(0, 12).map((brief: any) => ({
+        brief_id: brief.brief_id || "",
+        work_item_id: brief.work_item_id || "",
+        source: brief.source || "",
+        target_project: brief.target_project || "",
+        worker_context_packet_id: brief.worker_context_packet_id || "",
+        worker_context_packet_binding_id: brief.worker_context_packet_binding_id || brief.binding_id || "",
+        memory_policy_reason: brief.worker_context_packet_memory_policy_reason || "",
+        worker_task: compactMemoryCenterText(brief.worker_task || "", 420),
+      })),
+      missingBriefs: missing.slice(0, 8).map((candidate: any) => ({
+        work_item_id: candidate.work_item_id || "",
+        candidate_id: candidate.candidate_id || "",
+        reason: "ignore-memory receipt repair dispatch candidate 缺少 corrected-receipt 派发简报",
+      })),
+      metadataGaps: metadataGaps.slice(0, 8),
+      gaps: [
+        ...missing.slice(0, 8).map((candidate: any) => ({
+          work_item_id: candidate.work_item_id || "",
+          candidate_id: candidate.candidate_id || "",
+          reason: "ignore-memory receipt repair dispatch candidate 缺少 corrected-receipt worker brief",
+        })),
+        ...metadataGaps.slice(0, 8).map((gap: any) => ({
+          work_item_id: gap.work_item_id || "",
+          candidate_id: gap.candidate_id || "",
+          brief_id: gap.brief_id || "",
+          reason: `ignore-memory receipt repair dispatch brief 缺少字段：${gap.gaps.join(",")}`,
+        })),
+      ].slice(0, 12),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.expectedBriefCount || 0) > 0 || Number(row.readyBriefCount || 0) > 0);
+  const requiredRows = checkedRows.filter(row => Number(row.expectedBriefCount || 0) > 0);
+  const coveredRows = requiredRows.filter(row => Number(row.coveredBriefCount || 0) >= Number(row.expectedBriefCount || 0));
+  const metadataCompleteRows = requiredRows.filter(row => Number(row.metadataGapCount || 0) === 0);
+  const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+  const metadataCoverageRate = requiredRows.length ? Math.round((metadataCompleteRows.length / requiredRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? "empty"
+    : coverageRate < 100 ? coverageRate >= 75 ? "warn" : "fail" : metadataCoverageRate === 100 ? "ok" : "warn";
+  return {
+    schema: "ccm-worker-context-packet-ignore-memory-receipt-repair-dispatch-brief-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      metadataCoverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsNeedingBriefs: requiredRows.length,
+      groupsCovered: coveredRows.length,
+      groupsMetadataComplete: metadataCompleteRows.length,
+      expectedBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedBriefCount || 0), 0),
+      coveredBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredBriefCount || 0), 0),
+      readyBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.readyBriefCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      packetBoundBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.packetBoundBriefCount || 0), 0),
+      memoryIgnoredPromptBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.memoryIgnoredPromptBriefCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.expectedBriefCount || 0) - Number(a.expectedBriefCount || 0) || Number(b.readyBriefCount || 0) - Number(a.readyBriefCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketIgnoreMemoryReceiptRepairDispatchBriefs(options: any = {}) {
+  const report = buildWorkerContextPacketIgnoreMemoryReceiptRepairDispatchBriefReport(options);
+  const checked = Number(report.overall.groupsNeedingBriefs || 0);
+  const passed = (report.groups || []).filter((row: any) => Number(row.expectedBriefCount || 0) > 0 && row.status === "ok").length;
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    expectedBriefCount: row.expectedBriefCount,
+    coveredBriefCount: row.coveredBriefCount,
+    readyBriefCount: row.readyBriefCount,
+    packetBoundBriefCount: row.packetBoundBriefCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "ignore-memory receipt repair dispatch brief 缺失",
+    work_item_id: gap.work_item_id || "",
+    candidate_id: gap.candidate_id || "",
+    brief_id: gap.brief_id || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_ignore_memory_receipt_repair_dispatch_briefs",
+    "WorkerContextPacket Ignore Memory Receipt Repair Dispatch Briefs",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "把 ignore-memory receipt repair candidates 编译成主 Agent 可复制给子 Agent 的 corrected-receipt worker brief；brief 必须包含 CCM_AGENT_RECEIPT.memoryIgnored、user_requested_ignore_memory 和 memoryUsed 防误用约束。"
+  );
+  check.report = report;
+  return check;
+}
+
+function buildWorkerContextPacketIgnoreMemoryReceiptRepairTypedMemoryReport(options: any = {}) {
+  const repairReport = options.repairWorkItemReport
+    || options.repair_work_item_report
+    || buildWorkerContextPacketIgnoreMemoryReceiptRepairWorkItemReport(options);
+  const candidateReport = options.candidateReport
+    || options.candidate_report
+    || buildWorkerContextPacketIgnoreMemoryReceiptRepairDispatchCandidateReport({ ...options, repairWorkItemReport: repairReport });
+  const briefReport = options.briefReport
+    || options.brief_report
+    || buildWorkerContextPacketIgnoreMemoryReceiptRepairDispatchBriefReport({ ...options, candidateReport });
+  const groupIds = [...new Set([
+    ...(repairReport.groups || []).map((row: any) => row.groupId),
+    ...(candidateReport.groups || []).map((row: any) => row.groupId),
+    ...(briefReport.groups || []).map((row: any) => row.groupId),
+  ].map((item: any) => String(item || "").trim()).filter(Boolean))];
+  const rows = groupIds.map((groupId: string) => {
+    const repairGroup = (repairReport.groups || []).find((row: any) => row.groupId === groupId) || {};
+    const candidateGroup = (candidateReport.groups || []).find((row: any) => row.groupId === groupId) || {};
+    const briefGroup = (briefReport.groups || []).find((row: any) => row.groupId === groupId) || {};
+    const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const repairItems = (Array.isArray(workLedger.items) ? workLedger.items : []).filter(isWorkerContextIgnoreMemoryReceiptRepairWorkItem);
+    const candidates = Array.isArray(candidateGroup.candidates) ? candidateGroup.candidates : [];
+    const briefs = Array.isArray(briefGroup.briefs) ? briefGroup.briefs : [];
+    const inputRows = [
+      ...repairItems,
+      ...candidates,
+      ...briefs,
+      ...(Array.isArray(repairGroup.gaps) ? repairGroup.gaps : []),
+      ...(Array.isArray(candidateGroup.gaps) ? candidateGroup.gaps : []),
+      ...(Array.isArray(briefGroup.gaps) ? briefGroup.gaps : []),
+    ];
+    let distillation: any = null;
+    let distillationError = "";
+    try {
+      const {
+        distillIgnoreMemoryReceiptRepairToTypedMemory,
+      } = require("../collaboration/group-memory-index");
+      distillation = inputRows.length
+        ? distillIgnoreMemoryReceiptRepairToTypedMemory(groupId, {
+          items: repairItems,
+          candidates,
+          briefs,
+          gaps: [
+            ...(Array.isArray(repairGroup.gaps) ? repairGroup.gaps : []),
+            ...(Array.isArray(candidateGroup.gaps) ? candidateGroup.gaps : []),
+            ...(Array.isArray(briefGroup.gaps) ? briefGroup.gaps : []),
+          ],
+        }, {
+          reason: "memory-center-ignore-memory-receipt-repair-typed-memory-report",
+          updatedAt: options.generatedAt || options.generated_at || now(),
+        })
+        : null;
+    } catch (error: any) {
+      distillationError = String(error?.message || error);
+    }
+    const {
+      readGroupTypedMemoryDistillationLedger,
+      scanGroupTypedMemoryDocuments,
+      buildGroupTypedMemoryRecall,
+    } = require("../collaboration/group-memory-index");
+    const distillationLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = distillationLedger.ignoreMemoryReceiptRepairArchive || {};
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const disciplineDocs = (Array.isArray(docs) ? docs : []).filter((doc: any) => String(doc.source || "") === "auto:ignore-memory-receipt-repair-distillation");
+    const docText = disciplineDocs.map((doc: any) => String(doc.body || "")).join("\n");
+    const recall = buildGroupTypedMemoryRecall(groupId, "ignore memory user_requested_ignore_memory memoryIgnored memoryUsed must_not_use_group_memory", {
+      disableLedger: true,
+      forceMemory: true,
+      max: 8,
+      snippetChars: 260,
+    });
+    const recallText = [
+      ...(Array.isArray(recall.recalled) ? recall.recalled : []),
+      ...(Array.isArray(recall.entries) ? recall.entries : []),
+      ...(Array.isArray(recall.selected) ? recall.selected : []),
+      ...(Array.isArray(recall.docs) ? recall.docs : []),
+    ].map((item: any) => `${item.name || ""}\n${item.body || ""}\n${item.snippet || ""}\n${item.text || ""}`).join("\n");
+    const recallMatchCount = Array.isArray(recall.recalled)
+      ? recall.recalled.length
+      : Number(recall.matched_count || recall.entryCount || recall.entries?.length || 0);
+    const gaps: any[] = [];
+    if (distillationError) gaps.push({ reason: `ignore-memory receipt typed memory 蒸馏失败：${distillationError}` });
+    if (inputRows.length && !distillation) gaps.push({ reason: "存在 ignore-memory receipt repair 行但未触发 typed memory 蒸馏" });
+    if (inputRows.length && Number(archive.archived_count || 0) < 1) gaps.push({ reason: "ignore-memory receipt repair archive 为空" });
+    if (inputRows.length && !disciplineDocs.length) gaps.push({ reason: "未写入 ignore-memory receipt discipline typed MEMORY.md 文档" });
+    if (disciplineDocs.length && !/memoryIgnored/i.test(docText)) gaps.push({ reason: "typed memory 文档缺少 memoryIgnored 规则" });
+    if (disciplineDocs.length && !/memoryUsed/i.test(docText)) gaps.push({ reason: "typed memory 文档缺少 memoryUsed 防误用规则" });
+    if (disciplineDocs.length && !/user_requested_ignore_memory|must_not_use_group_memory/i.test(docText)) gaps.push({ reason: "typed memory 文档缺少 user_requested_ignore_memory / must_not_use_group_memory" });
+    if (inputRows.length && !/ignore-memory|Ignore-memory|memoryIgnored|user_requested_ignore_memory/i.test(recallText)) gaps.push({ reason: "ignore-memory receipt discipline typed memory 无法通过 recall probe 召回" });
+    const status = inputRows.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-ignore-memory-receipt-repair-typed-memory-group-v1",
+      groupId,
+      status,
+      inputRowCount: inputRows.length,
+      repairItemCount: repairItems.length,
+      candidateCount: candidates.length,
+      briefCount: briefs.length,
+      archivedCount: Number(archive.archived_count || 0),
+      typedMemoryDocCount: disciplineDocs.length,
+      recallMatchCount,
+      typedMemoryLedgerFile: distillationLedger.file || "",
+      docs: disciplineDocs.slice(0, 8).map((doc: any) => ({ relPath: doc.relPath, name: doc.name, source: doc.source })),
+      distillation: distillation ? {
+        incomingRowCount: distillation.incomingRowCount || 0,
+        archivedCount: distillation.archivedCount || 0,
+        writeCount: distillation.writeCount || 0,
+        correctedPromptCount: distillation.correctedPromptCount || 0,
+      } : null,
+      gaps,
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.inputRowCount || 0) > 0 || Number(row.archivedCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-ignore-memory-receipt-repair-typed-memory-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      inputRowCount: checkedRows.reduce((sum, row) => sum + Number(row.inputRowCount || 0), 0),
+      archivedCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedCount || 0), 0),
+      typedMemoryDocCount: checkedRows.reduce((sum, row) => sum + Number(row.typedMemoryDocCount || 0), 0),
+      recallMatchCount: checkedRows.reduce((sum, row) => sum + Number(row.recallMatchCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.inputRowCount || 0) - Number(a.inputRowCount || 0) || Number(b.archivedCount || 0) - Number(a.archivedCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketIgnoreMemoryReceiptRepairTypedMemory(options: any = {}) {
+  const report = buildWorkerContextPacketIgnoreMemoryReceiptRepairTypedMemoryReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    inputRowCount: row.inputRowCount,
+    archivedCount: row.archivedCount,
+    typedMemoryDocCount: row.typedMemoryDocCount,
+    recallMatchCount: row.recallMatchCount,
+    typedMemoryLedgerFile: row.typedMemoryLedgerFile,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "ignore-memory receipt repair typed memory 缺失",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_ignore_memory_receipt_repair_typed_memory",
+    "WorkerContextPacket Ignore Memory Receipt Repair Typed Memory",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 ignore-memory receipt repair 反复出现时，必须沉淀为 feedback typed MEMORY.md，让后续子 Agent 会话能召回 memoryIgnored / memoryUsed 回执纪律。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPacketCompactHookRunId(entry: any = {}) {
+  const retry = workerContextPacketCompactionRetry(entry) || {};
+  return String(
+    entry.worker_context_packet_compact_hook_run_id
+    || entry.workerContextPacketCompactHookRunId
+    || retry.compact_hook_run_id
+    || retry.compactHookRunId
+    || ""
+  ).trim();
+}
+
+function workerContextPacketCompactHookGaps(entry: any = {}, hookLedger: any = {}) {
+  const gaps: string[] = [];
+  const retry = workerContextPacketCompactionRetry(entry) || {};
+  const hookRunId = workerContextPacketCompactHookRunId(entry);
+  if (!entry.binding_id) gaps.push("binding_id");
+  if (!entry.assignment_id) gaps.push("assignment_id");
+  if (!entry.worker_context_packet_id) gaps.push("worker_context_packet_id");
+  if (!retry || retry.schema !== "ccm-worker-context-compaction-retry-v1") gaps.push("worker_context_packet_compaction_retry");
+  if (!hookRunId) return [...new Set([...gaps, "compact_hook_run_id"])];
+  const entries = (Array.isArray(hookLedger.entries) ? hookLedger.entries : []).filter((item: any) => item.hook_run_id === hookRunId);
+  if (!entries.length) return [...new Set([...gaps, "compact_hook_entries"])];
+  const pre = entries.filter((item: any) => item.phase === "pre");
+  const post = entries.filter((item: any) => item.phase === "post");
+  if (!pre.length) gaps.push("pre_hook_entry");
+  if (!post.length) gaps.push("post_hook_entry");
+  if (pre.length && !pre.some((item: any) => item.initial_usage_status === "over_budget")) gaps.push("pre_initial_over_budget");
+  if (post.length && !post.some((item: any) => item.final_usage_status)) gaps.push("post_final_usage_status");
+  if (retry.status === "recovered" && !post.some((item: any) => item.dispatch_ready === true && item.status === "ok")) gaps.push("post_recovered_dispatch_ready");
+  if (retry.status === "blocked" && !post.some((item: any) => item.dispatch_ready === false || item.status === "blocked" || item.status === "fail")) gaps.push("post_blocked_status");
+  const memoryFirst = retry.memory_first === true || String(retry.method || "").startsWith("memory_first");
+  if (memoryFirst && !entries.some((item: any) => item.memory_first === true)) gaps.push("hook_memory_first");
+  if (!entries.some((item: any) => String(item.assignment_id || "") === String(entry.assignment_id || ""))) gaps.push("hook_assignment_id");
+  return [...new Set(gaps)];
+}
+
+function buildWorkerContextPacketCompactHookLedgerReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const hookLedger = readGroupWorkerContextCompactHookLedger(groupId);
+    const entries = (Array.isArray(ledger.entries) ? ledger.entries : [])
+      .filter((entry: any) => workerContextPacketCompactionRetry(entry));
+    const checked = entries.map((entry: any) => {
+      const retry = workerContextPacketCompactionRetry(entry) || {};
+      const hookRunId = workerContextPacketCompactHookRunId(entry);
+      const hookEntries = (Array.isArray(hookLedger.entries) ? hookLedger.entries : []).filter((item: any) => item.hook_run_id === hookRunId);
+      const gaps = workerContextPacketCompactHookGaps(entry, hookLedger);
+      return { entry, retry, hookRunId, hookEntries, gaps };
+    });
+    const gapRows = checked.filter((row: any) => row.gaps.length > 0);
+    const hookRunIds = Array.from(new Set(checked.map((row: any) => row.hookRunId).filter(Boolean)));
+    const status = checked.length === 0
+      ? "empty"
+      : gapRows.length === 0 ? "ok" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-compact-hook-ledger-group-v1",
+      groupId,
+      status,
+      file: hookLedger.file || getGroupWorkerContextCompactHookLedgerFile(groupId),
+      bindingFile: ledger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      retryBindingCount: checked.length,
+      validHookBindingCount: checked.length - gapRows.length,
+      metadataGapCount: gapRows.length,
+      hookRunCount: hookRunIds.length,
+      preHookCount: checked.reduce((sum, row) => sum + row.hookEntries.filter((item: any) => item.phase === "pre").length, 0),
+      postHookCount: checked.reduce((sum, row) => sum + row.hookEntries.filter((item: any) => item.phase === "post").length, 0),
+      memoryFirstHookCount: checked.filter((row: any) => row.hookEntries.some((item: any) => item.memory_first === true)).length,
+      recoveredHookCount: checked.filter((row: any) => row.retry?.status === "recovered" && row.hookEntries.some((item: any) => item.phase === "post" && item.dispatch_ready === true)).length,
+      blockedHookCount: checked.filter((row: any) => row.retry?.status === "blocked" && row.hookEntries.some((item: any) => item.phase === "post" && item.dispatch_ready === false)).length,
+      hooks: checked.slice(-12).reverse().map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        packet_id: row.entry.worker_context_packet_id || "",
+        project: row.entry.project || "",
+        retry_status: row.retry?.status || "",
+        retry_method: row.retry?.method || "",
+        hook_run_id: row.hookRunId || "",
+        pre_count: row.hookEntries.filter((item: any) => item.phase === "pre").length,
+        post_count: row.hookEntries.filter((item: any) => item.phase === "post").length,
+        post_dispatch_ready: row.hookEntries.some((item: any) => item.phase === "post" && item.dispatch_ready === true),
+        memory_first: row.hookEntries.some((item: any) => item.memory_first === true),
+      })),
+      gaps: gapRows.slice(0, 8).map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        packet_id: row.entry.worker_context_packet_id || "",
+        project: row.entry.project || "",
+        hook_run_id: row.hookRunId || "",
+        reason: `WorkerContextPacket compact hook ledger 缺少/异常：${row.gaps.join(",")}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.retryBindingCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-compact-hook-ledger-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      retryBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.retryBindingCount || 0), 0),
+      validHookBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.validHookBindingCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      hookRunCount: checkedRows.reduce((sum, row) => sum + Number(row.hookRunCount || 0), 0),
+      preHookCount: checkedRows.reduce((sum, row) => sum + Number(row.preHookCount || 0), 0),
+      postHookCount: checkedRows.reduce((sum, row) => sum + Number(row.postHookCount || 0), 0),
+      memoryFirstHookCount: checkedRows.reduce((sum, row) => sum + Number(row.memoryFirstHookCount || 0), 0),
+      recoveredHookCount: checkedRows.reduce((sum, row) => sum + Number(row.recoveredHookCount || 0), 0),
+      blockedHookCount: checkedRows.reduce((sum, row) => sum + Number(row.blockedHookCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.retryBindingCount || 0) - Number(a.retryBindingCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketCompactHookLedger(options: any = {}) {
+  const report = buildWorkerContextPacketCompactHookLedgerReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    retryBindingCount: row.retryBindingCount,
+    hookRunCount: row.hookRunCount,
+    preHookCount: row.preHookCount,
+    postHookCount: row.postHookCount,
+    memoryFirstHookCount: row.memoryFirstHookCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "WorkerContextPacket compact hook ledger 缺失",
+    binding_id: gap.binding_id || "",
+    assignment_id: gap.assignment_id || "",
+    packet_id: gap.packet_id || "",
+    hook_run_id: gap.hook_run_id || "",
+    project: gap.project || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_compact_hook_ledger",
+    "WorkerContextPacket Compact Hook Ledger",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "每次 WorkerContextPacket 自动 compact/rerender retry 必须有 pre/post hook sidecar，证明压缩前压力、压缩后重注入和最终派发状态可追踪。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPacketMemoryReinjectionProof(entry: any = {}) {
+  return entry.worker_context_packet_memory_reinjection_proof
+    || entry.workerContextPacketMemoryReinjectionProof
+    || entry.worker_context_packet?.memory_reinjection_proof
+    || entry.workerContextPacket?.memoryReinjectionProof
+    || null;
+}
+
+function workerContextPacketRequiresMemoryReinjectionProof(entry: any = {}) {
+  const proof = workerContextPacketMemoryReinjectionProof(entry);
+  if (proof) return true;
+  const retry = workerContextPacketCompactionRetry(entry);
+  if (retry?.memory_first === true || String(retry?.method || "").startsWith("memory_first")) return true;
+  const flags = entry.worker_context_packet_render_probe?.rendered_flags || entry.workerContextPacketRenderProbe?.renderedFlags || {};
+  return flags.has_memory_reinjection_proof === true;
+}
+
+function workerContextPacketMemoryReinjectionProofGaps(entry: any = {}) {
+  const gaps: string[] = [];
+  const proof = workerContextPacketMemoryReinjectionProof(entry);
+  const retry = workerContextPacketCompactionRetry(entry) || {};
+  const memoryCompaction = retry.memory_compaction || retry.memoryCompaction || null;
+  const flags = entry.worker_context_packet_render_probe?.rendered_flags || entry.workerContextPacketRenderProbe?.renderedFlags || {};
+  const memoryFirst = proof?.memory_first === true || retry.memory_first === true || String(retry.method || "").startsWith("memory_first");
+  const policy = workerContextPacketMemoryPolicy(entry) || {};
+  if (!entry.binding_id) gaps.push("binding_id");
+  if (!entry.assignment_id) gaps.push("assignment_id");
+  if (!entry.worker_context_packet_id) gaps.push("worker_context_packet_id");
+  if (!proof || proof.schema !== "ccm-worker-context-memory-reinjection-proof-v1") return [...gaps, "worker_context_packet_memory_reinjection_proof"];
+  if (proof.packet_id && entry.worker_context_packet_id && proof.packet_id !== entry.worker_context_packet_id) gaps.push("proof_packet_id_mismatch");
+  const ignoredByPolicy = proof.status === "ignored_by_policy" || proof.memory_ignored === true || policy.ignored === true;
+  if (ignoredByPolicy) {
+    if (proof.status !== "ignored_by_policy") gaps.push("proof_ignored_by_policy_status");
+    if (proof.memory_ignored !== true) gaps.push("proof_memory_ignored");
+    if (policy.ignored !== true && policy.use !== "must_not_use_group_memory") gaps.push("memory_policy_ignored");
+    if (Object.keys(flags).length && flags.has_memory_reinjection_proof !== true) gaps.push("rendered_memory_reinjection_proof");
+    if (Object.keys(flags).length && flags.has_memory_ignored_policy !== true) gaps.push("rendered_memory_ignored_policy");
+    return [...new Set(gaps)];
+  }
+  if (proof.memory_present !== true) gaps.push("memory_present");
+  if (proof.rendered_memory_present !== true) gaps.push("rendered_memory_present");
+  if (!proof.packet_memory_hash) gaps.push("packet_memory_hash");
+  if (!proof.rendered_memory_hash) gaps.push("rendered_memory_hash");
+  if (Number(proof.packet_memory_chars || 0) <= 0) gaps.push("packet_memory_chars");
+  if (Number(proof.rendered_memory_chars || 0) <= 0) gaps.push("rendered_memory_chars");
+  if (Object.keys(flags).length && flags.has_memory_reinjection_proof !== true) gaps.push("rendered_memory_reinjection_proof");
+  if (Object.keys(flags).length && flags.has_platform_memory !== true) gaps.push("rendered_platform_memory");
+  if (memoryFirst) {
+    if (proof.memory_first !== true) gaps.push("proof_memory_first");
+    if (proof.status !== "compacted_reinjected") gaps.push("proof_compacted_reinjected_status");
+    if (proof.memory_compaction_schema !== "ccm-worker-context-memory-first-compaction-v1") gaps.push("proof_memory_compaction_schema");
+    if (!memoryCompaction || memoryCompaction.schema !== "ccm-worker-context-memory-first-compaction-v1") gaps.push("retry_memory_compaction_schema");
+    const expected = String(memoryCompaction?.compacted_memory_hash || proof.expected_compacted_memory_hash || "");
+    if (!expected) gaps.push("expected_compacted_memory_hash");
+    if (expected && proof.expected_compacted_memory_hash && proof.expected_compacted_memory_hash !== expected) gaps.push("expected_hash_mismatch");
+    if (expected && proof.packet_memory_hash !== expected) gaps.push("packet_memory_hash_mismatch");
+    if (proof.hash_matches_compaction !== true) gaps.push("hash_matches_compaction");
+    if (Object.keys(flags).length && flags.has_memory_compaction_hash !== true) gaps.push("rendered_memory_compaction_hash");
+  } else if (!["injected", "compacted_reinjected"].includes(String(proof.status || ""))) {
+    gaps.push("proof_status");
+  }
+  return [...new Set(gaps)];
+}
+
+function buildWorkerContextPacketMemoryReinjectionProofReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(ledger.entries) ? ledger.entries : [])
+      .filter((entry: any) => workerContextPacketRequiresMemoryReinjectionProof(entry));
+    const checked = entries.map((entry: any) => {
+      const proof = workerContextPacketMemoryReinjectionProof(entry) || {};
+      const retry = workerContextPacketCompactionRetry(entry) || {};
+      const flags = entry.worker_context_packet_render_probe?.rendered_flags || entry.workerContextPacketRenderProbe?.renderedFlags || {};
+      const gaps = workerContextPacketMemoryReinjectionProofGaps(entry);
+      return { entry, proof, retry, flags, gaps };
+    });
+    const gapRows = checked.filter((row: any) => row.gaps.length > 0);
+    const memoryFirstRows = checked.filter((row: any) => row.proof?.memory_first === true || row.retry?.memory_first === true || String(row.retry?.method || "").startsWith("memory_first"));
+    const status = checked.length === 0
+      ? "empty"
+      : gapRows.length === 0 ? "ok" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-memory-reinjection-proof-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      reinjectionBindingCount: checked.length,
+      validReinjectionCount: checked.length - gapRows.length,
+      metadataGapCount: gapRows.length,
+      memoryFirstCount: memoryFirstRows.length,
+      compactedReinjectionCount: checked.filter((row: any) => row.proof?.status === "compacted_reinjected").length,
+      ignoredByPolicyCount: checked.filter((row: any) => row.proof?.status === "ignored_by_policy" && row.proof?.memory_ignored === true).length,
+      hashMatchCount: checked.filter((row: any) => row.proof?.hash_matches_compaction === true).length,
+      renderedProofCount: checked.filter((row: any) => row.flags?.has_memory_reinjection_proof === true).length,
+      renderedMemoryCount: checked.filter((row: any) => row.flags?.has_platform_memory === true).length,
+      proofs: checked.slice(-12).reverse().map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        packet_id: row.entry.worker_context_packet_id || row.proof?.packet_id || "",
+        project: row.entry.project || row.proof?.project || "",
+        status: row.proof?.status || "",
+        memory_ignored: row.proof?.memory_ignored === true,
+        memory_first: row.proof?.memory_first === true,
+        packet_memory_hash: row.proof?.packet_memory_hash || "",
+        expected_compacted_memory_hash: row.proof?.expected_compacted_memory_hash || "",
+        hash_matches_compaction: row.proof?.hash_matches_compaction === true,
+        rendered_memory_present: row.proof?.rendered_memory_present === true,
+        rendered_memory_reinjection_proof: row.flags?.has_memory_reinjection_proof === true,
+      })),
+      gaps: gapRows.slice(0, 8).map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        packet_id: row.entry.worker_context_packet_id || "",
+        project: row.entry.project || "",
+        reason: `WorkerContextPacket memory reinjection proof 缺少/异常：${row.gaps.join(",")}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.reinjectionBindingCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-memory-reinjection-proof-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      reinjectionBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.reinjectionBindingCount || 0), 0),
+      validReinjectionCount: checkedRows.reduce((sum, row) => sum + Number(row.validReinjectionCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      memoryFirstCount: checkedRows.reduce((sum, row) => sum + Number(row.memoryFirstCount || 0), 0),
+      compactedReinjectionCount: checkedRows.reduce((sum, row) => sum + Number(row.compactedReinjectionCount || 0), 0),
+      ignoredByPolicyCount: checkedRows.reduce((sum, row) => sum + Number(row.ignoredByPolicyCount || 0), 0),
+      hashMatchCount: checkedRows.reduce((sum, row) => sum + Number(row.hashMatchCount || 0), 0),
+      renderedProofCount: checkedRows.reduce((sum, row) => sum + Number(row.renderedProofCount || 0), 0),
+      renderedMemoryCount: checkedRows.reduce((sum, row) => sum + Number(row.renderedMemoryCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.reinjectionBindingCount || 0) - Number(a.reinjectionBindingCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketMemoryReinjectionProof(options: any = {}) {
+  const report = buildWorkerContextPacketMemoryReinjectionProofReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    reinjectionBindingCount: row.reinjectionBindingCount,
+    memoryFirstCount: row.memoryFirstCount,
+    compactedReinjectionCount: row.compactedReinjectionCount,
+    ignoredByPolicyCount: row.ignoredByPolicyCount,
+    renderedProofCount: row.renderedProofCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "WorkerContextPacket memory reinjection proof 缺失",
+    binding_id: gap.binding_id || "",
+    assignment_id: gap.assignment_id || "",
+    packet_id: gap.packet_id || "",
+    project: gap.project || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_memory_reinjection_proof",
+    "WorkerContextPacket Memory Reinjection Proof",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "压缩/裁剪 WorkerContextPacket 后，主 Agent 必须证明压缩后的群聊记忆已重新注入最终下发给子 Agent 的 packet 与渲染文本。"
+  );
+  check.report = report;
+  return check;
+}
+
+function normalizeReplayRepairWorkerContextPacketBriefForCenter(item: any = {}) {
+  return {
+    brief_id: item.brief_id || item.briefId || "",
+    work_item_id: item.work_item_id || item.workItemId || "",
+    source: item.source || "",
+    target_project: item.target_project || item.targetProject || "",
+    proof_entry_id: item.proof_entry_id || item.proofEntryId || "",
+    request_patch_checksum: item.request_patch_checksum || item.requestPatchChecksum || "",
+    provider_reproof_status: item.provider_reproof_status || item.providerReproofStatus || "",
+    provider_reproof_reason: item.provider_reproof_reason || item.providerReproofReason || "",
+    reproof_candidate_id: item.reproof_candidate_id || item.reproofCandidateId || "",
+    timeline_binding_id: item.timeline_binding_id || item.timelineBindingId || "",
+    original_work_item_id: item.original_work_item_id || item.originalWorkItemId || "",
+    request_telemetry_session_status: item.request_telemetry_session_status || item.requestTelemetrySessionStatus || "",
+    request_telemetry_dispatch_status: item.request_telemetry_dispatch_status || item.requestTelemetryDispatchStatus || "",
+    runner_request_id: item.runner_request_id || item.runnerRequestId || "",
+    execution_id: item.execution_id || item.executionId || "",
+    required_receipt_reference: item.required_receipt_reference !== false && item.requiredReceiptReference !== false,
+    should_create_real_task: item.should_create_real_task === false || item.shouldCreateRealTask === false ? false : item.should_create_real_task,
+  };
+}
+
+function replayRepairWorkerContextPacketBriefsForCenter(entry: any = {}) {
+  const explicit = Array.isArray(entry.worker_context_packet_replay_briefs || entry.workerContextPacketReplayBriefs)
+    ? (entry.worker_context_packet_replay_briefs || entry.workerContextPacketReplayBriefs)
+    : [];
+  const packet = entry.worker_context_packet || entry.workerContextPacket || {};
+  const packetBriefs = Array.isArray(packet.replay_repair_dispatch_briefs || packet.replayRepairDispatchBriefs)
+    ? (packet.replay_repair_dispatch_briefs || packet.replayRepairDispatchBriefs)
+    : [];
+  const probeBrief = entry.worker_context_packet_render_probe?.matching_brief || entry.workerContextPacketRenderProbe?.matchingBrief || null;
+  return [...explicit, ...packetBriefs, probeBrief]
+    .filter(Boolean)
+    .map(normalizeReplayRepairWorkerContextPacketBriefForCenter);
+}
+
+function replayRepairWorkerContextPacketBriefMatchesCenter(packetBrief: any = {}, entry: any = {}) {
+  const packetBriefId = String(packetBrief.brief_id || "").trim();
+  const entryBriefId = String(entry.brief_id || "").trim();
+  if (packetBriefId && entryBriefId && packetBriefId === entryBriefId) return true;
+  const packetWorkItem = String(packetBrief.work_item_id || "").trim();
+  const entryWorkItem = String(entry.work_item_id || "").trim();
+  return !!packetWorkItem && !!entryWorkItem && packetWorkItem === entryWorkItem;
+}
+
+function replayRepairWorkerContextPacketInjectionGaps(entry: any = {}) {
+  const gaps: string[] = [];
+  if (!entry.worker_context_packet_id) gaps.push("worker_context_packet_id");
+  const packetBriefs = replayRepairWorkerContextPacketBriefsForCenter(entry);
+  if (!packetBriefs.length) gaps.push("worker_context_packet_replay_briefs");
+  const matchingBrief = packetBriefs.find((item: any) => replayRepairWorkerContextPacketBriefMatchesCenter(item, entry)) || null;
+  if (!matchingBrief) gaps.push("packet_brief_match");
+  const mirroredFields = [
+    "brief_id",
+    "work_item_id",
+    "source",
+    "proof_entry_id",
+    "request_patch_checksum",
+    "request_telemetry_session_status",
+    "request_telemetry_dispatch_status",
+    "runner_request_id",
+    "execution_id",
+  ];
+  if (String(entry.source || "") === "api_microcompact_native_apply_provider_reproof") {
+    mirroredFields.push(
+      "provider_reproof_status",
+      "provider_reproof_reason",
+      "reproof_candidate_id",
+      "timeline_binding_id",
+      "original_work_item_id",
+    );
+  }
+  for (const field of mirroredFields) {
+    const expected = String(entry[field] || "").trim();
+    if (expected && String(matchingBrief?.[field] || "").trim() !== expected) gaps.push(`packet_${field}`);
+  }
+  if (matchingBrief && matchingBrief.required_receipt_reference !== true) gaps.push("packet_required_receipt_reference");
+  if (matchingBrief && matchingBrief.should_create_real_task !== false) gaps.push("packet_should_create_real_task_false");
+  const probe = entry.worker_context_packet_render_probe || entry.workerContextPacketRenderProbe || {};
+  const flags = probe.rendered_flags || probe.renderedFlags || {};
+  if (!Object.keys(flags).length) gaps.push("worker_context_packet_render_probe");
+  const renderedChecks: Record<string, string> = {
+    brief_id: "has_brief_id",
+    work_item_id: "has_work_item_id",
+    source: "has_source",
+    proof_entry_id: "has_proof_entry_id",
+    request_patch_checksum: "has_request_patch_checksum",
+    provider_reproof_status: "has_provider_reproof_status",
+    provider_reproof_reason: "has_provider_reproof_reason",
+    reproof_candidate_id: "has_reproof_candidate_id",
+    timeline_binding_id: "has_timeline_binding_id",
+    original_work_item_id: "has_original_work_item_id",
+    request_telemetry_session_status: "has_request_telemetry_session_status",
+    request_telemetry_dispatch_status: "has_request_telemetry_dispatch_status",
+    runner_request_id: "has_runner_request_id",
+    execution_id: "has_execution_id",
+  };
+  for (const [field, flag] of Object.entries(renderedChecks)) {
+    if (!String(entry[field] || "").trim()) continue;
+    if (flags[flag] !== true) gaps.push(`rendered_${field}`);
+  }
+  if (flags.has_should_create_real_task_false !== true) gaps.push("rendered_should_create_real_task_false");
+  return [...new Set(gaps)];
+}
+
+function buildApiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = Array.isArray(ledger.entries) ? ledger.entries : [];
+    const nativeEntries = entries.filter((entry: any) => isApiMicrocompactNativeApplyProofDispatchSource(entry.source));
+    const packetRows = nativeEntries.map((entry: any) => {
+      const packetBriefs = replayRepairWorkerContextPacketBriefsForCenter(entry);
+      const matchingBrief = packetBriefs.find((item: any) => replayRepairWorkerContextPacketBriefMatchesCenter(item, entry)) || {};
+      const probe = entry.worker_context_packet_render_probe || entry.workerContextPacketRenderProbe || {};
+      const flags = probe.rendered_flags || probe.renderedFlags || {};
+      const gaps = replayRepairWorkerContextPacketInjectionGaps(entry);
+      return {
+        entry,
+        packetBriefs,
+        matchingBrief,
+        flags,
+        gaps,
+      };
+    });
+    const gapRows = packetRows.filter((row: any) => row.gaps.length > 0);
+    const providerRows = packetRows.filter((row: any) => String(row.entry.source || "") === "api_microcompact_native_apply_provider_reproof");
+    const status = nativeEntries.length === 0
+      ? "empty"
+      : gapRows.length === 0 ? "ok" : "fail";
+    return {
+      schema: "ccm-api-microcompact-native-apply-proof-repair-worker-context-packet-injection-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      bindingCount: nativeEntries.length,
+      validInjectionCount: nativeEntries.length - gapRows.length,
+      metadataGapCount: gapRows.length,
+      workerContextPacketBindingCount: nativeEntries.filter((entry: any) => entry.worker_context_packet_id).length,
+      packetBriefInjectionCount: packetRows.filter((row: any) => row.matchingBrief?.brief_id || row.matchingBrief?.work_item_id).length,
+      renderedProbeCount: packetRows.filter((row: any) => Object.keys(row.flags || {}).length > 0).length,
+      providerReproofBindingCount: providerRows.length,
+      providerReproofPacketCount: providerRows.filter((row: any) => row.matchingBrief?.provider_reproof_status).length,
+      renderedProviderReproofCount: providerRows.filter((row: any) => row.flags?.has_provider_reproof_status === true && row.flags?.has_provider_reproof_reason === true).length,
+      bindings: packetRows.slice(-12).reverse().map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        brief_id: row.entry.brief_id || "",
+        work_item_id: row.entry.work_item_id || "",
+        source: row.entry.source || "",
+        project: row.entry.project || "",
+        assignment_id: row.entry.assignment_id || "",
+        worker_context_packet_id: row.entry.worker_context_packet_id || "",
+        packet_brief_count: row.packetBriefs.length,
+        packet_brief_id: row.matchingBrief.brief_id || "",
+        packet_provider_reproof_status: row.matchingBrief.provider_reproof_status || "",
+        packet_provider_reproof_reason: row.matchingBrief.provider_reproof_reason || "",
+        packet_reproof_candidate_id: row.matchingBrief.reproof_candidate_id || "",
+        packet_original_work_item_id: row.matchingBrief.original_work_item_id || "",
+        rendered_has_provider_reproof_status: row.flags?.has_provider_reproof_status === true,
+        rendered_has_provider_reproof_reason: row.flags?.has_provider_reproof_reason === true,
+        rendered_has_original_work_item_id: row.flags?.has_original_work_item_id === true,
+      })),
+      gaps: gapRows.slice(0, 8).map((row: any) => ({
+        binding_id: row.entry.binding_id || "",
+        brief_id: row.entry.brief_id || "",
+        work_item_id: row.entry.work_item_id || "",
+        assignment_id: row.entry.assignment_id || "",
+        worker_context_packet_id: row.entry.worker_context_packet_id || "",
+        reason: `native proof repair WorkerContextPacket 注入缺少字段/渲染：${row.gaps.join(",")}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.bindingCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-api-microcompact-native-apply-proof-repair-worker-context-packet-injection-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      bindingCount: checkedRows.reduce((sum, row) => sum + Number(row.bindingCount || 0), 0),
+      validInjectionCount: checkedRows.reduce((sum, row) => sum + Number(row.validInjectionCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      workerContextPacketBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.workerContextPacketBindingCount || 0), 0),
+      packetBriefInjectionCount: checkedRows.reduce((sum, row) => sum + Number(row.packetBriefInjectionCount || 0), 0),
+      renderedProbeCount: checkedRows.reduce((sum, row) => sum + Number(row.renderedProbeCount || 0), 0),
+      providerReproofBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.providerReproofBindingCount || 0), 0),
+      providerReproofPacketCount: checkedRows.reduce((sum, row) => sum + Number(row.providerReproofPacketCount || 0), 0),
+      renderedProviderReproofCount: checkedRows.reduce((sum, row) => sum + Number(row.renderedProviderReproofCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.bindingCount || 0) - Number(a.bindingCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateApiMicrocompactNativeApplyProofRepairWorkerContextPacketInjection(options: any = {}) {
+  const report = buildApiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    bindingCount: row.bindingCount,
+    validInjectionCount: row.validInjectionCount,
+    packetBriefInjectionCount: row.packetBriefInjectionCount,
+    providerReproofBindingCount: row.providerReproofBindingCount,
+    providerReproofPacketCount: row.providerReproofPacketCount,
+    renderedProviderReproofCount: row.renderedProviderReproofCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "API microcompact native proof repair WorkerContextPacket 注入缺失",
+    binding_id: gap.binding_id || "",
+    brief_id: gap.brief_id || "",
+    work_item_id: gap.work_item_id || "",
+    assignment_id: gap.assignment_id || "",
+    worker_context_packet_id: gap.worker_context_packet_id || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "api_microcompact_native_apply_proof_repair_worker_context_packet_injection",
+    "API Microcompact Native Apply Proof Repair WorkerContextPacket Injection",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 provider/native proof repair brief 绑定到 assignment 后，必须进入真实 WorkerContextPacket，并在渲染给第三方子 Agent 的上下文里保留 provider re-proof/request/session/dispatch/runner 元数据。"
+  );
+  check.report = report;
+  return check;
+}
+
+function replayRepairDispatchTimelineBindingGroupIds(options: any = {}) {
+  const explicit = Array.isArray(options.groupIds || options.group_ids)
+    ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : null;
+  if (explicit?.length) return explicit;
+  return listJsonFiles(GROUP_MEMORY_REPLAY_REPAIR_TIMELINE_BINDINGS_DIR)
+    .map(file => {
+      const ledger = readJson(file, null);
+      return String(ledger?.groupId || path.basename(file, ".json") || "").trim();
+    })
+    .filter(Boolean);
+}
+
+const REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS = [
+  "dispatch",
+  "child_agent_start",
+  "worker_handoff_ready",
+  "task_agent_memory_context_snapshot",
+  "child_agent_receipt",
+];
+
+function replayRepairDispatchBriefTimelineBindingGaps(entry: any = {}) {
+  const gaps: string[] = [];
+  if (!entry.timeline_binding_id) gaps.push("timeline_binding_id");
+  if (!entry.brief_id) gaps.push("brief_id");
+  if (!entry.work_item_id) gaps.push("work_item_id");
+  if (!entry.task_id) gaps.push("task_id");
+  if (!entry.project) gaps.push("project");
+  if (!entry.assignment_id) gaps.push("assignment_id");
+  if (!entry.dispatch_key) gaps.push("dispatch_key");
+  if (!entry.worker_context_packet_id) gaps.push("worker_context_packet_id");
+  if (!entry.task_agent_session_id) gaps.push("task_agent_session_id");
+  if (!entry.memory_context_snapshot_id) gaps.push("memory_context_snapshot_id");
+  if (!entry.execution_id) gaps.push("execution_id");
+  if (entry.should_create_real_task !== false && entry.shouldCreateRealTask !== false) gaps.push("should_create_real_task_false");
+  const eventTypes = new Set((Array.isArray(entry.event_types) ? entry.event_types : []).map((item: any) => String(item || "").trim()).filter(Boolean));
+  for (const eventType of REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS) {
+    if (!eventTypes.has(eventType)) gaps.push(`event:${eventType}`);
+  }
+  if (isApiMicrocompactNativeApplyProofDispatchSource(entry.source)) {
+    if (!entry.proof_entry_id) gaps.push("proof_entry_id");
+    if (!entry.request_patch_checksum) gaps.push("request_patch_checksum");
+    if (!entry.request_telemetry_session_status) gaps.push("request_telemetry_session_status");
+    if (!entry.request_telemetry_dispatch_status) gaps.push("request_telemetry_dispatch_status");
+    if (!entry.runner_request_id) gaps.push("runner_request_id");
+    if (!entry.receipt_status) gaps.push("receipt_status");
+  }
+  if (String(entry.source || "") === "api_microcompact_native_apply_provider_reproof") {
+    if (!entry.provider_reproof_status) gaps.push("provider_reproof_status");
+    if (!entry.provider_reproof_reason) gaps.push("provider_reproof_reason");
+    if (!entry.reproof_candidate_id) gaps.push("reproof_candidate_id");
+    if (!entry.original_work_item_id) gaps.push("original_work_item_id");
+  }
+  return [...new Set(gaps)];
+}
+
+function replayRepairTimelineBindingHasRequiredCompletionEvidence(entry: any = {}) {
+  if (!isApiMicrocompactNativeApplyTimelineClosableSource(entry.source)) return false;
+  return replayRepairDispatchBriefTimelineBindingGaps(entry).length === 0
+    && ["done", "completed", "ok"].includes(String(entry.receipt_status || entry.receiptStatus || "").trim());
+}
+
+function replayRepairTimelineBindingMatchesRepairItem(binding: any = {}, item: any = {}) {
+  const bindingWorkItemId = String(binding.work_item_id || "").trim();
+  const itemId = String(item.work_item_id || item.id || "").trim();
+  if (bindingWorkItemId && itemId && bindingWorkItemId === itemId) return true;
+  const bindingRequest = String(binding.request_patch_checksum || "").trim();
+  const itemRequest = String(item.request_patch_checksum || "").trim();
+  if (bindingRequest && itemRequest && bindingRequest === itemRequest) return true;
+  const bindingRunner = String(binding.runner_request_id || "").trim();
+  const itemRunner = String(item.runner_request_id || item.request_telemetry_runner_request_id || "").trim();
+  if (bindingRunner && itemRunner && bindingRunner === itemRunner) return true;
+  const bindingProof = String(binding.proof_entry_id || "").trim();
+  const itemProof = String(item.proof_entry_id || "").trim();
+  return !!bindingProof && !!itemProof && bindingProof === itemProof;
+}
+
+function syncApiMicrocompactNativeApplyProofRepairTimelineCompletions(groupId: string, options: any = {}) {
+  if (!groupId) return { groupId, completed: 0, matchedBindingCount: 0, missingWorkItemBindings: [], openMatchedItems: [], itemIds: [] };
+  const at = String(options.at || options.generatedAt || options.generated_at || now());
+  const timelineLedger = readGroupReplayRepairDispatchTimelineBindingLedger(groupId);
+  const completeBindings = (Array.isArray(timelineLedger.entries) ? timelineLedger.entries : [])
+    .filter(replayRepairTimelineBindingHasRequiredCompletionEvidence);
+  const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+  const items = Array.isArray(ledger.items) ? ledger.items : [];
+  let completed = 0;
+  const itemIds: string[] = [];
+  const missingWorkItemBindings: any[] = [];
+  const openMatchedItems: any[] = [];
+  let changed = false;
+  const nextItems = items.map((item: any) => {
+    if (!isApiMicrocompactNativeApplyTimelineClosableSource(item.source)) return item;
+    const binding = completeBindings.find((entry: any) => replayRepairTimelineBindingMatchesRepairItem(entry, item));
+    if (!binding) return item;
+    if (!replayRepairWorkItemOpen(item.status)) return item;
+    changed = true;
+    completed += 1;
+    itemIds.push(String(item.work_item_id || item.id || ""));
+    const evidence = [
+      ...(Array.isArray(item.evidence) ? item.evidence : []),
+      `timeline_binding=${binding.timeline_binding_id || ""}`,
+      `timeline_events=${(binding.event_types || []).join(",")}`,
+      binding.receipt_status ? `receipt_status=${binding.receipt_status}` : "",
+    ].filter(Boolean);
+    const verification = [
+      ...(Array.isArray(item.verification) ? item.verification : []),
+      "timeline binding 已证明 dispatch->session->snapshot->execution->receipt 闭环",
+    ];
+    return {
+      ...item,
+      status: "completed",
+      updatedAt: at,
+      completedAt: item.completedAt || item.completed_at || at,
+      resolutionReason: "timeline_binding_child_receipt_proved_native_repair",
+      completion_source: "replay_repair_timeline_binding",
+      replay_repair_timeline_binding: {
+        timeline_binding_id: binding.timeline_binding_id || "",
+        brief_id: binding.brief_id || "",
+        task_id: binding.task_id || "",
+        assignment_id: binding.assignment_id || "",
+        worker_context_packet_id: binding.worker_context_packet_id || "",
+        task_agent_session_id: binding.task_agent_session_id || "",
+        memory_context_snapshot_id: binding.memory_context_snapshot_id || "",
+        execution_id: binding.execution_id || "",
+        runner_request_id: binding.runner_request_id || "",
+        receipt_status: binding.receipt_status || "",
+        event_types: binding.event_types || [],
+        completed_at: at,
+      },
+      blockers: [],
+      needs: [],
+      evidence: [...new Set(evidence)].slice(-24),
+      verification: [...new Set(verification)].slice(-24),
+    };
+  });
+  const nativeItems = nextItems.filter((item: any) => isApiMicrocompactNativeApplyTimelineClosableSource(item.source));
+  for (const binding of completeBindings) {
+    const matches = nativeItems.filter((item: any) => replayRepairTimelineBindingMatchesRepairItem(binding, item));
+    if (!matches.length) {
+      missingWorkItemBindings.push({
+        timeline_binding_id: binding.timeline_binding_id || "",
+        brief_id: binding.brief_id || "",
+        work_item_id: binding.work_item_id || "",
+        reason: "完整 timeline binding 没有匹配的 native proof repair work item",
+      });
+      continue;
+    }
+    for (const item of matches) {
+      if (replayRepairWorkItemOpen(item.status)) {
+        openMatchedItems.push({
+          timeline_binding_id: binding.timeline_binding_id || "",
+          work_item_id: item.work_item_id || item.id || "",
+          status: replayRepairWorkItemStatus(item.status),
+          reason: "timeline binding 已完整但匹配 repair work item 仍未关闭",
+        });
+      }
+    }
+  }
+  if (changed) {
+    writeGroupCompactBoundaryReplayRepairWorkItems(groupId, {
+      ...ledger,
+      items: nextItems,
+      stats: replayRepairWorkItemStats(nextItems),
+      updatedAt: at,
+      latestTimelineCompletion: {
+        completed,
+        itemIds,
+        at,
+      },
+    });
+  }
+  return {
+    groupId,
+    completed,
+    matchedBindingCount: completeBindings.length,
+    missingWorkItemBindings,
+    openMatchedItems,
+    itemIds,
+    changed,
+  };
+}
+
+function buildApiMicrocompactNativeApplyProofRepairTimelineBindingReport(options: any = {}) {
+  const groupIds = replayRepairDispatchTimelineBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupReplayRepairDispatchTimelineBindingLedger(groupId);
+    const entries = Array.isArray(ledger.entries) ? ledger.entries : [];
+    const nativeEntries = entries.filter((entry: any) => isApiMicrocompactNativeApplyProofDispatchSource(entry.source));
+    const gapEntries = nativeEntries
+      .map((entry: any) => ({
+        entry,
+        gaps: replayRepairDispatchBriefTimelineBindingGaps(entry),
+      }))
+      .filter((item: any) => item.gaps.length > 0);
+    const status = nativeEntries.length === 0
+      ? "empty"
+      : gapEntries.length === 0 ? "ok" : "fail";
+    return {
+      schema: "ccm-api-microcompact-native-apply-proof-repair-timeline-binding-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId),
+      bindingCount: nativeEntries.length,
+      validBindingCount: nativeEntries.length - gapEntries.length,
+      metadataGapCount: gapEntries.length,
+      taskBoundBindingCount: nativeEntries.filter((entry: any) => entry.task_id).length,
+      sessionBoundBindingCount: nativeEntries.filter((entry: any) => entry.task_agent_session_id).length,
+      snapshotBoundBindingCount: nativeEntries.filter((entry: any) => entry.memory_context_snapshot_id).length,
+      executionBoundBindingCount: nativeEntries.filter((entry: any) => entry.execution_id).length,
+      runnerBoundBindingCount: nativeEntries.filter((entry: any) => entry.runner_request_id).length,
+      receiptBoundBindingCount: nativeEntries.filter((entry: any) => entry.receipt_status).length,
+      requiredEventCoverageCount: nativeEntries.filter((entry: any) => {
+        const eventTypes = new Set((Array.isArray(entry.event_types) ? entry.event_types : []).map((item: any) => String(item || "").trim()));
+        return REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS.every(type => eventTypes.has(type));
+      }).length,
+      bindings: nativeEntries.slice(-12).reverse().map((entry: any) => ({
+        timeline_binding_id: entry.timeline_binding_id || "",
+        brief_id: entry.brief_id || "",
+        work_item_id: entry.work_item_id || "",
+        source: entry.source || "",
+        project: entry.project || "",
+        task_id: entry.task_id || "",
+        assignment_id: entry.assignment_id || "",
+        dispatch_key: entry.dispatch_key || "",
+        worker_context_packet_id: entry.worker_context_packet_id || "",
+        task_agent_session_id: entry.task_agent_session_id || "",
+        memory_context_snapshot_id: entry.memory_context_snapshot_id || "",
+        execution_id: entry.execution_id || "",
+        runner_request_id: entry.runner_request_id || "",
+        provider_reproof_status: entry.provider_reproof_status || "",
+        provider_reproof_reason: entry.provider_reproof_reason || "",
+        reproof_candidate_id: entry.reproof_candidate_id || "",
+        original_timeline_binding_id: entry.original_timeline_binding_id || "",
+        original_work_item_id: entry.original_work_item_id || "",
+        receipt_status: entry.receipt_status || "",
+        event_types: entry.event_types || [],
+      })),
+      gaps: gapEntries.slice(0, 8).map((item: any) => ({
+        timeline_binding_id: item.entry.timeline_binding_id || "",
+        brief_id: item.entry.brief_id || "",
+        work_item_id: item.entry.work_item_id || "",
+        task_id: item.entry.task_id || "",
+        assignment_id: item.entry.assignment_id || "",
+        reason: `native proof repair dispatch brief timeline binding 缺少字段/事件：${item.gaps.join(",")}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.bindingCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-api-microcompact-native-apply-proof-repair-timeline-binding-report-v1",
+    generatedAt: now(),
+    requiredEventTypes: REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS,
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      bindingCount: checkedRows.reduce((sum, row) => sum + Number(row.bindingCount || 0), 0),
+      validBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.validBindingCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      taskBoundBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.taskBoundBindingCount || 0), 0),
+      sessionBoundBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.sessionBoundBindingCount || 0), 0),
+      snapshotBoundBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.snapshotBoundBindingCount || 0), 0),
+      executionBoundBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.executionBoundBindingCount || 0), 0),
+      runnerBoundBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.runnerBoundBindingCount || 0), 0),
+      receiptBoundBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.receiptBoundBindingCount || 0), 0),
+      requiredEventCoverageCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredEventCoverageCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.bindingCount || 0) - Number(a.bindingCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateApiMicrocompactNativeApplyProofRepairTimelineBindings(options: any = {}) {
+  const report = buildApiMicrocompactNativeApplyProofRepairTimelineBindingReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    bindingCount: row.bindingCount,
+    validBindingCount: row.validBindingCount,
+    sessionBoundBindingCount: row.sessionBoundBindingCount,
+    snapshotBoundBindingCount: row.snapshotBoundBindingCount,
+    executionBoundBindingCount: row.executionBoundBindingCount,
+    receiptBoundBindingCount: row.receiptBoundBindingCount,
+    requiredEventCoverageCount: row.requiredEventCoverageCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "API microcompact native proof repair timeline binding 缺失",
+    timeline_binding_id: gap.timeline_binding_id || "",
+    brief_id: gap.brief_id || "",
+    work_item_id: gap.work_item_id || "",
+    task_id: gap.task_id || "",
+    assignment_id: gap.assignment_id || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "api_microcompact_native_apply_proof_repair_timeline_bindings",
+    "API Microcompact Native Apply Proof Repair Timeline Bindings",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当主 Agent 把 native proof repair dispatch brief 派给真实子 Agent 时，必须持久化 brief->timeline->task session->memory snapshot->execution->receipt 绑定，并保留 runner/proof/request 元数据。"
+  );
+  check.report = report;
+  return check;
+}
+
+function replayRepairTimelineBindingHasReceiptEvent(entry: any = {}) {
+  const eventTypes = new Set((Array.isArray(entry.event_types) ? entry.event_types : []).map((item: any) => String(item || "").trim()));
+  return eventTypes.has("child_agent_receipt") || !!String(entry.receipt_status || "").trim();
+}
+
+function replayRepairReceiptConsumptionStatus(value: any) {
+  const status = String(value || "").trim().toLowerCase();
+  if (["strong", "used", "verified", "ignored", "blocked"].includes(status)) return status;
+  if (["native_strong", "provider_strong"].includes(status)) return "strong";
+  if (["consumed", "applied"].includes(status)) return "used";
+  if (["not_used", "skipped"].includes(status)) return "ignored";
+  if (["failed", "needs_info", "needs_user"].includes(status)) return "blocked";
+  return status ? "invalid" : "missing";
+}
+
+function replayRepairReceiptConsumptionGaps(entry: any = {}) {
+  const gaps: string[] = [];
+  if (!replayRepairTimelineBindingHasReceiptEvent(entry)) gaps.push("child_agent_receipt_event");
+  const status = replayRepairReceiptConsumptionStatus(entry.replay_repair_consumption_status || entry.replayRepairConsumptionStatus);
+  if (status === "missing") gaps.push("replay_repair_consumption_status");
+  else if (status === "invalid") gaps.push("replay_repair_consumption_status_invalid");
+  if (!entry.replay_repair_consumption_source && status !== "missing") gaps.push("replay_repair_consumption_source");
+  if (["used", "verified", "ignored", "blocked", "strong"].includes(status) && !entry.replay_repair_consumption_reason) gaps.push("replay_repair_consumption_reason");
+  if (String(entry.source || "") === "api_microcompact_native_apply_provider_reproof") {
+    if (!entry.provider_reproof_status) gaps.push("provider_reproof_status");
+    if (!entry.provider_reproof_reason) gaps.push("provider_reproof_reason");
+    if (!entry.reproof_candidate_id) gaps.push("reproof_candidate_id");
+    if (!entry.original_work_item_id) gaps.push("original_work_item_id");
+  }
+  return [...new Set(gaps)];
+}
+
+function buildApiMicrocompactNativeApplyProofRepairReceiptConsumptionReport(options: any = {}) {
+  const groupIds = replayRepairDispatchTimelineBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupReplayRepairDispatchTimelineBindingLedger(groupId);
+    const entries = Array.isArray(ledger.entries) ? ledger.entries : [];
+    const nativeReceiptEntries = entries
+      .filter((entry: any) => isApiMicrocompactNativeApplyProofDispatchSource(entry.source))
+      .filter(replayRepairTimelineBindingHasReceiptEvent);
+    const consumptionRows = nativeReceiptEntries.map((entry: any) => {
+      const status = replayRepairReceiptConsumptionStatus(entry.replay_repair_consumption_status || entry.replayRepairConsumptionStatus);
+      const gaps = replayRepairReceiptConsumptionGaps(entry);
+      return { entry, status, gaps };
+    });
+    const gapRows = consumptionRows.filter((row: any) => row.gaps.length > 0);
+    const providerRows = consumptionRows.filter((row: any) => String(row.entry.source || "") === "api_microcompact_native_apply_provider_reproof");
+    const status = nativeReceiptEntries.length === 0
+      ? "empty"
+      : gapRows.length === 0 ? "ok" : "fail";
+    return {
+      schema: "ccm-api-microcompact-native-apply-proof-repair-receipt-consumption-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId),
+      receiptBindingCount: nativeReceiptEntries.length,
+      validConsumptionCount: nativeReceiptEntries.length - gapRows.length,
+      metadataGapCount: gapRows.length,
+      providerReproofReceiptCount: providerRows.length,
+      providerReproofConsumedCount: providerRows.filter((row: any) => ["strong", "used", "verified", "ignored", "blocked"].includes(row.status)).length,
+      strongReceiptClaimCount: consumptionRows.filter((row: any) => row.status === "strong").length,
+      usedCount: consumptionRows.filter((row: any) => row.status === "used").length,
+      verifiedCount: consumptionRows.filter((row: any) => row.status === "verified").length,
+      ignoredCount: consumptionRows.filter((row: any) => row.status === "ignored").length,
+      blockedCount: consumptionRows.filter((row: any) => row.status === "blocked").length,
+      bindings: consumptionRows.slice(-12).reverse().map((row: any) => ({
+        timeline_binding_id: row.entry.timeline_binding_id || "",
+        brief_id: row.entry.brief_id || "",
+        work_item_id: row.entry.work_item_id || "",
+        source: row.entry.source || "",
+        project: row.entry.project || "",
+        task_id: row.entry.task_id || "",
+        receipt_status: row.entry.receipt_status || "",
+        replay_repair_consumption_status: row.entry.replay_repair_consumption_status || "",
+        replay_repair_consumption_source: row.entry.replay_repair_consumption_source || "",
+        replay_repair_consumption_reason: compactMemoryCenterText(row.entry.replay_repair_consumption_reason || "", 240),
+        provider_reproof_status: row.entry.provider_reproof_status || "",
+        provider_reproof_reason: row.entry.provider_reproof_reason || "",
+        reproof_candidate_id: row.entry.reproof_candidate_id || "",
+        original_work_item_id: row.entry.original_work_item_id || "",
+      })),
+      gaps: gapRows.slice(0, 8).map((row: any) => ({
+        timeline_binding_id: row.entry.timeline_binding_id || "",
+        brief_id: row.entry.brief_id || "",
+        work_item_id: row.entry.work_item_id || "",
+        task_id: row.entry.task_id || "",
+        reason: `native proof repair receipt consumption 缺少字段：${row.gaps.join(",")}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.receiptBindingCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-api-microcompact-native-apply-proof-repair-receipt-consumption-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      receiptBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.receiptBindingCount || 0), 0),
+      validConsumptionCount: checkedRows.reduce((sum, row) => sum + Number(row.validConsumptionCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      providerReproofReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.providerReproofReceiptCount || 0), 0),
+      providerReproofConsumedCount: checkedRows.reduce((sum, row) => sum + Number(row.providerReproofConsumedCount || 0), 0),
+      strongReceiptClaimCount: checkedRows.reduce((sum, row) => sum + Number(row.strongReceiptClaimCount || 0), 0),
+      usedCount: checkedRows.reduce((sum, row) => sum + Number(row.usedCount || 0), 0),
+      verifiedCount: checkedRows.reduce((sum, row) => sum + Number(row.verifiedCount || 0), 0),
+      ignoredCount: checkedRows.reduce((sum, row) => sum + Number(row.ignoredCount || 0), 0),
+      blockedCount: checkedRows.reduce((sum, row) => sum + Number(row.blockedCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.receiptBindingCount || 0) - Number(a.receiptBindingCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateApiMicrocompactNativeApplyProofRepairReceiptConsumption(options: any = {}) {
+  const report = buildApiMicrocompactNativeApplyProofRepairReceiptConsumptionReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    receiptBindingCount: row.receiptBindingCount,
+    validConsumptionCount: row.validConsumptionCount,
+    providerReproofReceiptCount: row.providerReproofReceiptCount,
+    providerReproofConsumedCount: row.providerReproofConsumedCount,
+    strongReceiptClaimCount: row.strongReceiptClaimCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "API microcompact native proof repair receipt consumption 缺失",
+    timeline_binding_id: gap.timeline_binding_id || "",
+    brief_id: gap.brief_id || "",
+    work_item_id: gap.work_item_id || "",
+    task_id: gap.task_id || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "api_microcompact_native_apply_proof_repair_receipt_consumption",
+    "API Microcompact Native Apply Proof Repair Receipt Consumption",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 native/provider proof repair brief 进入子 Agent 上下文后，child_agent_receipt 必须用 replayRepairDispatchBriefUsage 或 memoryUsed/memoryIgnored 声明 used/verified/ignored/blocked/strong，形成注入后的消费审计。"
+  );
+  check.report = report;
+  return check;
+}
+
+function providerReproofReceiptConsumptionTypedMemoryProbeQuery(entries: any[] = []) {
+  return compactMemoryCenterText(entries.map((entry: any) => [
+    entry.brief_id,
+    entry.work_item_id,
+    entry.task_id,
+    entry.project,
+    entry.request_patch_checksum,
+    entry.runner_request_id,
+    entry.replay_repair_consumption_reason,
+    entry.provider_reproof_reason,
+  ].filter(Boolean).join(" ")).filter(Boolean).join("\n") || "provider re-proof receipt consumption typed MEMORY.md", 4200);
+}
+
+function providerReproofReceiptConsumptionEntryKey(entry: any = {}) {
+  return [
+    String(entry.timeline_binding_id || "").trim(),
+    String(entry.brief_id || "").trim(),
+    String(entry.work_item_id || "").trim(),
+    String(entry.request_patch_checksum || "").trim(),
+  ].filter(Boolean).join("|").toLowerCase();
+}
+
+function providerReproofReceiptConsumptionArchiveMatchesEntry(row: any = {}, entry: any = {}) {
+  const rowKey = providerReproofReceiptConsumptionEntryKey(row);
+  const entryKey = providerReproofReceiptConsumptionEntryKey(entry);
+  if (rowKey && entryKey && rowKey === entryKey) return true;
+  const briefId = String(entry.brief_id || "").trim();
+  const workItemId = String(entry.work_item_id || "").trim();
+  const requestChecksum = String(entry.request_patch_checksum || "").trim();
+  return (!!briefId && briefId === String(row.brief_id || "").trim())
+    || (!!workItemId && workItemId === String(row.work_item_id || "").trim())
+    || (!!requestChecksum && requestChecksum === String(row.request_patch_checksum || "").trim());
+}
+
+function buildApiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport(options: any = {}) {
+  const groupIds = replayRepairDispatchTimelineBindingGroupIds(options);
+  const {
+    buildGroupTypedMemoryRecall,
+    distillProviderReproofReceiptConsumptionToTypedMemory,
+    readGroupTypedMemoryDistillationLedger,
+    scanGroupTypedMemoryDocuments,
+  } = require("../collaboration/group-memory-index");
+  const rows = groupIds.map((groupId: string) => {
+    const timelineLedger = readGroupReplayRepairDispatchTimelineBindingLedger(groupId);
+    const entries = Array.isArray(timelineLedger.entries) ? timelineLedger.entries : [];
+    const providerEntries = entries
+      .filter((entry: any) => String(entry.source || "") === "api_microcompact_native_apply_provider_reproof")
+      .filter(replayRepairTimelineBindingHasReceiptEvent)
+      .filter((entry: any) => ["strong", "used", "verified", "ignored", "blocked"].includes(replayRepairReceiptConsumptionStatus(entry.replay_repair_consumption_status || entry.replayRepairConsumptionStatus)));
+    const distillation = providerEntries.length
+      ? distillProviderReproofReceiptConsumptionToTypedMemory(groupId, { rows: providerEntries }, {
+        reason: "memory-center-provider-reproof-receipt-consumption-typed-memory-report",
+        updatedAt: options.generatedAt || options.generated_at || now(),
+      })
+      : null;
+    const distillationLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = distillationLedger.providerReproofReceiptConsumptionArchive || {};
+    const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const recallDoc = docs.find((doc: any) => doc.relPath === "provider-reproof-receipt-consumption-recall.md");
+    const cautionDoc = docs.find((doc: any) => doc.relPath === "provider-reproof-receipt-consumption-cautions.md");
+    const recallDocText = (() => {
+      try { return recallDoc?.file ? fs.readFileSync(recallDoc.file, "utf-8") : ""; } catch { return ""; }
+    })();
+    const archivedEntries = providerEntries.filter((entry: any) => archiveRows.some((row: any) => providerReproofReceiptConsumptionArchiveMatchesEntry(row, entry)));
+    const promotedEntries = providerEntries.filter((entry: any) => ["strong", "used", "verified"].includes(replayRepairReceiptConsumptionStatus(entry.replay_repair_consumption_status || entry.replayRepairConsumptionStatus)));
+    const cautionEntries = providerEntries.filter((entry: any) => ["ignored", "blocked"].includes(replayRepairReceiptConsumptionStatus(entry.replay_repair_consumption_status || entry.replayRepairConsumptionStatus)));
+    const strongEntries = providerEntries.filter((entry: any) => replayRepairReceiptConsumptionStatus(entry.replay_repair_consumption_status || entry.replayRepairConsumptionStatus) === "strong");
+    const recall = providerEntries.length
+      ? buildGroupTypedMemoryRecall(groupId, providerReproofReceiptConsumptionTypedMemoryProbeQuery(providerEntries), {
+        max: 8,
+        disableLedger: true,
+        forceMemory: true,
+        snippetChars: 260,
+      })
+      : { recalled: [] };
+    const recalledText = JSON.stringify(recall.recalled || []);
+    const gaps: any[] = [];
+    if (providerEntries.length && archivedEntries.length < providerEntries.length) {
+      gaps.push({
+        reason: `provider re-proof receipt consumption archive 缺少 ${providerEntries.length - archivedEntries.length} 个回执消费行`,
+        missing: providerEntries.length - archivedEntries.length,
+      });
+    }
+    if (promotedEntries.length && (!recallDoc || recallDoc.type !== "reference")) {
+      gaps.push({ reason: "used/verified/strong provider re-proof receipt rows 未写入 reference typed memory", required: promotedEntries.length });
+    }
+    if (cautionEntries.length && (!cautionDoc || cautionDoc.type !== "feedback")) {
+      gaps.push({ reason: "ignored/blocked provider re-proof receipt rows 未写入 feedback caution typed memory", required: cautionEntries.length });
+    }
+    if (promotedEntries.length && !recalledText.includes("provider-reproof-receipt-consumption-recall.md")) {
+      gaps.push({ reason: "provider re-proof promoted receipt typed memory 无法通过 recall probe 召回" });
+    }
+    if (strongEntries.length && !recallDocText.includes("receipt strong is a consumption claim only")) {
+      gaps.push({ reason: "strong receipt claim typed memory 未声明其不是 native provider strong proof", required: strongEntries.length });
+    }
+    const status = providerEntries.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+    return {
+      schema: "ccm-api-microcompact-native-apply-provider-reproof-receipt-consumption-typed-memory-group-v1",
+      groupId,
+      status,
+      file: timelineLedger.file || getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId),
+      typedMemoryLedgerFile: distillationLedger.file || "",
+      providerReproofReceiptCount: providerEntries.length,
+      archivedReceiptCount: archivedEntries.length,
+      promotedReceiptCount: promotedEntries.length,
+      cautionReceiptCount: cautionEntries.length,
+      strongReceiptClaimCount: strongEntries.length,
+      typedArchiveCount: Number(archive.archived_count || archiveRows.length || 0),
+      typedPromotedCount: Number(archive.promoted_count || 0),
+      typedCautionCount: Number(archive.caution_count || 0),
+      typedDocCount: Number(!!recallDoc) + Number(!!cautionDoc),
+      recallProbeCount: Array.isArray(recall.recalled) ? recall.recalled.length : 0,
+      recallProbeCovered: recalledText.includes("provider-reproof-receipt-consumption-recall.md"),
+      distillation: distillation ? {
+        incomingRowCount: distillation.incomingRowCount || 0,
+        archivedCount: distillation.archivedCount || 0,
+        promotedCount: distillation.promotedCount || 0,
+        cautionCount: distillation.cautionCount || 0,
+        writeCount: distillation.writeCount || 0,
+      } : null,
+      docs: [recallDoc, cautionDoc].filter(Boolean).map((doc: any) => ({
+        relPath: doc.relPath,
+        type: doc.type,
+        source: doc.source,
+        file: doc.file,
+      })),
+      bindings: providerEntries.slice(-12).reverse().map((entry: any) => ({
+        timeline_binding_id: entry.timeline_binding_id || "",
+        brief_id: entry.brief_id || "",
+        work_item_id: entry.work_item_id || "",
+        project: entry.project || "",
+        task_id: entry.task_id || "",
+        replay_repair_consumption_status: entry.replay_repair_consumption_status || "",
+        replay_repair_consumption_source: entry.replay_repair_consumption_source || "",
+        provider_reproof_status: entry.provider_reproof_status || "",
+        request_patch_checksum: entry.request_patch_checksum || "",
+      })),
+      gaps: gaps.slice(0, 8),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.providerReproofReceiptCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-api-microcompact-native-apply-provider-reproof-receipt-consumption-typed-memory-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      providerReproofReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.providerReproofReceiptCount || 0), 0),
+      archivedReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedReceiptCount || 0), 0),
+      promotedReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.promotedReceiptCount || 0), 0),
+      cautionReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.cautionReceiptCount || 0), 0),
+      strongReceiptClaimCount: checkedRows.reduce((sum, row) => sum + Number(row.strongReceiptClaimCount || 0), 0),
+      typedDocCount: checkedRows.reduce((sum, row) => sum + Number(row.typedDocCount || 0), 0),
+      recallProbeCoveredCount: checkedRows.filter(row => row.recallProbeCovered === true).length,
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.providerReproofReceiptCount || 0) - Number(a.providerReproofReceiptCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateApiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemory(options: any = {}) {
+  const report = buildApiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    providerReproofReceiptCount: row.providerReproofReceiptCount,
+    archivedReceiptCount: row.archivedReceiptCount,
+    promotedReceiptCount: row.promotedReceiptCount,
+    cautionReceiptCount: row.cautionReceiptCount,
+    strongReceiptClaimCount: row.strongReceiptClaimCount,
+    typedDocCount: row.typedDocCount,
+    recallProbeCovered: row.recallProbeCovered,
+    typedMemoryLedgerFile: row.typedMemoryLedgerFile,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "provider re-proof receipt consumption typed memory 缺失",
+    providerReproofReceiptCount: row.providerReproofReceiptCount || 0,
+    archivedReceiptCount: row.archivedReceiptCount || 0,
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "api_microcompact_native_apply_provider_reproof_receipt_consumption_typed_memory",
+    "API Microcompact Native Apply Provider Re-proof Receipt Consumption Typed Memory",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "provider re-proof brief 被子 Agent 消费后，used/verified/strong 必须进入 reference typed MEMORY.md，ignored/blocked 必须进入 feedback caution memory，并可被下一次子 Agent 会话召回。"
+  );
+  check.report = report;
+  return check;
+}
+
+function replayRepairTimelineCompletionGroupIds(options: any = {}) {
+  const explicit = Array.isArray(options.groupIds || options.group_ids)
+    ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : null;
+  if (explicit?.length) return explicit;
+  const ids = new Set<string>();
+  for (const id of replayRepairDispatchTimelineBindingGroupIds(options)) ids.add(id);
+  for (const file of listJsonFiles(GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR)) {
+    const ledger = readJson(file, null);
+    const hasNativeRepair = Array.isArray(ledger?.items)
+      && ledger.items.some((item: any) => String(item.source || "") === "api_microcompact_native_apply_binding_repair");
+    if (hasNativeRepair) ids.add(String(ledger.groupId || path.basename(file, ".json") || "").trim());
+  }
+  return [...ids].filter(Boolean);
+}
+
+function buildApiMicrocompactNativeApplyProofRepairTimelineCompletionReport(options: any = {}) {
+  const groupIds = replayRepairTimelineCompletionGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const completion = syncApiMicrocompactNativeApplyProofRepairTimelineCompletions(groupId, {
+      at: options.generatedAt || options.generated_at || now(),
+    });
+    const timelineLedger = readGroupReplayRepairDispatchTimelineBindingLedger(groupId);
+    const workItemLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const bindings = (Array.isArray(timelineLedger.entries) ? timelineLedger.entries : [])
+      .filter(replayRepairTimelineBindingHasRequiredCompletionEvidence);
+    const repairItems = (Array.isArray(workItemLedger.items) ? workItemLedger.items : [])
+      .filter((item: any) => String(item.source || "") === "api_microcompact_native_apply_binding_repair");
+    const matchedBindings = bindings.map((binding: any) => {
+      const matches = repairItems.filter((item: any) => replayRepairTimelineBindingMatchesRepairItem(binding, item));
+      return {
+        binding,
+        matches,
+        completed: matches.length > 0 && matches.every((item: any) => replayRepairWorkItemStatus(item.status) === "completed"),
+      };
+    });
+    const missing = matchedBindings.filter((item: any) => item.matches.length === 0);
+    const open = matchedBindings.flatMap((item: any) => item.matches
+      .filter((repair: any) => replayRepairWorkItemOpen(repair.status))
+      .map((repair: any) => ({ binding: item.binding, repair })));
+    const status = bindings.length === 0
+      ? "empty"
+      : missing.length === 0 && open.length === 0 ? "ok" : "fail";
+    return {
+      schema: "ccm-api-microcompact-native-apply-proof-repair-timeline-completion-group-v1",
+      groupId,
+      status,
+      timelineFile: timelineLedger.file || getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId),
+      workItemFile: workItemLedger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      completeBindingCount: bindings.length,
+      matchedBindingCount: matchedBindings.filter((item: any) => item.matches.length > 0).length,
+      completedBindingCount: matchedBindings.filter((item: any) => item.completed).length,
+      completedRepairItemCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "completed" && item.completion_source === "replay_repair_timeline_binding").length,
+      openMatchedRepairItemCount: open.length,
+      missingWorkItemBindingCount: missing.length,
+      completedNow: completion.completed || 0,
+      bindings: matchedBindings.slice(-12).reverse().map((item: any) => ({
+        timeline_binding_id: item.binding.timeline_binding_id || "",
+        brief_id: item.binding.brief_id || "",
+        work_item_id: item.binding.work_item_id || "",
+        task_id: item.binding.task_id || "",
+        assignment_id: item.binding.assignment_id || "",
+        completed: item.completed,
+        repair_items: item.matches.map((repair: any) => ({
+          id: repair.id || repair.work_item_id || "",
+          status: replayRepairWorkItemStatus(repair.status),
+          completion_source: repair.completion_source || "",
+          resolutionReason: repair.resolutionReason || repair.resolution_reason || "",
+        })),
+      })),
+      gaps: [
+        ...missing.map((item: any) => ({
+          timeline_binding_id: item.binding.timeline_binding_id || "",
+          brief_id: item.binding.brief_id || "",
+          work_item_id: item.binding.work_item_id || "",
+          reason: "完整 timeline binding 没有匹配的 native proof repair work item",
+        })),
+        ...open.map((item: any) => ({
+          timeline_binding_id: item.binding.timeline_binding_id || "",
+          brief_id: item.binding.brief_id || "",
+          work_item_id: item.repair.work_item_id || item.repair.id || "",
+          reason: "完整 timeline binding 已存在，但 repair work item 仍未关闭",
+        })),
+      ].slice(0, 8),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.completeBindingCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-api-microcompact-native-apply-proof-repair-timeline-completion-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      completeBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.completeBindingCount || 0), 0),
+      matchedBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.matchedBindingCount || 0), 0),
+      completedBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.completedBindingCount || 0), 0),
+      completedRepairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.completedRepairItemCount || 0), 0),
+      openMatchedRepairItemCount: checkedRows.reduce((sum, row) => sum + Number(row.openMatchedRepairItemCount || 0), 0),
+      missingWorkItemBindingCount: checkedRows.reduce((sum, row) => sum + Number(row.missingWorkItemBindingCount || 0), 0),
+      completedNow: checkedRows.reduce((sum, row) => sum + Number(row.completedNow || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.completeBindingCount || 0) - Number(a.completeBindingCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateApiMicrocompactNativeApplyProofRepairTimelineCompletions(options: any = {}) {
+  const report = buildApiMicrocompactNativeApplyProofRepairTimelineCompletionReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    completeBindingCount: row.completeBindingCount,
+    matchedBindingCount: row.matchedBindingCount,
+    completedBindingCount: row.completedBindingCount,
+    completedRepairItemCount: row.completedRepairItemCount,
+    completedNow: row.completedNow,
+    workItemFile: row.workItemFile,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "timeline binding 未关闭 native proof repair work item",
+    timeline_binding_id: gap.timeline_binding_id || "",
+    brief_id: gap.brief_id || "",
+    work_item_id: gap.work_item_id || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "api_microcompact_native_apply_proof_repair_timeline_completions",
+    "API Microcompact Native Apply Proof Repair Timeline Completions",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "完整的 native proof repair timeline binding 必须能自动关闭匹配的 replay repair work item，形成 child receipt -> repair ledger 的实时闭环。"
+  );
+  check.report = report;
+  return check;
+}
+
+function apiMicrocompactNativeProofClosureString(...values: any[]) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function apiMicrocompactNativeApplyProofTimelineClosureRows(groupId: string) {
+  const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+  const items = Array.isArray(ledger.items) ? ledger.items : [];
+  return items
+    .filter((item: any) => isApiMicrocompactNativeApplyProofRepairWorkItem(item))
+    .filter((item: any) => replayRepairWorkItemStatus(item.status) === "completed")
+    .filter((item: any) => String(item.completion_source || item.completionSource || "") === "replay_repair_timeline_binding")
+    .map((item: any) => {
+      const binding = item.replay_repair_timeline_binding || item.replayRepairTimelineBinding || {};
+      const taskId = apiMicrocompactNativeProofClosureString(item.taskId, item.task_id, binding.task_id);
+      const workItemId = apiMicrocompactNativeProofClosureString(item.work_item_id, item.id);
+      return {
+        schema: "ccm-api-microcompact-native-apply-proof-repair-closure-row-v1",
+        groupId,
+        work_item_id: workItemId,
+        task_id: taskId,
+        repair_closure_status: "timeline_proved",
+        completion_source: "replay_repair_timeline_binding",
+        resolution_reason: item.resolutionReason || item.resolution_reason || "",
+        completed_at: apiMicrocompactNativeProofClosureString(binding.completed_at, item.completedAt, item.completed_at),
+        timeline_binding_id: apiMicrocompactNativeProofClosureString(binding.timeline_binding_id, item.timeline_binding_id),
+        brief_id: apiMicrocompactNativeProofClosureString(binding.brief_id, item.brief_id),
+        assignment_id: apiMicrocompactNativeProofClosureString(binding.assignment_id, item.assignment_id),
+        target_project: apiMicrocompactNativeProofClosureString(item.target_project, item.dispatch_target, item.target),
+        proof_entry_id: apiMicrocompactNativeProofClosureString(item.proof_entry_id, binding.proof_entry_id),
+        plan_checksum: apiMicrocompactNativeProofClosureString(item.plan_checksum, item.planChecksum),
+        apply_plan_checksum: apiMicrocompactNativeProofClosureString(item.apply_plan_checksum, item.applyPlanChecksum),
+        request_patch_checksum: apiMicrocompactNativeProofClosureString(item.request_patch_checksum, item.requestPatchChecksum, binding.request_patch_checksum),
+        runner_request_id: apiMicrocompactNativeProofClosureString(item.runner_request_id, item.request_telemetry_runner_request_id, binding.runner_request_id),
+        execution_id: apiMicrocompactNativeProofClosureString(item.execution_id, binding.execution_id),
+        task_agent_session_id: apiMicrocompactNativeProofClosureString(item.task_agent_session_id, item.expected_task_agent_session_id, binding.task_agent_session_id),
+        native_session_id: apiMicrocompactNativeProofClosureString(item.native_session_id, item.expected_native_session_id, binding.native_session_id),
+        memory_context_snapshot_id: apiMicrocompactNativeProofClosureString(item.memory_context_snapshot_id, binding.memory_context_snapshot_id),
+        memory_context_snapshot_checksum: apiMicrocompactNativeProofClosureString(item.memory_context_snapshot_checksum, binding.memory_context_snapshot_checksum),
+        request_telemetry_status: apiMicrocompactNativeProofClosureString(item.request_telemetry_status),
+        request_telemetry_source: apiMicrocompactNativeProofClosureString(item.request_telemetry_source),
+        request_telemetry_entry_id: apiMicrocompactNativeProofClosureString(item.request_telemetry_entry_id),
+        request_telemetry_session_status: apiMicrocompactNativeProofClosureString(item.request_telemetry_session_status, binding.request_telemetry_session_status),
+        request_telemetry_dispatch_status: apiMicrocompactNativeProofClosureString(item.request_telemetry_dispatch_status, binding.request_telemetry_dispatch_status),
+      };
+    });
+}
+
+function apiMicrocompactNativeApplyProofEntryMatchesTimelineClosure(entry: any = {}, closure: any = {}) {
+  const closureProofId = apiMicrocompactNativeProofClosureString(closure.proof_entry_id, closure.proofEntryId);
+  const entryProofId = apiMicrocompactNativeProofClosureString(entry.entry_id, entry.entryId);
+  if (closureProofId && entryProofId && closureProofId === entryProofId) return true;
+  const taskId = apiMicrocompactNativeProofClosureString(closure.task_id, closure.taskId);
+  const planChecksum = apiMicrocompactNativeProofClosureString(closure.plan_checksum, closure.planChecksum);
+  const applyPlanChecksum = apiMicrocompactNativeProofClosureString(closure.apply_plan_checksum, closure.applyPlanChecksum);
+  const requestPatchChecksum = apiMicrocompactNativeProofClosureString(closure.request_patch_checksum, closure.requestPatchChecksum);
+  const taskAgentSessionId = apiMicrocompactNativeProofClosureString(closure.task_agent_session_id, closure.taskAgentSessionId);
+  const nativeSessionId = apiMicrocompactNativeProofClosureString(closure.native_session_id, closure.nativeSessionId);
+  const snapshotId = apiMicrocompactNativeProofClosureString(closure.memory_context_snapshot_id, closure.memoryContextSnapshotId);
+  const executionId = apiMicrocompactNativeProofClosureString(closure.execution_id, closure.executionId);
+  const runnerRequestId = apiMicrocompactNativeProofClosureString(closure.runner_request_id, closure.runnerRequestId);
+  const sameTask = !taskId || !entry.task_id || String(entry.task_id || "") === taskId;
+  const samePlan = !planChecksum || String(entry.plan_checksum || "") === planChecksum;
+  const sameApply = !applyPlanChecksum
+    || [entry.apply_plan_checksum, entry.receipt_apply_plan_checksum].some(value => String(value || "") === applyPlanChecksum);
+  const sameRequest = !requestPatchChecksum
+    || [entry.request_patch_checksum, entry.receipt_request_patch_checksum].some(value => String(value || "") === requestPatchChecksum);
+  const sameTaskSession = !taskAgentSessionId
+    || [entry.task_agent_session_id, entry.receipt_task_agent_session_id, entry.expected_task_agent_session_id].some(value => String(value || "") === taskAgentSessionId);
+  const sameNativeSession = !nativeSessionId
+    || [entry.native_session_id, entry.receipt_native_session_id, entry.expected_native_session_id].some(value => String(value || "") === nativeSessionId);
+  const sameSnapshot = !snapshotId
+    || [entry.memory_context_snapshot_id, entry.receipt_memory_context_snapshot_id, entry.expected_memory_context_snapshot_id].some(value => String(value || "") === snapshotId);
+  const sameExecution = !executionId || !entry.execution_id || String(entry.execution_id || "") === executionId;
+  const sameRunner = !runnerRequestId
+    || [entry.runner_request_id, entry.external_runner_request_id].some(value => String(value || "") === runnerRequestId);
+  const hasStableIdentity = !!(requestPatchChecksum || planChecksum || taskId || runnerRequestId);
+  return hasStableIdentity
+    && sameTask
+    && samePlan
+    && sameApply
+    && sameRequest
+    && sameTaskSession
+    && sameNativeSession
+    && sameSnapshot
+    && sameExecution
+    && sameRunner;
+}
+
+function enrichApiMicrocompactNativeApplyProofEntryForClosureReproof(groupId: string, entry: any = {}, telemetryEntries: any[] = [], options: any = {}) {
+  const nowMs = Number(options.nowMs || options.now_ms || Date.now());
+  const telemetryMaxAgeMs = Number(options.telemetryMaxAgeMs || options.telemetry_max_age_ms || API_MICROCOMPACT_NATIVE_APPLY_TELEMETRY_MAX_AGE_MS);
+  const telemetry = telemetryEntries.find((item: any) => apiMicrocompactTelemetryEntryMatchesProof(item, entry))
+    || telemetryEntries.find((item: any) => apiMicrocompactTelemetryEntryMatchesProofCore(item, entry));
+  const telemetryProof = classifyApiMicrocompactNativeApplyTelemetryForProof(telemetry, { nowMs, telemetryMaxAgeMs });
+  const bindingProof = evaluateApiMicrocompactTelemetryBindingForProof(telemetry, entry, { groupId });
+  const requestTelemetryStrong = entry.proof_status === "verified" && telemetryProof.strong && bindingProof.strongBinding;
+  return summarizeApiMicrocompactNativeApplyProofEntry({
+    ...entry,
+    request_telemetry_matched: telemetryProof.matched,
+    request_telemetry_strong: requestTelemetryStrong,
+    request_telemetry_fresh: telemetryProof.fresh,
+    request_telemetry_stale: telemetryProof.stale,
+    request_telemetry_status: telemetryProof.status,
+    request_telemetry_entry_id: telemetry?.entry_id || "",
+    request_telemetry_sent_at: telemetry?.sent_at || "",
+    request_telemetry_source: telemetryProof.source,
+    request_telemetry_age_ms: telemetryProof.ageMs,
+    request_telemetry_max_age_ms: telemetryProof.maxAgeMs,
+    request_telemetry_adapter_captured: telemetryProof.adapterCaptured,
+    request_telemetry_session_bound: bindingProof.sessionBound,
+    request_telemetry_session_status: bindingProof.sessionStatus,
+    request_telemetry_session_issues: bindingProof.sessionIssues,
+    request_telemetry_dispatch_bound: bindingProof.dispatchBound,
+    request_telemetry_dispatch_status: bindingProof.dispatchStatus,
+    request_telemetry_dispatch_issues: bindingProof.dispatchIssues,
+    request_telemetry_runner_request_id: bindingProof.runnerRequestId,
+    request_telemetry_runner_matched: bindingProof.runnerMatched,
+    request_telemetry_runner_missing: bindingProof.runnerMissing,
+    request_telemetry_binding_weak_reason: bindingProof.weakReason,
+    request_telemetry_weak_reason: requestTelemetryStrong
+      ? ""
+      : telemetryProof.strong && bindingProof.weakReason
+        ? bindingProof.weakReason
+        : telemetryProof.weakReason,
+  });
+}
+
+function apiMicrocompactNativeApplyProofClosureReproofReason(proof: any = null) {
+  if (!proof) return "missing_native_apply_proof_entry";
+  if (proof.proofStatus && proof.proofStatus !== "verified") return `proof_status=${proof.proofStatus}`;
+  if (!proof.requestTelemetryMatched) return proof.requestTelemetryStatus === "missing" ? "missing_native_request_adapter_telemetry" : `request_telemetry_status=${proof.requestTelemetryStatus || "unmatched"}`;
+  if (proof.requestTelemetryStale) return "stale_native_request_adapter_telemetry";
+  if (proof.requestTelemetrySource && proof.requestTelemetrySource !== "native_request_adapter") return "receipt_only_request_telemetry";
+  if (!proof.requestTelemetrySessionBound) return `session_binding=${proof.requestTelemetrySessionStatus || "unbound"}`;
+  if (!proof.requestTelemetryDispatchBound) return `dispatch_binding=${proof.requestTelemetryDispatchStatus || "unbound"}`;
+  return proof.requestTelemetryWeakReason || "native_provider_reproof_needed";
+}
+
+function apiMicrocompactNativeApplyProofClosureReproofAction(proof: any = null) {
+  if (!proof) return "record_native_apply_proof_ledger_for_closed_timeline_repair";
+  if (proof.requestTelemetryStatus === "missing" || !proof.requestTelemetryMatched) return "rerun_native_request_adapter_capture_for_exact_request_patch";
+  if (proof.requestTelemetryStale) return "refresh_native_request_adapter_telemetry_for_exact_request_patch";
+  if (proof.requestTelemetrySource && proof.requestTelemetrySource !== "native_request_adapter") return "replace_receipt_only_telemetry_with_native_request_adapter_capture";
+  if (!proof.requestTelemetrySessionBound) return "bind_task_agent_session_snapshot_then_reproof_provider_request";
+  if (!proof.requestTelemetryDispatchBound) return "bind_execution_runner_request_then_reproof_provider_request";
+  return "reproof_native_provider_request_telemetry_for_closed_repair";
+}
+
+function buildApiMicrocompactNativeApplyProofClosureReproofCandidate(groupId: string, closure: any = {}, proof: any = null) {
+  const taskId = apiMicrocompactNativeProofClosureString(closure.task_id, proof?.taskId);
+  const requestPatchChecksum = apiMicrocompactNativeProofClosureString(closure.request_patch_checksum, proof?.requestPatchChecksum);
+  const runnerRequestId = apiMicrocompactNativeProofClosureString(closure.runner_request_id, proof?.requestTelemetryRunnerRequestId);
+  const executionId = apiMicrocompactNativeProofClosureString(closure.execution_id, proof?.executionId);
+  const taskAgentSessionId = apiMicrocompactNativeProofClosureString(closure.task_agent_session_id, proof?.taskAgentSessionId);
+  const snapshotId = apiMicrocompactNativeProofClosureString(closure.memory_context_snapshot_id, proof?.memoryContextSnapshotId);
+  const reason = apiMicrocompactNativeApplyProofClosureReproofReason(proof);
+  const action = apiMicrocompactNativeApplyProofClosureReproofAction(proof);
+  return {
+    schema: "ccm-api-microcompact-native-apply-proof-repair-closure-reproof-candidate-v1",
+    reproof_candidate_id: `api-native-proof-closure-reproof:${hash([
+      groupId,
+      closure.work_item_id || "",
+      closure.timeline_binding_id || "",
+      taskId,
+      requestPatchChecksum,
+      runnerRequestId,
+    ], 14)}`,
+    groupId,
+    work_item_id: closure.work_item_id || "",
+    timeline_binding_id: closure.timeline_binding_id || "",
+    brief_id: closure.brief_id || "",
+    repair_closure_status: "timeline_proved",
+    provider_reproof_status: "needed",
+    provider_reproof_reason: reason,
+    recommended_action: action,
+    task_id: taskId,
+    target_project: apiMicrocompactNativeProofClosureString(closure.target_project, proof?.targetProject, proof?.agent),
+    proof_entry_id: apiMicrocompactNativeProofClosureString(closure.proof_entry_id, proof?.entryId),
+    plan_checksum: apiMicrocompactNativeProofClosureString(closure.plan_checksum, proof?.planChecksum),
+    apply_plan_checksum: apiMicrocompactNativeProofClosureString(closure.apply_plan_checksum, proof?.applyPlanChecksum),
+    request_patch_checksum: requestPatchChecksum,
+    runner_request_id: runnerRequestId,
+    execution_id: executionId,
+    task_agent_session_id: taskAgentSessionId,
+    native_session_id: apiMicrocompactNativeProofClosureString(closure.native_session_id, proof?.nativeSessionId),
+    memory_context_snapshot_id: snapshotId,
+    memory_context_snapshot_checksum: apiMicrocompactNativeProofClosureString(closure.memory_context_snapshot_checksum, proof?.memoryContextSnapshotChecksum),
+    nativeApplyStrongProof: proof?.nativeApplyStrongProof === true,
+    proofStatus: proof?.proofStatus || "missing",
+    request_telemetry_status: proof?.requestTelemetryStatus || "missing",
+    request_telemetry_source: proof?.requestTelemetrySource || "",
+    request_telemetry_entry_id: proof?.requestTelemetryEntryId || "",
+    request_telemetry_session_status: proof?.requestTelemetrySessionStatus || closure.request_telemetry_session_status || "",
+    request_telemetry_dispatch_status: proof?.requestTelemetryDispatchStatus || closure.request_telemetry_dispatch_status || "",
+    prompt_patch: compactMemoryCenterText([
+      "API microcompact native proof re-proof candidate:",
+      `- group=${groupId}`,
+      taskId ? `- task_id=${taskId}` : "",
+      requestPatchChecksum ? `- request_patch_checksum=${requestPatchChecksum}` : "",
+      runnerRequestId ? `- runner_request_id=${runnerRequestId}` : "",
+      executionId ? `- execution_id=${executionId}` : "",
+      taskAgentSessionId ? `- task_agent_session_id=${taskAgentSessionId}` : "",
+      snapshotId ? `- memory_context_snapshot_id=${snapshotId}` : "",
+      `- reason=${reason}`,
+      "- 只补齐或重跑这个 request patch 的 native_request_adapter provider telemetry；不要把 timeline closure 直接当成 native provider strong proof。",
+    ].filter(Boolean).join("\n"), 1200),
+  };
+}
+
+function buildApiMicrocompactNativeApplyProofRepairClosureReproofReport(options: any = {}) {
+  const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
+    ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : null;
+  const groupIds = explicitGroupIds?.length ? explicitGroupIds : replayRepairTimelineCompletionGroupIds(options);
+  const generatedAt = String(options.generatedAt || options.generated_at || now());
+  const nowMs = Number(options.nowMs || options.now_ms || Date.parse(generatedAt) || Date.now());
+  const rows = groupIds.map((groupId: string) => {
+    syncApiMicrocompactNativeApplyProofRepairTimelineCompletions(groupId, { at: generatedAt });
+    const proofLedger = readApiMicrocompactNativeApplyProofLedgerForCenter(groupId);
+    const telemetryLedger = readApiMicrocompactNativeApplyRequestTelemetryLedgerForCenter(groupId);
+    const proofEntries = Array.isArray(proofLedger.entries) ? proofLedger.entries : [];
+    const telemetryEntries = Array.isArray(telemetryLedger.entries) ? telemetryLedger.entries : [];
+    const closures = apiMicrocompactNativeApplyProofTimelineClosureRows(groupId);
+    const closureViews = closures.map((closure: any) => {
+      const rawProof = proofEntries.find((entry: any) => apiMicrocompactNativeApplyProofEntryMatchesTimelineClosure(entry, closure));
+      const proof = rawProof
+        ? enrichApiMicrocompactNativeApplyProofEntryForClosureReproof(groupId, rawProof, telemetryEntries, {
+          ...options,
+          nowMs,
+        })
+        : null;
+      const nativeApplyStrongProof = proof?.nativeApplyStrongProof === true;
+      const candidate = nativeApplyStrongProof ? null : buildApiMicrocompactNativeApplyProofClosureReproofCandidate(groupId, closure, proof);
+      return {
+        ...closure,
+        provider_reproof_status: nativeApplyStrongProof ? "strong" : "needed",
+        provider_reproof_reason: nativeApplyStrongProof ? "" : candidate?.provider_reproof_reason || "",
+        nativeApplyStrongProof,
+        proofStatus: proof?.proofStatus || "missing",
+        requestTelemetryStrong: proof?.requestTelemetryStrong === true,
+        requestTelemetryMatched: proof?.requestTelemetryMatched === true,
+        requestTelemetryFresh: proof?.requestTelemetryFresh === true,
+        requestTelemetryStatus: proof?.requestTelemetryStatus || "missing",
+        requestTelemetrySource: proof?.requestTelemetrySource || "",
+        requestTelemetryEntryId: proof?.requestTelemetryEntryId || "",
+        requestTelemetrySessionBound: proof?.requestTelemetrySessionBound === true,
+        requestTelemetrySessionStatus: proof?.requestTelemetrySessionStatus || "",
+        requestTelemetryDispatchBound: proof?.requestTelemetryDispatchBound === true,
+        requestTelemetryDispatchStatus: proof?.requestTelemetryDispatchStatus || "",
+        requestTelemetryRunnerRequestId: proof?.requestTelemetryRunnerRequestId || closure.runner_request_id || "",
+        reproofCandidate: candidate,
+      };
+    });
+    const candidates = closureViews.map((row: any) => row.reproofCandidate).filter(Boolean);
+    const providerStrongProofCount = closureViews.filter((row: any) => row.nativeApplyStrongProof === true).length;
+    const status = closureViews.length === 0
+      ? "empty"
+      : candidates.length === 0 ? "ok" : providerStrongProofCount > 0 ? "warn" : "fail";
+    return {
+      schema: "ccm-api-microcompact-native-apply-proof-repair-closure-reproof-group-v1",
+      groupId,
+      status,
+      workItemFile: getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      proofLedgerFile: proofLedger.file || getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId),
+      requestTelemetryLedgerFile: telemetryLedger.file || getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId),
+      timelineProvedRepairCount: closureViews.length,
+      providerStrongProofCount,
+      providerStrongReproofNeededCount: candidates.length,
+      missingProofCount: closureViews.filter((row: any) => row.proofStatus === "missing").length,
+      requestTelemetryMissingCount: closureViews.filter((row: any) => row.requestTelemetryStatus === "missing").length,
+      requestTelemetryReceiptOnlyCount: closureViews.filter((row: any) => row.requestTelemetryStatus === "receipt_only").length,
+      requestTelemetryStaleCount: closureViews.filter((row: any) => row.requestTelemetryStatus === "stale").length,
+      requestTelemetrySessionUnboundCount: closureViews.filter((row: any) => row.requestTelemetryMatched && !row.requestTelemetrySessionBound).length,
+      requestTelemetryDispatchUnboundCount: closureViews.filter((row: any) => row.requestTelemetryMatched && !row.requestTelemetryDispatchBound).length,
+      closures: closureViews.slice(-12).reverse().map((row: any) => ({
+        work_item_id: row.work_item_id || "",
+        timeline_binding_id: row.timeline_binding_id || "",
+        repair_closure_status: row.repair_closure_status || "",
+        provider_reproof_status: row.provider_reproof_status || "",
+        provider_reproof_reason: row.provider_reproof_reason || "",
+        nativeApplyStrongProof: row.nativeApplyStrongProof === true,
+        task_id: row.task_id || "",
+        proof_entry_id: row.proof_entry_id || "",
+        request_patch_checksum: row.request_patch_checksum || "",
+        runner_request_id: row.runner_request_id || "",
+        execution_id: row.execution_id || "",
+        task_agent_session_id: row.task_agent_session_id || "",
+        memory_context_snapshot_id: row.memory_context_snapshot_id || "",
+        requestTelemetryStatus: row.requestTelemetryStatus || "",
+        requestTelemetrySource: row.requestTelemetrySource || "",
+        requestTelemetrySessionStatus: row.requestTelemetrySessionStatus || "",
+        requestTelemetryDispatchStatus: row.requestTelemetryDispatchStatus || "",
+      })),
+      reproofCandidates: candidates.slice(0, 12),
+      gaps: candidates.slice(0, 8).map((candidate: any) => ({
+        reproof_candidate_id: candidate.reproof_candidate_id || "",
+        work_item_id: candidate.work_item_id || "",
+        timeline_binding_id: candidate.timeline_binding_id || "",
+        task_id: candidate.task_id || "",
+        request_patch_checksum: candidate.request_patch_checksum || "",
+        runner_request_id: candidate.runner_request_id || "",
+        execution_id: candidate.execution_id || "",
+        task_agent_session_id: candidate.task_agent_session_id || "",
+        memory_context_snapshot_id: candidate.memory_context_snapshot_id || "",
+        reason: `timeline closure 已证明 repair item 可关闭，但 provider strong proof 仍需 re-proof：${candidate.provider_reproof_reason || "native_provider_reproof_needed"}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.timelineProvedRepairCount || 0) > 0);
+  const checked = checkedRows.reduce((sum, row) => sum + Number(row.timelineProvedRepairCount || 0), 0);
+  const passed = checkedRows.reduce((sum, row) => sum + Number(row.providerStrongProofCount || 0), 0);
+  const score = qualityRate(passed, checked);
+  const status = checked === 0 ? "empty" : Number(score) >= 90 ? "ok" : Number(score) >= 70 ? "warn" : "fail";
+  return {
+    schema: "ccm-api-microcompact-native-apply-proof-repair-closure-reproof-report-v1",
+    generatedAt,
+    overall: {
+      status,
+      score,
+      checked,
+      passed,
+      missing: Math.max(0, checked - passed),
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      timelineProvedRepairCount: checked,
+      providerStrongProofCount: passed,
+      providerStrongReproofNeededCount: checkedRows.reduce((sum, row) => sum + Number(row.providerStrongReproofNeededCount || 0), 0),
+      missingProofCount: checkedRows.reduce((sum, row) => sum + Number(row.missingProofCount || 0), 0),
+      requestTelemetryMissingCount: checkedRows.reduce((sum, row) => sum + Number(row.requestTelemetryMissingCount || 0), 0),
+      requestTelemetryReceiptOnlyCount: checkedRows.reduce((sum, row) => sum + Number(row.requestTelemetryReceiptOnlyCount || 0), 0),
+      requestTelemetryStaleCount: checkedRows.reduce((sum, row) => sum + Number(row.requestTelemetryStaleCount || 0), 0),
+      requestTelemetrySessionUnboundCount: checkedRows.reduce((sum, row) => sum + Number(row.requestTelemetrySessionUnboundCount || 0), 0),
+      requestTelemetryDispatchUnboundCount: checkedRows.reduce((sum, row) => sum + Number(row.requestTelemetryDispatchUnboundCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.providerStrongReproofNeededCount || 0) - Number(a.providerStrongReproofNeededCount || 0) || Number(b.timelineProvedRepairCount || 0) - Number(a.timelineProvedRepairCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateApiMicrocompactNativeApplyProofRepairClosureReproof(options: any = {}) {
+  const report = buildApiMicrocompactNativeApplyProofRepairClosureReproofReport(options);
+  const checked = Number(report.overall.checked || 0);
+  const passed = Number(report.overall.passed || 0);
+  const evidence = (report.groups || [])
+    .filter((row: any) => Number(row.providerStrongProofCount || 0) > 0)
+    .slice(0, 12)
+    .map((row: any) => ({
+      groupId: row.groupId,
+      timelineProvedRepairCount: row.timelineProvedRepairCount,
+      providerStrongProofCount: row.providerStrongProofCount,
+      providerStrongReproofNeededCount: row.providerStrongReproofNeededCount,
+      proofLedgerFile: row.proofLedgerFile,
+      requestTelemetryLedgerFile: row.requestTelemetryLedgerFile,
+    }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "timeline closure 后仍需 native provider re-proof",
+    reproof_candidate_id: gap.reproof_candidate_id || "",
+    work_item_id: gap.work_item_id || "",
+    timeline_binding_id: gap.timeline_binding_id || "",
+    task_id: gap.task_id || "",
+    request_patch_checksum: gap.request_patch_checksum || "",
+    runner_request_id: gap.runner_request_id || "",
+    execution_id: gap.execution_id || "",
+    task_agent_session_id: gap.task_agent_session_id || "",
+    memory_context_snapshot_id: gap.memory_context_snapshot_id || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "api_microcompact_native_apply_proof_repair_closure_reproof",
+    "API Microcompact Native Apply Proof Repair Closure Re-proof",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "把 timeline-proved repair closure 和 native provider strong telemetry 分离：关闭 repair item 只证明修复链闭环，仍要用精确 request/session/execution/snapshot 重新证明 provider request telemetry。"
+  );
+  check.report = report;
+  return check;
+}
+
+function isApiMicrocompactNativeApplyProviderReproofWorkItem(item: any = {}) {
+  return String(item.source || "") === "api_microcompact_native_apply_provider_reproof";
+}
+
+function buildApiMicrocompactNativeApplyProviderReproofWorkItem(groupId: string, candidate: any = {}, index = 0, existing: any = {}, at = now()) {
+  const taskId = String(candidate.task_id || candidate.taskId || "").trim();
+  const targetProject = String(candidate.target_project || candidate.targetProject || candidate.agent || "memory-context").trim();
+  const requestPatchChecksum = String(candidate.request_patch_checksum || candidate.requestPatchChecksum || "").trim();
+  const runnerRequestId = String(candidate.runner_request_id || candidate.runnerRequestId || "").trim();
+  const executionId = String(candidate.execution_id || candidate.executionId || "").trim();
+  const taskAgentSessionId = String(candidate.task_agent_session_id || candidate.taskAgentSessionId || "").trim();
+  const nativeSessionId = String(candidate.native_session_id || candidate.nativeSessionId || "").trim();
+  const snapshotId = String(candidate.memory_context_snapshot_id || candidate.memoryContextSnapshotId || "").trim();
+  const snapshotChecksum = String(candidate.memory_context_snapshot_checksum || candidate.memoryContextSnapshotChecksum || "").trim();
+  const proofEntryId = String(candidate.proof_entry_id || candidate.proofEntryId || "").trim();
+  const reproofCandidateId = String(candidate.reproof_candidate_id || candidate.reproofCandidateId || "").trim();
+  const timelineBindingId = String(candidate.timeline_binding_id || candidate.timelineBindingId || "").trim();
+  const originalWorkItemId = String(candidate.work_item_id || candidate.original_work_item_id || "").trim();
+  const reason = compactMemoryCenterText(candidate.provider_reproof_reason || candidate.reason || "native provider telemetry re-proof needed", 360);
+  const id = `api-native-provider-reproof:${hash([
+    groupId,
+    reproofCandidateId,
+    timelineBindingId,
+    requestPatchChecksum,
+    runnerRequestId,
+    taskAgentSessionId,
+  ], 14)}`;
+  const previousStatus = replayRepairWorkItemStatus(existing.status);
+  const status = ["in_progress", "blocked", "completed", "cancelled"].includes(previousStatus) ? previousStatus : "pending";
+  const instruction = [
+    `为 ${targetProject || "目标子 Agent"} 补齐 API microcompact native provider re-proof。`,
+    "注意：timeline closure 只能证明 repair item 可关闭，不能替代 provider native_request_adapter telemetry。",
+    taskId ? `taskId=${taskId}` : "",
+    requestPatchChecksum ? `必须只针对 requestPatchChecksum=${requestPatchChecksum} 重新采集或绑定 provider telemetry` : "必须补齐 requestPatchChecksum",
+    runnerRequestId ? `runnerRequestId=${runnerRequestId} 必须命中 execution.externalRunnerRequestIds` : "必须记录 runnerRequestId/externalRunnerRequestId",
+    executionId ? `executionId=${executionId}` : "必须绑定 executionId",
+    taskAgentSessionId ? `taskAgentSessionId=${taskAgentSessionId}` : "必须绑定 taskAgentSessionId",
+    snapshotId ? `memoryContextSnapshotId=${snapshotId}` : "必须绑定 memoryContextSnapshotId",
+    "完成后 Memory Center 需要显示 provider_reproof_status=strong、nativeApplyStrongProof=true、requestTelemetrySessionBound=true、requestTelemetryDispatchBound=true。",
+  ].filter(Boolean).join(" ");
+  const expected = [
+    "providerReproofStatus=strong",
+    "nativeApplyStrongProof=true",
+    "requestTelemetrySource=native_request_adapter",
+    "requestTelemetryFresh=true",
+    "requestTelemetrySessionBound=true",
+    "requestTelemetryDispatchBound=true",
+    requestPatchChecksum ? `requestPatchChecksum=${requestPatchChecksum}` : "",
+    runnerRequestId ? `runnerRequestId=${runnerRequestId}` : "",
+  ].filter(Boolean).join("; ");
+  return {
+    id,
+    work_item_id: id,
+    taskId,
+    scopeId: groupId,
+    group_id: groupId,
+    subject: compactMemoryCenterText("补齐 native provider telemetry re-proof", 150),
+    description: reason,
+    activeForm: compactMemoryCenterText(`re-proof provider telemetry：${requestPatchChecksum || proofEntryId || timelineBindingId || "native apply"}`, 180),
+    owner: existing.owner && previousStatus !== "pending" ? existing.owner : "group-main-agent",
+    target: compactMemoryCenterText(targetProject || "memory-context", 120),
+    agentType: "group-main-agent",
+    status,
+    priority: "critical",
+    component: "api_microcompact_native_provider_reproof",
+    source: "api_microcompact_native_apply_provider_reproof",
+    source_action_id: `api-native-provider-reproof:${timelineBindingId || reproofCandidateId || index}`,
+    repair_target: requestPatchChecksum || proofEntryId || timelineBindingId || taskId,
+    instruction: compactMemoryCenterText(instruction, 1000),
+    expected: compactMemoryCenterText(expected, 520),
+    source_reason: reason,
+    attempt: Math.max(1, Number(existing.attempt || 1) || 1),
+    replay_attempt_id: "",
+    replay_status: String(candidate.provider_reproof_status || "needed"),
+    replay_score: null,
+    replay_rendered_hash: "",
+    target_project: targetProject,
+    dispatch_target: targetProject,
+    boundary_checksum: "",
+    summarized_through_message_id: "",
+    prompt_patch: compactMemoryCenterText(candidate.prompt_patch || "", 1800),
+    dispatch_hint: {
+      claim_policy: "group_main_agent_before_child_dispatch",
+      next_step: candidate.recommended_action || "rerun_native_request_adapter_provider_reproof",
+      should_create_real_task: false,
+      reason: "Memory Center provider re-proof sidecar; main Agent may claim and dispatch deliberately.",
+    },
+    raw_recovery: {
+      rule: "api_microcompact_native_provider_reproof_after_timeline_closure",
+      provider_reproof_reason: reason,
+      reproof_candidate_id: reproofCandidateId,
+      timeline_binding_id: timelineBindingId,
+      original_work_item_id: originalWorkItemId,
+      recommended_action: candidate.recommended_action || "",
+    },
+    provider_reproof_status: "needed",
+    provider_reproof_reason: reason,
+    reproof_candidate_id: reproofCandidateId,
+    timeline_binding_id: timelineBindingId,
+    original_work_item_id: originalWorkItemId,
+    proof_entry_id: proofEntryId,
+    plan_checksum: candidate.plan_checksum || candidate.planChecksum || "",
+    apply_plan_checksum: candidate.apply_plan_checksum || candidate.applyPlanChecksum || "",
+    request_patch_checksum: requestPatchChecksum,
+    task_agent_session_id: taskAgentSessionId,
+    expected_task_agent_session_id: taskAgentSessionId,
+    native_session_id: nativeSessionId,
+    expected_native_session_id: nativeSessionId,
+    memory_context_snapshot_id: snapshotId,
+    memory_context_snapshot_checksum: snapshotChecksum,
+    execution_id: executionId,
+    runner_request_id: runnerRequestId,
+    request_telemetry_entry_id: candidate.request_telemetry_entry_id || "",
+    request_telemetry_status: candidate.request_telemetry_status || "missing",
+    request_telemetry_source: candidate.request_telemetry_source || "",
+    request_telemetry_session_status: candidate.request_telemetry_session_status || "",
+    request_telemetry_dispatch_status: candidate.request_telemetry_dispatch_status || "",
+    request_telemetry_runner_request_id: runnerRequestId,
+    evidence: [
+      timelineBindingId ? `timeline_binding=${timelineBindingId}` : "",
+      originalWorkItemId ? `closed_repair_work_item=${originalWorkItemId}` : "",
+      reproofCandidateId ? `reproof_candidate=${reproofCandidateId}` : "",
+      reason,
+    ].filter(Boolean),
+    filesChanged: [],
+    verification: [
+      "重新运行 API microcompact native apply proof repair closure re-proof report",
+      "确认 provider_reproof_status=strong 且 nativeApplyStrongProof=true",
+      "确认 requestTelemetrySessionBound/requestTelemetryDispatchBound 均为 true",
+    ],
+    blockers: [],
+    needs: ["native_request_adapter telemetry ledger", "task-agent session/snapshot ledger", "execution externalRunnerRequestIds"],
+    requeueReason: "",
+    createdAt: existing.createdAt || existing.created_at || at,
+    updatedAt: existing.updatedAt || existing.updated_at || at,
+    lastSeenAt: existing.lastSeenAt || existing.last_seen_at || at,
+    completedAt: existing.completedAt || existing.completed_at || "",
+    seenCount: Math.max(1, Number(existing.seenCount || existing.seen_count || 1) || 1),
+  };
+}
+
+function syncApiMicrocompactNativeApplyProviderReproofWorkItems(groupId: string, closureReproofGroup: any = {}, options: any = {}) {
+  if (!groupId || !closureReproofGroup?.schema) return summarizeReplayRepairPendingWorkItems(groupId);
+  const at = String(options.at || options.generatedAt || options.generated_at || now());
+  const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+  const previousItems = Array.isArray(ledger.items) ? ledger.items : [];
+  const previousById = new Map<string, any>(previousItems.map((item: any) => [String(item.id || item.work_item_id || ""), item]));
+  const candidates = Array.isArray(closureReproofGroup.reproofCandidates || closureReproofGroup.reproof_candidates)
+    ? (closureReproofGroup.reproofCandidates || closureReproofGroup.reproof_candidates)
+    : [];
+  const currentIds = new Set<string>();
+  const nextReproofItems: any[] = [];
+  let changed = false;
+
+  for (const [index, candidate] of candidates.entries()) {
+    const draft = buildApiMicrocompactNativeApplyProviderReproofWorkItem(groupId, candidate, index, {}, at);
+    const existing = previousById.get(draft.id) || {};
+    let item = buildApiMicrocompactNativeApplyProviderReproofWorkItem(groupId, candidate, index, existing, at);
+    const previousSignature = replayRepairWorkItemSignature(existing);
+    const nextSignature = replayRepairWorkItemSignature(item);
+    if (existing.id && previousSignature === nextSignature) {
+      item = {
+        ...existing,
+        ...item,
+        createdAt: existing.createdAt || item.createdAt,
+        updatedAt: existing.updatedAt || item.updatedAt,
+        lastSeenAt: existing.lastSeenAt || item.lastSeenAt,
+        seenCount: Number(existing.seenCount || 1),
+      };
+    } else {
+      item = {
+        ...item,
+        updatedAt: at,
+        lastSeenAt: at,
+        seenCount: existing.id ? Number(existing.seenCount || 1) + 1 : 1,
+      };
+      changed = true;
+    }
+    currentIds.add(item.id);
+    nextReproofItems.push(item);
+  }
+
+  const untouchedItems: any[] = [];
+  for (const existing of previousItems) {
+    const id = String(existing.id || existing.work_item_id || "");
+    if (!isApiMicrocompactNativeApplyProviderReproofWorkItem(existing)) {
+      untouchedItems.push(existing);
+      continue;
+    }
+    if (!id || currentIds.has(id)) continue;
+    const currentStatus = replayRepairWorkItemStatus(existing.status);
+    if (!replayRepairWorkItemOpen(currentStatus)) {
+      nextReproofItems.push(existing);
+      continue;
+    }
+    const resolved = String(closureReproofGroup.status || "") === "ok"
+      || Number(closureReproofGroup.providerStrongReproofNeededCount || closureReproofGroup.provider_strong_reproof_needed_count || 0) === 0;
+    nextReproofItems.push({
+      ...existing,
+      status: resolved ? "completed" : "cancelled",
+      updatedAt: at,
+      completedAt: resolved ? (existing.completedAt || at) : existing.completedAt || "",
+      resolutionReason: resolved ? "native_provider_reproof_strong" : "superseded_by_latest_closure_reproof_report",
+      provider_reproof_status: resolved ? "strong" : existing.provider_reproof_status || "needed",
+      latestClosureReproof: {
+        status: closureReproofGroup.status || "",
+        timelineProvedRepairCount: closureReproofGroup.timelineProvedRepairCount || 0,
+        providerStrongProofCount: closureReproofGroup.providerStrongProofCount || 0,
+        providerStrongReproofNeededCount: closureReproofGroup.providerStrongReproofNeededCount || 0,
+      },
+    });
+    changed = true;
+  }
+
+  const nextItems = [...untouchedItems, ...nextReproofItems]
+    .sort((a, b) => {
+      const statusRank = replayRepairWorkItemOpen(a.status) === replayRepairWorkItemOpen(b.status) ? 0 : replayRepairWorkItemOpen(a.status) ? -1 : 1;
+      if (statusRank) return statusRank;
+      const priority = replayRepairPriorityRank(a.priority) - replayRepairPriorityRank(b.priority);
+      if (priority) return priority;
+      return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    })
+    .slice(0, 160);
+  const stats = replayRepairWorkItemStats(nextItems);
+  const nextLedger = {
+    ...ledger,
+    latestApiMicrocompactNativeApplyProviderReproof: {
+      status: closureReproofGroup.status || "",
+      timelineProvedRepairCount: closureReproofGroup.timelineProvedRepairCount || 0,
+      providerStrongProofCount: closureReproofGroup.providerStrongProofCount || 0,
+      providerStrongReproofNeededCount: closureReproofGroup.providerStrongReproofNeededCount || 0,
+      reproofCandidateCount: candidates.length,
+    },
+    items: nextItems,
+    stats,
+    updatedAt: changed || !ledger.updatedAt ? at : ledger.updatedAt,
+  };
+  const currentComparable = JSON.stringify({
+    latestApiMicrocompactNativeApplyProviderReproof: ledger.latestApiMicrocompactNativeApplyProviderReproof || null,
+    items: previousItems.filter(isApiMicrocompactNativeApplyProviderReproofWorkItem),
+  });
+  const nextComparable = JSON.stringify({
+    latestApiMicrocompactNativeApplyProviderReproof: nextLedger.latestApiMicrocompactNativeApplyProviderReproof || null,
+    items: nextItems.filter(isApiMicrocompactNativeApplyProviderReproofWorkItem),
+  });
+  if (changed || currentComparable !== nextComparable || !fs.existsSync(ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId))) {
+    return summarizeReplayRepairPendingWorkItems(groupId, writeGroupCompactBoundaryReplayRepairWorkItems(groupId, nextLedger));
+  }
+  return summarizeReplayRepairPendingWorkItems(groupId, ledger);
+}
+
+function buildApiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport(options: any = {}) {
+  const closureReproofReport = options.closureReproofReport
+    || options.closure_reproof_report
+    || buildApiMicrocompactNativeApplyProofRepairClosureReproofReport(options);
+  const rows = (closureReproofReport.groups || []).map((group: any) => {
+    const groupId = String(group.groupId || "");
+    const workItemsSummary = syncApiMicrocompactNativeApplyProviderReproofWorkItems(groupId, group, {
+      at: options.generatedAt || options.generated_at || closureReproofReport.generatedAt || now(),
+    });
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const items = (Array.isArray(ledger.items) ? ledger.items : []).filter(isApiMicrocompactNativeApplyProviderReproofWorkItem);
+    const candidates = Array.isArray(group.reproofCandidates || group.reproof_candidates)
+      ? (group.reproofCandidates || group.reproof_candidates)
+      : [];
+    const openItems = items.filter((item: any) => replayRepairWorkItemOpen(item.status));
+    const completedItems = items.filter((item: any) => replayRepairWorkItemStatus(item.status) === "completed");
+    const matched = candidates.map((candidate: any) => {
+      const item = items.find((entry: any) => {
+        const sameCandidate = candidate.reproof_candidate_id && entry.reproof_candidate_id === candidate.reproof_candidate_id;
+        const sameRequest = candidate.request_patch_checksum && entry.request_patch_checksum === candidate.request_patch_checksum;
+        const sameTimeline = candidate.timeline_binding_id && entry.timeline_binding_id === candidate.timeline_binding_id;
+        return sameCandidate || (sameRequest && sameTimeline);
+      }) || null;
+      return { candidate, item };
+    });
+    const missing = matched.filter((entry: any) => !entry.item);
+    const metadataGaps = matched
+      .filter((entry: any) => entry.item)
+      .map((entry: any) => {
+        const item = entry.item || {};
+        const gaps = [
+          !item.provider_reproof_status ? "provider_reproof_status" : "",
+          !item.provider_reproof_reason ? "provider_reproof_reason" : "",
+          !item.request_patch_checksum ? "request_patch_checksum" : "",
+          !item.runner_request_id ? "runner_request_id" : "",
+          !item.execution_id ? "execution_id" : "",
+          !item.task_agent_session_id ? "task_agent_session_id" : "",
+          !item.memory_context_snapshot_id ? "memory_context_snapshot_id" : "",
+          !item.timeline_binding_id ? "timeline_binding_id" : "",
+        ].filter(Boolean);
+        return {
+          work_item_id: item.work_item_id || item.id || "",
+          reproof_candidate_id: entry.candidate.reproof_candidate_id || "",
+          gaps,
+        };
+      })
+      .filter((entry: any) => entry.gaps.length > 0);
+    const expected = Number(group.providerStrongReproofNeededCount || 0);
+    const covered = Math.max(0, expected - missing.length);
+    const status = expected === 0
+      ? openItems.length > 0 ? "warn" : "empty"
+      : missing.length > 0 ? "fail" : metadataGaps.length > 0 ? "warn" : "ok";
+    return {
+      schema: "ccm-api-microcompact-native-apply-proof-repair-closure-reproof-work-item-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      closureReproofStatus: group.status || "",
+      expectedWorkItemCount: expected,
+      coveredWorkItemCount: covered,
+      workItemCount: items.length,
+      openItemCount: openItems.length,
+      completedItemCount: completedItems.length,
+      metadataGapCount: metadataGaps.length,
+      dispatchCandidateCount: (buildReplayRepairMainAgentDispatchCandidates(groupId, { ledger, limit: Math.max(12, items.length + 4) }).candidates || [])
+        .filter((candidate: any) => candidate.source === "api_microcompact_native_apply_provider_reproof").length,
+      workItemsSummary,
+      workItems: items.slice(0, 12).map((item: any) => ({
+        id: item.id || item.work_item_id || "",
+        status: replayRepairWorkItemStatus(item.status),
+        source: item.source || "",
+        provider_reproof_status: item.provider_reproof_status || "",
+        provider_reproof_reason: item.provider_reproof_reason || "",
+        reproof_candidate_id: item.reproof_candidate_id || "",
+        timeline_binding_id: item.timeline_binding_id || "",
+        original_work_item_id: item.original_work_item_id || "",
+        task_id: item.taskId || item.task_id || "",
+        request_patch_checksum: item.request_patch_checksum || "",
+        runner_request_id: item.runner_request_id || "",
+        execution_id: item.execution_id || "",
+        task_agent_session_id: item.task_agent_session_id || "",
+        memory_context_snapshot_id: item.memory_context_snapshot_id || "",
+        dispatch_target: item.dispatch_target || "",
+      })),
+      gaps: [
+        ...missing.slice(0, 8).map((entry: any) => ({
+          reproof_candidate_id: entry.candidate.reproof_candidate_id || "",
+          timeline_binding_id: entry.candidate.timeline_binding_id || "",
+          request_patch_checksum: entry.candidate.request_patch_checksum || "",
+          reason: "closure re-proof candidate 未物化为 provider re-proof repair work item",
+        })),
+        ...metadataGaps.slice(0, 8).map((entry: any) => ({
+          work_item_id: entry.work_item_id || "",
+          reproof_candidate_id: entry.reproof_candidate_id || "",
+          reason: `provider re-proof repair work item 缺少字段：${entry.gaps.join(",")}`,
+        })),
+      ].slice(0, 12),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.expectedWorkItemCount || 0) > 0 || Number(row.openItemCount || 0) > 0);
+  const requiredRows = checkedRows.filter(row => Number(row.expectedWorkItemCount || 0) > 0);
+  const coveredRows = requiredRows.filter(row => Number(row.coveredWorkItemCount || 0) >= Number(row.expectedWorkItemCount || 0));
+  const metadataCompleteRows = requiredRows.filter(row => Number(row.metadataGapCount || 0) === 0);
+  const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+  const metadataCoverageRate = requiredRows.length ? Math.round((metadataCompleteRows.length / requiredRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? checkedRows.some(row => row.status === "warn") ? "warn" : "empty"
+    : coverageRate < 100 ? coverageRate >= 75 ? "warn" : "fail" : metadataCoverageRate === 100 ? "ok" : "warn";
+  return {
+    schema: "ccm-api-microcompact-native-apply-proof-repair-closure-reproof-work-item-report-v1",
+    generatedAt: closureReproofReport.generatedAt || now(),
+    overall: {
+      status,
+      coverageRate,
+      metadataCoverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsNeedingWorkItems: requiredRows.length,
+      groupsCovered: coveredRows.length,
+      groupsMetadataComplete: metadataCompleteRows.length,
+      expectedWorkItemCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedWorkItemCount || 0), 0),
+      coveredWorkItemCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredWorkItemCount || 0), 0),
+      openItemCount: checkedRows.reduce((sum, row) => sum + Number(row.openItemCount || 0), 0),
+      completedItemCount: checkedRows.reduce((sum, row) => sum + Number(row.completedItemCount || 0), 0),
+      dispatchCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.dispatchCandidateCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.expectedWorkItemCount || 0) - Number(a.expectedWorkItemCount || 0) || Number(b.openItemCount || 0) - Number(a.openItemCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateApiMicrocompactNativeApplyProofRepairClosureReproofWorkItems(options: any = {}) {
+  const report = buildApiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport(options);
+  const checked = Number(report.overall.groupsNeedingWorkItems || 0);
+  const passed = (report.groups || []).filter((row: any) => Number(row.expectedWorkItemCount || 0) > 0 && row.status === "ok").length;
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    expectedWorkItemCount: row.expectedWorkItemCount,
+    coveredWorkItemCount: row.coveredWorkItemCount,
+    openItemCount: row.openItemCount,
+    dispatchCandidateCount: row.dispatchCandidateCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "closure re-proof work item 缺失",
+    work_item_id: gap.work_item_id || "",
+    reproof_candidate_id: gap.reproof_candidate_id || "",
+    timeline_binding_id: gap.timeline_binding_id || "",
+    request_patch_checksum: gap.request_patch_checksum || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "api_microcompact_native_apply_proof_repair_closure_reproof_work_items",
+    "API Microcompact Native Apply Proof Repair Closure Re-proof Work Items",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "把 timeline-closed 但 provider telemetry 仍弱的 native proof re-proof candidate 物化为主 Agent 可领取/派发的 repair work item，并保留 request/session/execution/snapshot 定位字段。"
+  );
+  check.report = report;
+  return check;
+}
+
 function buildCompactFileReferenceReadPlanRevalidationRepairWorkItemReport(options: any = {}) {
   const revalidationReport = buildCompactFileReferenceReadPlanRevalidationGateReport(options);
   const rows = (revalidationReport.groups || []).map((group: any) => {
@@ -5085,6 +13318,152 @@ function evaluateGroupToolContinuitySnapshots(options: any = {}) {
     evidence,
     gaps,
     "对齐 Claude Code 的 discovered tools / invoked skills 保留：压缩后必须把工具、技能、缺失项作为上下文恢复，但不能绕过当前授权与 runtime tool gate。"
+  );
+  check.report = report;
+  return check;
+}
+
+function buildTaskAgentMemoryContextSnapshotReport(options: any = {}) {
+  try {
+    const {
+      buildTaskAgentMemoryContextSnapshotInventory,
+      pruneTaskAgentMemoryContextSnapshots,
+    } = require("../../tasks/agent-sessions");
+    const inventory = buildTaskAgentMemoryContextSnapshotInventory(options);
+    const retention = pruneTaskAgentMemoryContextSnapshots({ ...options, dryRun: true });
+    const summary = inventory.summary || {};
+    const checked = Number(summary.snapshotCount || 0);
+    const failed = Number(summary.failCount || 0);
+    const warned = Number(summary.warnCount || 0);
+    const status = checked === 0
+      ? "empty"
+      : failed > 0 ? "fail" : warned > 0 ? "warn" : "ok";
+    return {
+      schema: "ccm-task-agent-memory-context-snapshot-quality-report-v1",
+      generatedAt: now(),
+      overall: {
+        status,
+        checked,
+        passed: Number(summary.okCount || 0),
+        score: qualityRate(Number(summary.okCount || 0), checked),
+        sessionCount: Number(summary.sessionCount || 0),
+        snapshotCount: checked,
+        okCount: Number(summary.okCount || 0),
+        warnCount: warned,
+        failCount: failed,
+        orphanFileCount: Number(summary.orphanFileCount || 0),
+        missingFileCount: Number(summary.missingFileCount || 0),
+        checksumMismatchCount: Number(summary.checksumMismatchCount || 0),
+        missingPacketCount: Number(summary.missingPacketCount || 0),
+        missingGateCount: Number(summary.missingGateCount || 0),
+        staleCount: Number(summary.staleCount || 0),
+        prunableCount: Number(summary.prunableCount || 0),
+        retentionCandidateCount: Number(retention.candidateCount || 0),
+      },
+      inventory: {
+        directory: inventory.directory || "",
+        policy: inventory.policy || {},
+        summary,
+      },
+      retention: {
+        schema: retention.schema,
+        dryRun: retention.dryRun === true,
+        candidateCount: Number(retention.candidateCount || 0),
+        prunedCount: Number(retention.prunedCount || 0),
+        skippedCount: Number(retention.skippedCount || 0),
+        rows: (retention.pruned || []).slice(0, 40),
+      },
+      groups: inventory.groups || [],
+      rows: (inventory.rows || []).slice(0, 80),
+      weakRows: (inventory.weakRows || []).slice(0, 40),
+      prunableRows: (inventory.prunableRows || []).slice(0, 40),
+    };
+  } catch (error: any) {
+    return {
+      schema: "ccm-task-agent-memory-context-snapshot-quality-report-v1",
+      generatedAt: now(),
+      overall: {
+        status: "fail",
+        checked: 1,
+        passed: 0,
+        score: 0,
+        sessionCount: 0,
+        snapshotCount: 0,
+        okCount: 0,
+        warnCount: 0,
+        failCount: 1,
+        prunableCount: 0,
+      },
+      inventory: { summary: {} },
+      retention: { dryRun: true, candidateCount: 0, prunedCount: 0, skippedCount: 0, rows: [] },
+      groups: [],
+      rows: [],
+      weakRows: [{ reason: error?.message || String(error) }],
+      prunableRows: [],
+      error: error?.message || String(error),
+    };
+  }
+}
+
+function buildGroupTaskAgentMemoryContextSnapshotOverview(groupId: string) {
+  const id = String(groupId || "").trim();
+  if (!id) return null;
+  const report = buildTaskAgentMemoryContextSnapshotReport({ groupId: id });
+  const group = (report.groups || []).find((row: any) => row.groupId === id) || null;
+  const rows = (report.rows || []).filter((row: any) => row.groupId === id);
+  const weakRows = (report.weakRows || []).filter((row: any) => row.groupId === id);
+  const prunableRows = (report.prunableRows || []).filter((row: any) => row.groupId === id);
+  return {
+    schema: "ccm-group-task-agent-memory-context-snapshot-overview-v1",
+    groupId: id,
+    status: group
+      ? Number(group.failCount || 0) > 0 ? "fail" : Number(group.warnCount || 0) > 0 ? "warn" : "ok"
+      : "empty",
+    directory: report.inventory?.directory || "",
+    policy: report.inventory?.policy || {},
+    snapshotCount: Number(group?.snapshotCount || rows.length || 0),
+    okCount: Number(group?.okCount || rows.filter((row: any) => row.status === "ok").length || 0),
+    warnCount: Number(group?.warnCount || rows.filter((row: any) => row.status === "warn").length || 0),
+    failCount: Number(group?.failCount || rows.filter((row: any) => row.status === "fail").length || 0),
+    staleCount: Number(group?.staleCount || rows.filter((row: any) => row.stale).length || 0),
+    prunableCount: Number(group?.prunableCount || prunableRows.length || 0),
+    projects: group?.projects || Array.from(new Set(rows.map((row: any) => row.project).filter(Boolean))).slice(0, 12),
+    rows: rows.slice(0, 12),
+    weakRows: weakRows.slice(0, 12),
+    prunableRows: prunableRows.slice(0, 12),
+    retention: report.retention || null,
+  };
+}
+
+function evaluateTaskAgentMemoryContextSnapshots(options: any = {}) {
+  const report = buildTaskAgentMemoryContextSnapshotReport(options);
+  const checked = Number(report.overall.checked || report.overall.snapshotCount || 0);
+  const passed = Number(report.overall.passed || report.overall.okCount || 0);
+  const evidence = (report.rows || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    taskId: row.taskId,
+    sessionId: row.sessionId,
+    snapshotId: row.snapshotId,
+    workerContextPacketId: row.workerContextPacketId,
+    gateCount: row.gateCount,
+    snapshotFile: row.snapshotFile,
+  }));
+  const gaps = (report.weakRows || []).flatMap((row: any) => (row.gaps || [{ reason: row.reason || "task Agent memory context snapshot 异常" }]).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    taskId: row.taskId,
+    sessionId: row.sessionId,
+    snapshotId: row.snapshotId,
+    reason: gap.reason || "task Agent memory context snapshot 异常",
+    snapshotFile: row.snapshotFile,
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "task_agent_memory_context_snapshots",
+    "Task Agent 记忆上下文快照",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "每次第三方项目子 Agent 会话必须有可审计的群聊记忆上下文快照：绑定真实 task Agent session、带 worker context packet、gate id、checksum，并支持 Memory Center retention dry-run。"
   );
   check.report = report;
   return check;
@@ -6443,6 +14822,7 @@ function buildChildGlobalAgentMemoryBridgeReport(options: any = {}) {
         maxGlobalAgentMemory: options.maxGlobalAgentMemory || options.max_global_agent_memory || 5,
         includeGlobalClaudeMemory: options.includeGlobalClaudeMemory === true,
         includeProjectMemory: options.includeProjectMemory === true,
+        allowSelftestGlobalMemoryForSelfTest: options.allowSelftestGlobalMemoryForSelfTest === true || options.allow_selftest_global_memory_for_selftest === true,
       });
     } catch (error: any) {
       return {
@@ -6463,6 +14843,23 @@ function buildChildGlobalAgentMemoryBridgeReport(options: any = {}) {
     const conflictCount = Number(arbitration.conflictCount || 0);
     const crossGroupSuppression = recall.crossGroupSuppression || {};
     const crossGroupSuppressedCount = Number(arbitration.crossGroupSuppressedCount || crossGroupSuppression.suppressedCount || 0);
+    const crossGroupAdvisoryCount = Number(crossGroupSuppression.advisoryCount || 0);
+    const crossGroupSupersededCount = Number(crossGroupSuppression.supersededCount || 0);
+    const crossGroupDecayedCount = Number(crossGroupSuppression.decayedCount || 0);
+    const recalledItems = Array.isArray(recall.items) ? recall.items : [];
+    const semanticRiskScores = recalledItems.flatMap((item: any) => {
+      const itemArbitration = item?.arbitration || {};
+      return [
+        Number(itemArbitration.semanticRiskScore || itemArbitration.semanticRisk?.score || 0),
+        ...(Array.isArray(itemArbitration.decisiveEvidence) ? itemArbitration.decisiveEvidence : []).map((evidence: any) => Number(evidence.semanticRiskScore || evidence.semanticRisk?.score || 0)),
+      ];
+    }).filter((score: number) => Number.isFinite(score) && score > 0);
+    const semanticRiskCount = semanticRiskScores.length;
+    const semanticConflictCount = recalledItems.filter((item: any) => {
+      const itemArbitration = item?.arbitration || {};
+      return itemArbitration.semanticRisk?.conflictCount > 0 || Number(itemArbitration.semanticRiskScore || itemArbitration.semanticRisk?.score || 0) >= 60;
+    }).length;
+    const maxSemanticRiskScore = semanticRiskScores.length ? Math.max(...semanticRiskScores) : 0;
     const rendered = String(bundle.rendered_text || "");
     const renderedHasBridge = itemCount > 0
       ? rendered.includes("全局 Agent 长期记忆召回") && rendered.includes("global_memory_id=")
@@ -6472,6 +14869,12 @@ function buildChildGlobalAgentMemoryBridgeReport(options: any = {}) {
       : true;
     const renderedHasCrossGroupSuppression = crossGroupSuppressedCount > 0
       ? rendered.includes("跨群聊全局记忆抑制") && rendered.includes("cross_group_suppression=background_only")
+      : true;
+    const renderedHasCrossGroupFreshness = crossGroupAdvisoryCount > 0
+      ? rendered.includes("跨群聊抑制新鲜度") && rendered.includes("cross_group_suppression=advisory")
+      : true;
+    const renderedHasSemanticArbitration = semanticRiskCount > 0
+      ? rendered.includes("semantic_risk=") && rendered.includes("semantic_reasons=")
       : true;
     const sourceManifestHasGlobalMemory = (bundle.source_manifest?.entries || []).some((entry: any) => entry.id === "global_agent_memory" || entry.type === "global_agent_memory_json");
     const sourceManifestHasArbitrationLedger = (bundle.source_manifest?.entries || []).some((entry: any) => entry.id === "global_memory_arbitration_ledger" || entry.type === "global_memory_arbitration_ledger");
@@ -6483,6 +14886,7 @@ function buildChildGlobalAgentMemoryBridgeReport(options: any = {}) {
     const ledger = bundle.global_memory_arbitration_ledger || {};
     const ledgerRequired = demotedCount > 0 || conflictCount > 0;
     const crossGroupSuppressionRequired = crossGroupSuppressedCount > 0;
+    const crossGroupEvidenceRequired = crossGroupSuppressedCount > 0 || crossGroupAdvisoryCount > 0;
     const ledgerFile = ledger.file || bundle.raw_sources?.group_global_memory_arbitration_ledger_file || getGroupGlobalMemoryArbitrationLedgerFile(groupId);
     const ledgerRecorded = !ledgerRequired || (ledger.schema === "ccm-group-global-memory-arbitration-ledger-summary-v1"
       && Number(ledger.entryCount || 0) >= Math.max(1, demotedCount + conflictCount > 0 ? 1 : 0)
@@ -6496,7 +14900,8 @@ function buildChildGlobalAgentMemoryBridgeReport(options: any = {}) {
         && rawSourceHasGlobalMemory
         && ledgerRecorded
         && (!ledgerRequired || (sourceManifestHasArbitrationLedger && compactReferencesHasArbitrationLedger))
-        && (!crossGroupSuppressionRequired || (renderedHasCrossGroupSuppression && sourceManifestHasCrossGroupArbitration && compactReferencesHasCrossGroupArbitration))
+        && (!crossGroupEvidenceRequired || (renderedHasCrossGroupSuppression && renderedHasCrossGroupFreshness && sourceManifestHasCrossGroupArbitration && compactReferencesHasCrossGroupArbitration))
+        && renderedHasSemanticArbitration
           ? "ok" : "fail";
     return {
       schema: "ccm-child-global-agent-memory-bridge-row-v1",
@@ -6507,8 +14912,17 @@ function buildChildGlobalAgentMemoryBridgeReport(options: any = {}) {
       demotedCount,
       conflictCount,
       crossGroupSuppressedCount,
+      crossGroupAdvisoryCount,
+      crossGroupSupersededCount,
+      crossGroupDecayedCount,
+      semanticRiskCount,
+      semanticConflictCount,
+      maxSemanticRiskScore,
       crossGroupSuppressionRequired,
+      crossGroupEvidenceRequired,
       renderedHasCrossGroupSuppression,
+      renderedHasCrossGroupFreshness,
+      renderedHasSemanticArbitration,
       recallReason: recall.reason || "",
       renderedHasBridge,
       renderedHasArbitration,
@@ -6524,6 +14938,7 @@ function buildChildGlobalAgentMemoryBridgeReport(options: any = {}) {
       arbitrationLedgerFile: ledgerFile,
       crossGroupSuppressionSourceDir: crossGroupSuppression.sourceDir || bundle.raw_sources?.global_memory_cross_group_arbitration_dir || "",
       crossGroupSuppressionItems: crossGroupSuppression.items || [],
+      crossGroupSuppressionAdvisoryItems: crossGroupSuppression.advisoryItems || [],
       arbitrationLedgerEntryCount: Number(ledger.entryCount || 0),
       arbitrationLedgerRepeatedConflictCount: Number(ledger.repeatedConflictCount || 0),
       arbitrationDistillationCandidateCount: Array.isArray(ledger.distillationCandidates) ? ledger.distillationCandidates.length : 0,
@@ -6552,14 +14967,22 @@ function buildChildGlobalAgentMemoryBridgeReport(options: any = {}) {
       missingRenderedCount: checkedRows.filter(row => Number(row.itemCount || 0) > 0 && !row.renderedHasBridge).length,
       missingArbitrationRenderCount: checkedRows.filter(row => (Number(row.demotedCount || 0) > 0 || Number(row.conflictCount || 0) > 0) && !row.renderedHasArbitration).length,
       missingCrossGroupSuppressionRenderCount: checkedRows.filter(row => Number(row.crossGroupSuppressedCount || 0) > 0 && !row.renderedHasCrossGroupSuppression).length,
+      missingCrossGroupFreshnessRenderCount: checkedRows.filter(row => Number(row.crossGroupAdvisoryCount || 0) > 0 && !row.renderedHasCrossGroupFreshness).length,
+      missingSemanticArbitrationRenderCount: checkedRows.filter(row => Number(row.semanticRiskCount || 0) > 0 && !row.renderedHasSemanticArbitration).length,
       missingArbitrationLedgerCount: checkedRows.filter(row => row.arbitrationLedgerRequired && !row.arbitrationLedgerRecorded).length,
       missingArbitrationLedgerReferenceCount: checkedRows.filter(row => row.arbitrationLedgerRequired && (!row.sourceManifestHasArbitrationLedger || !row.compactReferencesHasArbitrationLedger)).length,
-      missingCrossGroupSuppressionReferenceCount: checkedRows.filter(row => row.crossGroupSuppressionRequired && (!row.sourceManifestHasCrossGroupArbitration || !row.compactReferencesHasCrossGroupArbitration)).length,
+      missingCrossGroupSuppressionReferenceCount: checkedRows.filter(row => row.crossGroupEvidenceRequired && (!row.sourceManifestHasCrossGroupArbitration || !row.compactReferencesHasCrossGroupArbitration)).length,
       missingSourceCount: checkedRows.filter(row => Number(row.itemCount || 0) > 0 && !row.sourceManifestHasGlobalMemory).length,
       missingCompactReferenceCount: checkedRows.filter(row => Number(row.itemCount || 0) > 0 && !row.compactReferencesHasGlobalMemory).length,
       demotedCount: checkedRows.reduce((sum, row) => sum + Number(row.demotedCount || 0), 0),
       conflictCount: checkedRows.reduce((sum, row) => sum + Number(row.conflictCount || 0), 0),
+      semanticRiskCount: checkedRows.reduce((sum, row) => sum + Number(row.semanticRiskCount || 0), 0),
+      semanticConflictCount: checkedRows.reduce((sum, row) => sum + Number(row.semanticConflictCount || 0), 0),
+      maxSemanticRiskScore: checkedRows.reduce((max, row) => Math.max(max, Number(row.maxSemanticRiskScore || 0)), 0),
       crossGroupSuppressedCount: checkedRows.reduce((sum, row) => sum + Number(row.crossGroupSuppressedCount || 0), 0),
+      crossGroupAdvisoryCount: checkedRows.reduce((sum, row) => sum + Number(row.crossGroupAdvisoryCount || 0), 0),
+      crossGroupSupersededCount: checkedRows.reduce((sum, row) => sum + Number(row.crossGroupSupersededCount || 0), 0),
+      crossGroupDecayedCount: checkedRows.reduce((sum, row) => sum + Number(row.crossGroupDecayedCount || 0), 0),
       arbitrationLedgerEntryCount: checkedRows.reduce((sum, row) => sum + Number(row.arbitrationLedgerEntryCount || 0), 0),
       repeatedArbitrationConflictCount: checkedRows.reduce((sum, row) => sum + Number(row.arbitrationLedgerRepeatedConflictCount || 0), 0),
       arbitrationDistillationCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.arbitrationDistillationCandidateCount || 0), 0),
@@ -6581,6 +15004,9 @@ function evaluateChildGlobalAgentMemoryBridge(options: any = {}) {
     itemCount: row.itemCount,
     demotedCount: row.demotedCount,
     conflictCount: row.conflictCount,
+    semanticRiskCount: row.semanticRiskCount,
+    semanticConflictCount: row.semanticConflictCount,
+    maxSemanticRiskScore: row.maxSemanticRiskScore,
     arbitrationLedgerEntryCount: row.arbitrationLedgerEntryCount,
     arbitrationLedgerRepeatedConflictCount: row.arbitrationLedgerRepeatedConflictCount,
     arbitrationDistillationCandidateCount: row.arbitrationDistillationCandidateCount,
@@ -6771,6 +15197,134 @@ function evaluateGlobalMemoryCrossGroupSuppression(options: any = {}) {
   return check;
 }
 
+function evaluateGlobalMemoryCrossGroupSuppressionFreshness(options: any = {}) {
+  const report = buildChildGlobalAgentMemoryBridgeReport(options);
+  const rows = (report.groups || []).filter((row: any) => Number(row.crossGroupAdvisoryCount || 0) > 0);
+  const passedRows = rows.filter((row: any) => row.renderedHasCrossGroupFreshness === true
+    && row.sourceManifestHasCrossGroupArbitration === true
+    && row.compactReferencesHasCrossGroupArbitration === true);
+  const evidence = passedRows.slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    targetProject: row.targetProject,
+    advisoryCount: row.crossGroupAdvisoryCount,
+    supersededCount: row.crossGroupSupersededCount,
+    decayedCount: row.crossGroupDecayedCount,
+    sourceDir: row.crossGroupSuppressionSourceDir,
+    items: row.crossGroupSuppressionAdvisoryItems,
+  }));
+  const gaps = rows.filter((row: any) => !passedRows.includes(row)).slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    targetProject: row.targetProject,
+    reason: "跨群聊抑制已降级为 advisory，但缺少新鲜度渲染或 source/compact references。",
+    advisoryCount: row.crossGroupAdvisoryCount,
+    supersededCount: row.crossGroupSupersededCount,
+    decayedCount: row.crossGroupDecayedCount,
+    renderedHasCrossGroupFreshness: row.renderedHasCrossGroupFreshness,
+    sourceManifestHasCrossGroupArbitration: row.sourceManifestHasCrossGroupArbitration,
+    compactReferencesHasCrossGroupArbitration: row.compactReferencesHasCrossGroupArbitration,
+    sourceDir: row.crossGroupSuppressionSourceDir,
+  }));
+  const check: any = makeQualityCheck(
+    "global_memory_cross_group_suppression_freshness",
+    "跨群聊抑制新鲜度",
+    rows.length,
+    passedRows.length,
+    evidence,
+    gaps,
+    "当旧跨群聊仲裁证据被更新的 Global Agent 记忆覆盖，或证据超过新鲜度窗口时，子 Agent 包必须把抑制降级为 advisory，并保留来源。"
+  );
+  check.report = {
+    schema: "ccm-global-memory-cross-group-suppression-freshness-quality-report-v1",
+    generatedAt: now(),
+    overall: {
+      checkedGroupCount: rows.length,
+      passedGroupCount: passedRows.length,
+      advisoryCount: report.overall?.crossGroupAdvisoryCount || 0,
+      supersededCount: report.overall?.crossGroupSupersededCount || 0,
+      decayedCount: report.overall?.crossGroupDecayedCount || 0,
+      missingRenderCount: report.overall?.missingCrossGroupFreshnessRenderCount || 0,
+      missingReferenceCount: report.overall?.missingCrossGroupSuppressionReferenceCount || 0,
+    },
+    groups: rows.slice(0, 50),
+  };
+  return check;
+}
+
+function evaluateGlobalMemorySelfTestContamination(options: any = {}) {
+  let scan: any = null;
+  try {
+    const api = require("../../agents/global/memory");
+    scan = typeof api.scanGlobalAgentMemorySelfTestContamination === "function"
+      ? api.scanGlobalAgentMemorySelfTestContamination({ includeResidue: options.includeResidue !== false, limit: options.limit || 80 })
+      : null;
+  } catch (error: any) {
+    return makeQualityCheck(
+      "global_memory_selftest_contamination",
+      "Global Agent 记忆自测污染",
+      1,
+      0,
+      [],
+      [{ reason: compactMemoryCenterText(error?.message || error, 260) }],
+      "真实 Global Agent 长期记忆不能含 selftest sentinel；残留测试备份应提示清理，active memory 必须硬失败。"
+    );
+  }
+  if (!scan?.schema) {
+    return makeQualityCheck(
+      "global_memory_selftest_contamination",
+      "Global Agent 记忆自测污染",
+      1,
+      0,
+      [],
+      [{ reason: "scanGlobalAgentMemorySelfTestContamination unavailable" }],
+      "真实 Global Agent 长期记忆不能含 selftest sentinel；残留测试备份应提示清理，active memory 必须硬失败。"
+    );
+  }
+  const activeCount = Number(scan.active_contamination_count || 0);
+  const residueCount = Number(scan.residue_contamination_count || 0);
+  const contaminatedRows = Array.isArray(scan.rows) ? scan.rows : [];
+  const activeRows = contaminatedRows.filter((row: any) => row.active === true);
+  const residueRows = contaminatedRows.filter((row: any) => row.active !== true);
+  const evidence = activeCount === 0
+    ? [{
+      file: scan.file,
+      activeContaminationCount: activeCount,
+      residueContaminationCount: residueCount,
+      status: residueCount > 0 ? "active_clean_residue_warn" : "clean",
+    }]
+    : [];
+  const gaps = (activeRows.length ? activeRows : residueRows).slice(0, 20).map((row: any) => ({
+    file: row.file,
+    role: row.role,
+    active: row.active === true,
+    kind: row.kind,
+    id: row.id,
+    sentinels: row.sentinels || [],
+    reason: row.active === true
+      ? "active_global_memory_contains_selftest_sentinel"
+      : "residual_selftest_memory_artifact",
+    preview: compactMemoryCenterText(row.preview || "", 260),
+  }));
+  const check: any = makeQualityCheck(
+    "global_memory_selftest_contamination",
+    "Global Agent 记忆自测污染",
+    Math.max(1, Number(scan.files?.filter((file: any) => file.exists).length || 0)),
+    activeCount === 0 ? 1 : 0,
+    evidence,
+    activeCount > 0 ? gaps : [],
+    "真实 Global Agent 长期记忆不能含 selftest sentinel；残留测试备份应提示清理，active memory 必须硬失败。"
+  );
+  check.status = activeCount > 0 ? "fail" : residueCount > 0 ? "warn" : "ok";
+  check.score = activeCount > 0 ? 0 : residueCount > 0 ? 85 : 100;
+  check.residueGaps = residueRows.slice(0, 20).map((row: any) => ({
+    file: row.file,
+    role: row.role,
+    sentinels: row.sentinels || [],
+    reason: "residual_selftest_memory_artifact",
+  }));
+  check.report = scan;
+  return check;
+}
+
 function readCachedQualityReport(maxAgeMs = 10 * 60 * 1000) {
   const cached = readJson(QUALITY_FILE, null);
   if (!cached?.generatedAt) return null;
@@ -6792,12 +15346,46 @@ function memoryQualityCheckDescriptors(lightweight: boolean, options: any = {}) 
     { id: "child_agent_memory_use", run: () => evaluateChildAgentMemoryUse({ taskLimit: lightweight ? 12 : 80, textLimit: lightweight ? 1800 : 6000 }) },
     { id: "child_agent_memory_reliability", run: () => evaluateChildAgentMemoryReliability({ taskLimit: lightweight ? 20 : 120 }) },
     { id: "compact_boundary_timeline", run: () => evaluateCompactBoundaryTimeline({}) },
+    { id: "compact_strategy_decision", run: () => evaluateCompactStrategyDecision({}) },
+    { id: "post_compact_cleanup_audit", run: () => evaluatePostCompactCleanupAudit({}) },
+    { id: "api_microcompact_edit_plan", run: () => evaluateApiMicroCompactEditPlan({}) },
+    { id: "api_microcompact_receipt_discipline", run: () => evaluateApiMicrocompactReceiptDiscipline({ taskLimit: lightweight ? 40 : 160 }) },
+    { id: "api_microcompact_native_apply_readiness", run: () => evaluateApiMicrocompactNativeApplyReadiness({ taskLimit: lightweight ? 40 : 160 }) },
+    { id: "api_microcompact_native_apply_proof", run: () => evaluateApiMicrocompactNativeApplyProof({ taskLimit: lightweight ? 40 : 160 }) },
+    { id: "api_microcompact_native_apply_proof_repair_work_items", run: () => evaluateApiMicrocompactNativeApplyProofRepairWorkItems({ taskLimit: lightweight ? 40 : 160 }) },
+    { id: "api_microcompact_native_apply_proof_repair_dispatch_candidates", run: () => evaluateApiMicrocompactNativeApplyProofRepairDispatchCandidates({ taskLimit: lightweight ? 40 : 160 }) },
+    { id: "api_microcompact_native_apply_proof_repair_dispatch_briefs", run: () => evaluateApiMicrocompactNativeApplyProofRepairDispatchBriefs({ taskLimit: lightweight ? 40 : 160 }) },
+    { id: "api_microcompact_native_apply_proof_repair_assignment_bindings", run: () => evaluateApiMicrocompactNativeApplyProofRepairAssignmentBindings({}) },
+    { id: "worker_context_packet_context_usage", run: () => evaluateWorkerContextPacketContextUsage(options) },
+    { id: "worker_context_packet_context_usage_repair_work_items", run: () => evaluateWorkerContextPacketContextUsageRepairWorkItems(options) },
+    { id: "worker_context_packet_context_usage_repair_typed_memory", run: () => evaluateWorkerContextPacketContextUsageRepairTypedMemory(options) },
+    { id: "worker_context_packet_pre_dispatch_gate", run: () => evaluateWorkerContextPacketPreDispatchGate(options) },
+    { id: "worker_context_packet_compaction_retry", run: () => evaluateWorkerContextPacketCompactionRetry(options) },
+    { id: "worker_context_packet_compact_hook_ledger", run: () => evaluateWorkerContextPacketCompactHookLedger(options) },
+    { id: "worker_context_packet_compact_outcome_ledger", run: () => evaluateWorkerContextPacketCompactOutcomeLedger(options) },
+    { id: "worker_context_packet_compact_strategy_memory", run: () => evaluateWorkerContextPacketCompactStrategyMemory(options) },
+    { id: "worker_context_packet_ptl_emergency_downgrade", run: () => evaluateWorkerContextPacketPtlEmergencyDowngrade(options) },
+    { id: "worker_context_packet_ignore_memory_policy", run: () => evaluateWorkerContextPacketIgnoreMemoryPolicy(options) },
+    { id: "worker_context_packet_ignore_memory_receipt_compliance", run: () => evaluateWorkerContextPacketIgnoreMemoryReceiptCompliance(options) },
+    { id: "worker_context_packet_ignore_memory_receipt_repair_work_items", run: () => evaluateWorkerContextPacketIgnoreMemoryReceiptRepairWorkItems(options) },
+    { id: "worker_context_packet_ignore_memory_receipt_repair_dispatch_candidates", run: () => evaluateWorkerContextPacketIgnoreMemoryReceiptRepairDispatchCandidates(options) },
+    { id: "worker_context_packet_ignore_memory_receipt_repair_dispatch_briefs", run: () => evaluateWorkerContextPacketIgnoreMemoryReceiptRepairDispatchBriefs(options) },
+    { id: "worker_context_packet_ignore_memory_receipt_repair_typed_memory", run: () => evaluateWorkerContextPacketIgnoreMemoryReceiptRepairTypedMemory(options) },
+    { id: "worker_context_packet_memory_reinjection_proof", run: () => evaluateWorkerContextPacketMemoryReinjectionProof(options) },
+    { id: "api_microcompact_native_apply_proof_repair_worker_context_packet_injection", run: () => evaluateApiMicrocompactNativeApplyProofRepairWorkerContextPacketInjection(options) },
+    { id: "api_microcompact_native_apply_proof_repair_timeline_bindings", run: () => evaluateApiMicrocompactNativeApplyProofRepairTimelineBindings({}) },
+    { id: "api_microcompact_native_apply_proof_repair_receipt_consumption", run: () => evaluateApiMicrocompactNativeApplyProofRepairReceiptConsumption(options) },
+    { id: "api_microcompact_native_apply_provider_reproof_receipt_consumption_typed_memory", run: () => evaluateApiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemory(options) },
+    { id: "api_microcompact_native_apply_proof_repair_timeline_completions", run: () => evaluateApiMicrocompactNativeApplyProofRepairTimelineCompletions({}) },
+    { id: "api_microcompact_native_apply_proof_repair_closure_reproof", run: () => evaluateApiMicrocompactNativeApplyProofRepairClosureReproof({}) },
+    { id: "api_microcompact_native_apply_proof_repair_closure_reproof_work_items", run: () => evaluateApiMicrocompactNativeApplyProofRepairClosureReproofWorkItems({}) },
     { id: "compaction_hook_ledger", run: () => evaluateCompactionHookLedger({}) },
     { id: "compact_boundary_replay_gate", run: () => evaluateCompactBoundaryReplayGate({}) },
     { id: "replay_repair_pending_work_items", run: () => evaluateReplayRepairPendingWorkItems({}) },
     { id: "replay_repair_dispatch_candidates", run: () => evaluateReplayRepairDispatchCandidates({}) },
     { id: "group_session_memory_snapshots", run: () => evaluateGroupSessionMemorySnapshots({}) },
     { id: "group_tool_continuity_snapshots", run: () => evaluateGroupToolContinuitySnapshots({}) },
+    { id: "task_agent_memory_context_snapshots", run: () => evaluateTaskAgentMemoryContextSnapshots({}) },
     { id: "compact_file_references", run: () => evaluateCompactFileReferences({}) },
     { id: "compact_file_reference_read_plan", run: () => evaluateCompactFileReferenceReadPlan({}) },
     { id: "compact_file_reference_read_plan_freshness", run: () => evaluateCompactFileReferenceReadPlanFreshness({}) },
@@ -6817,6 +15405,8 @@ function memoryQualityCheckDescriptors(lightweight: boolean, options: any = {}) 
     { id: "global_memory_arbitration_ledger", run: () => evaluateGlobalMemoryArbitrationLedger({ groupLimit: lightweight ? 8 : 30 }) },
     { id: "global_memory_arbitration_distillation", run: () => evaluateGlobalMemoryArbitrationDistillation({ groupLimit: lightweight ? 8 : 30 }) },
     { id: "global_memory_cross_group_suppression", run: () => evaluateGlobalMemoryCrossGroupSuppression({ groupLimit: lightweight ? 8 : 30 }) },
+    { id: "global_memory_cross_group_suppression_freshness", run: () => evaluateGlobalMemoryCrossGroupSuppressionFreshness({ groupLimit: lightweight ? 8 : 30 }) },
+    { id: "global_memory_selftest_contamination", run: () => evaluateGlobalMemorySelfTestContamination({}) },
   ];
 }
 
@@ -6891,10 +15481,45 @@ export function buildMemoryCenterOverview() {
   if (Number(acceptanceRates.forgettingRate || 0) > 0) addSystemAlert("critical", "memory_forgetting", `检测到 ${acceptanceRates.forgettingRate}% 的持续约束无法回溯原文`);
   if (acceptanceRates.recoverySuccessRate !== null && acceptanceRates.recoverySuccessRate < 100) addSystemAlert("critical", "backup_recoverability", `可用备份比例仅 ${acceptanceRates.recoverySuccessRate}%`);
   if (acceptanceRates.projectIntegrityRate !== null && acceptanceRates.projectIntegrityRate < 100) addSystemAlert("critical", "project_archive_integrity", `项目归档完整率仅 ${acceptanceRates.projectIntegrityRate}%`);
+  const globalMemorySelftestContamination = evaluateGlobalMemorySelfTestContamination({});
+  if (globalMemorySelftestContamination.status === "fail") {
+    addSystemAlert("critical", "global_memory_selftest_contamination", `Global Agent active memory 含自测 sentinel 污染 ${globalMemorySelftestContamination.report?.active_contamination_count || 0} 处`);
+  } else if (globalMemorySelftestContamination.status === "warn") {
+    addSystemAlert("warning", "global_memory_selftest_residue", `Global Agent memory 目录仍有自测残留 ${globalMemorySelftestContamination.report?.residue_contamination_count || 0} 处，active memory 已干净`);
+  }
   const postCompactDisciplineTrend = buildPostCompactCandidateDisciplineTrend({ taskLimit: 120, minSample: 3 });
   const postCompactDispatchTrend = buildPostCompactDispatchMarkerTrend({});
   const childAgentReliabilityReport = buildChildAgentMemoryReliabilityReport({ taskLimit: 120 });
   const compactBoundaryTimelineReport = buildCompactBoundaryTimelineReport({});
+  const compactStrategyDecisionReport = buildCompactStrategyDecisionReport({});
+  const postCompactCleanupAuditReport = buildPostCompactCleanupAuditReport({});
+  const apiMicroCompactEditPlanReport = buildApiMicroCompactEditPlanReport({});
+  const apiMicrocompactReceiptDisciplineReport = buildApiMicrocompactReceiptDisciplineReport({});
+  const apiMicrocompactNativeApplyReadinessReport = buildApiMicrocompactNativeApplyReadinessReport({});
+  const apiMicrocompactNativeApplyProofReport = buildApiMicrocompactNativeApplyProofReport({});
+  const apiMicrocompactNativeApplyProofRepairWorkItemReport = buildApiMicrocompactNativeApplyProofRepairWorkItemReport({});
+  const apiMicrocompactNativeApplyProofRepairDispatchCandidateReport = buildApiMicrocompactNativeApplyProofRepairDispatchCandidateReport({
+    repairWorkItemReport: apiMicrocompactNativeApplyProofRepairWorkItemReport,
+  });
+  const apiMicrocompactNativeApplyProofRepairDispatchBriefReport = buildApiMicrocompactNativeApplyProofRepairDispatchBriefReport({
+    candidateReport: apiMicrocompactNativeApplyProofRepairDispatchCandidateReport,
+  });
+  const apiMicrocompactNativeApplyProofRepairAssignmentBindingReport = buildApiMicrocompactNativeApplyProofRepairAssignmentBindingReport({});
+  const workerContextPacketContextUsageReport = buildWorkerContextPacketContextUsageReport({});
+  const workerContextPacketContextUsageRepairWorkItemReport = buildWorkerContextPacketContextUsageRepairWorkItemReport({});
+  const workerContextPacketPreDispatchGateReport = buildWorkerContextPacketPreDispatchGateReport({});
+  const workerContextPacketCompactionRetryReport = buildWorkerContextPacketCompactionRetryReport({});
+  const workerContextPacketCompactHookLedgerReport = buildWorkerContextPacketCompactHookLedgerReport({});
+  const workerContextPacketMemoryReinjectionProofReport = buildWorkerContextPacketMemoryReinjectionProofReport({});
+  const apiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport = buildApiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport({});
+  const apiMicrocompactNativeApplyProofRepairTimelineBindingReport = buildApiMicrocompactNativeApplyProofRepairTimelineBindingReport({});
+  const apiMicrocompactNativeApplyProofRepairReceiptConsumptionReport = buildApiMicrocompactNativeApplyProofRepairReceiptConsumptionReport({});
+  const apiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport = buildApiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport({});
+  const apiMicrocompactNativeApplyProofRepairTimelineCompletionReport = buildApiMicrocompactNativeApplyProofRepairTimelineCompletionReport({});
+  const apiMicrocompactNativeApplyProofRepairClosureReproofReport = buildApiMicrocompactNativeApplyProofRepairClosureReproofReport({});
+  const apiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport = buildApiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport({
+    closureReproofReport: apiMicrocompactNativeApplyProofRepairClosureReproofReport,
+  });
   const compactionHookLedgerReport = buildCompactionHookLedgerReport({});
   const compactBoundaryReplayReport = buildCompactBoundaryReplayReport({});
   const replayRepairPendingWorkItemReport = buildReplayRepairPendingWorkItemReport({});
@@ -6908,6 +15533,32 @@ export function buildMemoryCenterOverview() {
   const compactFileReferenceReadPlanUsageDisciplineReport = buildCompactFileReferenceReadPlanUsageDisciplineReport({});
   const compactFileReferenceUsageDisciplineReport = buildCompactFileReferenceUsageDisciplineReport({});
   const childGlobalAgentMemoryBridgeReport = buildChildGlobalAgentMemoryBridgeReport({ groupLimit: 12 });
+  const taskAgentMemoryContextSnapshotReport = buildTaskAgentMemoryContextSnapshotReport({});
+  if (taskAgentMemoryContextSnapshotReport.overall?.status === "fail" || taskAgentMemoryContextSnapshotReport.overall?.status === "warn") {
+    addSystemAlert(
+      taskAgentMemoryContextSnapshotReport.overall.status === "fail" ? "critical" : "warning",
+      "task_agent_memory_context_snapshots",
+      `项目子 Agent 记忆上下文快照 ${taskAgentMemoryContextSnapshotReport.overall.score ?? "待采样"}%，失败 ${taskAgentMemoryContextSnapshotReport.overall.failCount || 0} 个，可清理 ${taskAgentMemoryContextSnapshotReport.overall.prunableCount || 0} 个`
+    );
+  }
+  for (const group of taskAgentMemoryContextSnapshotReport.groups || []) {
+    if (group.failCount <= 0 && group.warnCount <= 0) continue;
+    const severity = group.failCount > 0 ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${group.groupId}:task_agent_memory_context_snapshots`,
+      scope: "group",
+      scopeId: group.groupId,
+      severity,
+      code: "task_agent_memory_context_snapshots",
+      message: `项目子 Agent 记忆快照异常：fail ${group.failCount || 0} / warn ${group.warnCount || 0} / prunable ${group.prunableCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === group.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
   if (postCompactDisciplineTrend.overall?.alert) {
     const rate = postCompactDisciplineTrend.overall.strictClassificationRate ?? postCompactDisciplineTrend.overall.ledger?.strictClassificationRate ?? "待采样";
     addSystemAlert(
@@ -6997,6 +15648,558 @@ export function buildMemoryCenterOverview() {
       severity,
       code: "compact_boundary_timeline",
       message: row.gaps?.[0]?.reason || "compact boundary timeline 存在缺口",
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (compactStrategyDecisionReport.overall?.status === "fail" || compactStrategyDecisionReport.overall?.status === "warn") {
+    addSystemAlert(
+      compactStrategyDecisionReport.overall.status === "fail" ? "critical" : "warning",
+      "compact_strategy_decision",
+      `压缩策略决策覆盖率 ${compactStrategyDecisionReport.overall.score ?? "待采样"}%，缺决策 ${compactStrategyDecisionReport.overall.missingDecisionCount || 0} 个，invariant 失败 ${compactStrategyDecisionReport.overall.invariantFailureCount || 0} 个`
+    );
+  }
+  for (const row of compactStrategyDecisionReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:compact_strategy_decision`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "compact_strategy_decision",
+      message: row.gaps?.[0]?.reason || "compact strategy decision 存在缺口",
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (postCompactCleanupAuditReport.overall?.status === "fail" || postCompactCleanupAuditReport.overall?.status === "warn") {
+    addSystemAlert(
+      postCompactCleanupAuditReport.overall.status === "fail" ? "critical" : "warning",
+      "post_compact_cleanup_audit",
+      `压缩后清理审计覆盖率 ${postCompactCleanupAuditReport.overall.score ?? "待采样"}%，缺审计 ${postCompactCleanupAuditReport.overall.missingAuditCount || 0} 个，失败检查 ${postCompactCleanupAuditReport.overall.failedCheckCount || 0} 个`
+    );
+  }
+  for (const row of postCompactCleanupAuditReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:post_compact_cleanup_audit`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "post_compact_cleanup_audit",
+      message: row.gaps?.[0]?.reason || "post compact cleanup audit 存在缺口",
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicroCompactEditPlanReport.overall?.status === "fail" || apiMicroCompactEditPlanReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicroCompactEditPlanReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_edit_plan",
+      `API microcompact edit plan 覆盖率 ${apiMicroCompactEditPlanReport.overall.score ?? "待采样"}%，缺计划 ${apiMicroCompactEditPlanReport.overall.missingPlanCount || 0} 个`
+    );
+  }
+  for (const row of apiMicroCompactEditPlanReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_edit_plan`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_edit_plan",
+      message: row.gaps?.[0]?.reason || "API microcompact edit plan 存在缺口",
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicrocompactReceiptDisciplineReport.overall?.status === "fail" || apiMicrocompactReceiptDisciplineReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicrocompactReceiptDisciplineReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_receipt_discipline",
+      `API microcompact 使用回执纪律 ${apiMicrocompactReceiptDisciplineReport.overall.score ?? "待采样"}%，缺声明 ${apiMicrocompactReceiptDisciplineReport.overall.missing || 0} 个`
+    );
+  }
+  for (const row of apiMicrocompactReceiptDisciplineReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_receipt_discipline`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_receipt_discipline",
+      message: row.gaps?.[0]?.reason || "API microcompact 使用回执纪律存在缺口",
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicrocompactNativeApplyReadinessReport.overall?.status === "fail" || apiMicrocompactNativeApplyReadinessReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicrocompactNativeApplyReadinessReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_native_apply_readiness",
+      `API microcompact 原生应用就绪度 ${apiMicrocompactNativeApplyReadinessReport.overall.score ?? "待采样"}%，无效契约 ${apiMicrocompactNativeApplyReadinessReport.overall.missing || 0} 个`
+    );
+  }
+  for (const row of apiMicrocompactNativeApplyReadinessReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_native_apply_readiness`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_native_apply_readiness",
+      message: row.gaps?.[0]?.reason || "API microcompact 原生应用契约存在缺口",
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicrocompactNativeApplyProofReport.overall?.status === "fail" || apiMicrocompactNativeApplyProofReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicrocompactNativeApplyProofReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_native_apply_proof",
+      `API microcompact 原生应用强证明覆盖率 ${apiMicrocompactNativeApplyProofReport.overall.score ?? "待采样"}%，strong ${apiMicrocompactNativeApplyProofReport.overall.requestTelemetryStrongCount || 0} 个，receipt-only ${apiMicrocompactNativeApplyProofReport.overall.requestTelemetryReceiptOnlyCount || 0} 个，stale ${apiMicrocompactNativeApplyProofReport.overall.requestTelemetryStaleCount || 0} 个，缺 request telemetry ${apiMicrocompactNativeApplyProofReport.overall.requestTelemetryMissingCount || 0} 个，失败证明 ${apiMicrocompactNativeApplyProofReport.overall.failedProofCount || 0} 个`
+    );
+  }
+  for (const row of apiMicrocompactNativeApplyProofReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_native_apply_proof`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_native_apply_proof",
+      message: row.gaps?.[0]?.reason || "API microcompact native_applied 缺少可审计 proof ledger",
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicrocompactNativeApplyProofRepairWorkItemReport.overall?.status === "fail" || apiMicrocompactNativeApplyProofRepairWorkItemReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicrocompactNativeApplyProofRepairWorkItemReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_native_apply_proof_repair_work_items",
+      `API microcompact 原生强证明修复待办覆盖率 ${apiMicrocompactNativeApplyProofRepairWorkItemReport.overall.coverageRate ?? "待采样"}%，open ${apiMicrocompactNativeApplyProofRepairWorkItemReport.overall.openItemCount || 0} 个，required ${apiMicrocompactNativeApplyProofRepairWorkItemReport.overall.requiredActionCount || 0} 个`
+    );
+  }
+  for (const row of apiMicrocompactNativeApplyProofRepairWorkItemReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_native_apply_proof_repair_work_items`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_native_apply_proof_repair_work_items",
+      message: row.gaps?.[0]?.reason || `API microcompact native proof repair work items open ${row.openItemCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicrocompactNativeApplyProofRepairDispatchCandidateReport.overall?.status === "fail" || apiMicrocompactNativeApplyProofRepairDispatchCandidateReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicrocompactNativeApplyProofRepairDispatchCandidateReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_native_apply_proof_repair_dispatch_candidates",
+      `API microcompact 原生强证明修复派发候选覆盖率 ${apiMicrocompactNativeApplyProofRepairDispatchCandidateReport.overall.coverageRate ?? "待采样"}%，candidate ${apiMicrocompactNativeApplyProofRepairDispatchCandidateReport.overall.candidateCount || 0} 个，metadata gaps ${apiMicrocompactNativeApplyProofRepairDispatchCandidateReport.overall.metadataGapCount || 0} 个`
+    );
+  }
+  for (const row of apiMicrocompactNativeApplyProofRepairDispatchCandidateReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_native_apply_proof_repair_dispatch_candidates`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_native_apply_proof_repair_dispatch_candidates",
+      message: row.gaps?.[0]?.reason || `API microcompact native proof repair dispatch candidates missing ${Math.max(0, Number(row.expectedCandidateCount || 0) - Number(row.coveredCandidateCount || 0))}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicrocompactNativeApplyProofRepairDispatchBriefReport.overall?.status === "fail" || apiMicrocompactNativeApplyProofRepairDispatchBriefReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicrocompactNativeApplyProofRepairDispatchBriefReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_native_apply_proof_repair_dispatch_briefs",
+      `API microcompact 原生强证明修复派发简报覆盖率 ${apiMicrocompactNativeApplyProofRepairDispatchBriefReport.overall.coverageRate ?? "待采样"}%，brief ${apiMicrocompactNativeApplyProofRepairDispatchBriefReport.overall.readyBriefCount || 0} 个，metadata gaps ${apiMicrocompactNativeApplyProofRepairDispatchBriefReport.overall.metadataGapCount || 0} 个`
+    );
+  }
+  for (const row of apiMicrocompactNativeApplyProofRepairDispatchBriefReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_native_apply_proof_repair_dispatch_briefs`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_native_apply_proof_repair_dispatch_briefs",
+      message: row.gaps?.[0]?.reason || `API microcompact native proof repair dispatch briefs missing ${Math.max(0, Number(row.expectedBriefCount || 0) - Number(row.coveredBriefCount || 0))}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicrocompactNativeApplyProofRepairAssignmentBindingReport.overall?.status === "fail" || apiMicrocompactNativeApplyProofRepairAssignmentBindingReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicrocompactNativeApplyProofRepairAssignmentBindingReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_native_apply_proof_repair_assignment_bindings",
+      `API microcompact 原生强证明修复 assignment 绑定覆盖率 ${apiMicrocompactNativeApplyProofRepairAssignmentBindingReport.overall.coverageRate ?? "待采样"}%，binding ${apiMicrocompactNativeApplyProofRepairAssignmentBindingReport.overall.bindingCount || 0} 个，metadata gaps ${apiMicrocompactNativeApplyProofRepairAssignmentBindingReport.overall.metadataGapCount || 0} 个`
+    );
+  }
+  for (const row of apiMicrocompactNativeApplyProofRepairAssignmentBindingReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_native_apply_proof_repair_assignment_bindings`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_native_apply_proof_repair_assignment_bindings",
+      message: row.gaps?.[0]?.reason || `API microcompact native proof repair assignment bindings metadata gaps ${row.metadataGapCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketContextUsageReport.overall?.status === "fail" || workerContextPacketContextUsageReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketContextUsageReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_context_usage",
+      `WorkerContextPacket context usage 覆盖率 ${workerContextPacketContextUsageReport.overall.coverageRate ?? "待采样"}%，packet ${workerContextPacketContextUsageReport.overall.packetBindingCount || 0} 个，valid ${workerContextPacketContextUsageReport.overall.validUsageCount || 0} 个，over budget ${workerContextPacketContextUsageReport.overall.overBudgetCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketContextUsageReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_context_usage`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_context_usage",
+      message: row.gaps?.[0]?.reason || `WorkerContextPacket context usage gaps ${row.metadataGapCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketContextUsageRepairWorkItemReport.overall?.status === "fail" || workerContextPacketContextUsageRepairWorkItemReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketContextUsageRepairWorkItemReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_context_usage_repair_work_items",
+      `WorkerContextPacket context usage reactive repair 覆盖率 ${workerContextPacketContextUsageRepairWorkItemReport.overall.coverageRate ?? "待采样"}%，required ${workerContextPacketContextUsageRepairWorkItemReport.overall.requiredActionCount || 0} 个，open ${workerContextPacketContextUsageRepairWorkItemReport.overall.openItemCount || 0} 个，over budget ${workerContextPacketContextUsageRepairWorkItemReport.overall.overBudgetCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketContextUsageRepairWorkItemReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_context_usage_repair_work_items`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_context_usage_repair_work_items",
+      message: row.gaps?.[0]?.reason || `WorkerContextPacket context usage repair work items open ${row.openItemCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPreDispatchGateReport.overall?.status === "fail" || workerContextPacketPreDispatchGateReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketPreDispatchGateReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_pre_dispatch_gate",
+      `WorkerContextPacket pre-dispatch gate 覆盖率 ${workerContextPacketPreDispatchGateReport.overall.coverageRate ?? "待采样"}%，gate ${workerContextPacketPreDispatchGateReport.overall.gateBindingCount || 0} 个，over budget ${workerContextPacketPreDispatchGateReport.overall.overBudgetCount || 0} 个，blocked ${workerContextPacketPreDispatchGateReport.overall.blockedOverBudgetCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketPreDispatchGateReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pre_dispatch_gate`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pre_dispatch_gate",
+      message: row.gaps?.[0]?.reason || `WorkerContextPacket pre-dispatch gate metadata gaps ${row.metadataGapCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketCompactionRetryReport.overall?.status === "fail" || workerContextPacketCompactionRetryReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketCompactionRetryReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_compaction_retry",
+      `WorkerContextPacket auto compact retry 覆盖率 ${workerContextPacketCompactionRetryReport.overall.coverageRate ?? "待采样"}%，retry ${workerContextPacketCompactionRetryReport.overall.retryBindingCount || 0} 个，memory-first ${workerContextPacketCompactionRetryReport.overall.memoryFirstCount || 0} 个，recovered ${workerContextPacketCompactionRetryReport.overall.recoveredCount || 0} 个，blocked ${workerContextPacketCompactionRetryReport.overall.blockedCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketCompactionRetryReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_compaction_retry`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_compaction_retry",
+      message: row.gaps?.[0]?.reason || `WorkerContextPacket compaction retry metadata gaps ${row.metadataGapCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketCompactHookLedgerReport.overall?.status === "fail" || workerContextPacketCompactHookLedgerReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketCompactHookLedgerReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_compact_hook_ledger",
+      `WorkerContextPacket compact hook ledger 覆盖率 ${workerContextPacketCompactHookLedgerReport.overall.coverageRate ?? "待采样"}%，retry ${workerContextPacketCompactHookLedgerReport.overall.retryBindingCount || 0} 个，pre ${workerContextPacketCompactHookLedgerReport.overall.preHookCount || 0} 个，post ${workerContextPacketCompactHookLedgerReport.overall.postHookCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketCompactHookLedgerReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_compact_hook_ledger`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_compact_hook_ledger",
+      message: row.gaps?.[0]?.reason || `WorkerContextPacket compact hook ledger metadata gaps ${row.metadataGapCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketMemoryReinjectionProofReport.overall?.status === "fail" || workerContextPacketMemoryReinjectionProofReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketMemoryReinjectionProofReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_memory_reinjection_proof",
+      `WorkerContextPacket memory reinjection proof 覆盖率 ${workerContextPacketMemoryReinjectionProofReport.overall.coverageRate ?? "待采样"}%，proof ${workerContextPacketMemoryReinjectionProofReport.overall.reinjectionBindingCount || 0} 个，memory-first ${workerContextPacketMemoryReinjectionProofReport.overall.memoryFirstCount || 0} 个，rendered ${workerContextPacketMemoryReinjectionProofReport.overall.renderedProofCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketMemoryReinjectionProofReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_memory_reinjection_proof`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_memory_reinjection_proof",
+      message: row.gaps?.[0]?.reason || `WorkerContextPacket memory reinjection proof metadata gaps ${row.metadataGapCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport.overall?.status === "fail" || apiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_native_apply_proof_repair_worker_context_packet_injection",
+      `API microcompact 原生强证明修复 WorkerContextPacket 注入覆盖率 ${apiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport.overall.coverageRate ?? "待采样"}%，packet briefs ${apiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport.overall.packetBriefInjectionCount || 0} 个，provider rendered ${apiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport.overall.renderedProviderReproofCount || 0} 个，metadata gaps ${apiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport.overall.metadataGapCount || 0} 个`
+    );
+  }
+  for (const row of apiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_native_apply_proof_repair_worker_context_packet_injection`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_native_apply_proof_repair_worker_context_packet_injection",
+      message: row.gaps?.[0]?.reason || `API microcompact native proof repair WorkerContextPacket metadata gaps ${row.metadataGapCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicrocompactNativeApplyProofRepairTimelineBindingReport.overall?.status === "fail" || apiMicrocompactNativeApplyProofRepairTimelineBindingReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicrocompactNativeApplyProofRepairTimelineBindingReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_native_apply_proof_repair_timeline_bindings",
+      `API microcompact 原生强证明修复 timeline 绑定覆盖率 ${apiMicrocompactNativeApplyProofRepairTimelineBindingReport.overall.coverageRate ?? "待采样"}%，binding ${apiMicrocompactNativeApplyProofRepairTimelineBindingReport.overall.bindingCount || 0} 个，metadata gaps ${apiMicrocompactNativeApplyProofRepairTimelineBindingReport.overall.metadataGapCount || 0} 个`
+    );
+  }
+  for (const row of apiMicrocompactNativeApplyProofRepairTimelineBindingReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_native_apply_proof_repair_timeline_bindings`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_native_apply_proof_repair_timeline_bindings",
+      message: row.gaps?.[0]?.reason || `API microcompact native proof repair timeline bindings metadata gaps ${row.metadataGapCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicrocompactNativeApplyProofRepairReceiptConsumptionReport.overall?.status === "fail" || apiMicrocompactNativeApplyProofRepairReceiptConsumptionReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicrocompactNativeApplyProofRepairReceiptConsumptionReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_native_apply_proof_repair_receipt_consumption",
+      `API microcompact 原生强证明修复回执消费覆盖率 ${apiMicrocompactNativeApplyProofRepairReceiptConsumptionReport.overall.coverageRate ?? "待采样"}%，receipt bindings ${apiMicrocompactNativeApplyProofRepairReceiptConsumptionReport.overall.receiptBindingCount || 0} 个，valid ${apiMicrocompactNativeApplyProofRepairReceiptConsumptionReport.overall.validConsumptionCount || 0} 个，metadata gaps ${apiMicrocompactNativeApplyProofRepairReceiptConsumptionReport.overall.metadataGapCount || 0} 个`
+    );
+  }
+  for (const row of apiMicrocompactNativeApplyProofRepairReceiptConsumptionReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_native_apply_proof_repair_receipt_consumption`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_native_apply_proof_repair_receipt_consumption",
+      message: row.gaps?.[0]?.reason || `API microcompact native proof repair receipt consumption metadata gaps ${row.metadataGapCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport.overall?.status === "fail" || apiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_native_apply_provider_reproof_receipt_consumption_typed_memory",
+      `Provider re-proof 回执消费 typed memory 覆盖率 ${apiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport.overall.coverageRate ?? "待采样"}%，provider receipts ${apiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport.overall.providerReproofReceiptCount || 0} 个，archived ${apiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport.overall.archivedReceiptCount || 0} 个，metadata gaps ${apiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport.overall.metadataGapCount || 0} 个`
+    );
+  }
+  for (const row of apiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_native_apply_provider_reproof_receipt_consumption_typed_memory`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_native_apply_provider_reproof_receipt_consumption_typed_memory",
+      message: row.gaps?.[0]?.reason || `provider re-proof receipt typed memory gaps ${row.gaps?.length || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicrocompactNativeApplyProofRepairTimelineCompletionReport.overall?.status === "fail" || apiMicrocompactNativeApplyProofRepairTimelineCompletionReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicrocompactNativeApplyProofRepairTimelineCompletionReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_native_apply_proof_repair_timeline_completions",
+      `API microcompact 原生强证明修复 timeline completion 覆盖率 ${apiMicrocompactNativeApplyProofRepairTimelineCompletionReport.overall.coverageRate ?? "待采样"}%，complete bindings ${apiMicrocompactNativeApplyProofRepairTimelineCompletionReport.overall.completeBindingCount || 0} 个，open matched ${apiMicrocompactNativeApplyProofRepairTimelineCompletionReport.overall.openMatchedRepairItemCount || 0} 个`
+    );
+  }
+  for (const row of apiMicrocompactNativeApplyProofRepairTimelineCompletionReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_native_apply_proof_repair_timeline_completions`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_native_apply_proof_repair_timeline_completions",
+      message: row.gaps?.[0]?.reason || `API microcompact native proof repair timeline completions open matched ${row.openMatchedRepairItemCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicrocompactNativeApplyProofRepairClosureReproofReport.overall?.status === "fail" || apiMicrocompactNativeApplyProofRepairClosureReproofReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicrocompactNativeApplyProofRepairClosureReproofReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_native_apply_proof_repair_closure_reproof",
+      `API microcompact native proof repair closure re-proof ${apiMicrocompactNativeApplyProofRepairClosureReproofReport.overall.score ?? "待采样"}%，timeline closed ${apiMicrocompactNativeApplyProofRepairClosureReproofReport.overall.timelineProvedRepairCount || 0} 个，仍需 provider re-proof ${apiMicrocompactNativeApplyProofRepairClosureReproofReport.overall.providerStrongReproofNeededCount || 0} 个`
+    );
+  }
+  for (const row of apiMicrocompactNativeApplyProofRepairClosureReproofReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_native_apply_proof_repair_closure_reproof`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_native_apply_proof_repair_closure_reproof",
+      message: row.gaps?.[0]?.reason || `timeline closure 后仍需 provider re-proof ${row.providerStrongReproofNeededCount || 0} 个`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (apiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport.overall?.status === "fail" || apiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport.overall?.status === "warn") {
+    addSystemAlert(
+      apiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport.overall.status === "fail" ? "critical" : "warning",
+      "api_microcompact_native_apply_proof_repair_closure_reproof_work_items",
+      `API microcompact provider re-proof 待办覆盖率 ${apiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport.overall.coverageRate ?? "待采样"}%，expected ${apiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport.overall.expectedWorkItemCount || 0} 个，open ${apiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport.overall.openItemCount || 0} 个，dispatch candidates ${apiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport.overall.dispatchCandidateCount || 0} 个`
+    );
+  }
+  for (const row of apiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:api_microcompact_native_apply_proof_repair_closure_reproof_work_items`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "api_microcompact_native_apply_proof_repair_closure_reproof_work_items",
+      message: row.gaps?.[0]?.reason || `provider re-proof repair work items expected ${row.expectedWorkItemCount || 0}`,
     });
     const summary = groups.find(item => item.id === row.groupId);
     if (summary) {
@@ -7300,6 +16503,29 @@ export function buildMemoryCenterOverview() {
     postCompactDispatchTrend,
     childAgentReliabilityReport,
     compactBoundaryTimelineReport,
+    compactStrategyDecisionReport,
+    postCompactCleanupAuditReport,
+    apiMicroCompactEditPlanReport,
+    apiMicrocompactReceiptDisciplineReport,
+    apiMicrocompactNativeApplyReadinessReport,
+    apiMicrocompactNativeApplyProofReport,
+    apiMicrocompactNativeApplyProofRepairWorkItemReport,
+    apiMicrocompactNativeApplyProofRepairDispatchCandidateReport,
+    apiMicrocompactNativeApplyProofRepairDispatchBriefReport,
+    apiMicrocompactNativeApplyProofRepairAssignmentBindingReport,
+    workerContextPacketContextUsageReport,
+    workerContextPacketContextUsageRepairWorkItemReport,
+    workerContextPacketPreDispatchGateReport,
+    workerContextPacketCompactionRetryReport,
+    workerContextPacketCompactHookLedgerReport,
+    workerContextPacketMemoryReinjectionProofReport,
+    apiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport,
+    apiMicrocompactNativeApplyProofRepairTimelineBindingReport,
+    apiMicrocompactNativeApplyProofRepairReceiptConsumptionReport,
+    apiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport,
+    apiMicrocompactNativeApplyProofRepairTimelineCompletionReport,
+    apiMicrocompactNativeApplyProofRepairClosureReproofReport,
+    apiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport,
     compactionHookLedgerReport,
     compactBoundaryReplayReport,
     replayRepairPendingWorkItemReport,
@@ -7313,6 +16539,7 @@ export function buildMemoryCenterOverview() {
     compactFileReferenceReadPlanUsageDisciplineReport,
     compactFileReferenceUsageDisciplineReport,
     childGlobalAgentMemoryBridgeReport,
+    taskAgentMemoryContextSnapshotReport,
   };
 }
 
@@ -8000,6 +17227,7 @@ export function runMemoryCenterChildGlobalAgentMemoryBridgeSelfTest() {
   const sessionDir = path.join(GROUP_SESSION_MEMORY_DIR, sidecarFileId(groupId));
   const toolDir = path.join(GROUP_TOOL_CONTINUITY_DIR, sidecarFileId(groupId));
   const compactReferenceFile = getGroupCompactFileReferenceLedgerFile(groupId);
+  const releaseGlobalMemorySelftest = acquireGlobalMemorySelfTestLock("memory-center-global-agent-memory-bridge");
   const previousGlobalMemory = fs.existsSync(GLOBAL_MEMORY_FILE) ? fs.readFileSync(GLOBAL_MEMORY_FILE, "utf-8") : null;
   const previousGlobalMemoryBak = fs.existsSync(`${GLOBAL_MEMORY_FILE}.bak`) ? fs.readFileSync(`${GLOBAL_MEMORY_FILE}.bak`, "utf-8") : null;
   try {
@@ -8053,11 +17281,13 @@ export function runMemoryCenterChildGlobalAgentMemoryBridgeSelfTest() {
       groupIds: [groupId],
       query: "MEMORY_CENTER_GLOBAL_BRIDGE_SENTINEL src/global-bridge.ts",
       targetProject: "api",
+      allowSelftestGlobalMemoryForSelfTest: true,
     });
     const check = evaluateChildGlobalAgentMemoryBridge({
       groupIds: [groupId],
       query: "MEMORY_CENTER_GLOBAL_BRIDGE_SENTINEL src/global-bridge.ts",
       targetProject: "api",
+      allowSelftestGlobalMemoryForSelfTest: true,
     });
     const row = report.groups?.[0] || {};
     const checks = {
@@ -8086,6 +17316,7 @@ export function runMemoryCenterChildGlobalAgentMemoryBridgeSelfTest() {
       if (previousGlobalMemoryBak === null) fs.rmSync(`${GLOBAL_MEMORY_FILE}.bak`, { force: true });
       else fs.writeFileSync(`${GLOBAL_MEMORY_FILE}.bak`, previousGlobalMemoryBak, "utf-8");
     } catch {}
+    releaseGlobalMemorySelftest();
   }
 }
 
@@ -8099,6 +17330,7 @@ export function runMemoryCenterChildGlobalAgentMemoryArbitrationSelfTest() {
   const toolDir = path.join(GROUP_TOOL_CONTINUITY_DIR, sidecarFileId(groupId));
   const compactReferenceFile = getGroupCompactFileReferenceLedgerFile(groupId);
   const arbitrationLedgerFile = getGroupGlobalMemoryArbitrationLedgerFile(groupId);
+  const releaseGlobalMemorySelftest = acquireGlobalMemorySelfTestLock("memory-center-global-agent-memory-arbitration");
   const previousGlobalMemory = fs.existsSync(GLOBAL_MEMORY_FILE) ? fs.readFileSync(GLOBAL_MEMORY_FILE, "utf-8") : null;
   const previousGlobalMemoryBak = fs.existsSync(`${GLOBAL_MEMORY_FILE}.bak`) ? fs.readFileSync(`${GLOBAL_MEMORY_FILE}.bak`, "utf-8") : null;
   try {
@@ -8153,16 +17385,19 @@ export function runMemoryCenterChildGlobalAgentMemoryArbitrationSelfTest() {
       groupIds: [groupId],
       query: "MEMORY_CENTER_GLOBAL_ARBITRATION_SENTINEL src/global-arbitration.ts",
       targetProject: "api",
+      allowSelftestGlobalMemoryForSelfTest: true,
     });
     const arbitrationLedgerCheck = evaluateGlobalMemoryArbitrationLedger({
       groupIds: [groupId],
       query: "MEMORY_CENTER_GLOBAL_ARBITRATION_SENTINEL src/global-arbitration.ts",
       targetProject: "api",
+      allowSelftestGlobalMemoryForSelfTest: true,
     });
     const arbitrationDistillationCheck = evaluateGlobalMemoryArbitrationDistillation({
       groupIds: [groupId],
       query: "MEMORY_CENTER_GLOBAL_ARBITRATION_SENTINEL src/global-arbitration.ts",
       targetProject: "api",
+      allowSelftestGlobalMemoryForSelfTest: true,
     });
     const row = report.groups?.[0] || {};
     const checks = {
@@ -8209,6 +17444,7 @@ export function runMemoryCenterChildGlobalAgentMemoryArbitrationSelfTest() {
       if (previousGlobalMemoryBak === null) fs.rmSync(`${GLOBAL_MEMORY_FILE}.bak`, { force: true });
       else fs.writeFileSync(`${GLOBAL_MEMORY_FILE}.bak`, previousGlobalMemoryBak, "utf-8");
     } catch {}
+    releaseGlobalMemorySelftest();
   }
 }
 
@@ -8233,6 +17469,7 @@ export function runMemoryCenterChildGlobalAgentMemoryCrossGroupSuppressionSelfTe
     path.join(GROUP_SESSION_MEMORY_DIR, sidecarFileId(groupId)),
     path.join(GROUP_TOOL_CONTINUITY_DIR, sidecarFileId(groupId)),
   ]);
+  const releaseGlobalMemorySelftest = acquireGlobalMemorySelfTestLock("memory-center-global-cross-group-suppression");
   const previousGlobalMemory = fs.existsSync(GLOBAL_MEMORY_FILE) ? fs.readFileSync(GLOBAL_MEMORY_FILE, "utf-8") : null;
   const previousGlobalMemoryBak = fs.existsSync(`${GLOBAL_MEMORY_FILE}.bak`) ? fs.readFileSync(`${GLOBAL_MEMORY_FILE}.bak`, "utf-8") : null;
   try {
@@ -8287,6 +17524,7 @@ export function runMemoryCenterChildGlobalAgentMemoryCrossGroupSuppressionSelfTe
     buildAgentMemoryContextBundle(sourceGroupId, "api", "继续 MEMORY_CENTER_CROSS_GROUP_SUPPRESSION_SENTINEL src/cross-center.ts", {
       minKeepTokens: 1,
       maxGlobalAgentMemory: 4,
+      allowSelftestGlobalMemoryForSelfTest: true,
     });
     saveGroupMessages(targetGroupId, [
       { id: "mccgs-b-1", role: "user", target: "coordinator", timestamp: targetAt, content: "继续 src/cross-center.ts，先按当前仓库状态核验。" },
@@ -8301,11 +17539,13 @@ export function runMemoryCenterChildGlobalAgentMemoryCrossGroupSuppressionSelfTe
       groupIds: [targetGroupId],
       query: "MEMORY_CENTER_CROSS_GROUP_SUPPRESSION_SENTINEL src/cross-center.ts",
       targetProject: "api",
+      allowSelftestGlobalMemoryForSelfTest: true,
     });
     const check = evaluateGlobalMemoryCrossGroupSuppression({
       groupIds: [targetGroupId],
       query: "MEMORY_CENTER_CROSS_GROUP_SUPPRESSION_SENTINEL src/cross-center.ts",
       targetProject: "api",
+      allowSelftestGlobalMemoryForSelfTest: true,
     });
     const row = report.groups?.[0] || {};
     const checks = {
@@ -8340,6 +17580,177 @@ export function runMemoryCenterChildGlobalAgentMemoryCrossGroupSuppressionSelfTe
       if (previousGlobalMemoryBak === null) fs.rmSync(`${GLOBAL_MEMORY_FILE}.bak`, { force: true });
       else fs.writeFileSync(`${GLOBAL_MEMORY_FILE}.bak`, previousGlobalMemoryBak, "utf-8");
     } catch {}
+    releaseGlobalMemorySelftest();
+  }
+}
+
+export function runMemoryCenterChildGlobalAgentMemoryCrossGroupFreshnessSelfTest() {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const sourceGroupId = `memory-center-global-freshness-source-${suffix}`;
+  const targetGroupId = `memory-center-global-freshness-target-${suffix}`;
+  const groupFiles = [sourceGroupId, targetGroupId].flatMap(groupId => [
+    path.join(GROUP_MEMORY_DIR, `${groupId}.json`),
+    path.join(GROUP_MEMORY_DIR, `${groupId}.json.bak`),
+    path.join(GROUP_MESSAGES_DIR, `${groupId}.json`),
+    path.join(GROUP_MESSAGES_DIR, `${groupId}.json.bak`),
+    path.join(CCM_DIR, "group-memory-reload", `${cleanId(groupId)}.json`),
+    path.join(CCM_DIR, "group-memory-reload", `${cleanId(groupId)}.json.bak`),
+    getGroupCompactFileReferenceLedgerFile(groupId),
+    `${getGroupCompactFileReferenceLedgerFile(groupId)}.bak`,
+    getGroupGlobalMemoryArbitrationLedgerFile(groupId),
+    `${getGroupGlobalMemoryArbitrationLedgerFile(groupId)}.bak`,
+  ]);
+  const cleanupDirs = [sourceGroupId, targetGroupId].flatMap(groupId => [
+    path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId)),
+    path.join(GROUP_SESSION_MEMORY_DIR, sidecarFileId(groupId)),
+    path.join(GROUP_TOOL_CONTINUITY_DIR, sidecarFileId(groupId)),
+  ]);
+  const releaseGlobalMemorySelftest = acquireGlobalMemorySelfTestLock("memory-center-global-cross-group-freshness");
+  const previousGlobalMemory = fs.existsSync(GLOBAL_MEMORY_FILE) ? fs.readFileSync(GLOBAL_MEMORY_FILE, "utf-8") : null;
+  const previousGlobalMemoryBak = fs.existsSync(`${GLOBAL_MEMORY_FILE}.bak`) ? fs.readFileSync(`${GLOBAL_MEMORY_FILE}.bak`, "utf-8") : null;
+  try {
+    const { saveGroupMessages } = require("../collaboration/storage");
+    const { buildAgentMemoryContextBundle, saveGroupMemory } = require("../collaboration/memory");
+    const oldGlobalAt = "2026-07-07T11:00:00.000Z";
+    const sourceAt = "2026-07-07T12:00:00.000Z";
+    const newerGlobalAt = new Date(Date.now() + 60_000).toISOString();
+    writeJsonAtomic(GLOBAL_MEMORY_FILE, {
+      version: 1,
+      scope: "global",
+      id: "global-agent",
+      user: [{
+        id: "gmi_memory_center_cross_group_freshness",
+        text: "MEMORY_CENTER_CROSS_GROUP_FRESHNESS_SENTINEL: src/cross-freshness.ts 必须使用 stale-center-freshness-rule。",
+        why: "验证 Memory Center 能识别旧跨群聊抑制。",
+        howToApply: "旧规则：直接使用 stale-center-freshness-rule。",
+        importance: 99,
+        confidence: 0.99,
+        createdAt: oldGlobalAt,
+        updatedAt: oldGlobalAt,
+        source: {
+          sessionId: "memory-center-freshness-old-session",
+          messageIds: ["memory-center-freshness-old-message"],
+          source: "selftest",
+          timestamp: oldGlobalAt,
+        },
+      }],
+      feedback: [],
+      authorization: [],
+      decisions: [],
+      missions: [],
+      unresolved: [],
+      references: [],
+      sessions: [],
+      archives: [],
+      compaction: { boundaryVersion: 1, totalCompactions: 0, consecutiveFailures: 0, health: "healthy", boundaries: [] },
+      privacy: { rejectedCandidates: 0, encryptedTranscripts: true, lastScanAt: oldGlobalAt },
+      integrity: { pass: true, corruptedArchives: [] },
+      updatedAt: oldGlobalAt,
+    });
+    saveGroupMessages(sourceGroupId, [
+      { id: "mccgf-a-1", role: "user", target: "coordinator", timestamp: sourceAt, content: "MEMORY_CENTER_CROSS_GROUP_FRESHNESS_SENTINEL: src/cross-freshness.ts 不再使用 stale-center-freshness-rule，改为 source-center-freshness-rule。" },
+    ]);
+    saveGroupMemory(sourceGroupId, {
+      groupId: sourceGroupId,
+      goal: "验证 Memory Center 跨群聊抑制 freshness 来源群聊",
+      currentPhase: "memory-center-cross-group-freshness-source",
+      persistentRequirements: [{ messageId: "mccgf-a-1", text: "src/cross-freshness.ts 不再使用 stale-center-freshness-rule，改为 source-center-freshness-rule。" }],
+    });
+    buildAgentMemoryContextBundle(sourceGroupId, "api", "继续 MEMORY_CENTER_CROSS_GROUP_FRESHNESS_SENTINEL src/cross-freshness.ts", {
+      minKeepTokens: 1,
+      maxGlobalAgentMemory: 4,
+      allowSelftestGlobalMemoryForSelfTest: true,
+    });
+    writeJsonAtomic(GLOBAL_MEMORY_FILE, {
+      version: 1,
+      scope: "global",
+      id: "global-agent",
+      user: [{
+        id: "gmi_memory_center_cross_group_freshness",
+        text: "MEMORY_CENTER_CROSS_GROUP_FRESHNESS_SENTINEL: src/cross-freshness.ts 已更新为 verified-center-freshness-rule。",
+        why: "新全局记忆覆盖旧跨群聊抑制。",
+        howToApply: "使用 verified-center-freshness-rule 前仍核验当前来源。",
+        importance: 99,
+        confidence: 0.99,
+        createdAt: oldGlobalAt,
+        updatedAt: newerGlobalAt,
+        source: {
+          sessionId: "memory-center-freshness-new-session",
+          messageIds: ["memory-center-freshness-new-message"],
+          source: "selftest",
+          timestamp: newerGlobalAt,
+        },
+      }],
+      feedback: [],
+      authorization: [],
+      decisions: [],
+      missions: [],
+      unresolved: [],
+      references: [],
+      sessions: [],
+      archives: [],
+      compaction: { boundaryVersion: 1, totalCompactions: 0, consecutiveFailures: 0, health: "healthy", boundaries: [] },
+      privacy: { rejectedCandidates: 0, encryptedTranscripts: true, lastScanAt: newerGlobalAt },
+      integrity: { pass: true, corruptedArchives: [] },
+      updatedAt: newerGlobalAt,
+    });
+    saveGroupMessages(targetGroupId, [
+      { id: "mccgf-b-1", role: "user", target: "coordinator", timestamp: newerGlobalAt, content: "继续 freshness target，按当前来源核验。" },
+    ]);
+    saveGroupMemory(targetGroupId, {
+      groupId: targetGroupId,
+      goal: "验证 Memory Center freshness target",
+      currentPhase: "memory-center-cross-group-freshness-target",
+    });
+    const report = buildChildGlobalAgentMemoryBridgeReport({
+      groupIds: [targetGroupId],
+      query: "MEMORY_CENTER_CROSS_GROUP_FRESHNESS_SENTINEL src/cross-freshness.ts",
+      targetProject: "api",
+      allowSelftestGlobalMemoryForSelfTest: true,
+    });
+    const check = evaluateGlobalMemoryCrossGroupSuppressionFreshness({
+      groupIds: [targetGroupId],
+      query: "MEMORY_CENTER_CROSS_GROUP_FRESHNESS_SENTINEL src/cross-freshness.ts",
+      targetProject: "api",
+      allowSelftestGlobalMemoryForSelfTest: true,
+    });
+    const row = report.groups?.[0] || {};
+    const checks = {
+      reportCoversFreshness: report.schema === "ccm-child-global-agent-memory-bridge-report-v1"
+        && report.overall?.status === "ok"
+        && Number(row.crossGroupAdvisoryCount || 0) >= 1
+        && Number(row.crossGroupSupersededCount || 0) >= 1
+        && Number(row.crossGroupSuppressedCount || 0) === 0,
+      rowHasRenderedFreshness: row.renderedHasCrossGroupFreshness === true,
+      rowHasCrossGroupSources: row.sourceManifestHasCrossGroupArbitration === true
+        && row.compactReferencesHasCrossGroupArbitration === true,
+      qualityCheckPasses: check.id === "global_memory_cross_group_suppression_freshness"
+        && Number(check.checked || 0) === 1
+        && Number(check.passed || 0) === 1,
+      reportOverallCountsFreshness: Number(check.report?.overall?.advisoryCount || 0) >= 1
+        && Number(check.report?.overall?.supersededCount || 0) >= 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      row,
+      quality: check.report?.overall || {},
+    };
+  } finally {
+    for (const file of groupFiles) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    for (const dir of cleanupDirs) {
+      try { if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+    try {
+      fs.mkdirSync(path.dirname(GLOBAL_MEMORY_FILE), { recursive: true });
+      if (previousGlobalMemory === null) fs.rmSync(GLOBAL_MEMORY_FILE, { force: true });
+      else fs.writeFileSync(GLOBAL_MEMORY_FILE, previousGlobalMemory, "utf-8");
+      if (previousGlobalMemoryBak === null) fs.rmSync(`${GLOBAL_MEMORY_FILE}.bak`, { force: true });
+      else fs.writeFileSync(`${GLOBAL_MEMORY_FILE}.bak`, previousGlobalMemoryBak, "utf-8");
+    } catch {}
+    releaseGlobalMemorySelftest();
   }
 }
 
@@ -8373,6 +17784,8 @@ export function runMemoryCenterQualityTargetedRefreshSelfTest() {
       targetedReportCarriesAvailableIds: Array.isArray(targeted.availableCheckIds)
         && targeted.availableCheckIds.includes("child_global_agent_memory_bridge")
         && targeted.availableCheckIds.includes("global_memory_cross_group_suppression")
+        && targeted.availableCheckIds.includes("global_memory_cross_group_suppression_freshness")
+        && targeted.availableCheckIds.includes("global_memory_selftest_contamination")
         && targeted.availableCheckIds.includes("rag_recall"),
       unknownIdsAreReported: unknown.targeted === true
         && unknown.checks?.length === 1
@@ -8513,6 +17926,6705 @@ export function runMemoryCenterCompactBoundaryTimelineSelfTest() {
       try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
     }
     try { if (typedDir && fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runMemoryCenterCompactStrategyDecisionSelfTest() {
+  const groupId = `memory-center-compact-strategy-selftest-${process.pid}-${Date.now()}`;
+  const groupFile = path.join(GROUP_MEMORY_DIR, `${groupId}.json`);
+  const messageFile = path.join(GROUP_MESSAGES_DIR, `${groupId}.json`);
+  const reloadFile = path.join(CCM_DIR, "group-memory-reload", `${cleanId(groupId)}.json`);
+  try {
+    const { saveGroupMemory, renderGroupMemoryContextBundle } = require("../collaboration/memory");
+    const { saveGroupMessages } = require("../collaboration/storage");
+    const { buildGroupCompactStrategyDecision, buildGroupPreservedSegment, buildGroupMicroCompactPlan } = require("../collaboration/group-memory-compaction");
+    const messages = Array.from({ length: 14 }, (_: any, index: number) => ({
+      id: `csd-center-${index}`,
+      role: index % 2 ? "assistant" : "user",
+      agent: index % 2 ? "api" : undefined,
+      target: index % 2 ? undefined : "coordinator",
+      task_id: `csd-center-task-${Math.floor(index / 2)}`,
+      timestamp: "2026-07-08T01:00:00.000Z",
+      content: index === 0
+        ? "必须保留 MEMORY_CENTER_COMPACT_STRATEGY_SENTINEL，Memory Center 要能治理压缩策略决策。"
+        : `压缩策略 Memory Center 自测 ${index}，涉及 src/compact-strategy.ts 和 npm run check。${"证据".repeat(30)}`,
+    }));
+    saveGroupMessages(groupId, messages);
+    const keepIndex = 10;
+    const microCompact = buildGroupMicroCompactPlan(messages.slice(0, keepIndex), { maxChars: 900 });
+    const preservedSegment = buildGroupPreservedSegment(messages, keepIndex, {
+      minMessages: 2,
+      minTokens: 1,
+      maxTokens: 1500,
+      summaryChecksum: "memory-center-compact-strategy-summary",
+      transcriptPath: messageFile,
+      now: "2026-07-08T01:00:00.000Z",
+    });
+    const decision = buildGroupCompactStrategyDecision({
+      groupId,
+      messages,
+      messagesToCompact: messages.slice(0, keepIndex),
+      keptMessages: messages.slice(keepIndex),
+      keepIndex,
+      compacted: true,
+      primaryCompact: true,
+      microCompact,
+      preservedSegment,
+      preCompactTokenCount: 7200,
+      postCompactTokenCount: 1800,
+      summaryChecksum: "memory-center-compact-strategy-summary",
+      transcriptPath: messageFile,
+      reason: "memory center compact strategy decision selftest",
+      now: "2026-07-08T01:00:00.000Z",
+    });
+    const memory = {
+      groupId,
+      goal: "验证 compact strategy decision 能进入 Memory Center 治理和子 Agent 上下文",
+      messageDigest: "MEMORY_CENTER_COMPACT_STRATEGY_SENTINEL：压缩策略决策必须可见。",
+      persistentRequirements: [{ messageId: "csd-center-0", text: "必须保留 MEMORY_CENTER_COMPACT_STRATEGY_SENTINEL。" }],
+      compaction: {
+        version: 1,
+        compactedMessageCount: keepIndex,
+        preservedRecentMessages: messages.length - keepIndex,
+        lastCompactedMessageId: "csd-center-9",
+        lastCompactedAt: "2026-07-08T01:00:00.000Z",
+        summaryChecksum: "memory-center-compact-strategy-summary",
+        preCompactTokenCount: 7200,
+        postCompactTokenCount: 1800,
+        microCompact,
+        preservedSegment,
+        compactStrategyDecision: decision,
+        boundaries: [{
+          id: "memory-center-compact-strategy-boundary",
+          summarizedThroughMessageId: "csd-center-9",
+          summarizedMessageCount: keepIndex,
+          summaryChecksum: "memory-center-compact-strategy-summary",
+          compactStrategyDecision: decision,
+        }],
+      },
+      compactBoundary: {
+        id: "memory-center-compact-strategy-boundary",
+        summarizedFromMessageId: "csd-center-0",
+        summarizedThroughMessageId: "csd-center-9",
+        summarizedMessageCount: keepIndex,
+        summaryChecksum: "memory-center-compact-strategy-summary",
+        preCompactTokenCount: 7200,
+        postCompactTokenCount: 1800,
+        preservedSegment,
+        compactStrategyDecision: decision,
+        post_compact_restore: {
+          strategy: "conversation_summary_recent_reinject",
+          transcriptPath: messageFile,
+          preservedSegment,
+          strategyDecision: decision,
+          microCompact,
+        },
+      },
+    };
+    saveGroupMemory(groupId, memory);
+    const overview = buildGroupCompactStrategyDecisionOverview(groupId, memory);
+    const report = buildCompactStrategyDecisionReport({ groupIds: [groupId] });
+    const check = evaluateCompactStrategyDecision({ groupIds: [groupId] });
+    const detail: any = getMemoryCenterScope("group", groupId);
+    const detailDecision = detail.postCompactUsage?.compactStrategyDecision || {};
+    const rendered = renderGroupMemoryContextBundle({
+      schema: "ccm-group-memory-context-v1",
+      target_project: "api",
+      memory_policy: { use: "must_consider" },
+      group_state: { goal: memory.goal, currentPhase: "test" },
+      compaction: {
+        compactStrategyDecision: decision,
+      },
+    });
+    const checks = {
+      overviewPassesDecision: overview.schema === "ccm-group-compact-strategy-decision-overview-v1"
+        && overview.status === "ok"
+        && overview.mode === decision.mode
+        && overview.invariantPass === true,
+      reportAggregatesDecision: report.schema === "ccm-compact-strategy-decision-report-v1"
+        && report.overall?.status === "ok"
+        && report.overall?.checkedGroupCount === 1
+        && report.overall?.passedGroupCount === 1,
+      qualityCheckCoversDecision: check.id === "compact_strategy_decision"
+        && Number(check.checked || 0) === 1
+        && Number(check.passed || 0) === 1,
+      detailExposesDecision: detailDecision.schema === "ccm-group-compact-strategy-decision-overview-v1"
+        && detailDecision.decisionChecksum === decision.decisionChecksum
+        && detailDecision.transcriptPath === messageFile,
+      childAgentRendererMentionsDecision: rendered.includes("压缩策略决策")
+        && rendered.includes(decision.mode)
+        && rendered.includes("raw transcript"),
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, decision: detailDecision };
+  } finally {
+    for (const file of [groupFile, `${groupFile}.bak`, messageFile, `${messageFile}.bak`, reloadFile, `${reloadFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterPostCompactCleanupAuditSelfTest() {
+  const groupId = `memory-center-post-compact-cleanup-selftest-${process.pid}-${Date.now()}`;
+  const groupFile = path.join(GROUP_MEMORY_DIR, `${groupId}.json`);
+  const messageFile = path.join(GROUP_MESSAGES_DIR, `${groupId}.json`);
+  const reloadFile = path.join(CCM_DIR, "group-memory-reload", `${cleanId(groupId)}.json`);
+  try {
+    const { saveGroupMemory, renderGroupMemoryContextBundle } = require("../collaboration/memory");
+    const { saveGroupMessages } = require("../collaboration/storage");
+    const {
+      buildGroupCompactStrategyDecision,
+      buildGroupPostCompactCleanupAudit,
+      buildGroupPreservedSegment,
+      buildGroupMicroCompactPlan,
+      buildPostCompactReinjectionPlan,
+    } = require("../collaboration/group-memory-compaction");
+    const messages = Array.from({ length: 12 }, (_: any, index: number) => ({
+      id: `pcca-center-${index}`,
+      role: index % 2 ? "assistant" : "user",
+      agent: index % 2 ? "api" : undefined,
+      target: index % 2 ? undefined : "coordinator",
+      timestamp: "2026-07-08T02:00:00.000Z",
+      content: index === 0
+        ? "必须保留 MEMORY_CENTER_POST_COMPACT_CLEANUP_SENTINEL，cleanup 后 skill/tool continuity 仍要作为上下文。"
+        : `Memory Center cleanup audit 自测 ${index}，Skill:typescript-audit#cleanup，src/post-cleanup.ts，npm run check。${"证据".repeat(30)}`,
+      invokedSkills: index % 2 ? [{ name: "typescript-audit", contentHash: "cleanup" }] : [],
+    }));
+    saveGroupMessages(groupId, messages);
+    const keepIndex = 8;
+    const microCompact = buildGroupMicroCompactPlan(messages.slice(0, keepIndex), { maxChars: 800 });
+    const postCompactReinject = buildPostCompactReinjectionPlan(messages.slice(0, keepIndex), microCompact);
+    const preservedSegment = buildGroupPreservedSegment(messages, keepIndex, {
+      minMessages: 2,
+      minTokens: 1,
+      maxTokens: 1400,
+      summaryChecksum: "memory-center-post-cleanup-summary",
+      transcriptPath: messageFile,
+      now: "2026-07-08T02:00:00.000Z",
+    });
+    const decision = buildGroupCompactStrategyDecision({
+      groupId,
+      messages,
+      messagesToCompact: messages.slice(0, keepIndex),
+      keptMessages: messages.slice(keepIndex),
+      keepIndex,
+      compacted: true,
+      primaryCompact: true,
+      microCompact,
+      preservedSegment,
+      preCompactTokenCount: 6800,
+      postCompactTokenCount: 1700,
+      summaryChecksum: "memory-center-post-cleanup-summary",
+      transcriptPath: messageFile,
+      reason: "memory center post compact cleanup audit selftest",
+      now: "2026-07-08T02:00:00.000Z",
+    });
+    const recoveryAudit = {
+      schema: "ccm-post-compact-recovery-audit-v1",
+      status: "pass",
+      pass: true,
+      action: "safe_to_inject_child_agent_memory_packet",
+      summaryChecksum: "memory-center-post-cleanup-summary",
+      transcriptPath: messageFile,
+      passedChecks: 3,
+      checkCount: 3,
+      failedChecks: [],
+    };
+    const boundary: any = {
+      id: "memory-center-post-cleanup-boundary",
+      summarizedFromMessageId: "pcca-center-0",
+      summarizedThroughMessageId: "pcca-center-7",
+      summarizedMessageCount: keepIndex,
+      summaryChecksum: "memory-center-post-cleanup-summary",
+      preCompactTokenCount: 6800,
+      postCompactTokenCount: 1700,
+      preservedSegment,
+      compactStrategyDecision: decision,
+      post_compact_restore: {
+        strategy: "conversation_summary_recent_reinject",
+        transcriptPath: messageFile,
+        preservedSegment,
+        strategyDecision: decision,
+        recoveryAudit,
+        microCompact,
+        reinjectionPlan: postCompactReinject,
+      },
+    };
+    const cleanupAudit = buildGroupPostCompactCleanupAudit({
+      groupId,
+      boundary,
+      compactStrategyDecision: decision,
+      postCompactRecoveryAudit: recoveryAudit,
+      microCompact,
+      postCompactReinject,
+      preservedSegment,
+      transcriptPath: messageFile,
+      summaryChecksum: "memory-center-post-cleanup-summary",
+      now: "2026-07-08T02:00:00.000Z",
+    });
+    boundary.post_compact_restore.cleanupAudit = cleanupAudit;
+    const memory = {
+      groupId,
+      goal: "验证 post compact cleanup audit 能进入 Memory Center 治理和子 Agent 上下文",
+      messageDigest: "MEMORY_CENTER_POST_COMPACT_CLEANUP_SENTINEL：cleanup audit 必须可见。",
+      persistentRequirements: [{ messageId: "pcca-center-0", text: "必须保留 MEMORY_CENTER_POST_COMPACT_CLEANUP_SENTINEL。" }],
+      compaction: {
+        version: 1,
+        compactedMessageCount: keepIndex,
+        preservedRecentMessages: messages.length - keepIndex,
+        lastCompactedMessageId: "pcca-center-7",
+        lastCompactedAt: "2026-07-08T02:00:00.000Z",
+        summaryChecksum: "memory-center-post-cleanup-summary",
+        preCompactTokenCount: 6800,
+        postCompactTokenCount: 1700,
+        microCompact,
+        postCompactReinject,
+        preservedSegment,
+        compactStrategyDecision: decision,
+        postCompactRecoveryAudit: recoveryAudit,
+        postCompactCleanupAudit: cleanupAudit,
+      },
+      compactBoundary: boundary,
+      messageCompression: {
+        enabled: true,
+        compressedMessages: keepIndex,
+        recentMessages: messages.length - keepIndex,
+        postCompactCleanupAudit: cleanupAudit,
+      },
+    };
+    saveGroupMemory(groupId, memory);
+    const overview = buildGroupPostCompactCleanupAuditOverview(groupId, memory);
+    const report = buildPostCompactCleanupAuditReport({ groupIds: [groupId] });
+    const check = evaluatePostCompactCleanupAudit({ groupIds: [groupId] });
+    const detail: any = getMemoryCenterScope("group", groupId);
+    const detailCleanup = detail.postCompactUsage?.postCompactCleanupAudit || {};
+    const rendered = renderGroupMemoryContextBundle({
+      schema: "ccm-group-memory-context-v1",
+      target_project: "api",
+      memory_policy: { use: "must_consider" },
+      group_state: { goal: memory.goal, currentPhase: "test" },
+      compaction: {
+        postCompactCleanupAudit: cleanupAudit,
+      },
+    });
+    const checks = {
+      overviewPassesCleanupAudit: overview.schema === "ccm-group-post-compact-cleanup-audit-overview-v1"
+        && overview.status === "ok"
+        && overview.preserveInvokedSkills === true
+        && overview.preserveToolContinuity === true,
+      reportAggregatesCleanupAudit: report.schema === "ccm-post-compact-cleanup-audit-report-v1"
+        && report.overall?.status === "ok"
+        && report.overall?.checkedGroupCount === 1
+        && report.overall?.passedGroupCount === 1,
+      qualityCheckCoversCleanupAudit: check.id === "post_compact_cleanup_audit"
+        && Number(check.checked || 0) === 1
+        && Number(check.passed || 0) === 1,
+      detailExposesCleanupAudit: detailCleanup.schema === "ccm-group-post-compact-cleanup-audit-overview-v1"
+        && detailCleanup.summaryChecksum === cleanupAudit.summaryChecksum
+        && detailCleanup.transcriptPath === messageFile,
+      childAgentRendererMentionsCleanup: rendered.includes("压缩后清理审计")
+        && rendered.includes("invoked skills/tool continuity")
+        && rendered.includes("raw="),
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, cleanup: detailCleanup };
+  } finally {
+    for (const file of [groupFile, `${groupFile}.bak`, messageFile, `${messageFile}.bak`, reloadFile, `${reloadFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicroCompactEditPlanSelfTest() {
+  const groupId = `memory-center-api-microcompact-selftest-${process.pid}-${Date.now()}`;
+  const groupFile = path.join(GROUP_MEMORY_DIR, `${groupId}.json`);
+  const messageFile = path.join(GROUP_MESSAGES_DIR, `${groupId}.json`);
+  const reloadFile = path.join(CCM_DIR, "group-memory-reload", `${cleanId(groupId)}.json`);
+  try {
+    const { saveGroupMemory, renderGroupMemoryContextBundle } = require("../collaboration/memory");
+    const { saveGroupMessages } = require("../collaboration/storage");
+    const { buildGroupApiMicroCompactEditPlan } = require("../collaboration/group-memory-compaction");
+    const messages = [
+      {
+        id: "api-microcompact-center-thinking",
+        role: "assistant",
+        agent: "api",
+        timestamp: "2026-07-08T05:00:00.000Z",
+        content: [
+          { type: "thinking", thinking: "MEMORY_CENTER_API_MICROCOMPACT_THINKING_SENTINEL" },
+          { type: "tool_use", id: "tool-read-api-plan", name: "Read", input: { file_path: "src/api-microcompact-plan.ts" } },
+        ],
+      },
+      {
+        id: "api-microcompact-center-result",
+        role: "user",
+        timestamp: "2026-07-08T05:01:00.000Z",
+        content: [
+          { type: "tool_result", tool_use_id: "tool-read-api-plan", content: "MEMORY_CENTER_API_MICROCOMPACT_TOOL_RESULT_SENTINEL\nsrc/api-microcompact-plan.ts" },
+        ],
+      },
+      ...Array.from({ length: 10 }, (_: any, index: number) => ({
+        id: `api-microcompact-center-${index}`,
+        role: index % 2 ? "assistant" : "user",
+        agent: index % 2 ? "api" : undefined,
+        target: index % 2 ? undefined : "coordinator",
+        timestamp: "2026-07-08T05:02:00.000Z",
+        content: `API microcompact Memory Center 自测 ${index}，third-party executor context pressure ${"证据".repeat(30)}`,
+      })),
+    ];
+    saveGroupMessages(groupId, messages);
+    const plan = buildGroupApiMicroCompactEditPlan(messages, {
+      groupId,
+      activeTokens: 220000,
+      maxInputTokens: 1000,
+      targetInputTokens: 400,
+      force: true,
+      now: "2026-07-08T05:05:00.000Z",
+    });
+    const memory = {
+      groupId,
+      goal: "验证 API microcompact edit plan 能进入 Memory Center 治理和子 Agent 上下文",
+      messageDigest: "MEMORY_CENTER_API_MICROCOMPACT_SENTINEL：API edit plan 必须可见。",
+      persistentRequirements: [{ messageId: "api-microcompact-center-thinking", text: "必须保留 MEMORY_CENTER_API_MICROCOMPACT_SENTINEL。" }],
+      compaction: {
+        version: 1,
+        compactedMessageCount: 8,
+        preservedRecentMessages: 4,
+        lastCompactedMessageId: "api-microcompact-center-5",
+        lastCompactedAt: "2026-07-08T05:05:00.000Z",
+        summaryChecksum: "memory-center-api-microcompact-summary",
+        preCompactTokenCount: 220000,
+        postCompactTokenCount: 40000,
+        apiMicroCompactEditPlan: plan,
+      },
+      compactBoundary: {
+        id: "memory-center-api-microcompact-boundary",
+        summarizedFromMessageId: "api-microcompact-center-thinking",
+        summarizedThroughMessageId: "api-microcompact-center-5",
+        summarizedMessageCount: 8,
+        summaryChecksum: "memory-center-api-microcompact-summary",
+        preCompactTokenCount: 220000,
+        postCompactTokenCount: 40000,
+        apiMicroCompactEditPlan: plan,
+        post_compact_restore: {
+          strategy: "conversation_summary_recent_reinject",
+          transcriptPath: messageFile,
+          apiMicroCompactEditPlan: plan,
+        },
+      },
+      messageCompression: {
+        enabled: true,
+        compressedMessages: 8,
+        recentMessages: 4,
+        apiMicroCompactEditPlan: plan,
+      },
+    };
+    saveGroupMemory(groupId, memory);
+    const overview = buildGroupApiMicroCompactEditPlanOverview(groupId, memory);
+    const report = buildApiMicroCompactEditPlanReport({ groupIds: [groupId] });
+    const check = evaluateApiMicroCompactEditPlan({ groupIds: [groupId] });
+    const detail: any = getMemoryCenterScope("group", groupId);
+    const detailPlan = detail.postCompactUsage?.apiMicroCompactEditPlan || {};
+    const rendered = renderGroupMemoryContextBundle({
+      schema: "ccm-group-memory-context-v1",
+      target_project: "api",
+      memory_policy: { use: "must_consider" },
+      group_state: { goal: memory.goal, currentPhase: "test" },
+      compaction: {
+        apiMicroCompactEditPlan: plan,
+      },
+    });
+    const checks = {
+      overviewPassesApiMicrocompactPlan: overview.schema === "ccm-group-api-microcompact-edit-plan-overview-v1"
+        && overview.status === "ok"
+        && overview.editCount === plan.editCount
+        && overview.planChecksum === plan.planChecksum,
+      reportAggregatesApiMicrocompactPlan: report.schema === "ccm-api-microcompact-edit-plan-report-v1"
+        && report.overall?.status === "ok"
+        && report.overall?.checkedGroupCount === 1
+        && report.overall?.passedGroupCount === 1,
+      qualityCheckCoversApiMicrocompactPlan: check.id === "api_microcompact_edit_plan"
+        && Number(check.checked || 0) === 1
+        && Number(check.passed || 0) === 1,
+      detailExposesApiMicrocompactPlan: detailPlan.schema === "ccm-group-api-microcompact-edit-plan-overview-v1"
+        && detailPlan.planChecksum === plan.planChecksum
+        && detailPlan.editCount === plan.editCount,
+      childAgentRendererMentionsApiMicrocompactPlan: rendered.includes("API microcompact edit plan")
+        && rendered.includes("edits=")
+        && rendered.includes("thinking=")
+        && rendered.includes("tool_result="),
+      planKeepsThirdPartyCliAdvisoryBoundary: plan.advisoryOnly === true
+        && plan.canApplyNatively === false
+        && plan.contextManagement?.edits?.length === plan.editCount,
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, plan: detailPlan };
+  } finally {
+    for (const file of [groupFile, `${groupFile}.bak`, messageFile, `${messageFile}.bak`, reloadFile, `${reloadFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactReceiptDisciplineSelfTest() {
+  const groupId = `memory-center-api-microcompact-receipt-selftest-${process.pid}-${Date.now()}`;
+  const groupFile = path.join(GROUP_MEMORY_DIR, `${groupId}.json`);
+  const messageFile = path.join(GROUP_MESSAGES_DIR, `${groupId}.json`);
+  const reloadFile = path.join(CCM_DIR, "group-memory-reload", `${cleanId(groupId)}.json`);
+  const originalTasks = loadTasks();
+  try {
+    const { saveGroupMemory } = require("../collaboration/memory");
+    const { saveGroupMessages } = require("../collaboration/storage");
+    const { buildGroupApiMicroCompactEditPlan } = require("../collaboration/group-memory-compaction");
+    const messages = [
+      {
+        id: "api-microcompact-receipt-thinking",
+        role: "assistant",
+        agent: "api",
+        timestamp: "2026-07-08T06:00:00.000Z",
+        content: [
+          { type: "thinking", thinking: "MEMORY_CENTER_API_MICROCOMPACT_RECEIPT_THINKING" },
+          { type: "tool_use", id: "tool-api-receipt", name: "Read", input: { file_path: "src/api-microcompact-receipt.ts" } },
+        ],
+      },
+      {
+        id: "api-microcompact-receipt-result",
+        role: "user",
+        timestamp: "2026-07-08T06:01:00.000Z",
+        content: [{ type: "tool_result", tool_use_id: "tool-api-receipt", content: "API microcompact receipt result" }],
+      },
+    ];
+    saveGroupMessages(groupId, messages);
+    const plan = buildGroupApiMicroCompactEditPlan(messages, {
+      groupId,
+      activeTokens: 220000,
+      maxInputTokens: 1000,
+      targetInputTokens: 400,
+      force: true,
+      now: "2026-07-08T06:05:00.000Z",
+    });
+    saveGroupMemory(groupId, {
+      groupId,
+      goal: "验证 API microcompact 使用回执纪律",
+      compaction: {
+        compactedMessageCount: 2,
+        lastCompactedMessageId: "api-microcompact-receipt-result",
+        summaryChecksum: "memory-center-api-microcompact-receipt-summary",
+        apiMicroCompactEditPlan: plan,
+      },
+      compactBoundary: {
+        summarizedThroughMessageId: "api-microcompact-receipt-result",
+        summaryChecksum: "memory-center-api-microcompact-receipt-summary",
+        apiMicroCompactEditPlan: plan,
+        post_compact_restore: { apiMicroCompactEditPlan: plan },
+      },
+    });
+    const task = {
+      id: `task-${groupId}`,
+      title: "API microcompact receipt selftest",
+      group_id: groupId,
+      target_project: "api",
+      workflow_type: "daily_dev",
+      delivery_summary: {
+        status: "done",
+        api_microcompact_edit_plans: [{
+          plan_checksum: plan.planChecksum,
+          edit_count: plan.editCount,
+          advisory_only: true,
+          can_apply_natively: false,
+        }],
+        api_microcompact_edit_plan_count: 1,
+        api_microcompact_receipt_passed: true,
+        api_microcompact_receipt_rows: [{
+          agent: "api",
+          api_microcompact: {
+            schema: "ccm-child-agent-api-microcompact-receipt-validation-v1",
+            required: true,
+            pass: true,
+            plan_checksums: [plan.planChecksum],
+            missing_plan_checksums: [],
+            unsafe_native_applied_plan_checksums: [],
+            native_applied_count: 0,
+            advisory_count: 1,
+            ignored_count: 0,
+            rows: [{ plan_checksum: plan.planChecksum, usage_state: "advisory", pass: true }],
+          },
+        }],
+        receipt_quality: [{
+          agent: "api",
+          status: "done",
+          grade: "good",
+          api_microcompact: {
+            required: true,
+            pass: true,
+            plan_checksums: [plan.planChecksum],
+            missing_plan_checksums: [],
+            unsafe_native_applied_plan_checksums: [],
+            advisory_count: 1,
+          },
+        }],
+        receipts: [{
+          agent: "api",
+          status: "done",
+          summary: "已按 advisory 使用 API microcompact edit plan。",
+          memoryUsed: [`api_microcompact_edit_plan planChecksum=${plan.planChecksum} advisory`],
+          apiMicrocompactUsage: [{
+            planChecksum: plan.planChecksum,
+            usageState: "advisory",
+            nativeApplied: false,
+            advisoryOnly: true,
+            reason: "third-party CLI advisory context pressure only",
+          }],
+        }],
+      },
+    };
+    saveTasks([...originalTasks.filter((item: any) => item.id !== task.id), task]);
+    const report = buildApiMicrocompactReceiptDisciplineReport({ groupIds: [groupId], tasks: [task] });
+    const check = evaluateApiMicrocompactReceiptDiscipline({ groupIds: [groupId], tasks: [task] });
+    const detail: any = getMemoryCenterScope("group", groupId);
+    const discipline = detail.postCompactUsage?.apiMicrocompactReceiptDiscipline || {};
+    const checks = {
+      reportAggregatesReceiptDiscipline: report.schema === "ccm-api-microcompact-receipt-discipline-report-v1"
+        && report.overall?.status === "ok"
+        && report.overall?.checked === 1
+        && report.overall?.passed === 1,
+      qualityCheckCoversReceiptDiscipline: check.id === "api_microcompact_receipt_discipline"
+        && Number(check.checked || 0) === 1
+        && Number(check.passed || 0) === 1,
+      detailExposesReceiptDiscipline: discipline.schema === "ccm-api-microcompact-receipt-discipline-group-v1"
+        && discipline.status === "ok"
+        && discipline.planChecksum === plan.planChecksum,
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, discipline };
+  } finally {
+    saveTasks(originalTasks);
+    for (const file of [groupFile, `${groupFile}.bak`, messageFile, `${messageFile}.bak`, reloadFile, `${reloadFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyReadinessSelfTest() {
+  const groupId = `memory-center-api-microcompact-native-apply-selftest-${process.pid}-${Date.now()}`;
+  const groupFile = path.join(GROUP_MEMORY_DIR, `${groupId}.json`);
+  const messageFile = path.join(GROUP_MESSAGES_DIR, `${groupId}.json`);
+  const reloadFile = path.join(CCM_DIR, "group-memory-reload", `${cleanId(groupId)}.json`);
+  const originalTasks = loadTasks();
+  try {
+    const { saveGroupMemory } = require("../collaboration/memory");
+    const { buildGroupApiMicroCompactEditPlan, buildGroupApiMicrocompactNativeApplyPlan } = require("../collaboration/group-memory-compaction");
+    const messages = [{
+      id: "api-microcompact-native-thinking",
+      role: "assistant",
+      agent: "api",
+      timestamp: "2026-07-08T07:00:00.000Z",
+      content: [
+        { type: "thinking", thinking: "MEMORY_CENTER_API_MICROCOMPACT_NATIVE_THINKING" },
+        { type: "tool_use", id: "tool-api-native", name: "Read", input: { file_path: "src/native.ts" } },
+        { type: "tool_result", tool_use_id: "tool-api-native", content: "native API result" },
+      ],
+    }];
+    const plan = buildGroupApiMicroCompactEditPlan(messages, {
+      groupId,
+      targetProject: "api",
+      activeTokens: 220000,
+      maxInputTokens: 1000,
+      targetInputTokens: 400,
+      force: true,
+      now: "2026-07-08T07:01:00.000Z",
+    });
+    const nativePlan = buildGroupApiMicrocompactNativeApplyPlan(plan, {
+      groupId,
+      targetProject: "api",
+      agentType: "anthropic-api",
+      transport: "anthropic_api",
+      provider: "anthropic",
+      supportsApiContextManagement: true,
+      nativeApiRequestLayer: true,
+      betaHeaders: ["context-management-2025-06-27"],
+      sessionBinding: {
+        schema: "ccm-child-agent-memory-session-binding-v1",
+        binding_id: "csm-api-microcompact-native-readiness",
+        task_agent_session_id: "tas-api-microcompact-native-readiness",
+        native_session_id: "native-api-microcompact-native-readiness",
+      },
+      now: "2026-07-08T07:02:00.000Z",
+    });
+    saveGroupMemory(groupId, {
+      groupId,
+      goal: "验证 API microcompact native apply readiness",
+      compaction: { apiMicroCompactEditPlan: plan },
+    });
+    const task = {
+      id: `task-${groupId}`,
+      title: "API microcompact native apply readiness selftest",
+      group_id: groupId,
+      target_project: "api",
+      delivery_summary: {
+        status: "done",
+        api_microcompact_edit_plans: [{
+          plan_checksum: plan.planChecksum,
+          edit_count: plan.editCount,
+          recommended: true,
+          native_apply_ready: true,
+          can_apply_natively: true,
+          native_apply_plan: nativePlan,
+          apply_plan_checksum: nativePlan.applyPlanChecksum,
+          request_patch_checksum: nativePlan.requestPatchChecksum,
+          task_agent_session_id: nativePlan.task_agent_session_id,
+          native_session_id: nativePlan.native_session_id,
+        }],
+      },
+    };
+    saveTasks([...originalTasks.filter((item: any) => item.id !== task.id), task]);
+    const report = buildApiMicrocompactNativeApplyReadinessReport({ groupIds: [groupId], tasks: [task] });
+    const check = evaluateApiMicrocompactNativeApplyReadiness({ groupIds: [groupId], tasks: [task] });
+    const detail: any = getMemoryCenterScope("group", groupId);
+    const readiness = detail.postCompactUsage?.apiMicrocompactNativeApplyReadiness || {};
+    const checks = {
+      reportAggregatesNativeReadiness: report.schema === "ccm-api-microcompact-native-apply-readiness-report-v1"
+        && report.overall?.status === "ok"
+        && report.overall?.nativeReadyCount === 1,
+      qualityCheckCoversNativeReadiness: check.id === "api_microcompact_native_apply_readiness"
+        && Number(check.checked || 0) === 1
+        && Number(check.passed || 0) === 1,
+      detailExposesNativeReadiness: readiness.schema === "ccm-api-microcompact-native-apply-readiness-group-v1"
+        && readiness.status === "ok"
+        && readiness.rows?.[0]?.requestPatchChecksum === nativePlan.requestPatchChecksum,
+      readinessTracksSessionBinding: readiness.rows?.[0]?.taskAgentSessionId === "tas-api-microcompact-native-readiness"
+        && Number(readiness.sessionBound || 0) === 1,
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, readiness };
+  } finally {
+    saveTasks(originalTasks);
+    for (const file of [groupFile, `${groupFile}.bak`, messageFile, `${messageFile}.bak`, reloadFile, `${reloadFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyProofSelfTest() {
+  const groupId = `memory-center-api-microcompact-native-proof-selftest-${process.pid}-${Date.now()}`;
+  const taskId = `task-${groupId}`;
+  const executionId = `execution-${groupId}`;
+  const runnerRequestId = `runner-${groupId}`;
+  const nativeSessionId = `native-${groupId}`;
+  const groupFile = path.join(GROUP_MEMORY_DIR, `${groupId}.json`);
+  const messageFile = path.join(GROUP_MESSAGES_DIR, `${groupId}.json`);
+  const reloadFile = path.join(CCM_DIR, "group-memory-reload", `${cleanId(groupId)}.json`);
+  const proofFile = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId);
+  const telemetryFile = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const executionFile = getExecutionKernelRecordFileForCenter(executionId);
+  const originalTasks = loadTasks();
+  try {
+    const {
+      recordGroupApiMicrocompactNativeApplyProofLedger,
+      recordGroupApiMicrocompactNativeApplyAdapterTelemetry,
+      saveGroupMemory,
+      renderGroupMemoryContextBundle,
+    } = require("../collaboration/memory");
+    const { buildGroupApiMicroCompactEditPlan, buildGroupApiMicrocompactNativeApplyPlan } = require("../collaboration/group-memory-compaction");
+    const {
+      openTaskAgentSession,
+      recordTaskAgentSessionTurn,
+      bindTaskAgentMemoryContextSnapshot,
+    } = require("../../tasks/agent-sessions");
+    const { ensureExecution, registerExternalRunnerRequest } = require("../../agents/execution-kernel");
+    const taskAgentSession = openTaskAgentSession({
+      scopeId: taskId,
+      taskId,
+      groupId,
+      project: "api",
+      agentType: "claudecode",
+    });
+    recordTaskAgentSessionTurn(taskAgentSession.id, { nativeSessionId, success: true });
+    const snapshotBinding = bindTaskAgentMemoryContextSnapshot(taskAgentSession.id, {
+      taskId,
+      groupId,
+      project: "api",
+      agentType: "claudecode",
+      nativeSessionId,
+      turn: 1,
+      executionId,
+      workerContextPacket: {
+        packet_id: `wcp-${groupId}`,
+        memory: {
+          schema: "ccm-group-memory-context-v1",
+          target_project: "api",
+          memory_policy: { use: "must_consider" },
+        },
+      },
+      renderedPrompt: "selftest prompt includes group memory context",
+    });
+    ensureExecution({
+      task: { id: taskId, title: "API microcompact native apply proof selftest", target_project: "api" },
+      project: "api",
+      agent: "api",
+      workDir: process.cwd(),
+      executionId,
+    });
+    registerExternalRunnerRequest(executionId, runnerRequestId);
+    const memoryContextSnapshotId = snapshotBinding?.snapshot?.snapshot_id || snapshotBinding?.session?.memoryContextSnapshotId || "";
+    const memoryContextSnapshotChecksum = snapshotBinding?.snapshot?.checksum || snapshotBinding?.session?.memoryContextSnapshotChecksum || "";
+    const messages = [{
+      id: "api-microcompact-native-proof-thinking",
+      role: "assistant",
+      agent: "api",
+      timestamp: "2026-07-08T08:00:00.000Z",
+      content: [
+        { type: "thinking", thinking: "MEMORY_CENTER_API_MICROCOMPACT_NATIVE_PROOF_THINKING" },
+        { type: "tool_use", id: "tool-api-native-proof", name: "Read", input: { file_path: "src/native-proof.ts" } },
+        { type: "tool_result", tool_use_id: "tool-api-native-proof", content: "native proof result" },
+      ],
+    }];
+    const plan = buildGroupApiMicroCompactEditPlan(messages, {
+      groupId,
+      targetProject: "api",
+      activeTokens: 220000,
+      maxInputTokens: 1000,
+      targetInputTokens: 400,
+      force: true,
+      now: "2026-07-08T08:01:00.000Z",
+    });
+    const nativePlan = buildGroupApiMicrocompactNativeApplyPlan(plan, {
+      groupId,
+      targetProject: "api",
+      agentType: "anthropic-api",
+      transport: "anthropic_api",
+      provider: "anthropic",
+      supportsApiContextManagement: true,
+      nativeApiRequestLayer: true,
+      betaHeaders: ["context-management-2025-06-27"],
+      sessionBinding: {
+        schema: "ccm-child-agent-memory-session-binding-v1",
+        binding_id: "csm-api-microcompact-native-proof",
+        task_agent_session_id: taskAgentSession.id,
+        native_session_id: nativeSessionId,
+      },
+      memoryContextSnapshotId: memoryContextSnapshotId,
+      memoryContextSnapshotChecksum: memoryContextSnapshotChecksum,
+      now: "2026-07-08T08:02:00.000Z",
+    });
+    saveGroupMemory(groupId, {
+      groupId,
+      goal: "验证 API microcompact native apply proof ledger",
+      compaction: {
+        compactedMessageCount: 1,
+        summaryChecksum: "memory-center-api-microcompact-native-proof-summary",
+        apiMicroCompactEditPlan: plan,
+        apiMicrocompactNativeApplyPlan: nativePlan,
+      },
+    });
+    const task = {
+      id: taskId,
+      title: "API microcompact native apply proof selftest",
+      group_id: groupId,
+      target_project: "api",
+      delivery_summary: {
+        status: "done",
+        api_microcompact_edit_plans: [{
+          plan_checksum: plan.planChecksum,
+          edit_count: plan.editCount,
+          recommended: true,
+          native_apply_ready: true,
+          can_apply_natively: true,
+          native_apply_plan: nativePlan,
+          apply_plan_checksum: nativePlan.applyPlanChecksum,
+          request_patch_checksum: nativePlan.requestPatchChecksum,
+          task_agent_session_id: nativePlan.task_agent_session_id,
+          native_session_id: nativePlan.native_session_id,
+          memory_context_snapshot_id: nativePlan.memory_context_snapshot_id,
+          memory_context_snapshot_checksum: nativePlan.memory_context_snapshot_checksum,
+        }],
+        api_microcompact_receipt_passed: true,
+        api_microcompact_receipt_rows: [{
+          agent: "api",
+          status: "done",
+          api_microcompact: {
+            schema: "ccm-child-agent-api-microcompact-receipt-validation-v1",
+            required: true,
+            pass: true,
+            plan_checksums: [plan.planChecksum],
+            native_applied_count: 1,
+            advisory_count: 0,
+            ignored_count: 0,
+            rows: [{
+              plan_checksum: plan.planChecksum,
+              usage_state: "native_applied",
+              native_applied: true,
+              native_apply_ready: true,
+              apply_plan_checksum: nativePlan.applyPlanChecksum,
+              request_patch_checksum: nativePlan.requestPatchChecksum,
+              receipt_apply_plan_checksum: nativePlan.applyPlanChecksum,
+              receipt_request_patch_checksum: nativePlan.requestPatchChecksum,
+              apply_plan_checksum_matched: true,
+              request_patch_checksum_matched: true,
+              session_binding_required: true,
+              session_matched: true,
+              expected_task_agent_session_id: nativePlan.task_agent_session_id,
+              receipt_task_agent_session_id: nativePlan.task_agent_session_id,
+              expected_native_session_id: nativePlan.native_session_id,
+              receipt_native_session_id: nativePlan.native_session_id,
+              expected_memory_context_snapshot_id: nativePlan.memory_context_snapshot_id,
+              receipt_memory_context_snapshot_id: nativePlan.memory_context_snapshot_id,
+              expected_memory_context_snapshot_checksum: nativePlan.memory_context_snapshot_checksum,
+              receipt_memory_context_snapshot_checksum: nativePlan.memory_context_snapshot_checksum,
+              unsafe_native_applied: false,
+              pass: true,
+              reason: "provider request merged context_management with requestPatchChecksum",
+            }],
+          },
+        }],
+        receipts: [{
+          agent: "api",
+          status: "done",
+          apiMicrocompactNativeApplyRequestTelemetry: [{
+            planChecksum: plan.planChecksum,
+            applyPlanChecksum: nativePlan.applyPlanChecksum,
+            requestPatchChecksum: nativePlan.requestPatchChecksum,
+            requestBodyChecksum: "request-body-checksum-api-microcompact-native-proof",
+            hasContextManagement: true,
+            betaHeaders: ["context-management-2025-06-27"],
+            provider: "anthropic",
+            model: "claude-selftest",
+            endpoint: "https://api.anthropic.com/v1/messages",
+            method: "POST",
+            responseStatus: 200,
+            requestId: "req-api-microcompact-native-proof",
+            runnerRequestId,
+            externalRunnerRequestId: runnerRequestId,
+            taskAgentSessionId: nativePlan.task_agent_session_id,
+            nativeSessionId: nativePlan.native_session_id,
+            memoryContextSnapshotId: nativePlan.memory_context_snapshot_id,
+            memoryContextSnapshotChecksum: nativePlan.memory_context_snapshot_checksum,
+            sentAt: "2026-07-08T08:02:30.000Z",
+            telemetrySource: "native_request_adapter",
+          }],
+        }],
+      },
+    };
+    recordGroupApiMicrocompactNativeApplyAdapterTelemetry({
+      groupId,
+      targetProject: "api",
+      taskId: task.id,
+      executionId,
+      runnerRequestId,
+      externalRunnerRequestId: runnerRequestId,
+      apiMicrocompactNativeApplyPlan: nativePlan,
+      requestPatch: nativePlan.requestPatch,
+      requestBody: {
+        model: "claude-selftest",
+        messages: [{ role: "user", content: "memory center native proof adapter telemetry selftest" }],
+        context_management: nativePlan.requestPatch?.body?.context_management,
+      },
+      headers: { "anthropic-beta": "context-management-2025-06-27" },
+      provider: "anthropic",
+      model: "claude-selftest",
+      endpoint: "https://api.anthropic.com/v1/messages",
+      method: "POST",
+      responseStatus: 200,
+      requestId: "req-api-microcompact-native-proof",
+      sentAt: "2026-07-08T08:02:30.000Z",
+    });
+    recordGroupApiMicrocompactNativeApplyProofLedger(groupId, {
+      targetProject: "api",
+      taskId: task.id,
+      executionId,
+      runnerRequestId,
+      externalRunnerRequestId: runnerRequestId,
+      finalStatus: "done",
+      receiptRows: task.delivery_summary.api_microcompact_receipt_rows,
+      generatedAt: "2026-07-08T08:03:00.000Z",
+    });
+    saveTasks([...originalTasks.filter((item: any) => item.id !== task.id), task]);
+    const report = buildApiMicrocompactNativeApplyProofReport({ groupIds: [groupId], tasks: [task], nowMs: Date.parse("2026-07-08T08:10:00.000Z") });
+    const check = evaluateApiMicrocompactNativeApplyProof({ groupIds: [groupId], tasks: [task], nowMs: Date.parse("2026-07-08T08:10:00.000Z") });
+    const detail: any = getMemoryCenterScope("group", groupId);
+    const proof = detail.postCompactUsage?.apiMicrocompactNativeApplyProof || {};
+    const rendered = renderGroupMemoryContextBundle({
+      schema: "ccm-group-memory-context-v1",
+      target_project: "api",
+      memory_policy: { use: "must_consider" },
+      group_state: { goal: "proof ledger render", currentPhase: "test" },
+      compaction: {
+        apiMicroCompactEditPlan: plan,
+        apiMicrocompactNativeApplyPlan: nativePlan,
+        apiMicrocompactNativeApplyProofLedger: {
+          schema: "ccm-group-api-microcompact-native-apply-proof-summary-v1",
+          has_history: true,
+          status: "ok",
+          proof_coverage_rate: 100,
+          ledger_file: proofFile,
+          request_telemetry: {
+            schema: "ccm-group-api-microcompact-native-apply-request-telemetry-summary-v1",
+            ledger_file: telemetryFile,
+            matched_verified_count: 1,
+            adapter_matched_verified_count: 1,
+            receipt_matched_verified_count: 0,
+            strong_verified_count: 1,
+            receipt_only_verified_count: 0,
+            missing_verified_count: 0,
+            stale_verified_count: 0,
+          },
+          totals: { verified: 1, failed: 0, advisory: 0, not_supported: 0, native_claims: 1 },
+          verified_entries: [{ plan_checksum: plan.planChecksum, request_patch_checksum: nativePlan.requestPatchChecksum, task_agent_session_id: nativePlan.task_agent_session_id, memory_context_snapshot_id: nativePlan.memory_context_snapshot_id, request_telemetry_status: "matched" }],
+          failed_entries: [],
+        },
+      },
+    });
+    const checks = {
+      reportAggregatesNativeProof: report.schema === "ccm-api-microcompact-native-apply-proof-report-v1"
+        && report.overall?.status === "ok"
+        && report.overall?.verifiedProofCount === 1
+        && report.overall?.requestTelemetryMatchedCount === 1
+        && report.overall?.requestTelemetryAdapterMatchedCount === 1
+        && report.overall?.requestTelemetryStrongCount === 1
+        && report.overall?.requestTelemetrySessionBoundCount === 1
+        && report.overall?.requestTelemetryDispatchBoundCount === 1
+        && report.overall?.requestTelemetryRunnerBoundCount === 1
+        && report.overall?.missingProofCount === 0,
+      qualityCheckCoversNativeProof: check.id === "api_microcompact_native_apply_proof"
+        && Number(check.checked || 0) === 1
+        && Number(check.passed || 0) === 1,
+      detailExposesNativeProof: proof.schema === "ccm-api-microcompact-native-apply-proof-group-v1"
+        && proof.status === "ok"
+        && proof.rows?.[0]?.requestPatchChecksum === nativePlan.requestPatchChecksum,
+      detailExposesAdapterTelemetrySource: proof.requestTelemetryAdapterMatchedCount === 1
+        && proof.requestTelemetryStrongCount === 1
+        && proof.requestTelemetrySessionBoundCount === 1
+        && proof.requestTelemetryDispatchBoundCount === 1
+        && proof.requestTelemetryRunnerBoundCount === 1
+        && proof.rows?.[0]?.nativeApplyStrongProof === true
+        && proof.rows?.[0]?.requestTelemetrySource === "native_request_adapter",
+      childAgentRendererMentionsNativeProof: rendered.includes("API microcompact native apply proof ledger")
+        && rendered.includes("verified=1")
+        && rendered.includes("strong=1")
+        && rendered.includes("adapter=1")
+        && rendered.includes(nativePlan.requestPatchChecksum),
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, proof };
+  } finally {
+    saveTasks(originalTasks);
+    try {
+      const { purgeTaskAgentSessions } = require("../../tasks/agent-sessions");
+      purgeTaskAgentSessions(taskId);
+    } catch {}
+    for (const file of [groupFile, `${groupFile}.bak`, messageFile, `${messageFile}.bak`, reloadFile, `${reloadFile}.bak`, proofFile, `${proofFile}.bak`, telemetryFile, `${telemetryFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (fs.existsSync(executionFile)) fs.unlinkSync(executionFile); } catch {}
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyProofAgingSelfTest() {
+  const baseId = `memory-center-api-microcompact-native-proof-aging-selftest-${process.pid}-${Date.now()}`;
+  const receiptOnlyGroupId = `${baseId}-receipt-only`;
+  const staleGroupId = `${baseId}-stale`;
+  const groupIds = [receiptOnlyGroupId, staleGroupId];
+  const files = groupIds.flatMap(groupId => {
+    const proofFile = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId);
+    const telemetryFile = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+    return [proofFile, `${proofFile}.bak`, telemetryFile, `${telemetryFile}.bak`];
+  });
+  const makeNative = (groupId: string, suffix: string) => ({
+    schema: "ccm-api-microcompact-native-apply-plan-v1",
+    groupId,
+    group_id: groupId,
+    targetProject: "api",
+    target_project: "api",
+    apiEditPlanChecksum: `plan-${suffix}`,
+    applyPlanChecksum: `apply-${suffix}`,
+    requestPatchChecksum: `request-${suffix}`,
+    taskAgentSessionId: `tas-${suffix}`,
+    task_agent_session_id: `tas-${suffix}`,
+    nativeSessionId: `native-${suffix}`,
+    native_session_id: `native-${suffix}`,
+    memoryContextSnapshotId: `snapshot-${suffix}`,
+    memory_context_snapshot_id: `snapshot-${suffix}`,
+    memoryContextSnapshotChecksum: `snapshot-checksum-${suffix}`,
+    memory_context_snapshot_checksum: `snapshot-checksum-${suffix}`,
+    nativeApplyReady: true,
+    mode: "native_api_context_management",
+    requestPatch: {
+      body: { context_management: { edits: [{ type: "clear_tool_uses_20250919", keep: { type: "tool_use_id", value: `tool-${suffix}` } }] } },
+      beta_headers: ["context-management-2025-06-27"],
+    },
+  });
+  const makeReceiptRows = (nativePlan: any) => [{
+    agent: "api",
+    status: "done",
+    api_microcompact: {
+      required: true,
+      pass: true,
+      rows: [{
+        plan_checksum: nativePlan.apiEditPlanChecksum,
+        usage_state: "native_applied",
+        native_applied: true,
+        native_apply_ready: true,
+        apply_plan_checksum: nativePlan.applyPlanChecksum,
+        request_patch_checksum: nativePlan.requestPatchChecksum,
+        receipt_apply_plan_checksum: nativePlan.applyPlanChecksum,
+        receipt_request_patch_checksum: nativePlan.requestPatchChecksum,
+        apply_plan_checksum_matched: true,
+        request_patch_checksum_matched: true,
+        session_binding_required: true,
+        session_matched: true,
+        expected_task_agent_session_id: nativePlan.task_agent_session_id,
+        receipt_task_agent_session_id: nativePlan.task_agent_session_id,
+        expected_native_session_id: nativePlan.native_session_id,
+        receipt_native_session_id: nativePlan.native_session_id,
+        expected_memory_context_snapshot_id: nativePlan.memory_context_snapshot_id,
+        receipt_memory_context_snapshot_id: nativePlan.memory_context_snapshot_id,
+        expected_memory_context_snapshot_checksum: nativePlan.memory_context_snapshot_checksum,
+        receipt_memory_context_snapshot_checksum: nativePlan.memory_context_snapshot_checksum,
+        unsafe_native_applied: false,
+        pass: true,
+        reason: "provider request telemetry downgrade selftest",
+      }],
+    },
+  }];
+  const makeTask = (groupId: string, nativePlan: any) => ({
+    id: `task-${groupId}`,
+    title: "API microcompact native proof aging selftest",
+    group_id: groupId,
+    target_project: "api",
+    delivery_summary: {
+      status: "done",
+      api_microcompact_receipt_passed: true,
+      api_microcompact_receipt_rows: makeReceiptRows(nativePlan),
+    },
+  });
+  try {
+    const {
+      recordGroupApiMicrocompactNativeApplyProofLedger,
+      recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger,
+      recordGroupApiMicrocompactNativeApplyAdapterTelemetry,
+    } = require("../collaboration/memory");
+    const receiptOnlyPlan = makeNative(receiptOnlyGroupId, "receipt-only");
+    const stalePlan = makeNative(staleGroupId, "stale");
+    const receiptOnlyTask = makeTask(receiptOnlyGroupId, receiptOnlyPlan);
+    const staleTask = makeTask(staleGroupId, stalePlan);
+    const receiptOnlyRows = receiptOnlyTask.delivery_summary.api_microcompact_receipt_rows;
+    const staleRows = staleTask.delivery_summary.api_microcompact_receipt_rows;
+    recordGroupApiMicrocompactNativeApplyRequestTelemetryLedger(receiptOnlyGroupId, {
+      targetProject: "api",
+      taskId: receiptOnlyTask.id,
+      executionId: "execution-receipt-only",
+      receipts: [{
+        agent: "api",
+        apiMicrocompactNativeApplyRequestTelemetry: [{
+          planChecksum: receiptOnlyPlan.apiEditPlanChecksum,
+          applyPlanChecksum: receiptOnlyPlan.applyPlanChecksum,
+          requestPatchChecksum: receiptOnlyPlan.requestPatchChecksum,
+          requestBodyChecksum: "request-body-receipt-only",
+          hasContextManagement: true,
+          betaHeaders: ["context-management-2025-06-27"],
+          provider: "anthropic",
+          model: "claude-selftest",
+          endpoint: "https://api.anthropic.com/v1/messages",
+          method: "POST",
+          responseStatus: 200,
+          requestId: "req-receipt-only",
+          taskAgentSessionId: receiptOnlyPlan.task_agent_session_id,
+          nativeSessionId: receiptOnlyPlan.native_session_id,
+          memoryContextSnapshotId: receiptOnlyPlan.memory_context_snapshot_id,
+          memoryContextSnapshotChecksum: receiptOnlyPlan.memory_context_snapshot_checksum,
+          sentAt: "2026-07-08T08:00:00.000Z",
+          telemetrySource: "agent_receipt",
+        }],
+      }],
+      generatedAt: "2026-07-08T08:00:05.000Z",
+    });
+    recordGroupApiMicrocompactNativeApplyAdapterTelemetry({
+      groupId: staleGroupId,
+      targetProject: "api",
+      taskId: staleTask.id,
+      executionId: "execution-stale",
+      apiMicrocompactNativeApplyPlan: stalePlan,
+      requestPatch: stalePlan.requestPatch,
+      requestBody: {
+        model: "claude-selftest",
+        messages: [{ role: "user", content: "stale adapter telemetry selftest" }],
+        context_management: stalePlan.requestPatch.body.context_management,
+      },
+      headers: { "anthropic-beta": "context-management-2025-06-27" },
+      provider: "anthropic",
+      model: "claude-selftest",
+      endpoint: "https://api.anthropic.com/v1/messages",
+      method: "POST",
+      responseStatus: 200,
+      requestId: "req-stale-adapter",
+      sentAt: "2026-07-01T08:00:00.000Z",
+    });
+    recordGroupApiMicrocompactNativeApplyProofLedger(receiptOnlyGroupId, {
+      targetProject: "api",
+      taskId: receiptOnlyTask.id,
+      executionId: "execution-receipt-only",
+      finalStatus: "done",
+      receiptRows: receiptOnlyRows,
+      generatedAt: "2026-07-08T08:01:00.000Z",
+    });
+    recordGroupApiMicrocompactNativeApplyProofLedger(staleGroupId, {
+      targetProject: "api",
+      taskId: staleTask.id,
+      executionId: "execution-stale",
+      finalStatus: "done",
+      receiptRows: staleRows,
+      generatedAt: "2026-07-08T08:01:00.000Z",
+    });
+    const report = buildApiMicrocompactNativeApplyProofReport({
+      groupIds,
+      tasks: [receiptOnlyTask, staleTask],
+      nowMs: Date.parse("2026-07-08T08:10:00.000Z"),
+      telemetryMaxAgeMs: 60 * 60 * 1000,
+    });
+    const receiptOnly = (report.groups || []).find((row: any) => row.groupId === receiptOnlyGroupId) || {};
+    const stale = (report.groups || []).find((row: any) => row.groupId === staleGroupId) || {};
+    const gapText = JSON.stringify([...(receiptOnly.gaps || []), ...(stale.gaps || [])]);
+    const checks = {
+      receiptOnlyDoesNotPass: receiptOnly.status === "fail"
+        && Number(receiptOnly.passed || 0) === 0
+        && Number(receiptOnly.requestTelemetryReceiptOnlyCount || 0) === 1
+        && Number(receiptOnly.requestTelemetryStrongCount || 0) === 0,
+      staleAdapterDoesNotPass: stale.status === "fail"
+        && Number(stale.passed || 0) === 0
+        && Number(stale.requestTelemetryStaleCount || 0) === 1
+        && Number(stale.requestTelemetryStrongCount || 0) === 0,
+      overallCountsWeakProofs: Number(report.overall?.requestTelemetryReceiptOnlyCount || 0) === 1
+        && Number(report.overall?.requestTelemetryStaleCount || 0) === 1
+        && Number(report.overall?.requestTelemetryStrongCount || 0) === 0,
+      gapsExplainDowngrade: gapText.includes("只有 Agent 回执来源 telemetry")
+        && gapText.includes("provider request telemetry 已过期"),
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, report: { overall: report.overall, receiptOnly, stale } };
+  } finally {
+    for (const file of files) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyDispatchBindingSelfTest() {
+  const baseId = `memory-center-api-microcompact-native-dispatch-binding-selftest-${process.pid}-${Date.now()}`;
+  const groupIds = ["good", "missing-session", "runner-mismatch"].map(suffix => `${baseId}-${suffix}`);
+  const files = groupIds.flatMap(groupId => {
+    const proofFile = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId);
+    const telemetryFile = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+    return [proofFile, `${proofFile}.bak`, telemetryFile, `${telemetryFile}.bak`];
+  });
+  const executionFiles: string[] = [];
+  const taskIds: string[] = [];
+  const makeNativePlan = (groupId: string, suffix: string, binding: any = {}) => ({
+    schema: "ccm-api-microcompact-native-apply-plan-v1",
+    groupId,
+    group_id: groupId,
+    targetProject: "api",
+    target_project: "api",
+    apiEditPlanChecksum: `plan-${suffix}`,
+    api_edit_plan_checksum: `plan-${suffix}`,
+    applyPlanChecksum: `apply-${suffix}`,
+    apply_plan_checksum: `apply-${suffix}`,
+    requestPatchChecksum: `request-${suffix}`,
+    request_patch_checksum: `request-${suffix}`,
+    taskAgentSessionId: binding.taskAgentSessionId || `tas-${suffix}`,
+    task_agent_session_id: binding.taskAgentSessionId || `tas-${suffix}`,
+    nativeSessionId: binding.nativeSessionId || `native-${suffix}`,
+    native_session_id: binding.nativeSessionId || `native-${suffix}`,
+    memoryContextSnapshotId: binding.memoryContextSnapshotId || `snapshot-${suffix}`,
+    memory_context_snapshot_id: binding.memoryContextSnapshotId || `snapshot-${suffix}`,
+    memoryContextSnapshotChecksum: binding.memoryContextSnapshotChecksum || `snapshot-checksum-${suffix}`,
+    memory_context_snapshot_checksum: binding.memoryContextSnapshotChecksum || `snapshot-checksum-${suffix}`,
+    nativeApplyReady: true,
+    mode: "native_api_context_management",
+    requestPatch: {
+      body: { context_management: { edits: [{ type: "clear_tool_uses_20250919", keep: { type: "tool_use_id", value: `tool-${suffix}` } }] } },
+      beta_headers: ["context-management-2025-06-27"],
+    },
+  });
+  const makeReceiptRows = (nativePlan: any, runnerRequestId = "") => [{
+    agent: "api",
+    status: "done",
+    runner_request_id: runnerRequestId,
+    external_runner_request_id: runnerRequestId,
+    api_microcompact: {
+      required: true,
+      pass: true,
+      rows: [{
+        plan_checksum: nativePlan.apiEditPlanChecksum,
+        usage_state: "native_applied",
+        native_applied: true,
+        native_apply_ready: true,
+        apply_plan_checksum: nativePlan.applyPlanChecksum,
+        request_patch_checksum: nativePlan.requestPatchChecksum,
+        receipt_apply_plan_checksum: nativePlan.applyPlanChecksum,
+        receipt_request_patch_checksum: nativePlan.requestPatchChecksum,
+        apply_plan_checksum_matched: true,
+        request_patch_checksum_matched: true,
+        session_binding_required: true,
+        session_matched: true,
+        expected_task_agent_session_id: nativePlan.task_agent_session_id,
+        receipt_task_agent_session_id: nativePlan.task_agent_session_id,
+        expected_native_session_id: nativePlan.native_session_id,
+        receipt_native_session_id: nativePlan.native_session_id,
+        expected_memory_context_snapshot_id: nativePlan.memory_context_snapshot_id,
+        receipt_memory_context_snapshot_id: nativePlan.memory_context_snapshot_id,
+        expected_memory_context_snapshot_checksum: nativePlan.memory_context_snapshot_checksum,
+        receipt_memory_context_snapshot_checksum: nativePlan.memory_context_snapshot_checksum,
+        runner_request_id: runnerRequestId,
+        external_runner_request_id: runnerRequestId,
+        unsafe_native_applied: false,
+        pass: true,
+        reason: "dispatch/session binding selftest",
+      }],
+    },
+  }];
+  const makeTask = (groupId: string, suffix: string) => {
+    const taskId = `task-${groupId}`;
+    taskIds.push(taskId);
+    return {
+      id: taskId,
+      title: `API microcompact dispatch binding ${suffix}`,
+      group_id: groupId,
+      target_project: "api",
+      delivery_summary: { status: "done", api_microcompact_receipt_passed: true },
+    };
+  };
+  const createBoundSession = (task: any, groupId: string, suffix: string, executionId: string) => {
+    const {
+      openTaskAgentSession,
+      recordTaskAgentSessionTurn,
+      bindTaskAgentMemoryContextSnapshot,
+    } = require("../../tasks/agent-sessions");
+    const session = openTaskAgentSession({
+      scopeId: task.id,
+      taskId: task.id,
+      groupId,
+      project: "api",
+      agentType: "claudecode",
+    });
+    const nativeSessionId = `native-${suffix}`;
+    recordTaskAgentSessionTurn(session.id, { nativeSessionId, success: true });
+    const bound = bindTaskAgentMemoryContextSnapshot(session.id, {
+      taskId: task.id,
+      groupId,
+      project: "api",
+      agentType: "claudecode",
+      nativeSessionId,
+      executionId,
+      turn: 1,
+      workerContextPacket: {
+        packet_id: `wcp-${suffix}`,
+        memory: { schema: "ccm-group-memory-context-v1", target_project: "api" },
+      },
+      renderedPrompt: `dispatch binding prompt ${suffix}`,
+    });
+    return {
+      taskAgentSessionId: session.id,
+      nativeSessionId,
+      memoryContextSnapshotId: bound?.snapshot?.snapshot_id || "",
+      memoryContextSnapshotChecksum: bound?.snapshot?.checksum || "",
+    };
+  };
+  const createExecution = (task: any, executionId: string, runnerToRegister = "") => {
+    const { ensureExecution, registerExternalRunnerRequest } = require("../../agents/execution-kernel");
+    ensureExecution({
+      task,
+      project: "api",
+      agent: "api",
+      workDir: process.cwd(),
+      executionId,
+    });
+    executionFiles.push(getExecutionKernelRecordFileForCenter(executionId));
+    if (runnerToRegister) registerExternalRunnerRequest(executionId, runnerToRegister);
+  };
+  const recordPlan = (nativePlan: any, task: any, executionId: string, runnerRequestId: string) => {
+    const {
+      recordGroupApiMicrocompactNativeApplyProofLedger,
+      recordGroupApiMicrocompactNativeApplyAdapterTelemetry,
+    } = require("../collaboration/memory");
+    recordGroupApiMicrocompactNativeApplyAdapterTelemetry({
+      groupId: nativePlan.group_id,
+      targetProject: "api",
+      taskId: task.id,
+      executionId,
+      runnerRequestId,
+      externalRunnerRequestId: runnerRequestId,
+      apiMicrocompactNativeApplyPlan: nativePlan,
+      requestPatch: nativePlan.requestPatch,
+      requestBody: {
+        model: "claude-selftest",
+        messages: [{ role: "user", content: "dispatch binding selftest" }],
+        context_management: nativePlan.requestPatch.body.context_management,
+      },
+      headers: { "anthropic-beta": "context-management-2025-06-27" },
+      provider: "anthropic",
+      model: "claude-selftest",
+      endpoint: "https://api.anthropic.com/v1/messages",
+      method: "POST",
+      responseStatus: 200,
+      requestId: `req-${runnerRequestId}`,
+      sentAt: "2026-07-08T08:02:30.000Z",
+    });
+    recordGroupApiMicrocompactNativeApplyProofLedger(nativePlan.group_id, {
+      targetProject: "api",
+      taskId: task.id,
+      executionId,
+      runnerRequestId,
+      externalRunnerRequestId: runnerRequestId,
+      finalStatus: "done",
+      receiptRows: makeReceiptRows(nativePlan, runnerRequestId),
+      generatedAt: "2026-07-08T08:03:00.000Z",
+    });
+  };
+  try {
+    const [goodGroupId, missingSessionGroupId, runnerMismatchGroupId] = groupIds;
+    const goodTask = makeTask(goodGroupId, "good");
+    const missingSessionTask = makeTask(missingSessionGroupId, "missing-session");
+    const runnerMismatchTask = makeTask(runnerMismatchGroupId, "runner-mismatch");
+    const goodExecutionId = `execution-${goodGroupId}`;
+    const missingExecutionId = `execution-${missingSessionGroupId}`;
+    const runnerMismatchExecutionId = `execution-${runnerMismatchGroupId}`;
+    const goodRunnerId = `runner-${goodGroupId}`;
+    const missingRunnerId = `runner-${missingSessionGroupId}`;
+    const runnerTelemetryId = `runner-${runnerMismatchGroupId}`;
+    const goodPlan = makeNativePlan(goodGroupId, "good", createBoundSession(goodTask, goodGroupId, "good", goodExecutionId));
+    createExecution(goodTask, goodExecutionId, goodRunnerId);
+    recordPlan(goodPlan, goodTask, goodExecutionId, goodRunnerId);
+    const missingSessionPlan = makeNativePlan(missingSessionGroupId, "missing-session");
+    createExecution(missingSessionTask, missingExecutionId, missingRunnerId);
+    recordPlan(missingSessionPlan, missingSessionTask, missingExecutionId, missingRunnerId);
+    const runnerMismatchPlan = makeNativePlan(runnerMismatchGroupId, "runner-mismatch", createBoundSession(runnerMismatchTask, runnerMismatchGroupId, "runner-mismatch", runnerMismatchExecutionId));
+    createExecution(runnerMismatchTask, runnerMismatchExecutionId, `different-${runnerTelemetryId}`);
+    recordPlan(runnerMismatchPlan, runnerMismatchTask, runnerMismatchExecutionId, runnerTelemetryId);
+    const report = buildApiMicrocompactNativeApplyProofReport({
+      groupIds,
+      tasks: [goodTask, missingSessionTask, runnerMismatchTask],
+      nowMs: Date.parse("2026-07-08T08:10:00.000Z"),
+    });
+    const good = (report.groups || []).find((row: any) => row.groupId === goodGroupId) || {};
+    const missingSession = (report.groups || []).find((row: any) => row.groupId === missingSessionGroupId) || {};
+    const runnerMismatch = (report.groups || []).find((row: any) => row.groupId === runnerMismatchGroupId) || {};
+    const gapText = JSON.stringify([...(missingSession.gaps || []), ...(runnerMismatch.gaps || [])]);
+    const checks = {
+      boundDispatchPasses: good.status === "ok"
+        && Number(good.passed || 0) === 1
+        && Number(good.requestTelemetryStrongCount || 0) === 1
+        && Number(good.requestTelemetrySessionBoundCount || 0) === 1
+        && Number(good.requestTelemetryDispatchBoundCount || 0) === 1
+        && Number(good.requestTelemetryRunnerBoundCount || 0) === 1,
+      missingSessionDowngrades: missingSession.status === "fail"
+        && Number(missingSession.passed || 0) === 0
+        && Number(missingSession.requestTelemetrySessionMismatchCount || 0) === 1
+        && Number(missingSession.requestTelemetryDispatchBoundCount || 0) === 1,
+      runnerMismatchDowngrades: runnerMismatch.status === "fail"
+        && Number(runnerMismatch.passed || 0) === 0
+        && Number(runnerMismatch.requestTelemetrySessionBoundCount || 0) === 1
+        && Number(runnerMismatch.requestTelemetryDispatchUnboundCount || 0) === 1
+        && Number(runnerMismatch.requestTelemetryRunnerMismatchCount || 0) === 1,
+      gapsNameBindingFailures: gapText.includes("task-agent session/snapshot")
+        && gapText.includes("execution/runner dispatch"),
+      overallCountsBinding: Number(report.overall?.requestTelemetryStrongCount || 0) === 1
+        && Number(report.overall?.requestTelemetrySessionMismatchCount || 0) === 1
+        && Number(report.overall?.requestTelemetryDispatchUnboundCount || 0) === 1,
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, report: { overall: report.overall, good, missingSession, runnerMismatch } };
+  } finally {
+    for (const taskId of taskIds) {
+      try {
+        const { purgeTaskAgentSessions } = require("../../tasks/agent-sessions");
+        purgeTaskAgentSessions(taskId);
+      } catch {}
+    }
+    for (const file of [...files, ...executionFiles]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyProofRepairWorkItemSelfTest() {
+  const groupId = `memory-center-api-microcompact-native-proof-repair-work-selftest-${process.pid}-${Date.now()}`;
+  const proofFile = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId);
+  const telemetryFile = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const taskId = `task-${groupId}`;
+  const nativePlan = {
+    schema: "ccm-api-microcompact-native-apply-plan-v1",
+    groupId,
+    group_id: groupId,
+    targetProject: "api",
+    target_project: "api",
+    apiEditPlanChecksum: "plan-repair-work",
+    api_edit_plan_checksum: "plan-repair-work",
+    applyPlanChecksum: "apply-repair-work",
+    apply_plan_checksum: "apply-repair-work",
+    requestPatchChecksum: "request-repair-work",
+    request_patch_checksum: "request-repair-work",
+    taskAgentSessionId: "tas-repair-work-missing",
+    task_agent_session_id: "tas-repair-work-missing",
+    nativeSessionId: "native-repair-work-missing",
+    native_session_id: "native-repair-work-missing",
+    memoryContextSnapshotId: "snapshot-repair-work-missing",
+    memory_context_snapshot_id: "snapshot-repair-work-missing",
+    memoryContextSnapshotChecksum: "snapshot-checksum-repair-work-missing",
+    memory_context_snapshot_checksum: "snapshot-checksum-repair-work-missing",
+    nativeApplyReady: true,
+    mode: "native_api_context_management",
+    requestPatch: {
+      body: { context_management: { edits: [{ type: "clear_tool_uses_20250919", keep: { type: "tool_use_id", value: "tool-repair-work" } }] } },
+      beta_headers: ["context-management-2025-06-27"],
+    },
+  };
+  const receiptRows = [{
+    agent: "api",
+    status: "done",
+    api_microcompact: {
+      required: true,
+      pass: true,
+      rows: [{
+        plan_checksum: nativePlan.apiEditPlanChecksum,
+        usage_state: "native_applied",
+        native_applied: true,
+        native_apply_ready: true,
+        apply_plan_checksum: nativePlan.applyPlanChecksum,
+        request_patch_checksum: nativePlan.requestPatchChecksum,
+        receipt_apply_plan_checksum: nativePlan.applyPlanChecksum,
+        receipt_request_patch_checksum: nativePlan.requestPatchChecksum,
+        apply_plan_checksum_matched: true,
+        request_patch_checksum_matched: true,
+        session_binding_required: true,
+        session_matched: true,
+        expected_task_agent_session_id: nativePlan.task_agent_session_id,
+        receipt_task_agent_session_id: nativePlan.task_agent_session_id,
+        expected_native_session_id: nativePlan.native_session_id,
+        receipt_native_session_id: nativePlan.native_session_id,
+        expected_memory_context_snapshot_id: nativePlan.memory_context_snapshot_id,
+        receipt_memory_context_snapshot_id: nativePlan.memory_context_snapshot_id,
+        expected_memory_context_snapshot_checksum: nativePlan.memory_context_snapshot_checksum,
+        receipt_memory_context_snapshot_checksum: nativePlan.memory_context_snapshot_checksum,
+        unsafe_native_applied: false,
+        pass: true,
+        reason: "native proof repair work item selftest",
+      }],
+    },
+  }];
+  try {
+    const {
+      recordGroupApiMicrocompactNativeApplyProofLedger,
+      recordGroupApiMicrocompactNativeApplyAdapterTelemetry,
+    } = require("../collaboration/memory");
+    recordGroupApiMicrocompactNativeApplyAdapterTelemetry({
+      groupId,
+      targetProject: "api",
+      taskId,
+      executionId: "execution-repair-work-missing",
+      runnerRequestId: "runner-repair-work-missing",
+      apiMicrocompactNativeApplyPlan: nativePlan,
+      requestPatch: nativePlan.requestPatch,
+      requestBody: {
+        model: "claude-selftest",
+        messages: [{ role: "user", content: "native proof repair work item selftest" }],
+        context_management: nativePlan.requestPatch.body.context_management,
+      },
+      headers: { "anthropic-beta": "context-management-2025-06-27" },
+      provider: "anthropic",
+      model: "claude-selftest",
+      endpoint: "https://api.anthropic.com/v1/messages",
+      method: "POST",
+      responseStatus: 200,
+      requestId: "req-repair-work-missing",
+      sentAt: "2026-07-08T08:02:30.000Z",
+    });
+    recordGroupApiMicrocompactNativeApplyProofLedger(groupId, {
+      targetProject: "api",
+      taskId,
+      executionId: "execution-repair-work-missing",
+      runnerRequestId: "runner-repair-work-missing",
+      finalStatus: "done",
+      receiptRows,
+      generatedAt: "2026-07-08T08:03:00.000Z",
+    });
+    const proofReport = buildApiMicrocompactNativeApplyProofReport({
+      groupIds: [groupId],
+      tasks: [],
+      nowMs: Date.parse("2026-07-08T08:10:00.000Z"),
+    });
+    const proof = (proofReport.groups || [])[0] || {};
+    const first = syncApiMicrocompactNativeApplyProofRepairWorkItems(groupId, proof, { at: "2026-07-08T08:11:00.000Z" });
+    const duplicate = syncApiMicrocompactNativeApplyProofRepairWorkItems(groupId, proof, { at: "2026-07-08T08:12:00.000Z" });
+    const workItemReport = buildApiMicrocompactNativeApplyProofRepairWorkItemReport({
+      groupIds: [groupId],
+      tasks: [],
+      nowMs: Date.parse("2026-07-08T08:10:00.000Z"),
+      generatedAt: "2026-07-08T08:13:00.000Z",
+    });
+    const quality = evaluateApiMicrocompactNativeApplyProofRepairWorkItems({
+      groupIds: [groupId],
+      tasks: [],
+      nowMs: Date.parse("2026-07-08T08:10:00.000Z"),
+      generatedAt: "2026-07-08T08:14:00.000Z",
+    });
+    const rendered = (() => {
+      try {
+        const { renderGroupMemoryContextBundle } = require("../collaboration/memory");
+        return renderGroupMemoryContextBundle({
+          schema: "ccm-group-memory-context-v1",
+          target_project: "api",
+          memory_policy: { use: "must_consider" },
+          group_state: { goal: "native proof repair work item selftest", currentPhase: "test" },
+          compaction: { replayRepairWorkItems: first },
+        });
+      } catch (error: any) {
+        return String(error?.message || error);
+      }
+    })();
+    const resolved = syncApiMicrocompactNativeApplyProofRepairWorkItems(groupId, {
+      ...proof,
+      status: "ok",
+      score: 100,
+      checked: 1,
+      passed: 1,
+      gaps: [],
+      requestTelemetryStrongCount: 1,
+    }, { at: "2026-07-08T08:15:00.000Z" });
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const nativeItems = (ledger.items || []).filter((item: any) => item.source === "api_microcompact_native_apply_binding_repair");
+    const checks = {
+      proofProducesBindingGaps: proof.status === "fail"
+        && Number(proof.requestTelemetrySessionMismatchCount || 0) === 1
+        && Number(proof.requestTelemetryDispatchUnboundCount || 0) === 1,
+      firstMaterializesNativeProofRepairItems: first.openItemCount >= 2
+        && first.items?.some((item: any) => item.source === "api_microcompact_native_apply_binding_repair" && item.component === "api_microcompact_native_session_binding")
+        && first.items?.some((item: any) => item.source === "api_microcompact_native_apply_binding_repair" && item.component === "api_microcompact_native_dispatch_binding"),
+      duplicateDoesNotAppend: duplicate.total === first.total,
+      qualityCoversRepairItems: workItemReport.overall?.status === "ok"
+        && Number(workItemReport.overall?.requiredActionCount || 0) >= 2
+        && quality.id === "api_microcompact_native_apply_proof_repair_work_items"
+        && Number(quality.passed || 0) === 1,
+      childAgentRendererMentionsRepairItems: rendered.includes("Replay Repair pending work")
+        && rendered.includes("api_microcompact_native")
+        && rendered.includes("runner-repair-work-missing"),
+      resolvedProofClosesOpenNativeItems: resolved.openItemCount === 0
+        && nativeItems.length >= 2
+        && nativeItems.every((item: any) => replayRepairWorkItemStatus(item.status) === "completed"),
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, first, resolved, report: workItemReport.overall };
+  } finally {
+    for (const file of [proofFile, `${proofFile}.bak`, telemetryFile, `${telemetryFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyProofRepairDispatchCandidateSelfTest() {
+  const groupId = `memory-center-api-microcompact-native-proof-repair-dispatch-selftest-${process.pid}-${Date.now()}`;
+  const proofFile = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId);
+  const telemetryFile = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const taskId = `task-${groupId}`;
+  const nativePlan = {
+    schema: "ccm-api-microcompact-native-apply-plan-v1",
+    groupId,
+    group_id: groupId,
+    targetProject: "api",
+    target_project: "api",
+    apiEditPlanChecksum: "plan-repair-dispatch",
+    api_edit_plan_checksum: "plan-repair-dispatch",
+    applyPlanChecksum: "apply-repair-dispatch",
+    apply_plan_checksum: "apply-repair-dispatch",
+    requestPatchChecksum: "request-repair-dispatch",
+    request_patch_checksum: "request-repair-dispatch",
+    taskAgentSessionId: "tas-repair-dispatch-missing",
+    task_agent_session_id: "tas-repair-dispatch-missing",
+    nativeSessionId: "native-repair-dispatch-missing",
+    native_session_id: "native-repair-dispatch-missing",
+    memoryContextSnapshotId: "snapshot-repair-dispatch-missing",
+    memory_context_snapshot_id: "snapshot-repair-dispatch-missing",
+    memoryContextSnapshotChecksum: "snapshot-checksum-repair-dispatch-missing",
+    memory_context_snapshot_checksum: "snapshot-checksum-repair-dispatch-missing",
+    nativeApplyReady: true,
+    mode: "native_api_context_management",
+    requestPatch: {
+      body: { context_management: { edits: [{ type: "clear_tool_uses_20250919", keep: { type: "tool_use_id", value: "tool-repair-dispatch" } }] } },
+      beta_headers: ["context-management-2025-06-27"],
+    },
+  };
+  const receiptRows = [{
+    agent: "api",
+    status: "done",
+    api_microcompact: {
+      required: true,
+      pass: true,
+      rows: [{
+        plan_checksum: nativePlan.apiEditPlanChecksum,
+        usage_state: "native_applied",
+        native_applied: true,
+        native_apply_ready: true,
+        apply_plan_checksum: nativePlan.applyPlanChecksum,
+        request_patch_checksum: nativePlan.requestPatchChecksum,
+        receipt_apply_plan_checksum: nativePlan.applyPlanChecksum,
+        receipt_request_patch_checksum: nativePlan.requestPatchChecksum,
+        apply_plan_checksum_matched: true,
+        request_patch_checksum_matched: true,
+        session_binding_required: true,
+        session_matched: true,
+        expected_task_agent_session_id: nativePlan.task_agent_session_id,
+        receipt_task_agent_session_id: nativePlan.task_agent_session_id,
+        expected_native_session_id: nativePlan.native_session_id,
+        receipt_native_session_id: nativePlan.native_session_id,
+        expected_memory_context_snapshot_id: nativePlan.memory_context_snapshot_id,
+        receipt_memory_context_snapshot_id: nativePlan.memory_context_snapshot_id,
+        expected_memory_context_snapshot_checksum: nativePlan.memory_context_snapshot_checksum,
+        receipt_memory_context_snapshot_checksum: nativePlan.memory_context_snapshot_checksum,
+        unsafe_native_applied: false,
+        pass: true,
+        reason: "native proof repair dispatch candidate selftest",
+      }],
+    },
+  }];
+  try {
+    const {
+      recordGroupApiMicrocompactNativeApplyProofLedger,
+      recordGroupApiMicrocompactNativeApplyAdapterTelemetry,
+    } = require("../collaboration/memory");
+    recordGroupApiMicrocompactNativeApplyAdapterTelemetry({
+      groupId,
+      targetProject: "api",
+      taskId,
+      executionId: "execution-repair-dispatch-missing",
+      runnerRequestId: "runner-repair-dispatch-missing",
+      apiMicrocompactNativeApplyPlan: nativePlan,
+      requestPatch: nativePlan.requestPatch,
+      requestBody: {
+        model: "claude-selftest",
+        messages: [{ role: "user", content: "native proof repair dispatch candidate selftest" }],
+        context_management: nativePlan.requestPatch.body.context_management,
+      },
+      headers: { "anthropic-beta": "context-management-2025-06-27" },
+      provider: "anthropic",
+      model: "claude-selftest",
+      endpoint: "https://api.anthropic.com/v1/messages",
+      method: "POST",
+      responseStatus: 200,
+      requestId: "req-repair-dispatch-missing",
+      sentAt: "2026-07-08T08:22:30.000Z",
+    });
+    recordGroupApiMicrocompactNativeApplyProofLedger(groupId, {
+      targetProject: "api",
+      taskId,
+      executionId: "execution-repair-dispatch-missing",
+      runnerRequestId: "runner-repair-dispatch-missing",
+      finalStatus: "done",
+      receiptRows,
+      generatedAt: "2026-07-08T08:23:00.000Z",
+    });
+    const proofReport = buildApiMicrocompactNativeApplyProofReport({
+      groupIds: [groupId],
+      tasks: [],
+      nowMs: Date.parse("2026-07-08T08:30:00.000Z"),
+    });
+    const proof = (proofReport.groups || [])[0] || {};
+    const repairSummary = syncApiMicrocompactNativeApplyProofRepairWorkItems(groupId, proof, { at: "2026-07-08T08:31:00.000Z" });
+    const candidates = buildReplayRepairMainAgentDispatchCandidates(groupId, { limit: 20 });
+    const nativeCandidates = (candidates.candidates || []).filter((candidate: any) => candidate.source === "api_microcompact_native_apply_binding_repair");
+    const firstCandidate = nativeCandidates[0] || {};
+    const candidateReport = buildApiMicrocompactNativeApplyProofRepairDispatchCandidateReport({
+      groupIds: [groupId],
+      tasks: [],
+      nowMs: Date.parse("2026-07-08T08:30:00.000Z"),
+      generatedAt: "2026-07-08T08:32:00.000Z",
+    });
+    const quality = evaluateApiMicrocompactNativeApplyProofRepairDispatchCandidates({
+      groupIds: [groupId],
+      tasks: [],
+      nowMs: Date.parse("2026-07-08T08:30:00.000Z"),
+      generatedAt: "2026-07-08T08:33:00.000Z",
+    });
+    const rendered = (() => {
+      try {
+        const { renderGroupMemoryContextBundle } = require("../collaboration/memory");
+        return renderGroupMemoryContextBundle({
+          schema: "ccm-group-memory-context-v1",
+          target_project: "api",
+          memory_policy: { use: "must_consider" },
+          group_state: { goal: "native proof repair dispatch candidate selftest", currentPhase: "test" },
+          compaction: {
+            replayRepairWorkItems: repairSummary,
+            replayRepairDispatchCandidates: candidates,
+          },
+        });
+      } catch (error: any) {
+        return String(error?.message || error);
+      }
+    })();
+    const resolved = syncApiMicrocompactNativeApplyProofRepairWorkItems(groupId, {
+      ...proof,
+      status: "ok",
+      score: 100,
+      checked: 1,
+      passed: 1,
+      gaps: [],
+      requestTelemetryStrongCount: 1,
+    }, { at: "2026-07-08T08:34:00.000Z" });
+    const resolvedCandidates = buildReplayRepairMainAgentDispatchCandidates(groupId, { limit: 20 });
+    const checks = {
+      proofProducesNativeRepairItems: proof.status === "fail"
+        && repairSummary.openItemCount >= 2
+        && repairSummary.items?.some((item: any) => item.source === "api_microcompact_native_apply_binding_repair" && item.component === "api_microcompact_native_session_binding")
+        && repairSummary.items?.some((item: any) => item.source === "api_microcompact_native_apply_binding_repair" && item.component === "api_microcompact_native_dispatch_binding"),
+      nativeRepairItemsBecomeDispatchCandidates: candidates.schema === "ccm-replay-repair-main-agent-dispatch-candidates-v1"
+        && nativeCandidates.length >= 2
+        && nativeCandidates.every((candidate: any) => candidate.shouldCreateRealTask === false)
+        && nativeCandidates.some((candidate: any) => candidate.request_patch_checksum === nativePlan.requestPatchChecksum)
+        && nativeCandidates.some((candidate: any) => candidate.runner_request_id === "runner-repair-dispatch-missing"),
+      nativeCandidateCarriesProofTelemetry: !!firstCandidate.proof_entry_id
+        && firstCandidate.request_patch_checksum === nativePlan.requestPatchChecksum
+        && firstCandidate.request_telemetry_source === "native_request_adapter"
+        && !!firstCandidate.request_telemetry_session_status
+        && !!firstCandidate.request_telemetry_dispatch_status
+        && firstCandidate.runner_request_id === "runner-repair-dispatch-missing",
+      nativeDispatchCandidateQualityPasses: candidateReport.overall?.status === "ok"
+        && Number(candidateReport.overall?.expectedCandidateCount || 0) >= 2
+        && Number(candidateReport.overall?.metadataGapCount || 0) === 0
+        && quality.id === "api_microcompact_native_apply_proof_repair_dispatch_candidates"
+        && Number(quality.passed || 0) === 1,
+      childAgentRendererMentionsNativeCandidateTelemetry: rendered.includes("Main Agent replay repair dispatch candidates")
+        && rendered.includes("request-repair-dispatch")
+        && rendered.includes("session=")
+        && rendered.includes("dispatch=")
+        && rendered.includes("runner-repair-dispatch-missing"),
+      resolvedProofRemovesNativeCandidates: resolved.openItemCount === 0
+        && !((resolvedCandidates.candidates || []).some((candidate: any) => candidate.source === "api_microcompact_native_apply_binding_repair")),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: candidateReport.overall,
+      candidate: {
+        work_item_id: firstCandidate.work_item_id || "",
+        proof_entry_id: firstCandidate.proof_entry_id || "",
+        request_patch_checksum: firstCandidate.request_patch_checksum || "",
+        request_telemetry_session_status: firstCandidate.request_telemetry_session_status || "",
+        request_telemetry_dispatch_status: firstCandidate.request_telemetry_dispatch_status || "",
+        runner_request_id: firstCandidate.runner_request_id || "",
+      },
+    };
+  } finally {
+    for (const file of [proofFile, `${proofFile}.bak`, telemetryFile, `${telemetryFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyProofRepairDispatchBriefSelfTest() {
+  const groupId = `memory-center-api-microcompact-native-proof-repair-brief-selftest-${process.pid}-${Date.now()}`;
+  const proofFile = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId);
+  const telemetryFile = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+  const taskId = `task-${groupId}`;
+  const nativePlan = {
+    schema: "ccm-api-microcompact-native-apply-plan-v1",
+    groupId,
+    group_id: groupId,
+    targetProject: "api",
+    target_project: "api",
+    apiEditPlanChecksum: "plan-repair-brief",
+    api_edit_plan_checksum: "plan-repair-brief",
+    applyPlanChecksum: "apply-repair-brief",
+    apply_plan_checksum: "apply-repair-brief",
+    requestPatchChecksum: "request-repair-brief",
+    request_patch_checksum: "request-repair-brief",
+    taskAgentSessionId: "tas-repair-brief-missing",
+    task_agent_session_id: "tas-repair-brief-missing",
+    nativeSessionId: "native-repair-brief-missing",
+    native_session_id: "native-repair-brief-missing",
+    memoryContextSnapshotId: "snapshot-repair-brief-missing",
+    memory_context_snapshot_id: "snapshot-repair-brief-missing",
+    memoryContextSnapshotChecksum: "snapshot-checksum-repair-brief-missing",
+    memory_context_snapshot_checksum: "snapshot-checksum-repair-brief-missing",
+    nativeApplyReady: true,
+    mode: "native_api_context_management",
+    requestPatch: {
+      body: { context_management: { edits: [{ type: "clear_tool_uses_20250919", keep: { type: "tool_use_id", value: "tool-repair-brief" } }] } },
+      beta_headers: ["context-management-2025-06-27"],
+    },
+  };
+  const receiptRows = [{
+    agent: "api",
+    status: "done",
+    api_microcompact: {
+      required: true,
+      pass: true,
+      rows: [{
+        plan_checksum: nativePlan.apiEditPlanChecksum,
+        usage_state: "native_applied",
+        native_applied: true,
+        native_apply_ready: true,
+        apply_plan_checksum: nativePlan.applyPlanChecksum,
+        request_patch_checksum: nativePlan.requestPatchChecksum,
+        receipt_apply_plan_checksum: nativePlan.applyPlanChecksum,
+        receipt_request_patch_checksum: nativePlan.requestPatchChecksum,
+        apply_plan_checksum_matched: true,
+        request_patch_checksum_matched: true,
+        session_binding_required: true,
+        session_matched: true,
+        expected_task_agent_session_id: nativePlan.task_agent_session_id,
+        receipt_task_agent_session_id: nativePlan.task_agent_session_id,
+        expected_native_session_id: nativePlan.native_session_id,
+        receipt_native_session_id: nativePlan.native_session_id,
+        expected_memory_context_snapshot_id: nativePlan.memory_context_snapshot_id,
+        receipt_memory_context_snapshot_id: nativePlan.memory_context_snapshot_id,
+        expected_memory_context_snapshot_checksum: nativePlan.memory_context_snapshot_checksum,
+        receipt_memory_context_snapshot_checksum: nativePlan.memory_context_snapshot_checksum,
+        unsafe_native_applied: false,
+        pass: true,
+        reason: "native proof repair dispatch brief selftest",
+      }],
+    },
+  }];
+  try {
+    const {
+      recordGroupApiMicrocompactNativeApplyProofLedger,
+      recordGroupApiMicrocompactNativeApplyAdapterTelemetry,
+    } = require("../collaboration/memory");
+    recordGroupApiMicrocompactNativeApplyAdapterTelemetry({
+      groupId,
+      targetProject: "api",
+      taskId,
+      executionId: "execution-repair-brief-missing",
+      runnerRequestId: "runner-repair-brief-missing",
+      apiMicrocompactNativeApplyPlan: nativePlan,
+      requestPatch: nativePlan.requestPatch,
+      requestBody: {
+        model: "claude-selftest",
+        messages: [{ role: "user", content: "native proof repair dispatch brief selftest" }],
+        context_management: nativePlan.requestPatch.body.context_management,
+      },
+      headers: { "anthropic-beta": "context-management-2025-06-27" },
+      provider: "anthropic",
+      model: "claude-selftest",
+      endpoint: "https://api.anthropic.com/v1/messages",
+      method: "POST",
+      responseStatus: 200,
+      requestId: "req-repair-brief-missing",
+      sentAt: "2026-07-08T08:42:30.000Z",
+    });
+    recordGroupApiMicrocompactNativeApplyProofLedger(groupId, {
+      targetProject: "api",
+      taskId,
+      executionId: "execution-repair-brief-missing",
+      runnerRequestId: "runner-repair-brief-missing",
+      finalStatus: "done",
+      receiptRows,
+      generatedAt: "2026-07-08T08:43:00.000Z",
+    });
+    const proofReport = buildApiMicrocompactNativeApplyProofReport({
+      groupIds: [groupId],
+      tasks: [],
+      nowMs: Date.parse("2026-07-08T08:50:00.000Z"),
+    });
+    const proof = (proofReport.groups || [])[0] || {};
+    syncApiMicrocompactNativeApplyProofRepairWorkItems(groupId, proof, { at: "2026-07-08T08:51:00.000Z" });
+    const candidateReport = buildApiMicrocompactNativeApplyProofRepairDispatchCandidateReport({
+      groupIds: [groupId],
+      tasks: [],
+      nowMs: Date.parse("2026-07-08T08:50:00.000Z"),
+      generatedAt: "2026-07-08T08:52:00.000Z",
+    });
+    const briefReport = buildApiMicrocompactNativeApplyProofRepairDispatchBriefReport({
+      groupIds: [groupId],
+      tasks: [],
+      nowMs: Date.parse("2026-07-08T08:50:00.000Z"),
+      generatedAt: "2026-07-08T08:53:00.000Z",
+      candidateReport,
+    });
+    const quality = evaluateApiMicrocompactNativeApplyProofRepairDispatchBriefs({
+      groupIds: [groupId],
+      tasks: [],
+      nowMs: Date.parse("2026-07-08T08:50:00.000Z"),
+      generatedAt: "2026-07-08T08:54:00.000Z",
+      candidateReport,
+    });
+    const ledger = readGroupReplayRepairDispatchPlanLedger(groupId);
+    const readyBriefs = (ledger.briefs || []).filter((brief: any) => brief.status === "ready" && brief.source === "api_microcompact_native_apply_binding_repair");
+    const firstBrief = readyBriefs[0] || {};
+    const coordinatorPrompt = (() => {
+      try {
+        const { buildCoordinatorPrompt } = require("../collaboration/group-orchestrator");
+        return buildCoordinatorPrompt({
+          group: {
+            id: groupId,
+            members: [
+              { project: "coordinator", role: "coordinator", agent: "coded-orchestrator" },
+              { project: "api", agent: "claude-code" },
+            ],
+          },
+          context: "用户要求继续修复记忆 native proof 缺口",
+          message: "继续处理记忆 native proof 修复候选",
+        });
+      } catch (error: any) {
+        return String(error?.message || error);
+      }
+    })();
+    const resolved = syncApiMicrocompactNativeApplyProofRepairWorkItems(groupId, {
+      ...proof,
+      status: "ok",
+      score: 100,
+      checked: 1,
+      passed: 1,
+      gaps: [],
+      requestTelemetryStrongCount: 1,
+    }, { at: "2026-07-08T08:55:00.000Z" });
+    const resolvedCandidateReport = buildApiMicrocompactNativeApplyProofRepairDispatchCandidateReport({
+      groupIds: [groupId],
+      tasks: [],
+      nowMs: Date.parse("2026-07-08T08:56:00.000Z"),
+      generatedAt: "2026-07-08T08:56:00.000Z",
+    });
+    buildApiMicrocompactNativeApplyProofRepairDispatchBriefReport({
+      groupIds: [groupId],
+      tasks: [],
+      nowMs: Date.parse("2026-07-08T08:56:00.000Z"),
+      generatedAt: "2026-07-08T08:57:00.000Z",
+      candidateReport: resolvedCandidateReport,
+    });
+    const resolvedLedger = readGroupReplayRepairDispatchPlanLedger(groupId);
+    const resolvedReadyBriefs = (resolvedLedger.briefs || []).filter((brief: any) => brief.status === "ready" && brief.source === "api_microcompact_native_apply_binding_repair");
+    const checks = {
+      nativeCandidatesCoveredBeforeBriefs: candidateReport.overall?.status === "ok"
+        && Number(candidateReport.overall?.expectedCandidateCount || 0) >= 2
+        && Number(candidateReport.overall?.metadataGapCount || 0) === 0,
+      dispatchBriefReportPasses: briefReport.overall?.status === "ok"
+        && Number(briefReport.overall?.expectedBriefCount || 0) >= 2
+        && Number(briefReport.overall?.metadataGapCount || 0) === 0
+        && quality.id === "api_microcompact_native_apply_proof_repair_dispatch_briefs"
+        && Number(quality.passed || 0) === 1,
+      dispatchBriefLedgerPersistsNativeProof: readyBriefs.length >= 2
+        && readyBriefs.every((brief: any) => brief.should_create_real_task === false)
+        && firstBrief.request_patch_checksum === nativePlan.requestPatchChecksum
+        && firstBrief.runner_request_id === "runner-repair-brief-missing"
+        && !!firstBrief.proof_entry_id,
+      dispatchBriefWorkerTaskIsSelfContained: String(firstBrief.worker_task || "").includes("request-repair-brief")
+        && String(firstBrief.worker_task || "").includes("runner-repair-brief-missing")
+        && String(firstBrief.worker_task || "").includes("CCM_AGENT_RECEIPT")
+        && String(firstBrief.worker_task || "").includes("只有当前用户消息或主 Agent 明确把本简报派发给你时"),
+      coordinatorPromptReceivesDispatchBrief: coordinatorPrompt.includes("群聊记忆 Replay 修复派发简报")
+        && coordinatorPrompt.includes("request-repair-brief")
+        && coordinatorPrompt.includes("runner-repair-brief-missing")
+        && coordinatorPrompt.includes("shouldCreateRealTask=false"),
+      resolvedProofSupersedesReadyBriefs: resolved.openItemCount === 0
+        && resolvedReadyBriefs.length === 0
+        && (resolvedLedger.briefs || []).some((brief: any) => brief.status === "superseded" && brief.source === "api_microcompact_native_apply_binding_repair"),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: briefReport.overall,
+      brief: {
+        brief_id: firstBrief.brief_id || "",
+        work_item_id: firstBrief.work_item_id || "",
+        proof_entry_id: firstBrief.proof_entry_id || "",
+        request_patch_checksum: firstBrief.request_patch_checksum || "",
+        runner_request_id: firstBrief.runner_request_id || "",
+      },
+    };
+  } finally {
+    for (const file of [
+      proofFile,
+      `${proofFile}.bak`,
+      telemetryFile,
+      `${telemetryFile}.bak`,
+      workItemsFile,
+      `${workItemsFile}.bak`,
+      dispatchPlanFile,
+      `${dispatchPlanFile}.bak`,
+    ]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyProofRepairAssignmentBindingSelfTest() {
+  const groupId = `memory-center-api-microcompact-native-proof-repair-assignment-selftest-${process.pid}-${Date.now()}`;
+  const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  try {
+    const {
+      syncReplayRepairDispatchPlansForCoordinator,
+      runCodedGroupOrchestrator,
+      readReplayRepairDispatchBindingLedgerForCoordinator,
+    } = require("../collaboration/group-orchestrator");
+    const candidateSummary = {
+      schema: "ccm-replay-repair-main-agent-dispatch-candidates-v1",
+      groupId,
+      file: "selftest-native-proof-repair-assignment",
+      candidateCount: 1,
+      openItemCount: 1,
+      readyCount: 1,
+      dispatchMarkedCount: 1,
+      shouldCreateRealTask: false,
+      candidates: [{
+        schema: "ccm-replay-repair-main-agent-dispatch-candidate-v1",
+        candidate_id: "replay-repair-dispatch:selftest-native-assignment",
+        work_item_id: "api-native-proof-repair:assignment-binding",
+        groupId,
+        status: "pending",
+        owner: "group-main-agent",
+        priority: "critical",
+        component: "api_microcompact_native_dispatch_binding",
+        source: "api_microcompact_native_apply_binding_repair",
+        subject: "修复 native apply assignment binding",
+        targetProject: "api",
+        dispatch_target: "api",
+        repair_target: "request-assignment-binding",
+        instruction: "修复 API microcompact native_applied 强证明链，并保持 request/session/dispatch/runner 绑定。",
+        expected: "nativeApplyStrongProof=true; requestTelemetrySessionBound=true; requestTelemetryDispatchBound=true; runnerRequestId=runner-assignment-binding",
+        proof_entry_id: "api_microcompact_native_apply_proof_assignment_binding",
+        plan_checksum: "plan-assignment-binding",
+        request_patch_checksum: "request-assignment-binding",
+        request_telemetry_status: "weak",
+        request_telemetry_source: "native_request_adapter",
+        request_telemetry_session_status: "missing_session",
+        request_telemetry_dispatch_status: "missing_execution",
+        runner_request_id: "runner-assignment-binding",
+        execution_id: "execution-assignment-binding",
+        recommendedAction: "main_agent_review_and_dispatch_to_child_agent",
+        shouldCreateRealTask: false,
+      }],
+    };
+    const planLedger = syncReplayRepairDispatchPlansForCoordinator(groupId, candidateSummary, { at: "2026-07-08T09:01:00.000Z" });
+    const readyBrief = (planLedger.briefs || []).find((brief: any) => brief.status === "ready" && brief.source === "api_microcompact_native_apply_binding_repair") || {};
+    const group = {
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator", agent: "coded-orchestrator" },
+        { project: "api", agent: "claude-code" },
+      ],
+    };
+    const result = runCodedGroupOrchestrator({
+      group,
+      message: [
+        "请让 api 项目执行 native proof replay repair。",
+        `必须使用 brief ${readyBrief.brief_id}，work item ${readyBrief.work_item_id}。`,
+        "修复 request-assignment-binding 和 runner-assignment-binding 的 session/dispatch 绑定，并回写 CCM_AGENT_RECEIPT。",
+      ].join("\n"),
+      context: "Phase 93 selftest：验证 dispatch brief 到 assignment 的绑定。",
+    });
+    const assignment = (result.assignments || []).find((item: any) => item.project === "api") || {};
+    const bindingLedger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+    const binding = (bindingLedger.entries || []).find((entry: any) => entry.brief_id === readyBrief.brief_id) || {};
+    const report = buildApiMicrocompactNativeApplyProofRepairAssignmentBindingReport({ groupIds: [groupId] });
+    const quality = evaluateApiMicrocompactNativeApplyProofRepairAssignmentBindings({ groupIds: [groupId] });
+    const packetBrief = assignment.worker_context_packet?.replay_repair_dispatch_briefs?.[0] || {};
+    const checks = {
+      dispatchBriefReady: planLedger.readyCount === 1
+        && readyBrief.request_patch_checksum === "request-assignment-binding"
+        && readyBrief.runner_request_id === "runner-assignment-binding",
+      assignmentCarriesBriefBinding: assignment.replay_repair_dispatch_brief?.brief_id === readyBrief.brief_id
+        && assignment.replay_repair_dispatch_brief?.request_patch_checksum === "request-assignment-binding"
+        && assignment.replay_repair_dispatch_brief?.runner_request_id === "runner-assignment-binding"
+        && assignment.replay_repair_dispatch_brief?.should_create_real_task === false,
+      workerContextPacketCarriesBrief: !!assignment.worker_context_packet?.packet_id
+        && packetBrief.brief_id === readyBrief.brief_id
+        && packetBrief.request_patch_checksum === "request-assignment-binding"
+        && packetBrief.runner_request_id === "runner-assignment-binding",
+      bindingLedgerPersistsAssignmentProof: binding.brief_id === readyBrief.brief_id
+        && binding.assignment_id
+        && binding.dispatch_key
+        && binding.worker_context_packet_id === assignment.worker_context_packet?.packet_id
+        && binding.proof_entry_id === "api_microcompact_native_apply_proof_assignment_binding"
+        && binding.should_create_real_task === false,
+      qualityCoversAssignmentBinding: report.overall?.status === "ok"
+        && Number(report.overall?.bindingCount || 0) === 1
+        && Number(report.overall?.metadataGapCount || 0) === 0
+        && quality.id === "api_microcompact_native_apply_proof_repair_assignment_bindings"
+        && Number(quality.passed || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      binding: {
+        binding_id: binding.binding_id || "",
+        brief_id: binding.brief_id || "",
+        assignment_id: binding.assignment_id || "",
+        dispatch_key: binding.dispatch_key || "",
+        worker_context_packet_id: binding.worker_context_packet_id || "",
+      },
+    };
+  } finally {
+    for (const file of [dispatchPlanFile, `${dispatchPlanFile}.bak`, bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketContextUsageSelfTest() {
+  const groupId = `memory-center-worker-context-usage-selftest-${process.pid}-${Date.now()}`;
+  const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  try {
+    const {
+      syncReplayRepairDispatchPlansForCoordinator,
+      runCodedGroupOrchestrator,
+      readReplayRepairDispatchBindingLedgerForCoordinator,
+    } = require("../collaboration/group-orchestrator");
+    const candidateSummary = {
+      schema: "ccm-replay-repair-main-agent-dispatch-candidates-v1",
+      groupId,
+      file: "selftest-worker-context-usage",
+      candidateCount: 1,
+      openItemCount: 1,
+      readyCount: 1,
+      dispatchMarkedCount: 1,
+      shouldCreateRealTask: false,
+      candidates: [{
+        schema: "ccm-replay-repair-main-agent-dispatch-candidate-v1",
+        candidate_id: "replay-repair-dispatch:selftest-worker-context-usage",
+        work_item_id: "api-native-proof-repair:worker-context-usage",
+        groupId,
+        status: "pending",
+        owner: "group-main-agent",
+        priority: "critical",
+        component: "worker_context_usage_budget",
+        source: "api_microcompact_native_apply_provider_reproof",
+        subject: "记录 WorkerContextPacket context usage",
+        targetProject: "api",
+        dispatch_target: "api",
+        repair_target: "request-worker-context-usage",
+        instruction: "验证 provider re-proof brief 派发时 WorkerContextPacket 携带 CC-style context usage budget。",
+        expected: "context_usage categories include replay_repair_dispatch_briefs and autocompact_buffer",
+        proof_entry_id: "api_microcompact_native_apply_proof_worker_context_usage",
+        plan_checksum: "plan-worker-context-usage",
+        request_patch_checksum: "request-worker-context-usage",
+        provider_reproof_status: "needed",
+        provider_reproof_reason: "missing_native_request_adapter_telemetry",
+        reproof_candidate_id: "candidate-worker-context-usage",
+        original_work_item_id: "original-worker-context-usage",
+        request_telemetry_status: "weak",
+        request_telemetry_source: "native_request_adapter",
+        request_telemetry_session_status: "missing_session",
+        request_telemetry_dispatch_status: "missing_execution",
+        runner_request_id: "runner-worker-context-usage",
+        execution_id: "execution-worker-context-usage",
+        recommendedAction: "main_agent_review_and_dispatch_to_child_agent",
+        shouldCreateRealTask: false,
+      }],
+    };
+    const planLedger = syncReplayRepairDispatchPlansForCoordinator(groupId, candidateSummary, { at: "2026-07-08T12:40:00.000Z" });
+    const readyBrief = (planLedger.briefs || []).find((brief: any) => brief.status === "ready" && brief.source === "api_microcompact_native_apply_provider_reproof") || {};
+    const group = {
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator", agent: "coded-orchestrator" },
+        { project: "api", agent: "claude-code" },
+      ],
+    };
+    const result = runCodedGroupOrchestrator({
+      group,
+      message: [
+        "请让 api 项目执行 worker context usage budget repair。",
+        `必须使用 brief ${readyBrief.brief_id}，work item ${readyBrief.work_item_id}。`,
+        "工作包必须带 Context usage budget，并在回执中说明使用情况。",
+      ].join("\n"),
+      context: "Phase 102 selftest：验证 WorkerContextPacket context usage budget ledger。",
+    });
+    const assignment = (result.assignments || []).find((item: any) => item.project === "api") || {};
+    const bindingLedger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+    const binding = (bindingLedger.entries || []).find((entry: any) => entry.brief_id === readyBrief.brief_id) || {};
+    const usage = assignment.worker_context_packet?.context_usage || {};
+    const bindingUsage = binding.worker_context_packet_context_usage || {};
+    const categoryIds = new Set((usage.categories || []).map((item: any) => item.id));
+    const report = buildWorkerContextPacketContextUsageReport({ groupIds: [groupId] });
+    const quality = evaluateWorkerContextPacketContextUsage({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_context_usage"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "worker_context_packet_context_usage") || {};
+    const checks = {
+      assignmentPacketCarriesUsage: usage.schema === "ccm-worker-context-usage-v1"
+        && usage.packet_id === assignment.worker_context_packet?.packet_id
+        && Number(usage.total_tokens || 0) > 0
+        && categoryIds.has("task_goal")
+        && categoryIds.has("replay_repair_dispatch_briefs")
+        && categoryIds.has("autocompact_buffer")
+        && categoryIds.has("free_space"),
+      renderedWorkerTaskShowsBudget: String(assignment.task || "").includes("Context usage budget")
+        && String(assignment.task || "").includes("Autocompact buffer"),
+      bindingPersistsUsageBudget: binding.worker_context_packet_id === assignment.worker_context_packet?.packet_id
+        && bindingUsage.schema === "ccm-worker-context-usage-v1"
+        && binding.worker_context_packet_render_probe?.rendered_flags?.has_context_usage_budget === true,
+      reportCoversUsageBudget: report.overall?.status === "ok"
+        && Number(report.overall?.packetBindingCount || 0) >= 1
+        && Number(report.overall?.validUsageCount || 0) >= 1
+        && Number(report.overall?.metadataGapCount || 0) === 0
+        && Number(report.overall?.renderedBudgetCount || 0) >= 1,
+      qualityCheckExposesUsageBudget: quality.id === "worker_context_packet_context_usage"
+        && quality.status === "ok"
+        && qualityCheck.status === "ok"
+        && Number(qualityCheck.checked || 0) === 1
+        && Number(qualityCheck.passed || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+      usage: {
+        status: usage.status || "",
+        total_tokens: usage.total_tokens || 0,
+        free_tokens: usage.free_tokens || 0,
+        top_categories: usage.top_categories || [],
+      },
+      binding: {
+        binding_id: binding.binding_id || "",
+        packet_id: binding.worker_context_packet_id || "",
+        rendered_context_usage_budget: binding.worker_context_packet_render_probe?.rendered_flags?.has_context_usage_budget === true,
+      },
+    };
+  } finally {
+    for (const file of [dispatchPlanFile, `${dispatchPlanFile}.bak`, bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketContextUsageRepairWorkItemSelfTest() {
+  const groupId = `memory-center-worker-context-usage-repair-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  try {
+    const usage = {
+      schema: "ccm-worker-context-usage-v1",
+      version: 1,
+      packet_id: "wcp-context-pressure-selftest",
+      project: "api",
+      task_id: "context-pressure-task",
+      model_context_policy: "cc-style-api-view-after-memory-render",
+      max_tokens: 1000,
+      reserved_output_tokens: 120,
+      autocompact_buffer_tokens: 120,
+      total_tokens: 1120,
+      total_chars: 4480,
+      free_tokens: -240,
+      pressure: 112,
+      status: "over_budget",
+      compact_recommended: true,
+      categories: [
+        { id: "task_goal", name: "Task and goal", tokens: 70, chars: 280, required: true, included: true },
+        { id: "group_memory_rendered", name: "Group memory rendered context", tokens: 720, chars: 2880, source: "ccm-group-memory-context-v1", required: true, included: true },
+        { id: "typed_memory_recall", name: "Typed MEMORY.md recall", tokens: 170, chars: 680, source: "typed-memory", included: true },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 160, chars: 640, required: true, included: true },
+        { id: "free_space", name: "Free space", tokens: 0, chars: 0, source: "budget", included: false },
+        { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 120, chars: 0, source: "budget", required: true, included: true },
+      ],
+      top_categories: [
+        { id: "group_memory_rendered", name: "Group memory rendered context", tokens: 720, chars: 2880 },
+        { id: "typed_memory_recall", name: "Typed MEMORY.md recall", tokens: 170, chars: 680 },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 160, chars: 640 },
+      ],
+      suggested_reductions: [
+        {
+          category_id: "group_memory_rendered",
+          name: "Group memory rendered context",
+          tokens: 720,
+          suggestion: "用最新 compact summary 与 typed MEMORY.md reference 替换完整渲染记忆。",
+        },
+        {
+          category_id: "typed_memory_recall",
+          name: "Typed MEMORY.md recall",
+          tokens: 170,
+          suggestion: "去重 typed MEMORY.md 召回，只保留本任务相关条目。",
+        },
+      ],
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T09:00:00.000Z",
+      bindingCount: 1,
+      nativeBindingCount: 0,
+      entries: [{
+        schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-v1",
+        binding_id: "binding-context-pressure-selftest",
+        groupId,
+        brief_id: "brief-context-pressure-selftest",
+        work_item_id: "provider-reproof-context-pressure-selftest",
+        source: "api_microcompact_native_apply_provider_reproof",
+        project: "api",
+        assignment_id: "assignment-context-pressure-selftest",
+        dispatch_key: "dispatch-context-pressure-selftest",
+        worker_context_packet_id: "wcp-context-pressure-selftest",
+        worker_context_packet_context_usage: usage,
+        proof_entry_id: "proof-context-pressure-selftest",
+        request_patch_checksum: "request-context-pressure-selftest",
+        provider_reproof_status: "needed",
+        provider_reproof_reason: "missing_native_request_adapter_telemetry",
+        runner_request_id: "runner-context-pressure-selftest",
+        execution_id: "execution-context-pressure-selftest",
+        should_create_real_task: false,
+        worker_context_packet_replay_briefs: [{
+          brief_id: "brief-context-pressure-selftest",
+          work_item_id: "provider-reproof-context-pressure-selftest",
+          source: "api_microcompact_native_apply_provider_reproof",
+          target_project: "api",
+        }],
+        worker_context_packet_render_probe: {
+          packet_id: "wcp-context-pressure-selftest",
+          rendered_flags: { has_context_usage_budget: true },
+        },
+        at: "2026-07-09T09:00:00.000Z",
+      }],
+    });
+    const usageReport = buildWorkerContextPacketContextUsageReport({ groupIds: [groupId] });
+    const repairReport = buildWorkerContextPacketContextUsageRepairWorkItemReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T09:01:00.000Z",
+    });
+    const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const repairItem = (workLedger.items || []).find((item: any) => item.source === "worker_context_packet_context_usage_repair") || {};
+    const candidates = buildReplayRepairMainAgentDispatchCandidates(groupId, { limit: 6 });
+    const quality = evaluateWorkerContextPacketContextUsageRepairWorkItems({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_context_usage_repair_work_items"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "worker_context_packet_context_usage_repair_work_items") || {};
+    const candidate = (candidates.candidates || []).find((item: any) => item.work_item_id === repairItem.work_item_id) || {};
+    const checks = {
+      usageReportSeesOverBudget: Number(usageReport.overall?.overBudgetCount || 0) === 1
+        && Number(usageReport.overall?.compactRecommendedCount || 0) === 1,
+      repairReportCreatesOpenWorkItem: repairReport.overall?.status === "ok"
+        && Number(repairReport.overall?.requiredActionCount || 0) === 1
+        && Number(repairReport.overall?.currentOpenItemCount || 0) === 1,
+      repairItemCarriesPressureMetadata: repairItem.source === "worker_context_packet_context_usage_repair"
+        && repairItem.priority === "critical"
+        && repairItem.worker_context_packet_id === "wcp-context-pressure-selftest"
+        && repairItem.worker_context_packet_usage_status === "over_budget"
+        && (repairItem.worker_context_packet_suggested_reductions || []).some((item: any) => item.category_id === "group_memory_rendered")
+        && String(repairItem.instruction || "").includes("Context usage budget"),
+      dispatchCandidateSurfacesRepair: candidates.candidateCount >= 1
+        && candidate.source === "worker_context_packet_context_usage_repair"
+        && ["main_agent_claim_or_triage_before_next_child_dispatch", "main_agent_review_and_dispatch_to_child_agent"].includes(candidate.recommendedAction),
+      qualityCheckCoversReactiveRepair: quality.id === "worker_context_packet_context_usage_repair_work_items"
+        && quality.status === "ok"
+        && qualityCheck.status === "ok"
+        && Number(qualityCheck.checked || 0) === 1
+        && Number(qualityCheck.passed || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      usageReport: usageReport.overall,
+      repairReport: repairReport.overall,
+      repairItem: {
+        id: repairItem.id || "",
+        status: repairItem.status || "",
+        priority: repairItem.priority || "",
+        packet_id: repairItem.worker_context_packet_id || "",
+        usage_status: repairItem.worker_context_packet_usage_status || "",
+        top_categories: repairItem.worker_context_packet_top_categories || [],
+      },
+      candidate: {
+        candidate_id: candidate.candidate_id || "",
+        work_item_id: candidate.work_item_id || "",
+        source: candidate.source || "",
+        recommendedAction: candidate.recommendedAction || "",
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketContextUsageRepairTypedMemorySelfTest() {
+  const groupId = `memory-center-worker-context-usage-repair-typed-memory-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  try {
+    const usage = {
+      schema: "ccm-worker-context-usage-v1",
+      version: 1,
+      packet_id: "wcp-context-pressure-typed-memory-selftest",
+      project: "api",
+      task_id: "context-pressure-typed-memory-task",
+      model_context_policy: "cc-style-api-view-after-memory-render",
+      max_tokens: 1000,
+      reserved_output_tokens: 120,
+      autocompact_buffer_tokens: 120,
+      total_tokens: 1160,
+      total_chars: 4640,
+      free_tokens: -280,
+      pressure: 116,
+      status: "over_budget",
+      compact_recommended: true,
+      categories: [
+        { id: "task_goal", name: "Task and goal", tokens: 70, chars: 280, required: true, included: true },
+        { id: "group_memory_rendered", name: "Group memory rendered context", tokens: 720, chars: 2880, source: "ccm-group-memory-context-v1", required: true, included: true },
+        { id: "typed_memory_recall", name: "Typed MEMORY.md recall", tokens: 210, chars: 840, source: "typed-memory", included: true },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 160, chars: 640, required: true, included: true },
+        { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 120, chars: 0, source: "budget", required: true, included: true },
+      ],
+      top_categories: [
+        { id: "group_memory_rendered", name: "Group memory rendered context", tokens: 720, chars: 2880 },
+        { id: "typed_memory_recall", name: "Typed MEMORY.md recall", tokens: 210, chars: 840 },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 160, chars: 640 },
+      ],
+      suggested_reductions: [
+        {
+          category_id: "group_memory_rendered",
+          name: "Group memory rendered context",
+          tokens: 720,
+          suggestion: "用最新 compact summary 与 typed MEMORY.md reference 替换完整渲染记忆。",
+        },
+        {
+          category_id: "typed_memory_recall",
+          name: "Typed MEMORY.md recall",
+          tokens: 210,
+          suggestion: "去重 typed MEMORY.md 召回，只保留本任务相关条目。",
+        },
+      ],
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T20:10:00.000Z",
+      bindingCount: 1,
+      entries: [{
+        schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-v1",
+        binding_id: "binding-context-pressure-typed-memory-selftest",
+        groupId,
+        brief_id: "brief-context-pressure-typed-memory-selftest",
+        work_item_id: "provider-reproof-context-pressure-typed-memory-selftest",
+        source: "api_microcompact_native_apply_provider_reproof",
+        project: "api",
+        assignment_id: "assignment-context-pressure-typed-memory-selftest",
+        dispatch_key: "dispatch-context-pressure-typed-memory-selftest",
+        worker_context_packet_id: "wcp-context-pressure-typed-memory-selftest",
+        worker_context_packet_context_usage: usage,
+        proof_entry_id: "proof-context-pressure-typed-memory-selftest",
+        request_patch_checksum: "request-context-pressure-typed-memory-selftest",
+        provider_reproof_status: "needed",
+        provider_reproof_reason: "missing_native_request_adapter_telemetry",
+        runner_request_id: "runner-context-pressure-typed-memory-selftest",
+        execution_id: "execution-context-pressure-typed-memory-selftest",
+        should_create_real_task: false,
+        worker_context_packet_render_probe: {
+          packet_id: "wcp-context-pressure-typed-memory-selftest",
+          rendered_flags: { has_context_usage_budget: true },
+        },
+        at: "2026-07-09T20:10:00.000Z",
+      }],
+    });
+    const repairReport = buildWorkerContextPacketContextUsageRepairWorkItemReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T20:10:01.000Z",
+    });
+    const typedReport = buildWorkerContextPacketContextUsageRepairTypedMemoryReport({
+      groupIds: [groupId],
+      repairWorkItemReport: repairReport,
+      generatedAt: "2026-07-09T20:10:02.000Z",
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_context_usage_repair_typed_memory"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_context_usage_repair_typed_memory") || {};
+    const {
+      buildGroupTypedMemoryRecall,
+      readGroupTypedMemoryDistillationLedger,
+      scanGroupTypedMemoryDocuments,
+    } = require("../collaboration/group-memory-index");
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const doc = (docs || []).find((item: any) => item.source === "auto:context-usage-repair-distillation") || {};
+    const recall = buildGroupTypedMemoryRecall(groupId, "CONTEXT_USAGE_REPAIR_TYPED_MEMORY context_usage free_tokens autocompact_buffer Context usage budget typed_memory_recall", {
+      disableLedger: true,
+      forceMemory: true,
+      max: 8,
+    });
+    const recallText = [
+      ...(Array.isArray(recall.recalled) ? recall.recalled : []),
+      ...(Array.isArray(recall.entries) ? recall.entries : []),
+      ...(Array.isArray(recall.selected) ? recall.selected : []),
+      ...(Array.isArray(recall.docs) ? recall.docs : []),
+    ].map((item: any) => `${item.relPath || ""}\n${item.name || ""}\n${item.body || ""}\n${item.snippet || ""}\n${item.text || ""}`).join("\n");
+    const checks = {
+      repairReportCreatesPressureItem: repairReport.overall?.status === "ok"
+        && Number(repairReport.overall?.requiredActionCount || 0) === 1
+        && Number(repairReport.overall?.currentOpenItemCount || 0) === 1,
+      typedMemoryReportPasses: typedReport.overall?.status === "ok"
+        && Number(typedReport.overall?.typedMemoryDocCount || 0) >= 1
+        && Number(typedReport.overall?.archivedCount || 0) >= 1
+        && Number(typedReport.overall?.recallMatchCount || 0) >= 1,
+      qualityCheckExposesTypedMemory: qualityCheck.status === "ok"
+        && Number(qualityCheck.passed || 0) === 1,
+      ledgerArchivesContextUsageRows: ledger.contextUsageRepairArchive?.schema === "ccm-context-usage-repair-distillation-v1"
+        && Number(ledger.contextUsageRepairArchive?.archived_count || 0) >= 1
+        && Number(ledger.contextUsageRepairArchive?.over_budget_count || 0) >= 1,
+      typedDocContainsBudgetDiscipline: String(doc.body || "").includes("context_usage.status")
+        && String(doc.body || "").includes("free_tokens")
+        && String(doc.body || "").includes("autocompact_buffer")
+        && String(doc.body || "").includes("Context usage budget"),
+      recallFindsContextUsageDiscipline: /worker-context-usage-pressure-discipline\.md|context_usage|autocompact_buffer|Context usage budget/i.test(recallText),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: typedReport.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+      doc: {
+        relPath: doc.relPath || "",
+        source: doc.source || "",
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPreDispatchGateSelfTest() {
+  const groupId = `memory-center-worker-context-pre-dispatch-gate-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  try {
+    const usage = {
+      schema: "ccm-worker-context-usage-v1",
+      version: 1,
+      packet_id: "wcp-pre-dispatch-gate-selftest",
+      project: "api",
+      task_id: "pre-dispatch-gate-task",
+      model_context_policy: "cc-style-api-view-after-memory-render",
+      max_tokens: 1000,
+      reserved_output_tokens: 120,
+      autocompact_buffer_tokens: 120,
+      total_tokens: 1180,
+      total_chars: 4720,
+      free_tokens: -300,
+      pressure: 118,
+      status: "over_budget",
+      compact_recommended: true,
+      categories: [
+        { id: "task_goal", name: "Task and goal", tokens: 90, chars: 360, required: true, included: true },
+        { id: "group_memory_rendered", name: "Group memory rendered context", tokens: 780, chars: 3120, required: true, included: true },
+        { id: "typed_memory_recall", name: "Typed MEMORY.md recall", tokens: 210, chars: 840, included: true },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 100, chars: 400, required: true, included: true },
+        { id: "free_space", name: "Free space", tokens: 0, chars: 0, source: "budget", included: false },
+        { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 120, chars: 0, source: "budget", required: true, included: true },
+      ],
+      top_categories: [
+        { id: "group_memory_rendered", name: "Group memory rendered context", tokens: 780, chars: 3120 },
+        { id: "typed_memory_recall", name: "Typed MEMORY.md recall", tokens: 210, chars: 840 },
+      ],
+      suggested_reductions: [{
+        category_id: "group_memory_rendered",
+        name: "Group memory rendered context",
+        tokens: 780,
+        suggestion: "先用 compact summary 替代完整群聊记忆。",
+      }],
+    };
+    const gate = {
+      schema: "ccm-worker-context-pre-dispatch-gate-v1",
+      gate_id: "worker-context-pre-dispatch:selftest",
+      assignment_id: "assignment-pre-dispatch-gate-selftest",
+      dispatch_key: "dispatch-pre-dispatch-gate-selftest",
+      project: "api",
+      worker_context_packet_id: "wcp-pre-dispatch-gate-selftest",
+      usage_status: "over_budget",
+      pressure_status: "over_budget",
+      dispatch_ready: false,
+      dispatchReady: false,
+      blocked: true,
+      compact_recommended: true,
+      must_repair_before_dispatch: true,
+      reason: "WorkerContextPacket over budget before child dispatch.",
+      repair_source: "worker_context_packet_context_usage_repair",
+      next_step: "compact_worker_context_packet_before_child_dispatch",
+      total_tokens: 1180,
+      max_tokens: 1000,
+      free_tokens: -300,
+      pressure: 118,
+      autocompact_buffer_tokens: 120,
+      top_categories: usage.top_categories,
+      suggested_reductions: usage.suggested_reductions,
+      generated_at: "2026-07-09T10:00:00.000Z",
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T10:00:00.000Z",
+      bindingCount: 1,
+      nativeBindingCount: 0,
+      workerContextPacketBindingCount: 1,
+      preDispatchGateCount: 1,
+      blockedPreDispatchGateCount: 1,
+      entries: [{
+        schema: "ccm-worker-context-packet-assignment-binding-v1",
+        binding_id: "worker-context-packet-assignment:pre-dispatch-gate-selftest",
+        groupId,
+        source: "worker_context_packet_pre_dispatch_gate",
+        project: "api",
+        assignment_id: "assignment-pre-dispatch-gate-selftest",
+        dispatch_key: "dispatch-pre-dispatch-gate-selftest",
+        task_fingerprint: "pre-dispatch-gate-selftest",
+        worker_context_packet_id: "wcp-pre-dispatch-gate-selftest",
+        worker_context_packet_context_usage: usage,
+        worker_context_pre_dispatch_gate: gate,
+        dispatch_ready: false,
+        dispatchReady: false,
+        worker_context_packet_render_probe: {
+          packet_id: "wcp-pre-dispatch-gate-selftest",
+          rendered_flags: { has_context_usage_budget: true, has_worker_context_packet: true },
+        },
+        should_create_real_task: false,
+        at: "2026-07-09T10:00:00.000Z",
+      }],
+    });
+    const gateReport = buildWorkerContextPacketPreDispatchGateReport({ groupIds: [groupId] });
+    const gateQuality = evaluateWorkerContextPacketPreDispatchGate({ groupIds: [groupId] });
+    const repairReport = buildWorkerContextPacketContextUsageRepairWorkItemReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T10:01:00.000Z",
+    });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pre_dispatch_gate"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "worker_context_packet_pre_dispatch_gate") || {};
+    const checks = {
+      gateReportAcceptsBlockedOverBudget: gateReport.overall?.status === "ok"
+        && Number(gateReport.overall?.overBudgetCount || 0) === 1
+        && Number(gateReport.overall?.blockedOverBudgetCount || 0) === 1
+        && Number(gateReport.overall?.metadataGapCount || 0) === 0,
+      gateQualityCheckPasses: gateQuality.id === "worker_context_packet_pre_dispatch_gate"
+        && gateQuality.status === "ok"
+        && Number(gateQuality.checked || 0) === 1
+        && Number(gateQuality.passed || 0) === 1
+        && qualityCheck.status === "ok",
+      overBudgetStillCreatesRepairItem: repairReport.overall?.status === "ok"
+        && Number(repairReport.overall?.requiredActionCount || 0) === 1
+        && Number(repairReport.overall?.currentOpenItemCount || 0) === 1
+        && Number(repairReport.overall?.overBudgetCount || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      gateReport: gateReport.overall,
+      repairReport: repairReport.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketCompactionRetrySelfTest() {
+  const groupId = `memory-center-worker-context-compaction-retry-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  try {
+    const retry = {
+      schema: "ccm-worker-context-compaction-retry-v1",
+      retry_id: "worker-context-retry:selftest",
+      method: "deterministic_head_tail_critical_lines",
+      status: "recovered",
+      from_packet_id: "wcp-retry-before-selftest",
+      retry_packet_id: "wcp-retry-after-selftest",
+      from_usage_status: "over_budget",
+      from_total_tokens: 6200,
+      from_max_tokens: 4000,
+      from_free_tokens: -2500,
+      retry_usage_status: "warn",
+      retry_total_tokens: 2600,
+      retry_max_tokens: 4000,
+      retry_free_tokens: 1100,
+      original_task_hash: "original-task-hash-selftest",
+      compacted_task_hash: "compacted-task-hash-selftest",
+      original_task_chars: 24000,
+      compacted_task_chars: 2200,
+      omitted_chars: 21800,
+      critical_line_count: 6,
+      preserved_receipt_contract: true,
+      recovered_dispatch_ready: true,
+      generated_at: "2026-07-09T11:00:00.000Z",
+    };
+    const usage = {
+      schema: "ccm-worker-context-usage-v1",
+      version: 1,
+      packet_id: "wcp-retry-after-selftest",
+      project: "api",
+      task_id: "compaction-retry-task",
+      model_context_policy: "cc-style-api-view-after-memory-render",
+      max_tokens: 4000,
+      reserved_output_tokens: 120,
+      autocompact_buffer_tokens: 300,
+      total_tokens: 2600,
+      total_chars: 7800,
+      free_tokens: 1100,
+      pressure: 65,
+      status: "warn",
+      compact_recommended: false,
+      categories: [
+        { id: "task_goal", name: "Task and goal", tokens: 1900, chars: 5700, required: true, included: true },
+        { id: "context_compaction_retry", name: "Context compaction retry", tokens: 220, chars: 660, required: true, included: true },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 180, chars: 540, required: true, included: true },
+        { id: "free_space", name: "Free space", tokens: 1100, chars: 0, source: "budget", included: true },
+        { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 300, chars: 0, source: "budget", required: true, included: true },
+      ],
+      top_categories: [
+        { id: "task_goal", name: "Task and goal", tokens: 1900, chars: 5700 },
+        { id: "context_compaction_retry", name: "Context compaction retry", tokens: 220, chars: 660 },
+      ],
+    };
+    const gate = {
+      schema: "ccm-worker-context-pre-dispatch-gate-v1",
+      gate_id: "worker-context-pre-dispatch:retry-selftest",
+      assignment_id: "assignment-compaction-retry-selftest",
+      dispatch_key: "dispatch-compaction-retry-selftest",
+      project: "api",
+      worker_context_packet_id: "wcp-retry-after-selftest",
+      usage_status: "warn",
+      pressure_status: "warn",
+      dispatch_ready: true,
+      dispatchReady: true,
+      blocked: false,
+      compact_recommended: false,
+      must_repair_before_dispatch: false,
+      reason: "WorkerContextPacket recovered after deterministic retry.",
+      repair_source: "",
+      context_compaction_retry: retry,
+      auto_retry_status: "recovered",
+      next_step: "dispatch_child_agent",
+      total_tokens: 2600,
+      max_tokens: 4000,
+      free_tokens: 1100,
+      pressure: 65,
+      autocompact_buffer_tokens: 300,
+      generated_at: "2026-07-09T11:00:00.000Z",
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T11:00:00.000Z",
+      bindingCount: 1,
+      nativeBindingCount: 0,
+      workerContextPacketBindingCount: 1,
+      preDispatchGateCount: 1,
+      blockedPreDispatchGateCount: 0,
+      entries: [{
+        schema: "ccm-worker-context-packet-assignment-binding-v1",
+        binding_id: "worker-context-packet-assignment:compaction-retry-selftest",
+        groupId,
+        source: "worker_context_packet_pre_dispatch_gate",
+        project: "api",
+        assignment_id: "assignment-compaction-retry-selftest",
+        dispatch_key: "dispatch-compaction-retry-selftest",
+        task_fingerprint: "compaction-retry-selftest",
+        worker_context_packet_id: "wcp-retry-after-selftest",
+        worker_context_packet_context_usage: usage,
+        worker_context_packet_compaction_retry: retry,
+        worker_context_pre_dispatch_gate: gate,
+        dispatch_ready: true,
+        dispatchReady: true,
+        should_create_real_task: true,
+        at: "2026-07-09T11:00:00.000Z",
+      }],
+    });
+    const report = buildWorkerContextPacketCompactionRetryReport({ groupIds: [groupId] });
+    const quality = evaluateWorkerContextPacketCompactionRetry({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_compaction_retry"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "worker_context_packet_compaction_retry") || {};
+    const checks = {
+      reportAcceptsRecoveredRetry: report.overall?.status === "ok"
+        && Number(report.overall?.retryBindingCount || 0) === 1
+        && Number(report.overall?.recoveredCount || 0) === 1
+        && Number(report.overall?.metadataGapCount || 0) === 0,
+      qualityCheckCoversRetry: quality.id === "worker_context_packet_compaction_retry"
+        && quality.status === "ok"
+        && Number(quality.checked || 0) === 1
+        && Number(quality.passed || 0) === 1
+        && qualityCheck.status === "ok",
+      retryShowsTokenRecovery: (report.groups?.[0]?.retries || [])[0]?.from_usage_status === "over_budget"
+        && (report.groups?.[0]?.retries || [])[0]?.retry_usage_status === "warn"
+        && (report.groups?.[0]?.retries || [])[0]?.dispatch_ready === true,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketMemoryFirstCompactionRetrySelfTest() {
+  const groupId = `memory-center-worker-context-memory-first-compaction-retry-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  try {
+    const memoryCompaction = {
+      schema: "ccm-worker-context-memory-first-compaction-v1",
+      method: "memory_fields_head_tail_and_recall_limit",
+      status: "compacted",
+      original_memory_hash: "original-memory-hash-selftest",
+      compacted_memory_hash: "compacted-memory-hash-selftest",
+      original_memory_chars: 24000,
+      compacted_memory_chars: 3200,
+      omitted_chars: 20800,
+      max_rendered_chars: 900,
+      max_recall_items: 3,
+      preserves_schema: true,
+    };
+    const retry = {
+      schema: "ccm-worker-context-compaction-retry-v1",
+      retry_id: "worker-context-retry:memory-first-selftest",
+      method: "memory_first_deterministic_context_compaction",
+      status: "recovered",
+      from_packet_id: "wcp-memory-first-before-selftest",
+      retry_packet_id: "wcp-memory-first-after-selftest",
+      from_usage_status: "over_budget",
+      from_total_tokens: 6200,
+      from_max_tokens: 4000,
+      from_free_tokens: -2500,
+      retry_usage_status: "warn",
+      retry_total_tokens: 2600,
+      retry_max_tokens: 4000,
+      retry_free_tokens: 1100,
+      memory_first: true,
+      memory_compaction: memoryCompaction,
+      original_task_hash: "same-task-hash-selftest",
+      compacted_task_hash: "same-task-hash-selftest",
+      original_task_chars: 420,
+      compacted_task_chars: 420,
+      omitted_chars: 20800,
+      critical_line_count: 0,
+      preserved_receipt_contract: true,
+      recovered_dispatch_ready: true,
+      generated_at: "2026-07-09T11:30:00.000Z",
+    };
+    const usage = {
+      schema: "ccm-worker-context-usage-v1",
+      version: 1,
+      packet_id: "wcp-memory-first-after-selftest",
+      project: "api",
+      task_id: "memory-first-compaction-retry-task",
+      model_context_policy: "cc-style-api-view-after-memory-render",
+      max_tokens: 4000,
+      reserved_output_tokens: 120,
+      autocompact_buffer_tokens: 300,
+      total_tokens: 2600,
+      total_chars: 7800,
+      free_tokens: 1100,
+      pressure: 65,
+      status: "warn",
+      compact_recommended: false,
+      categories: [
+        { id: "task_goal", name: "Task and goal", tokens: 140, chars: 420, required: true, included: true },
+        { id: "group_memory_rendered", name: "Group memory rendered context", tokens: 1100, chars: 3200, required: true, included: true },
+        { id: "context_compaction_retry", name: "Context compaction retry", tokens: 220, chars: 660, required: true, included: true },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 180, chars: 540, required: true, included: true },
+        { id: "free_space", name: "Free space", tokens: 1100, chars: 0, source: "budget", included: true },
+        { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 300, chars: 0, source: "budget", required: true, included: true },
+      ],
+      top_categories: [
+        { id: "group_memory_rendered", name: "Group memory rendered context", tokens: 1100, chars: 3200 },
+        { id: "context_compaction_retry", name: "Context compaction retry", tokens: 220, chars: 660 },
+      ],
+    };
+    const gate = {
+      schema: "ccm-worker-context-pre-dispatch-gate-v1",
+      gate_id: "worker-context-pre-dispatch:memory-first-retry-selftest",
+      assignment_id: "assignment-memory-first-retry-selftest",
+      dispatch_key: "dispatch-memory-first-retry-selftest",
+      project: "api",
+      worker_context_packet_id: "wcp-memory-first-after-selftest",
+      usage_status: "warn",
+      pressure_status: "warn",
+      dispatch_ready: true,
+      dispatchReady: true,
+      blocked: false,
+      compact_recommended: false,
+      must_repair_before_dispatch: false,
+      reason: "WorkerContextPacket recovered after memory-first deterministic retry.",
+      repair_source: "",
+      context_compaction_retry: retry,
+      auto_retry_status: "recovered",
+      next_step: "dispatch_child_agent",
+      total_tokens: 2600,
+      max_tokens: 4000,
+      free_tokens: 1100,
+      pressure: 65,
+      autocompact_buffer_tokens: 300,
+      generated_at: "2026-07-09T11:30:00.000Z",
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T11:30:00.000Z",
+      bindingCount: 1,
+      nativeBindingCount: 0,
+      workerContextPacketBindingCount: 1,
+      preDispatchGateCount: 1,
+      blockedPreDispatchGateCount: 0,
+      entries: [{
+        schema: "ccm-worker-context-packet-assignment-binding-v1",
+        binding_id: "worker-context-packet-assignment:memory-first-compaction-retry-selftest",
+        groupId,
+        source: "worker_context_packet_pre_dispatch_gate",
+        project: "api",
+        assignment_id: "assignment-memory-first-retry-selftest",
+        dispatch_key: "dispatch-memory-first-retry-selftest",
+        task_fingerprint: "memory-first-compaction-retry-selftest",
+        worker_context_packet_id: "wcp-memory-first-after-selftest",
+        worker_context_packet_context_usage: usage,
+        worker_context_packet_compaction_retry: retry,
+        worker_context_pre_dispatch_gate: gate,
+        dispatch_ready: true,
+        dispatchReady: true,
+        should_create_real_task: true,
+        at: "2026-07-09T11:30:00.000Z",
+      }],
+    });
+    const report = buildWorkerContextPacketCompactionRetryReport({ groupIds: [groupId] });
+    const quality = evaluateWorkerContextPacketCompactionRetry({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_compaction_retry"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "worker_context_packet_compaction_retry") || {};
+    const retryRow = (report.groups?.[0]?.retries || [])[0] || {};
+    const checks = {
+      reportAcceptsMemoryFirstRetry: report.overall?.status === "ok"
+        && Number(report.overall?.retryBindingCount || 0) === 1
+        && Number(report.overall?.memoryFirstCount || 0) === 1
+        && Number(report.overall?.memoryOmittedChars || 0) === 20800
+        && Number(report.overall?.metadataGapCount || 0) === 0,
+      qualityCheckCoversMemoryFirstRetry: quality.id === "worker_context_packet_compaction_retry"
+        && quality.status === "ok"
+        && Number(quality.checked || 0) === 1
+        && Number(quality.passed || 0) === 1
+        && qualityCheck.status === "ok",
+      retryShowsMemoryFirstRecovery: retryRow.memory_first === true
+        && retryRow.memory_compaction_schema === "ccm-worker-context-memory-first-compaction-v1"
+        && Number(retryRow.memory_omitted_chars || 0) === 20800
+        && Number(retryRow.original_task_chars || 0) === Number(retryRow.compacted_task_chars || 0)
+        && retryRow.dispatch_ready === true,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      retry: {
+        memory_first: retryRow.memory_first === true,
+        memory_compaction_schema: retryRow.memory_compaction_schema || "",
+        memory_omitted_chars: retryRow.memory_omitted_chars || 0,
+        original_task_chars: retryRow.original_task_chars || 0,
+        compacted_task_chars: retryRow.compacted_task_chars || 0,
+      },
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPartialCompactRetrySelfTest() {
+  const groupId = `memory-center-worker-context-partial-compact-retry-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  try {
+    const partialCompaction = {
+      schema: "ccm-worker-context-replay-brief-partial-compaction-v1",
+      method: "preserve_replay_brief_ids_receipts_and_provider_proof_fields",
+      category: "replay_repair_dispatch_briefs",
+      status: "compacted",
+      original_brief_count: 1,
+      compacted_brief_count: 1,
+      original_briefs_hash: "original-replay-briefs-hash-selftest",
+      compacted_briefs_hash: "compacted-replay-briefs-hash-selftest",
+      original_briefs_chars: 28000,
+      compacted_briefs_chars: 980,
+      omitted_chars: 27020,
+      omitted_by_brief_limit_chars: 0,
+      max_string_chars: 180,
+      max_id_chars: 140,
+      preserved_fields: [
+        "brief_id",
+        "work_item_id",
+        "source",
+        "target_project",
+        "proof_entry_id",
+        "request_patch_checksum",
+        "provider_reproof_status",
+        "provider_reproof_reason",
+        "reproof_candidate_id",
+        "timeline_binding_id",
+        "original_work_item_id",
+        "request_telemetry_session_status",
+        "request_telemetry_dispatch_status",
+        "runner_request_id",
+        "execution_id",
+      ],
+      truncated_field_count: 1,
+      truncated_fields: [{ index: 0, field: "provider_reproof_reason", original_chars: 27000, compacted_chars: 183, original_hash: "provider-reason-hash" }],
+      preserves_receipt_reference: true,
+      preserves_real_task_suppression: true,
+      generated_at: "2026-07-09T13:00:00.000Z",
+    };
+    const retry = {
+      schema: "ccm-worker-context-compaction-retry-v1",
+      retry_id: "worker-context-retry:partial-compact-selftest",
+      method: "replay_brief_partial_compact",
+      status: "recovered",
+      from_packet_id: "wcp-partial-before-selftest",
+      retry_packet_id: "wcp-partial-after-selftest",
+      from_usage_status: "over_budget",
+      from_total_tokens: 7600,
+      from_max_tokens: 4000,
+      from_free_tokens: -3700,
+      retry_usage_status: "warn",
+      retry_total_tokens: 2400,
+      retry_max_tokens: 4000,
+      retry_free_tokens: 1300,
+      memory_first: false,
+      memory_compaction: null,
+      partial_compact: true,
+      partial_compaction: partialCompaction,
+      original_task_hash: "same-task-hash-partial-selftest",
+      compacted_task_hash: "same-task-hash-partial-selftest",
+      original_task_chars: 420,
+      compacted_task_chars: 420,
+      omitted_chars: 27020,
+      critical_line_count: 0,
+      preserved_receipt_contract: true,
+      recovered_dispatch_ready: true,
+      generated_at: "2026-07-09T13:00:00.000Z",
+    };
+    const usage = {
+      schema: "ccm-worker-context-usage-v1",
+      version: 1,
+      packet_id: "wcp-partial-after-selftest",
+      project: "api",
+      task_id: "partial-compact-retry-task",
+      model_context_policy: "cc-style-api-view-after-memory-render",
+      max_tokens: 4000,
+      reserved_output_tokens: 120,
+      autocompact_buffer_tokens: 300,
+      total_tokens: 2400,
+      total_chars: 7200,
+      free_tokens: 1300,
+      pressure: 60,
+      status: "warn",
+      compact_recommended: false,
+      categories: [
+        { id: "task_goal", name: "Task and goal", tokens: 140, chars: 420, required: true, included: true },
+        { id: "replay_repair_dispatch_briefs", name: "Replay repair dispatch briefs", tokens: 320, chars: 980, required: true, included: true },
+        { id: "context_compaction_retry", name: "Context compaction retry", tokens: 520, chars: 1560, required: true, included: true },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 180, chars: 540, required: true, included: true },
+        { id: "free_space", name: "Free space", tokens: 1300, chars: 0, source: "budget", included: true },
+        { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 300, chars: 0, source: "budget", required: true, included: true },
+      ],
+      top_categories: [
+        { id: "context_compaction_retry", name: "Context compaction retry", tokens: 520, chars: 1560 },
+        { id: "replay_repair_dispatch_briefs", name: "Replay repair dispatch briefs", tokens: 320, chars: 980 },
+      ],
+    };
+    const gate = {
+      schema: "ccm-worker-context-pre-dispatch-gate-v1",
+      gate_id: "worker-context-pre-dispatch:partial-compact-selftest",
+      assignment_id: "assignment-partial-compact-selftest",
+      dispatch_key: "dispatch-partial-compact-selftest",
+      project: "api",
+      worker_context_packet_id: "wcp-partial-after-selftest",
+      usage_status: "warn",
+      pressure_status: "warn",
+      dispatch_ready: true,
+      dispatchReady: true,
+      blocked: false,
+      compact_recommended: false,
+      must_repair_before_dispatch: false,
+      reason: "WorkerContextPacket recovered after replay brief partial compact retry.",
+      repair_source: "",
+      context_compaction_retry: retry,
+      auto_retry_status: "recovered",
+      next_step: "dispatch_child_agent",
+      total_tokens: 2400,
+      max_tokens: 4000,
+      free_tokens: 1300,
+      pressure: 60,
+      autocompact_buffer_tokens: 300,
+      generated_at: "2026-07-09T13:00:00.000Z",
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T13:00:00.000Z",
+      bindingCount: 1,
+      nativeBindingCount: 0,
+      workerContextPacketBindingCount: 1,
+      preDispatchGateCount: 1,
+      blockedPreDispatchGateCount: 0,
+      entries: [{
+        schema: "ccm-worker-context-packet-assignment-binding-v1",
+        binding_id: "worker-context-packet-assignment:partial-compact-selftest",
+        groupId,
+        source: "worker_context_packet_pre_dispatch_gate",
+        project: "api",
+        assignment_id: "assignment-partial-compact-selftest",
+        dispatch_key: "dispatch-partial-compact-selftest",
+        task_fingerprint: "partial-compact-selftest",
+        worker_context_packet_id: "wcp-partial-after-selftest",
+        worker_context_packet_context_usage: usage,
+        worker_context_packet_compaction_retry: retry,
+        worker_context_packet_partial_compaction: partialCompaction,
+        worker_context_pre_dispatch_gate: gate,
+        dispatch_ready: true,
+        dispatchReady: true,
+        should_create_real_task: true,
+        at: "2026-07-09T13:00:00.000Z",
+      }],
+    });
+    const report = buildWorkerContextPacketCompactionRetryReport({ groupIds: [groupId] });
+    const quality = evaluateWorkerContextPacketCompactionRetry({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_compaction_retry"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "worker_context_packet_compaction_retry") || {};
+    const retryRow = (report.groups?.[0]?.retries || [])[0] || {};
+    const checks = {
+      reportAcceptsPartialCompactRetry: report.overall?.status === "ok"
+        && Number(report.overall?.retryBindingCount || 0) === 1
+        && Number(report.overall?.partialCompactCount || 0) === 1
+        && Number(report.overall?.partialOmittedChars || 0) === 27020
+        && Number(report.overall?.metadataGapCount || 0) === 0,
+      qualityCheckCoversPartialCompactRetry: quality.id === "worker_context_packet_compaction_retry"
+        && quality.status === "ok"
+        && Number(quality.checked || 0) === 1
+        && Number(quality.passed || 0) === 1
+        && qualityCheck.status === "ok",
+      retryShowsPartialRecoveryWithoutTaskCompaction: retryRow.partial_compact === true
+        && retryRow.partial_compaction_schema === "ccm-worker-context-replay-brief-partial-compaction-v1"
+        && retryRow.partial_compaction_category === "replay_repair_dispatch_briefs"
+        && Number(retryRow.original_task_chars || 0) === Number(retryRow.compacted_task_chars || 0)
+        && retryRow.dispatch_ready === true,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      retry: {
+        partial_compact: retryRow.partial_compact === true,
+        partial_compaction_schema: retryRow.partial_compaction_schema || "",
+        partial_compaction_category: retryRow.partial_compaction_category || "",
+        partial_omitted_chars: retryRow.partial_omitted_chars || 0,
+      },
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketMetadataPartialCompactRetrySelfTest() {
+  const groupId = `memory-center-worker-context-metadata-partial-compact-retry-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  try {
+    const partialCompaction = {
+      schema: "ccm-worker-context-metadata-partial-compaction-v1",
+      method: "top_category_metadata_field_compaction",
+      category: "worker_context_metadata",
+      categories: ["constraints_and_documents", "contract_injections", "dependencies"],
+      selected_from_top_categories: ["constraints_and_documents", "contract_injections"],
+      status: "compacted",
+      original_metadata_hash: "original-metadata-hash-selftest",
+      compacted_metadata_hash: "compacted-metadata-hash-selftest",
+      original_metadata_chars: 36000,
+      compacted_metadata_chars: 1800,
+      omitted_chars: 34200,
+      original_counts: { constraints: 10, document_findings: 14, dependencies: 7, contract_injections: 6 },
+      compacted_counts: { constraints: 4, document_findings: 4, dependencies: 4, contract_injections: 4 },
+      max_items: 4,
+      max_string_chars: 160,
+      max_dependency_reason_chars: 160,
+      max_contract_summary_chars: 160,
+      preserved_fields: [
+        "constraints",
+        "documentFindings",
+        "dependency.project",
+        "dependency.reason",
+        "dependency.dependency_id",
+        "contract.injection_id",
+        "contract.source_agent",
+        "contract.target_agent",
+        "contract.endpoint",
+        "contract.required_receipt_reference",
+      ],
+      preserves_receipt_reference: true,
+      preserves_real_task_suppression: true,
+      generated_at: "2026-07-09T13:30:00.000Z",
+    };
+    const retry = {
+      schema: "ccm-worker-context-compaction-retry-v1",
+      retry_id: "worker-context-retry:metadata-partial-compact-selftest",
+      method: "metadata_partial_compact",
+      status: "recovered",
+      from_packet_id: "wcp-metadata-before-selftest",
+      retry_packet_id: "wcp-metadata-after-selftest",
+      from_usage_status: "over_budget",
+      from_total_tokens: 8600,
+      from_max_tokens: 4200,
+      from_free_tokens: -4520,
+      retry_usage_status: "warn",
+      retry_total_tokens: 2600,
+      retry_max_tokens: 4200,
+      retry_free_tokens: 1480,
+      memory_first: false,
+      memory_compaction: null,
+      partial_compact: true,
+      partial_compaction: partialCompaction,
+      partial_compactions: [partialCompaction],
+      original_task_hash: "same-task-hash-metadata-selftest",
+      compacted_task_hash: "same-task-hash-metadata-selftest",
+      original_task_chars: 480,
+      compacted_task_chars: 480,
+      omitted_chars: 34200,
+      critical_line_count: 0,
+      preserved_receipt_contract: true,
+      recovered_dispatch_ready: true,
+      generated_at: "2026-07-09T13:30:00.000Z",
+    };
+    const usage = {
+      schema: "ccm-worker-context-usage-v1",
+      version: 1,
+      packet_id: "wcp-metadata-after-selftest",
+      project: "frontend",
+      task_id: "metadata-partial-compact-retry-task",
+      model_context_policy: "cc-style-api-view-after-memory-render",
+      max_tokens: 4200,
+      reserved_output_tokens: 120,
+      autocompact_buffer_tokens: 300,
+      total_tokens: 2600,
+      total_chars: 7800,
+      free_tokens: 1480,
+      pressure: 61.9,
+      status: "warn",
+      compact_recommended: false,
+      categories: [
+        { id: "task_goal", name: "Task and goal", tokens: 160, chars: 480, required: true, included: true },
+        { id: "constraints_and_documents", name: "Constraints and document findings", tokens: 420, chars: 1260, included: true },
+        { id: "contract_injections", name: "Contract injections", tokens: 320, chars: 960, included: true },
+        { id: "dependencies", name: "Dependencies", tokens: 220, chars: 660, included: true },
+        { id: "context_compaction_retry", name: "Context compaction retry", tokens: 520, chars: 1560, required: true, included: true },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 180, chars: 540, required: true, included: true },
+        { id: "free_space", name: "Free space", tokens: 1480, chars: 0, source: "budget", included: true },
+        { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 300, chars: 0, source: "budget", required: true, included: true },
+      ],
+      top_categories: [
+        { id: "context_compaction_retry", name: "Context compaction retry", tokens: 520, chars: 1560 },
+        { id: "constraints_and_documents", name: "Constraints and document findings", tokens: 420, chars: 1260 },
+        { id: "contract_injections", name: "Contract injections", tokens: 320, chars: 960 },
+      ],
+    };
+    const gate = {
+      schema: "ccm-worker-context-pre-dispatch-gate-v1",
+      gate_id: "worker-context-pre-dispatch:metadata-partial-compact-selftest",
+      assignment_id: "assignment-metadata-partial-compact-selftest",
+      dispatch_key: "dispatch-metadata-partial-compact-selftest",
+      project: "frontend",
+      worker_context_packet_id: "wcp-metadata-after-selftest",
+      usage_status: "warn",
+      pressure_status: "warn",
+      dispatch_ready: true,
+      dispatchReady: true,
+      blocked: false,
+      compact_recommended: false,
+      must_repair_before_dispatch: false,
+      reason: "WorkerContextPacket recovered after metadata partial compact retry.",
+      repair_source: "",
+      context_compaction_retry: retry,
+      auto_retry_status: "recovered",
+      next_step: "dispatch_child_agent",
+      total_tokens: 2600,
+      max_tokens: 4200,
+      free_tokens: 1480,
+      pressure: 61.9,
+      autocompact_buffer_tokens: 300,
+      generated_at: "2026-07-09T13:30:00.000Z",
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T13:30:00.000Z",
+      bindingCount: 1,
+      nativeBindingCount: 0,
+      workerContextPacketBindingCount: 1,
+      preDispatchGateCount: 1,
+      blockedPreDispatchGateCount: 0,
+      entries: [{
+        schema: "ccm-worker-context-packet-assignment-binding-v1",
+        binding_id: "worker-context-packet-assignment:metadata-partial-compact-selftest",
+        groupId,
+        source: "worker_context_packet_pre_dispatch_gate",
+        project: "frontend",
+        assignment_id: "assignment-metadata-partial-compact-selftest",
+        dispatch_key: "dispatch-metadata-partial-compact-selftest",
+        task_fingerprint: "metadata-partial-compact-selftest",
+        worker_context_packet_id: "wcp-metadata-after-selftest",
+        worker_context_packet_context_usage: usage,
+        worker_context_packet_compaction_retry: retry,
+        worker_context_packet_partial_compaction: partialCompaction,
+        worker_context_pre_dispatch_gate: gate,
+        dispatch_ready: true,
+        dispatchReady: true,
+        should_create_real_task: true,
+        at: "2026-07-09T13:30:00.000Z",
+      }],
+    });
+    const report = buildWorkerContextPacketCompactionRetryReport({ groupIds: [groupId] });
+    const quality = evaluateWorkerContextPacketCompactionRetry({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_compaction_retry"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "worker_context_packet_compaction_retry") || {};
+    const retryRow = (report.groups?.[0]?.retries || [])[0] || {};
+    const checks = {
+      reportAcceptsMetadataPartialCompactRetry: report.overall?.status === "ok"
+        && Number(report.overall?.retryBindingCount || 0) === 1
+        && Number(report.overall?.partialCompactCount || 0) === 1
+        && Number(report.overall?.partialOmittedChars || 0) === 34200
+        && Number(report.overall?.metadataGapCount || 0) === 0,
+      qualityCheckCoversMetadataPartialCompactRetry: quality.id === "worker_context_packet_compaction_retry"
+        && quality.status === "ok"
+        && Number(quality.checked || 0) === 1
+        && Number(quality.passed || 0) === 1
+        && qualityCheck.status === "ok",
+      retryShowsMetadataRecoveryWithoutTaskCompaction: retryRow.partial_compact === true
+        && retryRow.partial_compaction_schema === "ccm-worker-context-metadata-partial-compaction-v1"
+        && retryRow.partial_compaction_category === "worker_context_metadata"
+        && Array.isArray(retryRow.partial_compaction_categories)
+        && retryRow.partial_compaction_categories.includes("contract_injections")
+        && Number(retryRow.original_task_chars || 0) === Number(retryRow.compacted_task_chars || 0)
+        && retryRow.dispatch_ready === true,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      retry: {
+        partial_compact: retryRow.partial_compact === true,
+        partial_compaction_schema: retryRow.partial_compaction_schema || "",
+        partial_compaction_category: retryRow.partial_compaction_category || "",
+        partial_compaction_categories: retryRow.partial_compaction_categories || [],
+        partial_omitted_chars: retryRow.partial_omitted_chars || 0,
+      },
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPartialCompactPolicySelfTest() {
+  const groupId = `memory-center-worker-context-partial-compact-policy-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  try {
+    const policy = {
+      schema: "ccm-worker-context-partial-compact-policy-v1",
+      method: "usage_top_category_pressure",
+      source: "worker_context_usage.top_categories",
+      supported_categories: ["constraints_and_documents", "contract_injections", "dependencies"],
+      selected_categories: ["constraints_and_documents"],
+      skipped_categories: ["contract_injections", "dependencies"],
+      selected_count: 1,
+      max_categories: 1,
+      min_category_tokens: 1,
+      candidates: [{ category: "constraints_and_documents", tokens: 5400, chars: 16200, rank: 1 }],
+      fallback_used: false,
+      reason: "Selected constraints_and_documents from WorkerContextPacket context_usage top categories before task compaction.",
+      generated_at: "2026-07-09T14:00:00.000Z",
+    };
+    const partialCompaction = {
+      schema: "ccm-worker-context-metadata-partial-compaction-v1",
+      method: "top_category_metadata_field_compaction",
+      category: "worker_context_metadata",
+      categories: ["constraints_and_documents"],
+      partial_compact_policy: policy,
+      selected_from_top_categories: ["constraints_and_documents"],
+      skipped_categories: ["contract_injections", "dependencies"],
+      status: "compacted",
+      original_metadata_hash: "original-policy-metadata-hash-selftest",
+      compacted_metadata_hash: "compacted-policy-metadata-hash-selftest",
+      original_metadata_chars: 22000,
+      compacted_metadata_chars: 900,
+      omitted_chars: 21100,
+      original_counts: { constraints: 12, document_findings: 16, dependencies: 1, contract_injections: 1 },
+      compacted_counts: { constraints: 4, document_findings: 4, dependencies: 1, contract_injections: 1 },
+      max_items: 4,
+      max_string_chars: 150,
+      preserved_fields: [
+        "constraints",
+        "documentFindings",
+        "dependency.project",
+        "dependency.reason",
+        "dependency.dependency_id",
+        "contract.injection_id",
+        "contract.source_agent",
+        "contract.target_agent",
+        "contract.endpoint",
+        "contract.required_receipt_reference",
+      ],
+      preserves_receipt_reference: true,
+      preserves_real_task_suppression: true,
+      generated_at: "2026-07-09T14:00:00.000Z",
+    };
+    const retry = {
+      schema: "ccm-worker-context-compaction-retry-v1",
+      retry_id: "worker-context-retry:partial-compact-policy-selftest",
+      method: "metadata_partial_compact",
+      status: "recovered",
+      from_packet_id: "wcp-policy-before-selftest",
+      retry_packet_id: "wcp-policy-after-selftest",
+      from_usage_status: "over_budget",
+      from_total_tokens: 7600,
+      from_max_tokens: 3600,
+      from_free_tokens: -4120,
+      retry_usage_status: "warn",
+      retry_total_tokens: 2200,
+      retry_max_tokens: 3600,
+      retry_free_tokens: 1280,
+      memory_first: false,
+      partial_compact: true,
+      partial_compact_policy: policy,
+      partial_compaction: partialCompaction,
+      partial_compactions: [partialCompaction],
+      original_task_hash: "same-task-policy-selftest",
+      compacted_task_hash: "same-task-policy-selftest",
+      original_task_chars: 460,
+      compacted_task_chars: 460,
+      omitted_chars: 21100,
+      critical_line_count: 0,
+      preserved_receipt_contract: true,
+      recovered_dispatch_ready: true,
+      generated_at: "2026-07-09T14:00:00.000Z",
+    };
+    const usage = {
+      schema: "ccm-worker-context-usage-v1",
+      version: 1,
+      packet_id: "wcp-policy-after-selftest",
+      project: "frontend",
+      max_tokens: 3600,
+      autocompact_buffer_tokens: 120,
+      total_tokens: 2200,
+      total_chars: 6600,
+      free_tokens: 1280,
+      pressure: 61.1,
+      status: "warn",
+      compact_recommended: false,
+      categories: [
+        { id: "task_goal", name: "Task and goal", tokens: 153, chars: 460, required: true, included: true },
+        { id: "constraints_and_documents", name: "Constraints and document findings", tokens: 300, chars: 900, included: true },
+        { id: "contract_injections", name: "Contract injections", tokens: 40, chars: 120, included: true },
+        { id: "dependencies", name: "Dependencies", tokens: 30, chars: 90, included: true },
+        { id: "context_compaction_retry", name: "Context compaction retry", tokens: 520, chars: 1560, required: true, included: true },
+        { id: "free_space", name: "Free space", tokens: 1280, chars: 0, source: "budget", included: true },
+        { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 120, chars: 0, source: "budget", required: true, included: true },
+      ],
+      top_categories: [
+        { id: "context_compaction_retry", name: "Context compaction retry", tokens: 520, chars: 1560 },
+        { id: "constraints_and_documents", name: "Constraints and document findings", tokens: 300, chars: 900 },
+      ],
+    };
+    const gate = {
+      schema: "ccm-worker-context-pre-dispatch-gate-v1",
+      gate_id: "worker-context-pre-dispatch:partial-compact-policy-selftest",
+      assignment_id: "assignment-partial-compact-policy-selftest",
+      dispatch_key: "dispatch-partial-compact-policy-selftest",
+      project: "frontend",
+      worker_context_packet_id: "wcp-policy-after-selftest",
+      usage_status: "warn",
+      pressure_status: "warn",
+      dispatch_ready: true,
+      dispatchReady: true,
+      blocked: false,
+      context_compaction_retry: retry,
+      auto_retry_status: "recovered",
+      next_step: "dispatch_child_agent",
+      total_tokens: 2200,
+      max_tokens: 3600,
+      free_tokens: 1280,
+      pressure: 61.1,
+      autocompact_buffer_tokens: 120,
+      generated_at: "2026-07-09T14:00:00.000Z",
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T14:00:00.000Z",
+      bindingCount: 1,
+      workerContextPacketBindingCount: 1,
+      preDispatchGateCount: 1,
+      entries: [{
+        schema: "ccm-worker-context-packet-assignment-binding-v1",
+        binding_id: "worker-context-packet-assignment:partial-compact-policy-selftest",
+        groupId,
+        source: "worker_context_packet_pre_dispatch_gate",
+        project: "frontend",
+        assignment_id: "assignment-partial-compact-policy-selftest",
+        dispatch_key: "dispatch-partial-compact-policy-selftest",
+        worker_context_packet_id: "wcp-policy-after-selftest",
+        worker_context_packet_context_usage: usage,
+        worker_context_packet_compaction_retry: retry,
+        worker_context_packet_partial_compaction: partialCompaction,
+        worker_context_packet_partial_compact_policy: policy,
+        worker_context_pre_dispatch_gate: gate,
+        dispatch_ready: true,
+        dispatchReady: true,
+        should_create_real_task: true,
+        at: "2026-07-09T14:00:00.000Z",
+      }],
+    });
+    const report = buildWorkerContextPacketCompactionRetryReport({ groupIds: [groupId] });
+    const quality = evaluateWorkerContextPacketCompactionRetry({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_compaction_retry"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "worker_context_packet_compaction_retry") || {};
+    const retryRow = (report.groups?.[0]?.retries || [])[0] || {};
+    const checks = {
+      reportCountsPartialCompactPolicy: report.overall?.status === "ok"
+        && Number(report.overall?.partialCompactPolicyCount || 0) === 1
+        && Number(report.overall?.partialCompactCount || 0) === 1
+        && Number(report.overall?.metadataGapCount || 0) === 0,
+      retryRowExposesPolicy: retryRow.partial_compact_policy?.schema === "ccm-worker-context-partial-compact-policy-v1"
+        && retryRow.partial_compact_policy?.valid === true
+        && retryRow.partial_compact_policy?.selected_categories?.[0] === "constraints_and_documents"
+        && retryRow.partial_compact_policy?.skipped_categories?.includes("contract_injections"),
+      qualityCheckCoversPolicy: quality.id === "worker_context_packet_compaction_retry"
+        && quality.status === "ok"
+        && qualityCheck.status === "ok",
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      retry: {
+        partial_compact_policy: retryRow.partial_compact_policy || null,
+        partial_compaction_categories: retryRow.partial_compaction_categories || [],
+      },
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketCompactOutcomeLedgerSelfTest() {
+  const groupId = `memory-center-worker-context-compact-outcome-ledger-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const outcomeFile = getGroupWorkerContextCompactOutcomeLedgerFile(groupId);
+  try {
+    const policy = {
+      schema: "ccm-worker-context-partial-compact-policy-v1",
+      method: "usage_top_category_pressure",
+      source: "worker_context_usage.top_categories",
+      supported_categories: ["constraints_and_documents", "contract_injections", "dependencies"],
+      selected_categories: ["constraints_and_documents"],
+      skipped_categories: ["contract_injections", "dependencies"],
+      selected_count: 1,
+      max_categories: 1,
+      min_category_tokens: 1,
+      candidates: [{ category: "constraints_and_documents", tokens: 5400, chars: 16200, rank: 1 }],
+      fallback_used: false,
+      generated_at: "2026-07-09T14:30:00.000Z",
+    };
+    const partialCompaction = {
+      schema: "ccm-worker-context-metadata-partial-compaction-v1",
+      method: "top_category_metadata_field_compaction",
+      category: "worker_context_metadata",
+      categories: ["constraints_and_documents"],
+      partial_compact_policy: policy,
+      selected_from_top_categories: ["constraints_and_documents"],
+      skipped_categories: ["contract_injections", "dependencies"],
+      status: "compacted",
+      original_metadata_hash: "original-outcome-metadata-hash-selftest",
+      compacted_metadata_hash: "compacted-outcome-metadata-hash-selftest",
+      original_metadata_chars: 22000,
+      compacted_metadata_chars: 900,
+      omitted_chars: 21100,
+      preserved_fields: [
+        "constraints",
+        "documentFindings",
+        "dependency.project",
+        "contract.injection_id",
+      ],
+      preserves_receipt_reference: true,
+      preserves_real_task_suppression: true,
+    };
+    const retry = {
+      schema: "ccm-worker-context-compaction-retry-v1",
+      retry_id: "worker-context-retry:compact-outcome-ledger-selftest",
+      method: "metadata_partial_compact",
+      status: "recovered",
+      from_packet_id: "wcp-outcome-before-selftest",
+      retry_packet_id: "wcp-outcome-after-selftest",
+      from_usage_status: "over_budget",
+      from_total_tokens: 7600,
+      from_max_tokens: 3800,
+      from_free_tokens: -3920,
+      retry_usage_status: "warn",
+      retry_total_tokens: 2600,
+      retry_max_tokens: 3800,
+      retry_free_tokens: 1080,
+      compact_hook_run_id: "wcch-outcome-ledger-selftest",
+      memory_first: false,
+      partial_compact: true,
+      partial_compact_policy: policy,
+      partial_compaction: partialCompaction,
+      partial_compactions: [partialCompaction],
+      original_task_hash: "same-task-outcome-selftest",
+      compacted_task_hash: "same-task-outcome-selftest",
+      original_task_chars: 460,
+      compacted_task_chars: 460,
+      omitted_chars: 21100,
+      critical_line_count: 0,
+      preserved_receipt_contract: true,
+      recovered_dispatch_ready: true,
+      generated_at: "2026-07-09T14:30:00.000Z",
+    };
+    const usage = {
+      schema: "ccm-worker-context-usage-v1",
+      packet_id: "wcp-outcome-after-selftest",
+      project: "frontend",
+      max_tokens: 3800,
+      total_tokens: 2600,
+      free_tokens: 1080,
+      status: "warn",
+    };
+    const gate = {
+      schema: "ccm-worker-context-pre-dispatch-gate-v1",
+      assignment_id: "assignment-compact-outcome-ledger-selftest",
+      dispatch_key: "dispatch-compact-outcome-ledger-selftest",
+      project: "frontend",
+      worker_context_packet_id: "wcp-outcome-after-selftest",
+      dispatch_ready: true,
+      dispatchReady: true,
+      context_compaction_retry: retry,
+      auto_retry_status: "recovered",
+      total_tokens: 2600,
+      max_tokens: 3800,
+      free_tokens: 1080,
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T14:30:00.000Z",
+      bindingCount: 1,
+      workerContextPacketBindingCount: 1,
+      entries: [{
+        schema: "ccm-worker-context-packet-assignment-binding-v1",
+        binding_id: "worker-context-packet-assignment:compact-outcome-ledger-selftest",
+        groupId,
+        source: "worker_context_packet_pre_dispatch_gate",
+        project: "frontend",
+        assignment_id: "assignment-compact-outcome-ledger-selftest",
+        dispatch_key: "dispatch-compact-outcome-ledger-selftest",
+        worker_context_packet_id: "wcp-outcome-after-selftest",
+        worker_context_packet_context_usage: usage,
+        worker_context_packet_compaction_retry: retry,
+        worker_context_packet_partial_compaction: partialCompaction,
+        worker_context_packet_partial_compact_policy: policy,
+        worker_context_packet_compact_hook_run_id: "wcch-outcome-ledger-selftest",
+        worker_context_pre_dispatch_gate: gate,
+        dispatch_ready: true,
+        dispatchReady: true,
+        should_create_real_task: true,
+        at: "2026-07-09T14:30:00.000Z",
+      }],
+    });
+    writeJsonAtomic(outcomeFile, {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId,
+      file: outcomeFile,
+      updatedAt: "2026-07-09T14:30:01.000Z",
+      entries: [{
+        schema: "ccm-worker-context-compact-outcome-entry-v1",
+        outcome_id: "wcco-outcome-ledger-selftest",
+        group_id: groupId,
+        assignment_id: "assignment-compact-outcome-ledger-selftest",
+        dispatch_key: "dispatch-compact-outcome-ledger-selftest",
+        project: "frontend",
+        hook_run_id: "wcch-outcome-ledger-selftest",
+        retry_id: "worker-context-retry:compact-outcome-ledger-selftest",
+        method: "metadata_partial_compact",
+        status: "recovered",
+        dispatch_ready: true,
+        from_packet_id: "wcp-outcome-before-selftest",
+        retry_packet_id: "wcp-outcome-after-selftest",
+        initial_usage_status: "over_budget",
+        final_usage_status: "warn",
+        from_total_tokens: 7600,
+        retry_total_tokens: 2600,
+        from_free_tokens: -3920,
+        retry_free_tokens: 1080,
+        token_delta: 5000,
+        free_token_delta: 5000,
+        memory_first: false,
+        partial_compact: true,
+        task_compacted: false,
+        task_hash_unchanged: true,
+        partial_compaction_categories: ["constraints_and_documents"],
+        partial_compact_policy: policy,
+        omitted_chars: 21100,
+        partial_omitted_chars: 21100,
+        original_task_hash: "same-task-outcome-selftest",
+        compacted_task_hash: "same-task-outcome-selftest",
+        distillation_candidate: true,
+        at: "2026-07-09T14:30:01.000Z",
+      }],
+    });
+    const report = buildWorkerContextPacketCompactOutcomeLedgerReport({ groupIds: [groupId] });
+    const quality = evaluateWorkerContextPacketCompactOutcomeLedger({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_compact_outcome_ledger"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "worker_context_packet_compact_outcome_ledger") || {};
+    const outcomeRow = (report.groups?.[0]?.outcomes || [])[0] || {};
+    const checks = {
+      reportAcceptsOutcomeLedger: report.overall?.status === "ok"
+        && Number(report.overall?.outcomeCount || 0) === 1
+        && Number(report.overall?.partialCompactPolicyOutcomeCount || 0) === 1
+        && Number(report.overall?.taskPreservedOutcomeCount || 0) === 1
+        && Number(report.overall?.metadataGapCount || 0) === 0,
+      qualityCheckCoversOutcomeLedger: quality.id === "worker_context_packet_compact_outcome_ledger"
+        && quality.status === "ok"
+        && Number(quality.checked || 0) === 1
+        && Number(quality.passed || 0) === 1
+        && qualityCheck.status === "ok",
+      outcomeRowCarriesStrategySample: outcomeRow.outcome_status === "recovered"
+        && outcomeRow.dispatch_ready === true
+        && outcomeRow.selected_categories?.[0] === "constraints_and_documents"
+        && Number(outcomeRow.token_delta || 0) === 5000
+        && outcomeRow.task_hash_unchanged === true,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      outcome: {
+        outcome_status: outcomeRow.outcome_status || "",
+        selected_categories: outcomeRow.selected_categories || [],
+        token_delta: outcomeRow.token_delta || 0,
+        task_hash_unchanged: outcomeRow.task_hash_unchanged === true,
+      },
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, outcomeFile, `${outcomeFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketCompactStrategyMemorySelfTest() {
+  const groupId = `memory-center-worker-context-compact-strategy-memory-selftest-${process.pid}-${Date.now()}`;
+  const outcomeFile = getGroupWorkerContextCompactOutcomeLedgerFile(groupId);
+  const strategyFile = getGroupWorkerContextCompactStrategyMemoryFile(groupId);
+  try {
+    const dependencyPolicy = {
+      schema: "ccm-worker-context-partial-compact-policy-v1",
+      method: "usage_top_category_pressure",
+      selected_categories: ["dependencies"],
+      skipped_categories: ["constraints_and_documents"],
+      max_categories: 1,
+      fallback_used: false,
+    };
+    const constraintsPolicy = {
+      schema: "ccm-worker-context-partial-compact-policy-v1",
+      method: "usage_top_category_pressure",
+      selected_categories: ["constraints_and_documents"],
+      skipped_categories: ["dependencies"],
+      max_categories: 1,
+      fallback_used: false,
+    };
+    writeJsonAtomic(outcomeFile, {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId,
+      file: outcomeFile,
+      updatedAt: "2026-07-09T15:20:02.000Z",
+      entries: [
+        {
+          schema: "ccm-worker-context-compact-outcome-entry-v1",
+          outcome_id: "wcco-center-strategy-dependency",
+          group_id: groupId,
+          assignment_id: "assignment-center-strategy-dependency",
+          method: "metadata_partial_compact",
+          status: "recovered",
+          dispatch_ready: true,
+          from_total_tokens: 7800,
+          retry_total_tokens: 2600,
+          from_free_tokens: -4100,
+          retry_free_tokens: 1100,
+          token_delta: 5200,
+          free_token_delta: 5200,
+          partial_compact: true,
+          task_compacted: false,
+          task_hash_unchanged: true,
+          partial_compaction_categories: ["dependencies"],
+          partial_compact_policy: dependencyPolicy,
+          partial_omitted_chars: 19000,
+          distillation_candidate: true,
+          at: "2026-07-09T15:20:01.000Z",
+        },
+        {
+          schema: "ccm-worker-context-compact-outcome-entry-v1",
+          outcome_id: "wcco-center-strategy-constraints",
+          group_id: groupId,
+          assignment_id: "assignment-center-strategy-constraints",
+          method: "metadata_partial_compact",
+          status: "blocked",
+          dispatch_ready: false,
+          from_total_tokens: 7600,
+          retry_total_tokens: 7500,
+          from_free_tokens: -3900,
+          retry_free_tokens: -3800,
+          token_delta: 100,
+          free_token_delta: 100,
+          partial_compact: true,
+          task_compacted: false,
+          task_hash_unchanged: true,
+          partial_compaction_categories: ["constraints_and_documents"],
+          partial_compact_policy: constraintsPolicy,
+          partial_omitted_chars: 700,
+          distillation_candidate: true,
+          at: "2026-07-09T15:20:02.000Z",
+        },
+      ],
+    });
+    const report = buildWorkerContextPacketCompactStrategyMemoryReport({ groupIds: [groupId], generatedAt: "2026-07-09T15:20:03.000Z" });
+    const strategy = readGroupWorkerContextCompactStrategyMemory(groupId);
+    const quality = evaluateWorkerContextPacketCompactStrategyMemory({ groupIds: [groupId], generatedAt: "2026-07-09T15:20:03.000Z" });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_compact_strategy_memory"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "worker_context_packet_compact_strategy_memory") || {};
+    const groupRow = report.groups?.[0] || {};
+    const dependencyStats = (strategy.categories || []).find((item: any) => item.category === "dependencies") || {};
+    const checks = {
+      reportDistillsStrategyMemory: report.overall?.status === "ok"
+        && Number(report.overall?.strategyMemoryCount || 0) === 1
+        && Number(report.overall?.distilledOutcomeCount || 0) === 2
+        && Number(report.overall?.metadataGapCount || 0) === 0,
+      strategySidecarCreated: fs.existsSync(strategyFile)
+        && strategy.schema === "ccm-worker-context-compact-strategy-memory-v1"
+        && strategy.source_ledger_file === outcomeFile,
+      preferredCategoryFromRecovery: strategy.preferred_categories?.[0] === "dependencies"
+        && Number(dependencyStats.avg_free_token_delta || 0) === 5200,
+      qualityCheckCoversStrategyMemory: quality.id === "worker_context_packet_compact_strategy_memory"
+        && quality.status === "ok"
+        && qualityCheck.status === "ok",
+      reportRowCarriesStrategy: groupRow.preferredCategories?.[0] === "dependencies"
+        && Number(groupRow.sampleCount || 0) === 2,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      strategy: {
+        preferred_categories: strategy.preferred_categories || [],
+        sample_count: strategy.sample_count || 0,
+        source_ledger_file: strategy.source_ledger_file || "",
+      },
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [outcomeFile, `${outcomeFile}.bak`, strategyFile, `${strategyFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPtlEmergencyDowngradeSelfTest() {
+  const groupId = `memory-center-worker-context-ptl-emergency-downgrade-selftest-${process.pid}-${Date.now()}`;
+  const outcomeFile = getGroupWorkerContextCompactOutcomeLedgerFile(groupId);
+  const strategyFile = getGroupWorkerContextCompactStrategyMemoryFile(groupId);
+  const ptlFile = getGroupWorkerContextPtlEmergencyHintFile(groupId);
+  try {
+    const policy = {
+      schema: "ccm-worker-context-partial-compact-policy-v1",
+      method: "usage_top_category_pressure",
+      selected_categories: ["constraints_and_documents"],
+      skipped_categories: ["dependencies"],
+      max_categories: 1,
+      fallback_used: false,
+    };
+    writeJsonAtomic(outcomeFile, {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId,
+      file: outcomeFile,
+      updatedAt: "2026-07-09T16:30:03.000Z",
+      entries: [0, 1, 2].map((index: number) => ({
+        schema: "ccm-worker-context-compact-outcome-entry-v1",
+        outcome_id: `wcco-center-ptl-blocked-${index}`,
+        group_id: groupId,
+        assignment_id: `assignment-center-ptl-blocked-${index}`,
+        method: "metadata_partial_compact_then_deterministic_head_tail_critical_lines",
+        status: "blocked",
+        dispatch_ready: false,
+        from_total_tokens: 8800 + index,
+        retry_total_tokens: 7600 + index,
+        from_free_tokens: -5200,
+        retry_free_tokens: -4000,
+        token_delta: 1200,
+        free_token_delta: 1200,
+        partial_compact: true,
+        task_compacted: index === 2,
+        task_hash_unchanged: index !== 2,
+        partial_compaction_categories: ["constraints_and_documents"],
+        partial_compact_policy: policy,
+        partial_omitted_chars: 1500,
+        distillation_candidate: true,
+        at: `2026-07-09T16:30:0${index}.000Z`,
+      })),
+    });
+    const report = buildWorkerContextPacketPtlEmergencyDowngradeReport({ groupIds: [groupId], generatedAt: "2026-07-09T16:30:04.000Z" });
+    const hint = readGroupWorkerContextPtlEmergencyHint(groupId);
+    const quality = evaluateWorkerContextPacketPtlEmergencyDowngrade({ groupIds: [groupId], generatedAt: "2026-07-09T16:30:04.000Z" });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_ptl_emergency_downgrade"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "worker_context_packet_ptl_emergency_downgrade") || {};
+    const groupRow = report.groups?.[0] || {};
+    const checks = {
+      reportEngagesPtlEmergency: report.overall?.status === "ok"
+        && Number(report.overall?.engagedCount || 0) === 1
+        && Number(report.overall?.criticalCount || 0) === 1
+        && Number(report.overall?.blockedOutcomeCount || 0) === 3,
+      hintSidecarCreated: fs.existsSync(ptlFile)
+        && hint.schema === "ccm-worker-context-ptl-emergency-hint-v1"
+        && hint.engaged === true
+        && hint.emergency_level === "critical",
+      hintCarriesDowngradeBudgets: Number(hint.recommended_retry_options?.maxTaskChars || 0) === 1400
+        && Number(hint.recommended_retry_options?.metadata?.maxStringChars || 0) === 100,
+      qualityCheckCoversPtlEmergency: quality.id === "worker_context_packet_ptl_emergency_downgrade"
+        && quality.status === "ok"
+        && qualityCheck.status === "ok",
+      reportRowCarriesPtl: groupRow.engaged === true
+        && groupRow.emergencyLevel === "critical"
+        && Number(groupRow.taskCompactedBlockedCount || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      hint: {
+        engaged: hint.engaged,
+        emergency_level: hint.emergency_level,
+        blocked_outcome_count: hint.blocked_outcome_count,
+        maxTaskChars: hint.recommended_retry_options?.maxTaskChars || 0,
+      },
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [outcomeFile, `${outcomeFile}.bak`, strategyFile, `${strategyFile}.bak`, ptlFile, `${ptlFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketIgnoreMemoryPolicySelfTest() {
+  const groupId = `memory-center-worker-context-ignore-memory-policy-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  try {
+    const memoryPolicy = {
+      schema: "ccm-worker-context-memory-policy-v1",
+      ignored: true,
+      use: "must_not_use_group_memory",
+      reason: "user_requested_ignore_memory",
+      priority: "user_ignore_memory_request_over_platform_memory",
+      boundary: "current_worker_context_packet",
+      receipt_required: true,
+    };
+    const acceptance = {
+      ack_required_before_implementation: true,
+      receipt_required: true,
+      actual_diff_required: true,
+      verification_required: true,
+      memory_ignored_receipt_required: true,
+      contract_injection_receipt_required: false,
+      replay_repair_dispatch_brief_receipt_required: false,
+    };
+    const memoryProof = {
+      schema: "ccm-worker-context-memory-reinjection-proof-v1",
+      packet_id: "wcp-ignore-memory-policy-selftest",
+      project: "frontend",
+      memory_present: false,
+      memory_ignored: true,
+      memory_policy_reason: "user_requested_ignore_memory",
+      rendered_memory_present: false,
+      source_schema: "",
+      group_id: groupId,
+      target_project: "frontend",
+      packet_memory_hash: "",
+      packet_memory_chars: 0,
+      rendered_memory_hash: "",
+      rendered_memory_chars: 0,
+      memory_first: false,
+      status: "ignored_by_policy",
+    };
+    const usage = {
+      schema: "ccm-worker-context-usage-v1",
+      version: 1,
+      packet_id: "wcp-ignore-memory-policy-selftest",
+      project: "frontend",
+      task_id: "ignore-memory-policy-task",
+      model_context_policy: "cc-style-api-view-after-memory-render",
+      max_tokens: 4000,
+      reserved_output_tokens: 120,
+      autocompact_buffer_tokens: 300,
+      total_tokens: 820,
+      total_chars: 2460,
+      free_tokens: 2880,
+      pressure: 20.5,
+      status: "ok",
+      compact_recommended: false,
+      categories: [
+        { id: "task_goal", name: "Task and goal", tokens: 120, chars: 360, required: true, included: true },
+        { id: "memory_policy", name: "Memory policy", tokens: 160, chars: 480, source: "memory-policy", required: true, included: true },
+        { id: "memory_reinjection_proof", name: "Memory reinjection proof", tokens: 100, chars: 300, required: true, included: true },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 140, chars: 420, required: true, included: true },
+        { id: "free_space", name: "Free space", tokens: 2880, chars: 0, source: "budget", included: true },
+        { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 300, chars: 0, source: "budget", required: true, included: true },
+      ],
+      top_categories: [
+        { id: "memory_policy", name: "Memory policy", tokens: 160, chars: 480 },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 140, chars: 420 },
+      ],
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T17:10:00.000Z",
+      bindingCount: 1,
+      nativeBindingCount: 0,
+      workerContextPacketBindingCount: 1,
+      preDispatchGateCount: 1,
+      blockedPreDispatchGateCount: 0,
+      entries: [{
+        schema: "ccm-worker-context-packet-assignment-binding-v1",
+        binding_id: "worker-context-packet-assignment:ignore-memory-policy-selftest",
+        groupId,
+        source: "worker_context_packet_pre_dispatch_gate",
+        project: "frontend",
+        assignment_id: "assignment-ignore-memory-policy-selftest",
+        dispatch_key: "dispatch-ignore-memory-policy-selftest",
+        task_fingerprint: "ignore-memory-policy-selftest",
+        worker_context_packet_id: "wcp-ignore-memory-policy-selftest",
+        worker_context_packet_context_usage: usage,
+        worker_context_packet_memory_policy: memoryPolicy,
+        worker_context_packet_acceptance: acceptance,
+        worker_context_packet_memory_reinjection_proof: memoryProof,
+        worker_context_pre_dispatch_gate: {
+          schema: "ccm-worker-context-pre-dispatch-gate-v1",
+          gate_id: "worker-context-pre-dispatch:ignore-memory-policy-selftest",
+          assignment_id: "assignment-ignore-memory-policy-selftest",
+          dispatch_key: "dispatch-ignore-memory-policy-selftest",
+          project: "frontend",
+          worker_context_packet_id: "wcp-ignore-memory-policy-selftest",
+          usage_status: "ok",
+          pressure_status: "ok",
+          dispatch_ready: true,
+          dispatchReady: true,
+          blocked: false,
+          compact_recommended: false,
+          must_repair_before_dispatch: false,
+          next_step: "dispatch_child_agent",
+          total_tokens: 820,
+          max_tokens: 4000,
+          free_tokens: 2880,
+          pressure: 20.5,
+          autocompact_buffer_tokens: 300,
+          generated_at: "2026-07-09T17:10:00.000Z",
+        },
+        worker_context_packet_render_probe: {
+          packet_id: "wcp-ignore-memory-policy-selftest",
+          rendered_flags: {
+            has_context_usage_budget: true,
+            has_worker_context_packet: true,
+            has_platform_memory: false,
+            has_memory_policy: true,
+            has_memory_ignored_policy: true,
+            has_memory_reinjection_proof: true,
+            has_memory_compaction_hash: false,
+            has_memory_context_compact_marker: false,
+            has_partial_compaction: false,
+          },
+          rendered_excerpt: "WorkerContextPacket: wcp-ignore-memory-policy-selftest\nMemory policy：ignored；reason=user_requested_ignore_memory；use=must_not_use_group_memory\nCCM_AGENT_RECEIPT.memoryIgnored must be present\nMemory reinjection proof：ignored_by_policy",
+        },
+        dispatch_ready: true,
+        dispatchReady: true,
+        should_create_real_task: true,
+        at: "2026-07-09T17:10:00.000Z",
+      }],
+    });
+    const report = buildWorkerContextPacketIgnoreMemoryPolicyReport({ groupIds: [groupId] });
+    const quality = evaluateWorkerContextPacketIgnoreMemoryPolicy({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_ignore_memory_policy"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const proofReport = buildWorkerContextPacketMemoryReinjectionProofReport({ groupIds: [groupId] });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "worker_context_packet_ignore_memory_policy") || {};
+    const policyRow = (report.groups?.[0]?.policies || [])[0] || {};
+    const checks = {
+      reportCoversIgnorePolicy: report.overall?.status === "ok"
+        && Number(report.overall?.ignoredPolicyBindingCount || 0) === 1
+        && Number(report.overall?.validIgnoredPolicyCount || 0) === 1
+        && Number(report.overall?.metadataGapCount || 0) === 0,
+      reportRequiresReceiptAndProof: Number(report.overall?.receiptRequiredCount || 0) === 1
+        && Number(report.overall?.ignoredProofCount || 0) === 1
+        && Number(report.overall?.usagePolicyCategoryCount || 0) === 1
+        && Number(report.overall?.renderedIgnoredPolicyCount || 0) === 1,
+      qualityCheckExposesIgnorePolicy: quality.id === "worker_context_packet_ignore_memory_policy"
+        && quality.status === "ok"
+        && qualityCheck.status === "ok",
+      reinjectionProofAcceptsIgnoredByPolicy: proofReport.overall?.status === "ok"
+        && Number(proofReport.overall?.ignoredByPolicyCount || 0) === 1
+        && Number(proofReport.overall?.metadataGapCount || 0) === 0,
+      policyRowCarriesReason: policyRow.ignored === true
+        && policyRow.use === "must_not_use_group_memory"
+        && policyRow.reason === "user_requested_ignore_memory"
+        && policyRow.receipt_required === true,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      proofReport: proofReport.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketIgnoreMemoryReceiptComplianceSelfTest() {
+  const groupId = `memory-center-worker-context-ignore-memory-receipt-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  try {
+    const memoryPolicy = {
+      schema: "ccm-worker-context-memory-policy-v1",
+      ignored: true,
+      use: "must_not_use_group_memory",
+      reason: "user_requested_ignore_memory",
+      priority: "user_ignore_memory_request_over_platform_memory",
+      boundary: "current_worker_context_packet",
+      receipt_required: true,
+    };
+    const acceptance = {
+      ack_required_before_implementation: true,
+      receipt_required: true,
+      actual_diff_required: true,
+      verification_required: true,
+      memory_ignored_receipt_required: true,
+      contract_injection_receipt_required: false,
+      replay_repair_dispatch_brief_receipt_required: false,
+    };
+    const proof = {
+      schema: "ccm-worker-context-memory-reinjection-proof-v1",
+      packet_id: "wcp-ignore-memory-receipt-selftest",
+      project: "frontend",
+      memory_present: false,
+      memory_ignored: true,
+      memory_policy_reason: "user_requested_ignore_memory",
+      rendered_memory_present: false,
+      group_id: groupId,
+      target_project: "frontend",
+      packet_memory_hash: "",
+      packet_memory_chars: 0,
+      rendered_memory_hash: "",
+      rendered_memory_chars: 0,
+      status: "ignored_by_policy",
+    };
+    const usage = {
+      schema: "ccm-worker-context-usage-v1",
+      version: 1,
+      packet_id: "wcp-ignore-memory-receipt-selftest",
+      project: "frontend",
+      task_id: "ignore-memory-receipt-task",
+      max_tokens: 4000,
+      autocompact_buffer_tokens: 300,
+      total_tokens: 760,
+      free_tokens: 2940,
+      pressure: 19,
+      status: "ok",
+      categories: [
+        { id: "task_goal", tokens: 120, chars: 360, required: true, included: true },
+        { id: "memory_policy", tokens: 160, chars: 480, source: "memory-policy", required: true, included: true },
+        { id: "memory_reinjection_proof", tokens: 100, chars: 300, required: true, included: true },
+        { id: "verification_and_acceptance", tokens: 140, chars: 420, required: true, included: true },
+        { id: "free_space", tokens: 2940, chars: 0, source: "budget", included: true },
+        { id: "autocompact_buffer", tokens: 300, chars: 0, source: "budget", required: true, included: true },
+      ],
+    };
+    const baseEntry: any = {
+      schema: "ccm-worker-context-packet-assignment-binding-v1",
+      binding_id: "worker-context-packet-assignment:ignore-memory-receipt-selftest",
+      groupId,
+      source: "worker_context_packet_pre_dispatch_gate",
+      project: "frontend",
+      assignment_id: "assignment-ignore-memory-receipt-selftest",
+      dispatch_key: "dispatch-ignore-memory-receipt-selftest",
+      task_fingerprint: "ignore-memory-receipt-selftest",
+      worker_context_packet_id: "wcp-ignore-memory-receipt-selftest",
+      worker_context_packet_context_usage: usage,
+      worker_context_packet_memory_policy: memoryPolicy,
+      worker_context_packet_acceptance: acceptance,
+      worker_context_packet_memory_reinjection_proof: proof,
+      worker_context_packet_render_probe: {
+        packet_id: "wcp-ignore-memory-receipt-selftest",
+        rendered_flags: {
+          has_context_usage_budget: true,
+          has_worker_context_packet: true,
+          has_memory_policy: true,
+          has_memory_ignored_policy: true,
+          has_memory_reinjection_proof: true,
+        },
+      },
+      dispatch_ready: true,
+      dispatchReady: true,
+      should_create_real_task: true,
+      at: "2026-07-09T17:40:00.000Z",
+    };
+    const writeLedger = (entry: any) => writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T17:40:00.000Z",
+      bindingCount: 1,
+      nativeBindingCount: 0,
+      workerContextPacketBindingCount: 1,
+      entries: [entry],
+    });
+    writeLedger(baseEntry);
+    const missingComplianceReport = buildWorkerContextPacketIgnoreMemoryReceiptComplianceReport({ groupIds: [groupId] });
+    const missingRepairReport = buildWorkerContextPacketIgnoreMemoryReceiptRepairWorkItemReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T17:40:01.000Z",
+    });
+    const missingRepairQuality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_ignore_memory_receipt_repair_work_items"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const missingRepairQualityCheck = (missingRepairQuality.checks || []).find((item: any) => item.id === "worker_context_packet_ignore_memory_receipt_repair_work_items") || {};
+    const missingLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const openRepairItem = (missingLedger.items || []).find((item: any) => item.source === "worker_context_ignore_memory_receipt_repair" && replayRepairWorkItemOpen(item.status)) || {};
+
+    writeLedger({
+      ...baseEntry,
+      worker_context_packet_receipt: {
+        agent: "frontend",
+        status: "done",
+        worker_context_packet_id: "wcp-ignore-memory-receipt-selftest",
+        memoryIgnored: ["user_requested_ignore_memory; must_not_use_group_memory; platform/group/typed/global memory treated as empty"],
+        memoryUsed: [],
+        summary: "只使用当前任务文本和实时检查证据。",
+      },
+      receipt_status: "done",
+    });
+    const resolvedComplianceReport = buildWorkerContextPacketIgnoreMemoryReceiptComplianceReport({ groupIds: [groupId] });
+    const resolvedRepairReport = buildWorkerContextPacketIgnoreMemoryReceiptRepairWorkItemReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T17:40:02.000Z",
+    });
+    const resolvedComplianceQuality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_ignore_memory_receipt_compliance"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const resolvedComplianceQualityCheck = (resolvedComplianceQuality.checks || []).find((item: any) => item.id === "worker_context_packet_ignore_memory_receipt_compliance") || {};
+    const resolvedLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const completedRepairItem = (resolvedLedger.items || []).find((item: any) => item.source === "worker_context_ignore_memory_receipt_repair") || {};
+    const checks = {
+      missingComplianceDetectsGap: missingComplianceReport.overall?.status === "fail"
+        && (Number(missingComplianceReport.overall?.missingReceiptCount || 0) + Number(missingComplianceReport.overall?.missingMemoryIgnoredCount || 0)) >= 1
+        && Number(missingComplianceReport.overall?.metadataGapCount || 0) === 1,
+      missingGapCreatesRepairItem: missingRepairReport.overall?.status === "ok"
+        && Number(missingRepairReport.overall?.requiredActionCount || 0) === 1
+        && Number(missingRepairReport.overall?.currentOpenItemCount || 0) === 1
+        && openRepairItem.source === "worker_context_ignore_memory_receipt_repair"
+        && openRepairItem.component === "worker_context_ignore_memory_receipt_contract",
+      repairQualityCheckCoversGap: missingRepairQualityCheck.status === "ok"
+        && Number(missingRepairQualityCheck.checked || 0) === 1
+        && Number(missingRepairQualityCheck.passed || 0) === 1,
+      resolvedCompliancePasses: resolvedComplianceReport.overall?.status === "ok"
+        && Number(resolvedComplianceReport.overall?.compliantReceiptCount || 0) === 1
+        && Number(resolvedComplianceReport.overall?.metadataGapCount || 0) === 0
+        && resolvedComplianceQualityCheck.status === "ok",
+      resolvedRepairItemClosed: resolvedRepairReport.overall?.status === "ok"
+        && Number(resolvedRepairReport.overall?.requiredActionCount || 0) === 0
+        && replayRepairWorkItemStatus(completedRepairItem.status) === "completed"
+        && completedRepairItem.resolutionReason === "worker_context_ignore_memory_receipt_compliant",
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      missingComplianceReport: missingComplianceReport.overall,
+      missingRepairReport: missingRepairReport.overall,
+      resolvedComplianceReport: resolvedComplianceReport.overall,
+      resolvedRepairReport: resolvedRepairReport.overall,
+      repairItem: {
+        id: completedRepairItem.id || openRepairItem.id || "",
+        status: completedRepairItem.status || openRepairItem.status || "",
+        source: completedRepairItem.source || openRepairItem.source || "",
+        component: completedRepairItem.component || openRepairItem.component || "",
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketIgnoreMemoryReceiptRepairDispatchSelfTest() {
+  const groupId = `memory-center-worker-context-ignore-memory-receipt-dispatch-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+  try {
+    const entry: any = {
+      schema: "ccm-worker-context-packet-assignment-binding-v1",
+      binding_id: "worker-context-packet-assignment:ignore-memory-receipt-dispatch-selftest",
+      groupId,
+      source: "worker_context_packet_pre_dispatch_gate",
+      project: "frontend",
+      assignment_id: "assignment-ignore-memory-receipt-dispatch-selftest",
+      dispatch_key: "dispatch-ignore-memory-receipt-dispatch-selftest",
+      task_fingerprint: "ignore-memory-receipt-dispatch-selftest",
+      worker_context_packet_id: "wcp-ignore-memory-receipt-dispatch-selftest",
+      worker_context_packet_memory_policy: {
+        schema: "ccm-worker-context-memory-policy-v1",
+        ignored: true,
+        use: "must_not_use_group_memory",
+        reason: "user_requested_ignore_memory",
+        priority: "user_ignore_memory_request_over_platform_memory",
+        receipt_required: true,
+      },
+      worker_context_packet_acceptance: {
+        ack_required_before_implementation: true,
+        receipt_required: true,
+        actual_diff_required: true,
+        verification_required: true,
+        memory_ignored_receipt_required: true,
+      },
+      worker_context_packet_memory_reinjection_proof: {
+        schema: "ccm-worker-context-memory-reinjection-proof-v1",
+        packet_id: "wcp-ignore-memory-receipt-dispatch-selftest",
+        project: "frontend",
+        memory_present: false,
+        memory_ignored: true,
+        memory_policy_reason: "user_requested_ignore_memory",
+        status: "ignored_by_policy",
+      },
+      worker_context_packet_render_probe: {
+        packet_id: "wcp-ignore-memory-receipt-dispatch-selftest",
+        rendered_flags: {
+          has_memory_policy: true,
+          has_memory_ignored_policy: true,
+          has_memory_reinjection_proof: true,
+        },
+      },
+      dispatch_ready: true,
+      should_create_real_task: true,
+      at: "2026-07-09T18:10:00.000Z",
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T18:10:00.000Z",
+      bindingCount: 1,
+      entries: [entry],
+    });
+    const repairReport = buildWorkerContextPacketIgnoreMemoryReceiptRepairWorkItemReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T18:10:01.000Z",
+    });
+    const candidateReport = buildWorkerContextPacketIgnoreMemoryReceiptRepairDispatchCandidateReport({
+      groupIds: [groupId],
+      repairWorkItemReport: repairReport,
+      generatedAt: "2026-07-09T18:10:02.000Z",
+    });
+    const candidateQuality = evaluateWorkerContextPacketIgnoreMemoryReceiptRepairDispatchCandidates({
+      groupIds: [groupId],
+      repairWorkItemReport: repairReport,
+      generatedAt: "2026-07-09T18:10:03.000Z",
+    });
+    const briefReport = buildWorkerContextPacketIgnoreMemoryReceiptRepairDispatchBriefReport({
+      groupIds: [groupId],
+      candidateReport,
+      generatedAt: "2026-07-09T18:10:04.000Z",
+    });
+    const briefQuality = evaluateWorkerContextPacketIgnoreMemoryReceiptRepairDispatchBriefs({
+      groupIds: [groupId],
+      candidateReport,
+      generatedAt: "2026-07-09T18:10:05.000Z",
+    });
+    const candidate = candidateReport.groups?.[0]?.candidates?.[0] || {};
+    const dispatchPlanLedger = readGroupReplayRepairDispatchPlanLedger(groupId);
+    const brief = (dispatchPlanLedger.briefs || []).find((item: any) => isWorkerContextIgnoreMemoryReceiptRepairSource(item.source)) || briefReport.groups?.[0]?.briefs?.[0] || {};
+    const workerTask = String(brief.worker_task || "");
+    const rendered = (() => {
+      try {
+        const { renderGroupMemoryContextBundle } = require("../collaboration/memory");
+        return renderGroupMemoryContextBundle({
+          schema: "ccm-group-memory-context-v1",
+          target_project: "frontend",
+          memory_policy: { use: "must_consider" },
+          group_state: { goal: "ignore-memory receipt repair dispatch selftest", currentPhase: "test" },
+          compaction: {
+            replayRepairDispatchCandidates: {
+              schema: "ccm-replay-repair-main-agent-dispatch-candidates-v1",
+              candidateCount: 1,
+              readyCount: 1,
+              dispatchMarkedCount: 0,
+              shouldCreateRealTask: false,
+              file: workItemsFile,
+              candidates: [candidate],
+            },
+          },
+        });
+      } catch (error: any) {
+        return String(error?.message || error);
+      }
+    })();
+    const checks = {
+      repairItemCreated: repairReport.overall?.status === "ok"
+        && Number(repairReport.overall?.requiredActionCount || 0) === 1
+        && Number(repairReport.overall?.currentOpenItemCount || 0) === 1,
+      repairItemBecomesDispatchCandidate: candidateReport.overall?.status === "ok"
+        && Number(candidateReport.overall?.expectedCandidateCount || 0) === 1
+        && Number(candidateReport.overall?.coveredCandidateCount || 0) === 1
+        && candidate.source === "worker_context_ignore_memory_receipt_repair"
+        && candidate.worker_context_packet_id === "wcp-ignore-memory-receipt-dispatch-selftest"
+        && /memoryIgnored/i.test(String(candidate.prompt_patch || "")),
+      candidateQualityCheckPasses: candidateQuality.id === "worker_context_packet_ignore_memory_receipt_repair_dispatch_candidates"
+        && candidateQuality.status === "ok"
+        && Number(candidateQuality.passed || 0) === 1,
+      correctedReceiptBriefCreated: briefReport.overall?.status === "ok"
+        && Number(briefReport.overall?.expectedBriefCount || 0) === 1
+        && Number(briefReport.overall?.coveredBriefCount || 0) === 1
+        && brief.source === "worker_context_ignore_memory_receipt_repair"
+        && brief.worker_context_packet_id === "wcp-ignore-memory-receipt-dispatch-selftest"
+        && /CCM_AGENT_RECEIPT/i.test(workerTask)
+        && /memoryIgnored/i.test(workerTask)
+        && /user_requested_ignore_memory|must_not_use_group_memory/i.test(workerTask),
+      briefQualityCheckPasses: briefQuality.id === "worker_context_packet_ignore_memory_receipt_repair_dispatch_briefs"
+        && briefQuality.status === "ok"
+        && Number(briefQuality.passed || 0) === 1,
+      renderedContextMentionsIgnoreMemoryCandidate: rendered.includes("Main Agent replay repair dispatch candidates")
+        && rendered.includes("wcp-ignore-memory-receipt-dispatch-selftest")
+        && rendered.includes("memoryPolicy=user_requested_ignore_memory"),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      repairReport: repairReport.overall,
+      candidateReport: candidateReport.overall,
+      briefReport: briefReport.overall,
+      candidate: {
+        work_item_id: candidate.work_item_id || "",
+        source: candidate.source || "",
+        worker_context_packet_id: candidate.worker_context_packet_id || "",
+        memory_policy_reason: candidate.worker_context_packet_memory_policy_reason || "",
+      },
+      brief: {
+        brief_id: brief.brief_id || "",
+        source: brief.source || "",
+        worker_context_packet_id: brief.worker_context_packet_id || "",
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`, dispatchPlanFile, `${dispatchPlanFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketIgnoreMemoryReceiptRepairTypedMemorySelfTest() {
+  const groupId = `memory-center-worker-context-ignore-memory-receipt-typed-memory-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  try {
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T18:40:00.000Z",
+      bindingCount: 1,
+      entries: [{
+        schema: "ccm-worker-context-packet-assignment-binding-v1",
+        binding_id: "worker-context-packet-assignment:ignore-memory-receipt-typed-memory-selftest",
+        groupId,
+        source: "worker_context_packet_pre_dispatch_gate",
+        project: "frontend",
+        assignment_id: "assignment-ignore-memory-receipt-typed-memory-selftest",
+        dispatch_key: "dispatch-ignore-memory-receipt-typed-memory-selftest",
+        task_fingerprint: "ignore-memory-receipt-typed-memory-selftest",
+        worker_context_packet_id: "wcp-ignore-memory-receipt-typed-memory-selftest",
+        worker_context_packet_memory_policy: {
+          schema: "ccm-worker-context-memory-policy-v1",
+          ignored: true,
+          use: "must_not_use_group_memory",
+          reason: "user_requested_ignore_memory",
+          receipt_required: true,
+        },
+        worker_context_packet_acceptance: {
+          receipt_required: true,
+          memory_ignored_receipt_required: true,
+        },
+        worker_context_packet_memory_reinjection_proof: {
+          schema: "ccm-worker-context-memory-reinjection-proof-v1",
+          packet_id: "wcp-ignore-memory-receipt-typed-memory-selftest",
+          project: "frontend",
+          memory_present: false,
+          memory_ignored: true,
+          memory_policy_reason: "user_requested_ignore_memory",
+          status: "ignored_by_policy",
+        },
+        worker_context_packet_render_probe: {
+          packet_id: "wcp-ignore-memory-receipt-typed-memory-selftest",
+          rendered_flags: {
+            has_memory_policy: true,
+            has_memory_ignored_policy: true,
+            has_memory_reinjection_proof: true,
+          },
+        },
+        dispatch_ready: true,
+        should_create_real_task: true,
+        at: "2026-07-09T18:40:00.000Z",
+      }],
+    });
+    const repairReport = buildWorkerContextPacketIgnoreMemoryReceiptRepairWorkItemReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T18:40:01.000Z",
+    });
+    const candidateReport = buildWorkerContextPacketIgnoreMemoryReceiptRepairDispatchCandidateReport({
+      groupIds: [groupId],
+      repairWorkItemReport: repairReport,
+      generatedAt: "2026-07-09T18:40:02.000Z",
+    });
+    const briefReport = buildWorkerContextPacketIgnoreMemoryReceiptRepairDispatchBriefReport({
+      groupIds: [groupId],
+      candidateReport,
+      generatedAt: "2026-07-09T18:40:03.000Z",
+    });
+    const typedReport = buildWorkerContextPacketIgnoreMemoryReceiptRepairTypedMemoryReport({
+      groupIds: [groupId],
+      repairWorkItemReport: repairReport,
+      candidateReport,
+      briefReport,
+      generatedAt: "2026-07-09T18:40:04.000Z",
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_ignore_memory_receipt_repair_typed_memory"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_ignore_memory_receipt_repair_typed_memory") || {};
+    const {
+      readGroupTypedMemoryDistillationLedger,
+      scanGroupTypedMemoryDocuments,
+      buildGroupTypedMemoryRecall,
+    } = require("../collaboration/group-memory-index");
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const doc = (docs || []).find((item: any) => item.source === "auto:ignore-memory-receipt-repair-distillation") || {};
+    const recall = buildGroupTypedMemoryRecall(groupId, "IGNORE_MEMORY_RECEIPT_TYPED_MEMORY user_requested_ignore_memory memoryIgnored memoryUsed must_not_use_group_memory", {
+      disableLedger: true,
+      forceMemory: true,
+      max: 8,
+    });
+    const recallText = [
+      ...(Array.isArray(recall.recalled) ? recall.recalled : []),
+      ...(Array.isArray(recall.entries) ? recall.entries : []),
+      ...(Array.isArray(recall.selected) ? recall.selected : []),
+      ...(Array.isArray(recall.docs) ? recall.docs : []),
+    ].map((item: any) => `${item.name || ""}\n${item.body || ""}\n${item.snippet || ""}\n${item.text || ""}`).join("\n");
+    const checks = {
+      repairDispatchChainReady: repairReport.overall?.status === "ok"
+        && candidateReport.overall?.status === "ok"
+        && briefReport.overall?.status === "ok",
+      typedMemoryReportPasses: typedReport.overall?.status === "ok"
+        && Number(typedReport.overall?.typedMemoryDocCount || 0) >= 1
+        && Number(typedReport.overall?.archivedCount || 0) >= 1
+        && Number(typedReport.overall?.recallMatchCount || 0) >= 1,
+      qualityCheckExposesTypedMemory: qualityCheck.status === "ok"
+        && Number(qualityCheck.passed || 0) === 1,
+      ledgerArchivesIgnoreMemoryRows: ledger.ignoreMemoryReceiptRepairArchive?.schema === "ccm-ignore-memory-receipt-repair-distillation-v1"
+        && Number(ledger.ignoreMemoryReceiptRepairArchive?.archived_count || 0) >= 1
+        && Number(ledger.ignoreMemoryReceiptRepairArchive?.corrected_prompt_count || 0) >= 1,
+      typedDocContainsReceiptDiscipline: String(doc.body || "").includes("memoryIgnored")
+        && String(doc.body || "").includes("memoryUsed")
+        && /user_requested_ignore_memory|must_not_use_group_memory/i.test(String(doc.body || "")),
+      recallFindsIgnoreMemoryDiscipline: /memoryIgnored|user_requested_ignore_memory|must_not_use_group_memory/i.test(recallText),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: typedReport.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+      doc: {
+        relPath: doc.relPath || "",
+        source: doc.source || "",
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`, dispatchPlanFile, `${dispatchPlanFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketCompactHookLedgerSelfTest() {
+  const groupId = `memory-center-worker-context-compact-hook-ledger-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const hookFile = getGroupWorkerContextCompactHookLedgerFile(groupId);
+  try {
+    const hookRunId = "wcch-memory-center-selftest";
+    const retry = {
+      schema: "ccm-worker-context-compaction-retry-v1",
+      retry_id: "worker-context-retry:compact-hook-ledger-selftest",
+      method: "memory_first_deterministic_context_compaction",
+      status: "recovered",
+      from_packet_id: "wcp-hook-before-selftest",
+      retry_packet_id: "wcp-hook-after-selftest",
+      from_usage_status: "over_budget",
+      from_total_tokens: 6200,
+      from_max_tokens: 4000,
+      from_free_tokens: -2500,
+      retry_usage_status: "warn",
+      retry_total_tokens: 2600,
+      retry_max_tokens: 4000,
+      retry_free_tokens: 1100,
+      compact_hook_run_id: hookRunId,
+      memory_first: true,
+      memory_compaction: {
+        schema: "ccm-worker-context-memory-first-compaction-v1",
+        method: "memory_fields_head_tail_and_recall_limit",
+        status: "compacted",
+        original_memory_hash: "original-memory-hook-selftest",
+        compacted_memory_hash: "compacted-memory-hook-selftest",
+        original_memory_chars: 24000,
+        compacted_memory_chars: 3200,
+        omitted_chars: 20800,
+      },
+      original_task_hash: "same-task-hash-selftest",
+      compacted_task_hash: "same-task-hash-selftest",
+      original_task_chars: 420,
+      compacted_task_chars: 420,
+      omitted_chars: 20800,
+      critical_line_count: 0,
+      preserved_receipt_contract: true,
+      recovered_dispatch_ready: true,
+      generated_at: "2026-07-09T12:30:00.000Z",
+    };
+    const usage = {
+      schema: "ccm-worker-context-usage-v1",
+      version: 1,
+      packet_id: "wcp-hook-after-selftest",
+      project: "api",
+      task_id: "compact-hook-ledger-task",
+      model_context_policy: "cc-style-api-view-after-memory-render",
+      max_tokens: 4000,
+      reserved_output_tokens: 120,
+      autocompact_buffer_tokens: 300,
+      total_tokens: 2600,
+      total_chars: 7800,
+      free_tokens: 1100,
+      pressure: 65,
+      status: "warn",
+      compact_recommended: false,
+      categories: [
+        { id: "task_goal", name: "Task and goal", tokens: 140, chars: 420, required: true, included: true },
+        { id: "group_memory_rendered", name: "Group memory rendered context", tokens: 1100, chars: 3200, required: true, included: true },
+        { id: "context_compaction_retry", name: "Context compaction retry", tokens: 220, chars: 660, required: true, included: true },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 180, chars: 540, required: true, included: true },
+        { id: "free_space", name: "Free space", tokens: 1100, chars: 0, source: "budget", included: true },
+        { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 300, chars: 0, source: "budget", required: true, included: true },
+      ],
+    };
+    const gate = {
+      schema: "ccm-worker-context-pre-dispatch-gate-v1",
+      gate_id: "worker-context-pre-dispatch:compact-hook-ledger-selftest",
+      assignment_id: "assignment-compact-hook-ledger-selftest",
+      dispatch_key: "dispatch-compact-hook-ledger-selftest",
+      project: "api",
+      worker_context_packet_id: "wcp-hook-after-selftest",
+      usage_status: "warn",
+      pressure_status: "warn",
+      dispatch_ready: true,
+      dispatchReady: true,
+      blocked: false,
+      compact_recommended: false,
+      must_repair_before_dispatch: false,
+      context_compaction_retry: retry,
+      auto_retry_status: "recovered",
+      next_step: "dispatch_child_agent",
+      total_tokens: 2600,
+      max_tokens: 4000,
+      free_tokens: 1100,
+      pressure: 65,
+      autocompact_buffer_tokens: 300,
+      generated_at: "2026-07-09T12:30:00.000Z",
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T12:30:00.000Z",
+      bindingCount: 1,
+      nativeBindingCount: 0,
+      workerContextPacketBindingCount: 1,
+      preDispatchGateCount: 1,
+      blockedPreDispatchGateCount: 0,
+      entries: [{
+        schema: "ccm-worker-context-packet-assignment-binding-v1",
+        binding_id: "worker-context-packet-assignment:compact-hook-ledger-selftest",
+        groupId,
+        source: "worker_context_packet_pre_dispatch_gate",
+        project: "api",
+        assignment_id: "assignment-compact-hook-ledger-selftest",
+        dispatch_key: "dispatch-compact-hook-ledger-selftest",
+        task_fingerprint: "compact-hook-ledger-selftest",
+        worker_context_packet_id: "wcp-hook-after-selftest",
+        worker_context_packet_context_usage: usage,
+        worker_context_packet_compaction_retry: retry,
+        worker_context_packet_compact_hook_run_id: hookRunId,
+        worker_context_pre_dispatch_gate: gate,
+        dispatch_ready: true,
+        dispatchReady: true,
+        should_create_real_task: true,
+        at: "2026-07-09T12:30:00.000Z",
+      }],
+    });
+    writeJsonAtomic(hookFile, {
+      schema: "ccm-worker-context-compact-hook-ledger-v1",
+      version: 1,
+      groupId,
+      file: hookFile,
+      updatedAt: "2026-07-09T12:30:01.000Z",
+      entries: [
+        {
+          schema: "ccm-worker-context-compact-hook-entry-v1",
+          entry_id: "wcch-pre-selftest",
+          hook_run_id: hookRunId,
+          group_id: groupId,
+          phase: "pre",
+          ok: true,
+          status: "ok",
+          assignment_id: "assignment-compact-hook-ledger-selftest",
+          dispatch_key: "dispatch-compact-hook-ledger-selftest",
+          project: "api",
+          from_packet_id: "wcp-hook-before-selftest",
+          retry_packet_id: "",
+          method: "worker_context_memory_first_retry",
+          memory_first: true,
+          initial_usage_status: "over_budget",
+          final_usage_status: "",
+          dispatch_ready: false,
+          result_summary: { total_tokens: 6200, max_tokens: 4000, memory_present: true },
+          at: "2026-07-09T12:30:00.000Z",
+        },
+        {
+          schema: "ccm-worker-context-compact-hook-entry-v1",
+          entry_id: "wcch-post-selftest",
+          hook_run_id: hookRunId,
+          group_id: groupId,
+          phase: "post",
+          ok: true,
+          status: "ok",
+          assignment_id: "assignment-compact-hook-ledger-selftest",
+          dispatch_key: "dispatch-compact-hook-ledger-selftest",
+          project: "api",
+          from_packet_id: "wcp-hook-before-selftest",
+          retry_packet_id: "wcp-hook-after-selftest",
+          method: "memory_first_deterministic_context_compaction",
+          memory_first: true,
+          initial_usage_status: "over_budget",
+          final_usage_status: "warn",
+          dispatch_ready: true,
+          result_summary: { retry_status: "recovered", memory_reinjection_status: "compacted_reinjected", omitted_chars: 20800 },
+          at: "2026-07-09T12:30:01.000Z",
+        },
+      ],
+      stats: { total: 2, ok: 2, failed: 0, pre: { total: 1, ok: 1, failed: 0 }, post: { total: 1, ok: 1, failed: 0 } },
+    });
+    const report = buildWorkerContextPacketCompactHookLedgerReport({ groupIds: [groupId] });
+    const quality = evaluateWorkerContextPacketCompactHookLedger({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_compact_hook_ledger"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "worker_context_packet_compact_hook_ledger") || {};
+    const hookRow = (report.groups?.[0]?.hooks || [])[0] || {};
+    const checks = {
+      reportAcceptsPrePostHookLedger: report.overall?.status === "ok"
+        && Number(report.overall?.retryBindingCount || 0) === 1
+        && Number(report.overall?.hookRunCount || 0) === 1
+        && Number(report.overall?.preHookCount || 0) === 1
+        && Number(report.overall?.postHookCount || 0) === 1
+        && Number(report.overall?.memoryFirstHookCount || 0) === 1
+        && Number(report.overall?.recoveredHookCount || 0) === 1
+        && Number(report.overall?.metadataGapCount || 0) === 0,
+      qualityCheckCoversCompactHookLedger: quality.id === "worker_context_packet_compact_hook_ledger"
+        && quality.status === "ok"
+        && Number(quality.checked || 0) === 1
+        && Number(quality.passed || 0) === 1
+        && qualityCheck.status === "ok",
+      hookRowBindsRetryToPrePost: hookRow.hook_run_id === hookRunId
+        && Number(hookRow.pre_count || 0) === 1
+        && Number(hookRow.post_count || 0) === 1
+        && hookRow.post_dispatch_ready === true
+        && hookRow.memory_first === true,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      hook: {
+        hook_run_id: hookRow.hook_run_id || "",
+        pre_count: hookRow.pre_count || 0,
+        post_count: hookRow.post_count || 0,
+        post_dispatch_ready: hookRow.post_dispatch_ready === true,
+      },
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, hookFile, `${hookFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketMemoryReinjectionProofSelfTest() {
+  const groupId = `memory-center-worker-context-memory-reinjection-proof-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  try {
+    const memoryCompaction = {
+      schema: "ccm-worker-context-memory-first-compaction-v1",
+      method: "memory_fields_head_tail_and_recall_limit",
+      status: "compacted",
+      original_memory_hash: "original-memory-hash-selftest",
+      compacted_memory_hash: "compacted-memory-hash-selftest",
+      original_memory_chars: 24000,
+      compacted_memory_chars: 3200,
+      omitted_chars: 20800,
+      max_rendered_chars: 900,
+      max_recall_items: 3,
+      preserves_schema: true,
+    };
+    const retry = {
+      schema: "ccm-worker-context-compaction-retry-v1",
+      retry_id: "worker-context-retry:memory-reinjection-proof-selftest",
+      method: "memory_first_deterministic_context_compaction",
+      status: "recovered",
+      from_packet_id: "wcp-memory-reinjection-before-selftest",
+      retry_packet_id: "wcp-memory-reinjection-after-selftest",
+      from_usage_status: "over_budget",
+      from_total_tokens: 6200,
+      from_max_tokens: 4000,
+      from_free_tokens: -2500,
+      retry_usage_status: "warn",
+      retry_total_tokens: 2600,
+      retry_max_tokens: 4000,
+      retry_free_tokens: 1100,
+      memory_first: true,
+      memory_compaction: memoryCompaction,
+      original_task_hash: "same-task-hash-selftest",
+      compacted_task_hash: "same-task-hash-selftest",
+      original_task_chars: 420,
+      compacted_task_chars: 420,
+      omitted_chars: 20800,
+      critical_line_count: 0,
+      preserved_receipt_contract: true,
+      recovered_dispatch_ready: true,
+      generated_at: "2026-07-09T12:00:00.000Z",
+    };
+    const memoryProof = {
+      schema: "ccm-worker-context-memory-reinjection-proof-v1",
+      packet_id: "wcp-memory-reinjection-after-selftest",
+      project: "api",
+      memory_present: true,
+      rendered_memory_present: true,
+      source_schema: "ccm-group-memory-context-v1",
+      group_id: groupId,
+      target_project: "api",
+      packet_memory_hash: "compacted-memory-hash-selftest",
+      packet_memory_chars: 3200,
+      rendered_memory_hash: "rendered-memory-hash-selftest",
+      rendered_memory_chars: 1800,
+      memory_first: true,
+      compaction_retry_id: "worker-context-retry:memory-reinjection-proof-selftest",
+      memory_compaction_schema: "ccm-worker-context-memory-first-compaction-v1",
+      expected_compacted_memory_hash: "compacted-memory-hash-selftest",
+      hash_matches_compaction: true,
+      status: "compacted_reinjected",
+    };
+    const usage = {
+      schema: "ccm-worker-context-usage-v1",
+      version: 1,
+      packet_id: "wcp-memory-reinjection-after-selftest",
+      project: "api",
+      task_id: "memory-reinjection-proof-task",
+      model_context_policy: "cc-style-api-view-after-memory-render",
+      max_tokens: 4000,
+      reserved_output_tokens: 120,
+      autocompact_buffer_tokens: 300,
+      total_tokens: 2600,
+      total_chars: 7800,
+      free_tokens: 1100,
+      pressure: 65,
+      status: "warn",
+      compact_recommended: false,
+      categories: [
+        { id: "task_goal", name: "Task and goal", tokens: 140, chars: 420, required: true, included: true },
+        { id: "group_memory_rendered", name: "Group memory rendered context", tokens: 1100, chars: 3200, required: true, included: true },
+        { id: "memory_reinjection_proof", name: "Memory reinjection proof", tokens: 120, chars: 360, required: true, included: true },
+        { id: "context_compaction_retry", name: "Context compaction retry", tokens: 220, chars: 660, required: true, included: true },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 180, chars: 540, required: true, included: true },
+        { id: "free_space", name: "Free space", tokens: 1100, chars: 0, source: "budget", included: true },
+        { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 300, chars: 0, source: "budget", required: true, included: true },
+      ],
+      top_categories: [
+        { id: "group_memory_rendered", name: "Group memory rendered context", tokens: 1100, chars: 3200 },
+        { id: "context_compaction_retry", name: "Context compaction retry", tokens: 220, chars: 660 },
+      ],
+    };
+    const gate = {
+      schema: "ccm-worker-context-pre-dispatch-gate-v1",
+      gate_id: "worker-context-pre-dispatch:memory-reinjection-proof-selftest",
+      assignment_id: "assignment-memory-reinjection-proof-selftest",
+      dispatch_key: "dispatch-memory-reinjection-proof-selftest",
+      project: "api",
+      worker_context_packet_id: "wcp-memory-reinjection-after-selftest",
+      usage_status: "warn",
+      pressure_status: "warn",
+      dispatch_ready: true,
+      dispatchReady: true,
+      blocked: false,
+      compact_recommended: false,
+      must_repair_before_dispatch: false,
+      reason: "WorkerContextPacket recovered after memory-first deterministic retry.",
+      repair_source: "",
+      context_compaction_retry: retry,
+      auto_retry_status: "recovered",
+      next_step: "dispatch_child_agent",
+      total_tokens: 2600,
+      max_tokens: 4000,
+      free_tokens: 1100,
+      pressure: 65,
+      autocompact_buffer_tokens: 300,
+      generated_at: "2026-07-09T12:00:00.000Z",
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T12:00:00.000Z",
+      bindingCount: 1,
+      nativeBindingCount: 0,
+      workerContextPacketBindingCount: 1,
+      preDispatchGateCount: 1,
+      blockedPreDispatchGateCount: 0,
+      entries: [{
+        schema: "ccm-worker-context-packet-assignment-binding-v1",
+        binding_id: "worker-context-packet-assignment:memory-reinjection-proof-selftest",
+        groupId,
+        source: "worker_context_packet_pre_dispatch_gate",
+        project: "api",
+        assignment_id: "assignment-memory-reinjection-proof-selftest",
+        dispatch_key: "dispatch-memory-reinjection-proof-selftest",
+        task_fingerprint: "memory-reinjection-proof-selftest",
+        worker_context_packet_id: "wcp-memory-reinjection-after-selftest",
+        worker_context_packet_context_usage: usage,
+        worker_context_packet_compaction_retry: retry,
+        worker_context_packet_memory_reinjection_proof: memoryProof,
+        worker_context_pre_dispatch_gate: gate,
+        worker_context_packet_render_probe: {
+          packet_id: "wcp-memory-reinjection-after-selftest",
+          rendered_flags: {
+            has_context_usage_budget: true,
+            has_worker_context_packet: true,
+            has_platform_memory: true,
+            has_memory_reinjection_proof: true,
+            has_memory_compaction_hash: true,
+            has_memory_context_compact_marker: true,
+          },
+          rendered_excerpt: "平台记忆\nMemory reinjection proof：compacted_reinjected；memory_hash=compacted-memory-hash-selftest",
+        },
+        dispatch_ready: true,
+        dispatchReady: true,
+        should_create_real_task: true,
+        at: "2026-07-09T12:00:00.000Z",
+      }],
+    });
+    const report = buildWorkerContextPacketMemoryReinjectionProofReport({ groupIds: [groupId] });
+    const quality = evaluateWorkerContextPacketMemoryReinjectionProof({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_memory_reinjection_proof"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "worker_context_packet_memory_reinjection_proof") || {};
+    const proofRow = (report.groups?.[0]?.proofs || [])[0] || {};
+    const checks = {
+      reportAcceptsMemoryReinjectionProof: report.overall?.status === "ok"
+        && Number(report.overall?.reinjectionBindingCount || 0) === 1
+        && Number(report.overall?.memoryFirstCount || 0) === 1
+        && Number(report.overall?.compactedReinjectionCount || 0) === 1
+        && Number(report.overall?.hashMatchCount || 0) === 1
+        && Number(report.overall?.renderedProofCount || 0) === 1
+        && Number(report.overall?.metadataGapCount || 0) === 0,
+      qualityCheckCoversMemoryReinjectionProof: quality.id === "worker_context_packet_memory_reinjection_proof"
+        && quality.status === "ok"
+        && Number(quality.checked || 0) === 1
+        && Number(quality.passed || 0) === 1
+        && qualityCheck.status === "ok",
+      proofBindsRetryHashToRenderedPacket: proofRow.memory_first === true
+        && proofRow.status === "compacted_reinjected"
+        && proofRow.packet_memory_hash === "compacted-memory-hash-selftest"
+        && proofRow.expected_compacted_memory_hash === "compacted-memory-hash-selftest"
+        && proofRow.hash_matches_compaction === true
+        && proofRow.rendered_memory_reinjection_proof === true,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      proof: {
+        status: proofRow.status || "",
+        memory_first: proofRow.memory_first === true,
+        hash_matches_compaction: proofRow.hash_matches_compaction === true,
+        rendered_memory_reinjection_proof: proofRow.rendered_memory_reinjection_proof === true,
+      },
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyProofRepairTimelineBindingSelfTest() {
+  const groupId = `memory-center-api-microcompact-native-proof-repair-timeline-selftest-${process.pid}-${Date.now()}`;
+  const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+  const assignmentBindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const timelineBindingFile = getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId);
+  try {
+    const {
+      syncReplayRepairDispatchPlansForCoordinator,
+      runCodedGroupOrchestrator,
+      recordReplayRepairDispatchBriefTimelineBinding,
+      readReplayRepairDispatchTimelineBindingLedgerForCoordinator,
+    } = require("../collaboration/group-orchestrator");
+    const candidateSummary = {
+      schema: "ccm-replay-repair-main-agent-dispatch-candidates-v1",
+      groupId,
+      file: "selftest-native-proof-repair-timeline",
+      candidateCount: 1,
+      openItemCount: 1,
+      readyCount: 1,
+      dispatchMarkedCount: 1,
+      shouldCreateRealTask: false,
+      candidates: [{
+        schema: "ccm-replay-repair-main-agent-dispatch-candidate-v1",
+        candidate_id: "replay-repair-dispatch:selftest-native-timeline",
+        work_item_id: "api-native-proof-repair:timeline-binding",
+        groupId,
+        status: "pending",
+        owner: "group-main-agent",
+        priority: "critical",
+        component: "api_microcompact_native_timeline_binding",
+        source: "api_microcompact_native_apply_binding_repair",
+        subject: "修复 native apply timeline binding",
+        targetProject: "api",
+        dispatch_target: "api",
+        repair_target: "request-timeline-binding",
+        instruction: "修复 API microcompact native_applied 强证明链，并把 brief 绑定到真实 task timeline、session、snapshot、execution、receipt。",
+        expected: "timelineBinding=true; taskSessionBound=true; memorySnapshotBound=true; executionBound=true; receiptBound=true",
+        proof_entry_id: "api_microcompact_native_apply_proof_timeline_binding",
+        plan_checksum: "plan-timeline-binding",
+        request_patch_checksum: "request-timeline-binding",
+        request_telemetry_status: "weak",
+        request_telemetry_source: "native_request_adapter",
+        request_telemetry_session_status: "missing_session",
+        request_telemetry_dispatch_status: "missing_execution",
+        runner_request_id: "runner-timeline-binding",
+        execution_id: "execution-timeline-binding",
+        recommendedAction: "main_agent_review_and_dispatch_to_child_agent",
+        shouldCreateRealTask: false,
+      }],
+    };
+    const planLedger = syncReplayRepairDispatchPlansForCoordinator(groupId, candidateSummary, { at: "2026-07-08T09:10:00.000Z" });
+    const readyBrief = (planLedger.briefs || []).find((brief: any) => brief.status === "ready" && brief.source === "api_microcompact_native_apply_binding_repair") || {};
+    const group = {
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator", agent: "coded-orchestrator" },
+        { project: "api", agent: "claude-code" },
+      ],
+    };
+    const result = runCodedGroupOrchestrator({
+      group,
+      message: [
+        "请让 api 项目执行 native proof replay repair，并绑定真实执行时间线。",
+        `必须使用 brief ${readyBrief.brief_id}，work item ${readyBrief.work_item_id}。`,
+        "修复 request-timeline-binding 和 runner-timeline-binding 的 session/dispatch 绑定，并回写 CCM_AGENT_RECEIPT。",
+      ].join("\n"),
+      context: "Phase 94 selftest：验证 dispatch brief 到 timeline/session/snapshot/execution/receipt 的绑定。",
+    });
+    const assignment = (result.assignments || []).find((item: any) => item.project === "api") || {};
+    const brief = assignment.replay_repair_dispatch_brief || readyBrief;
+    const taskId = "task-timeline-binding";
+    const sessionId = "tas-timeline-binding";
+    const snapshotId = "tams-timeline-binding";
+    const executionId = "execution-timeline-binding";
+    for (const eventType of REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS) {
+      recordReplayRepairDispatchBriefTimelineBinding(groupId, {
+        brief,
+        task_id: taskId,
+        project: "api",
+        assignment_id: assignment.assignmentId || assignment.assignment_id || "",
+        dispatch_key: assignment.dispatchKey || assignment.dispatch_key || "",
+        worker_context_packet_id: assignment.worker_context_packet?.packet_id || "",
+        worker_handoff_id: "handoff-timeline-binding",
+        memory_context_snapshot_id: snapshotId,
+        memory_context_snapshot_checksum: "snapshot-checksum-timeline-binding",
+        task_agent_session_id: sessionId,
+        native_session_id: "native-timeline-binding",
+        execution_id: executionId,
+        receipt_status: "done",
+        timeline_event: {
+          id: `tl-${eventType}`,
+          type: eventType,
+          at: "2026-07-08T09:11:00.000Z",
+        },
+      }, { at: "2026-07-08T09:11:00.000Z" });
+    }
+    const ledger = readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId);
+    const binding = (ledger.entries || []).find((entry: any) => entry.brief_id === readyBrief.brief_id) || {};
+    const eventTypes = new Set((binding.event_types || []).map((item: any) => String(item || "")));
+    const report = buildApiMicrocompactNativeApplyProofRepairTimelineBindingReport({ groupIds: [groupId] });
+    const quality = evaluateApiMicrocompactNativeApplyProofRepairTimelineBindings({ groupIds: [groupId] });
+    const checks = {
+      dispatchBriefReady: planLedger.readyCount === 1
+        && readyBrief.request_patch_checksum === "request-timeline-binding"
+        && readyBrief.runner_request_id === "runner-timeline-binding",
+      assignmentCarriesBriefBinding: assignment.replay_repair_dispatch_brief?.brief_id === readyBrief.brief_id
+        && assignment.worker_context_packet?.replay_repair_dispatch_briefs?.[0]?.brief_id === readyBrief.brief_id,
+      timelineLedgerMergesRequiredEvents: REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS.every(type => eventTypes.has(type))
+        && (binding.event_refs || []).length >= REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS.length,
+      timelineLedgerCarriesExecutionProof: binding.task_id === taskId
+        && binding.task_agent_session_id === sessionId
+        && binding.memory_context_snapshot_id === snapshotId
+        && binding.execution_id === executionId
+        && binding.runner_request_id === "runner-timeline-binding"
+        && binding.receipt_status === "done",
+      qualityCoversTimelineBinding: report.overall?.status === "ok"
+        && Number(report.overall?.bindingCount || 0) === 1
+        && Number(report.overall?.metadataGapCount || 0) === 0
+        && Number(report.overall?.requiredEventCoverageCount || 0) === 1
+        && quality.id === "api_microcompact_native_apply_proof_repair_timeline_bindings"
+        && Number(quality.passed || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      binding: {
+        timeline_binding_id: binding.timeline_binding_id || "",
+        brief_id: binding.brief_id || "",
+        task_id: binding.task_id || "",
+        assignment_id: binding.assignment_id || "",
+        worker_context_packet_id: binding.worker_context_packet_id || "",
+        task_agent_session_id: binding.task_agent_session_id || "",
+        memory_context_snapshot_id: binding.memory_context_snapshot_id || "",
+        execution_id: binding.execution_id || "",
+        event_types: binding.event_types || [],
+      },
+    };
+  } finally {
+    for (const file of [
+      dispatchPlanFile,
+      `${dispatchPlanFile}.bak`,
+      assignmentBindingFile,
+      `${assignmentBindingFile}.bak`,
+      timelineBindingFile,
+      `${timelineBindingFile}.bak`,
+    ]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyProofRepairTimelineCompletionSelfTest() {
+  const groupId = `memory-center-api-microcompact-native-proof-repair-timeline-completion-selftest-${process.pid}-${Date.now()}`;
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const timelineBindingFile = getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId);
+  try {
+    const {
+      recordReplayRepairDispatchBriefTimelineBinding,
+      readReplayRepairDispatchTimelineBindingLedgerForCoordinator,
+    } = require("../collaboration/group-orchestrator");
+    const proof = {
+      schema: "ccm-api-microcompact-native-apply-proof-group-v1",
+      groupId,
+      status: "fail",
+      score: 42,
+      checked: 1,
+      passed: 0,
+      requestTelemetryStrongCount: 0,
+      requestTelemetrySessionMismatchCount: 1,
+      requestTelemetryDispatchUnboundCount: 1,
+      gaps: [{
+        severity: "high",
+        reason: "native_applied request telemetry session/snapshot and execution/runner binding missing",
+        taskId: "task-timeline-completion",
+        agent: "api",
+        planChecksum: "plan-timeline-completion",
+        requestPatchChecksum: "request-timeline-completion",
+      }],
+      rows: [{
+        entryId: "api_microcompact_native_apply_proof_timeline_completion",
+        taskId: "task-timeline-completion",
+        targetProject: "api",
+        agent: "api",
+        planChecksum: "plan-timeline-completion",
+        applyPlanChecksum: "apply-timeline-completion",
+        requestPatchChecksum: "request-timeline-completion",
+        taskAgentSessionId: "tas-timeline-completion",
+        nativeSessionId: "native-timeline-completion",
+        memoryContextSnapshotId: "snapshot-timeline-completion",
+        memoryContextSnapshotChecksum: "snapshot-checksum-timeline-completion",
+        executionId: "execution-timeline-completion",
+        requestTelemetryStatus: "weak",
+        requestTelemetrySource: "native_request_adapter",
+        requestTelemetrySessionStatus: "missing_session",
+        requestTelemetryDispatchStatus: "missing_execution",
+        requestTelemetryRunnerRequestId: "runner-timeline-completion",
+        runnerRequestId: "runner-timeline-completion",
+        requestTelemetryWeakReason: "selftest weak native proof before timeline closure",
+      }],
+    };
+    const first = syncApiMicrocompactNativeApplyProofRepairWorkItems(groupId, proof, { at: "2026-07-08T09:20:00.000Z" });
+    const firstLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const repairItem = (firstLedger.items || []).find((item: any) => item.source === "api_microcompact_native_apply_binding_repair") || {};
+    const brief = {
+      brief_id: "replay-repair-dispatch-brief:timeline-completion",
+      work_item_id: repairItem.work_item_id || repairItem.id || "",
+      source: "api_microcompact_native_apply_binding_repair",
+      target_project: "api",
+      proof_entry_id: repairItem.proof_entry_id || "api_microcompact_native_apply_proof_timeline_completion",
+      request_patch_checksum: repairItem.request_patch_checksum || "request-timeline-completion",
+      request_telemetry_session_status: repairItem.request_telemetry_session_status || "missing_session",
+      request_telemetry_dispatch_status: repairItem.request_telemetry_dispatch_status || "missing_execution",
+      runner_request_id: repairItem.runner_request_id || "runner-timeline-completion",
+      execution_id: repairItem.execution_id || "execution-timeline-completion",
+      should_create_real_task: false,
+    };
+    let lastBinding: any = null;
+    for (const eventType of REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS) {
+      lastBinding = recordReplayRepairDispatchBriefTimelineBinding(groupId, {
+        brief,
+        task_id: "task-timeline-completion",
+        project: "api",
+        assignment_id: "assignment-timeline-completion",
+        dispatch_key: "dispatch-key-timeline-completion",
+        worker_context_packet_id: "wcp-timeline-completion",
+        worker_handoff_id: "handoff-timeline-completion",
+        memory_context_snapshot_id: "snapshot-timeline-completion",
+        memory_context_snapshot_checksum: "snapshot-checksum-timeline-completion",
+        task_agent_session_id: "tas-timeline-completion",
+        native_session_id: "native-timeline-completion",
+        execution_id: "execution-timeline-completion",
+        receipt_status: "done",
+        timeline_event: {
+          id: `tl-completion-${eventType}`,
+          type: eventType,
+          at: "2026-07-08T09:21:00.000Z",
+        },
+      }, { at: "2026-07-08T09:21:00.000Z" });
+    }
+    const timelineLedger = readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId);
+    const binding = (timelineLedger.entries || []).find((entry: any) => entry.brief_id === brief.brief_id) || {};
+    const completedLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const completedItem = (completedLedger.items || []).find((item: any) => (item.work_item_id || item.id) === brief.work_item_id) || {};
+    const completionReport = buildApiMicrocompactNativeApplyProofRepairTimelineCompletionReport({ groupIds: [groupId], generatedAt: "2026-07-08T09:22:00.000Z" });
+    const quality = evaluateApiMicrocompactNativeApplyProofRepairTimelineCompletions({ groupIds: [groupId], generatedAt: "2026-07-08T09:22:00.000Z" });
+    const checks = {
+      weakProofCreatesOpenRepairItem: first.openItemCount >= 1
+        && repairItem.source === "api_microcompact_native_apply_binding_repair"
+        && replayRepairWorkItemOpen(repairItem.status),
+      timelineBindingCarriesRequiredEvents: REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS.every(type => (binding.event_types || []).includes(type)),
+      liveTimelineBindingClosesRepairItem: replayRepairWorkItemStatus(completedItem.status) === "completed"
+        && completedItem.completion_source === "replay_repair_timeline_binding"
+        && completedItem.replay_repair_timeline_binding?.timeline_binding_id === binding.timeline_binding_id
+        && lastBinding?.repair_work_item_completion?.closed >= 1,
+      completionReportCoversClosure: completionReport.overall?.status === "ok"
+        && Number(completionReport.overall?.completeBindingCount || 0) === 1
+        && Number(completionReport.overall?.completedBindingCount || 0) === 1
+        && Number(completionReport.overall?.openMatchedRepairItemCount || 0) === 0
+        && quality.id === "api_microcompact_native_apply_proof_repair_timeline_completions"
+        && Number(quality.passed || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      first: { openItemCount: first.openItemCount, total: first.total },
+      binding: {
+        timeline_binding_id: binding.timeline_binding_id || "",
+        brief_id: binding.brief_id || "",
+        work_item_id: binding.work_item_id || "",
+        event_types: binding.event_types || [],
+      },
+      completedItem: {
+        id: completedItem.id || completedItem.work_item_id || "",
+        status: replayRepairWorkItemStatus(completedItem.status),
+        completion_source: completedItem.completion_source || "",
+        resolutionReason: completedItem.resolutionReason || "",
+      },
+      report: completionReport.overall,
+    };
+  } finally {
+    for (const file of [workItemsFile, `${workItemsFile}.bak`, timelineBindingFile, `${timelineBindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyProofRepairClosureReproofSelfTest() {
+  const baseId = `memory-center-api-microcompact-native-proof-repair-closure-reproof-selftest-${process.pid}-${Date.now()}`;
+  const weakGroupId = `${baseId}-weak`;
+  const strongGroupId = `${baseId}-strong`;
+  const groupIds = [weakGroupId, strongGroupId];
+  const taskIds: string[] = [];
+  const executionFiles: string[] = [];
+  const files = groupIds.flatMap(groupId => {
+    const proofFile = getGroupApiMicrocompactNativeApplyProofLedgerFile(groupId);
+    const telemetryFile = getGroupApiMicrocompactNativeApplyRequestTelemetryLedgerFile(groupId);
+    const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+    const timelineBindingFile = getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId);
+    return [
+      proofFile,
+      `${proofFile}.bak`,
+      telemetryFile,
+      `${telemetryFile}.bak`,
+      workItemsFile,
+      `${workItemsFile}.bak`,
+      timelineBindingFile,
+      `${timelineBindingFile}.bak`,
+    ];
+  });
+  try {
+    const {
+      recordGroupApiMicrocompactNativeApplyProofLedger,
+      recordGroupApiMicrocompactNativeApplyAdapterTelemetry,
+    } = require("../collaboration/memory");
+    const { recordReplayRepairDispatchBriefTimelineBinding } = require("../collaboration/group-orchestrator");
+    const {
+      openTaskAgentSession,
+      recordTaskAgentSessionTurn,
+      bindTaskAgentMemoryContextSnapshot,
+    } = require("../../tasks/agent-sessions");
+    const { ensureExecution, registerExternalRunnerRequest } = require("../../agents/execution-kernel");
+    const createBoundIds = (groupId: string, suffix: string) => {
+      const idSeed = hash([groupId, suffix], 10);
+      const taskId = `task-closure-reproof-${suffix}-${idSeed}`;
+      const executionId = `execution-closure-reproof-${suffix}-${idSeed}`;
+      const runnerRequestId = `runner-closure-reproof-${suffix}-${idSeed}`;
+      const nativeSessionId = `native-closure-reproof-${suffix}-${idSeed}`;
+      const session = openTaskAgentSession({
+        scopeId: taskId,
+        taskId,
+        groupId,
+        project: "api",
+        agentType: "claudecode",
+      });
+      taskIds.push(taskId);
+      recordTaskAgentSessionTurn(session.id, { nativeSessionId, success: true });
+      const bound = bindTaskAgentMemoryContextSnapshot(session.id, {
+        taskId,
+        groupId,
+        project: "api",
+        agentType: "claudecode",
+        nativeSessionId,
+        executionId,
+        turn: 1,
+        workerContextPacket: {
+          packet_id: `wcp-${suffix}`,
+          memory: { schema: "ccm-group-memory-context-v1", target_project: "api" },
+        },
+        renderedPrompt: `closure reproof prompt ${suffix}`,
+      });
+      ensureExecution({
+        task: { id: taskId, title: `closure reproof ${suffix}`, target_project: "api" },
+        project: "api",
+        agent: "api",
+        workDir: process.cwd(),
+        executionId,
+      });
+      executionFiles.push(getExecutionKernelRecordFileForCenter(executionId));
+      registerExternalRunnerRequest(executionId, runnerRequestId);
+      return {
+        groupId,
+        suffix,
+        taskId,
+        executionId,
+        runnerRequestId,
+        nativeSessionId,
+        taskAgentSessionId: session.id,
+        memoryContextSnapshotId: bound?.snapshot?.snapshot_id || bound?.session?.memoryContextSnapshotId || "",
+        memoryContextSnapshotChecksum: bound?.snapshot?.checksum || bound?.session?.memoryContextSnapshotChecksum || "",
+        planChecksum: `plan-closure-reproof-${suffix}`,
+        applyPlanChecksum: `apply-closure-reproof-${suffix}`,
+        requestPatchChecksum: `request-closure-reproof-${suffix}`,
+      };
+    };
+    const recordProof = (ids: any) => recordGroupApiMicrocompactNativeApplyProofLedger(ids.groupId, {
+      targetProject: "api",
+      taskId: ids.taskId,
+      executionId: ids.executionId,
+      runnerRequestId: ids.runnerRequestId,
+      externalRunnerRequestId: ids.runnerRequestId,
+      finalStatus: "done",
+      receiptRows: [{
+        agent: "api",
+        status: "done",
+        runner_request_id: ids.runnerRequestId,
+        external_runner_request_id: ids.runnerRequestId,
+        api_microcompact: {
+          required: true,
+          pass: true,
+          rows: [{
+            plan_checksum: ids.planChecksum,
+            usage_state: "native_applied",
+            native_applied: true,
+            native_apply_ready: true,
+            apply_plan_checksum: ids.applyPlanChecksum,
+            request_patch_checksum: ids.requestPatchChecksum,
+            receipt_apply_plan_checksum: ids.applyPlanChecksum,
+            receipt_request_patch_checksum: ids.requestPatchChecksum,
+            apply_plan_checksum_matched: true,
+            request_patch_checksum_matched: true,
+            session_binding_required: true,
+            session_matched: true,
+            expected_task_agent_session_id: ids.taskAgentSessionId,
+            receipt_task_agent_session_id: ids.taskAgentSessionId,
+            expected_native_session_id: ids.nativeSessionId,
+            receipt_native_session_id: ids.nativeSessionId,
+            expected_memory_context_snapshot_id: ids.memoryContextSnapshotId,
+            receipt_memory_context_snapshot_id: ids.memoryContextSnapshotId,
+            expected_memory_context_snapshot_checksum: ids.memoryContextSnapshotChecksum,
+            receipt_memory_context_snapshot_checksum: ids.memoryContextSnapshotChecksum,
+            runner_request_id: ids.runnerRequestId,
+            external_runner_request_id: ids.runnerRequestId,
+            unsafe_native_applied: false,
+            pass: true,
+            reason: "closure reproof selftest verified receipt before native adapter re-proof",
+          }],
+        },
+      }],
+      generatedAt: "2026-07-08T10:00:00.000Z",
+    });
+    const closeRepairByTimeline = (ids: any) => {
+      const proofReport = buildApiMicrocompactNativeApplyProofReport({
+        groupIds: [ids.groupId],
+        nowMs: Date.parse("2026-07-08T10:05:00.000Z"),
+      });
+      const proof = (proofReport.groups || []).find((row: any) => row.groupId === ids.groupId) || {};
+      syncApiMicrocompactNativeApplyProofRepairWorkItems(ids.groupId, proof, { at: "2026-07-08T10:06:00.000Z" });
+      const ledger = readGroupCompactBoundaryReplayRepairWorkItems(ids.groupId);
+      const repairItem = (ledger.items || []).find((item: any) => item.source === "api_microcompact_native_apply_binding_repair") || {};
+      const brief = {
+        brief_id: `replay-repair-dispatch-brief:closure-reproof:${ids.suffix}`,
+        work_item_id: repairItem.work_item_id || repairItem.id || "",
+        source: "api_microcompact_native_apply_binding_repair",
+        target_project: "api",
+        proof_entry_id: repairItem.proof_entry_id || "",
+        request_patch_checksum: repairItem.request_patch_checksum || ids.requestPatchChecksum,
+        request_telemetry_session_status: repairItem.request_telemetry_session_status || "bound",
+        request_telemetry_dispatch_status: repairItem.request_telemetry_dispatch_status || "runner_bound",
+        runner_request_id: repairItem.runner_request_id || ids.runnerRequestId,
+        execution_id: repairItem.execution_id || ids.executionId,
+        should_create_real_task: false,
+      };
+      let lastBinding: any = null;
+      for (const eventType of REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS) {
+        lastBinding = recordReplayRepairDispatchBriefTimelineBinding(ids.groupId, {
+          brief,
+          task_id: ids.taskId,
+          project: "api",
+          assignment_id: `assignment-closure-reproof-${ids.suffix}`,
+          dispatch_key: `dispatch-key-closure-reproof-${ids.suffix}`,
+          worker_context_packet_id: `wcp-closure-reproof-${ids.suffix}`,
+          worker_handoff_id: `handoff-closure-reproof-${ids.suffix}`,
+          memory_context_snapshot_id: ids.memoryContextSnapshotId,
+          memory_context_snapshot_checksum: ids.memoryContextSnapshotChecksum,
+          task_agent_session_id: ids.taskAgentSessionId,
+          native_session_id: ids.nativeSessionId,
+          execution_id: ids.executionId,
+          receipt_status: "done",
+          timeline_event: {
+            id: `tl-closure-reproof-${ids.suffix}-${eventType}`,
+            type: eventType,
+            at: "2026-07-08T10:07:00.000Z",
+          },
+        }, { at: "2026-07-08T10:07:00.000Z" });
+      }
+      return { repairItem, lastBinding };
+    };
+    const recordStrongTelemetry = (ids: any) => recordGroupApiMicrocompactNativeApplyAdapterTelemetry({
+      groupId: ids.groupId,
+      targetProject: "api",
+      taskId: ids.taskId,
+      executionId: ids.executionId,
+      runnerRequestId: ids.runnerRequestId,
+      externalRunnerRequestId: ids.runnerRequestId,
+      apiMicrocompactNativeApplyPlan: {
+        groupId: ids.groupId,
+        group_id: ids.groupId,
+        targetProject: "api",
+        target_project: "api",
+        apiEditPlanChecksum: ids.planChecksum,
+        api_edit_plan_checksum: ids.planChecksum,
+        applyPlanChecksum: ids.applyPlanChecksum,
+        apply_plan_checksum: ids.applyPlanChecksum,
+        requestPatchChecksum: ids.requestPatchChecksum,
+        request_patch_checksum: ids.requestPatchChecksum,
+        taskAgentSessionId: ids.taskAgentSessionId,
+        task_agent_session_id: ids.taskAgentSessionId,
+        nativeSessionId: ids.nativeSessionId,
+        native_session_id: ids.nativeSessionId,
+        memoryContextSnapshotId: ids.memoryContextSnapshotId,
+        memory_context_snapshot_id: ids.memoryContextSnapshotId,
+        memoryContextSnapshotChecksum: ids.memoryContextSnapshotChecksum,
+        memory_context_snapshot_checksum: ids.memoryContextSnapshotChecksum,
+        requestPatch: {
+          body: { context_management: { edits: [{ type: "clear_tool_uses_20250919", keep: { type: "tool_use_id", value: `tool-${ids.suffix}` } }] } },
+          beta_headers: ["context-management-2025-06-27"],
+        },
+      },
+      requestPatch: {
+        body: { context_management: { edits: [{ type: "clear_tool_uses_20250919", keep: { type: "tool_use_id", value: `tool-${ids.suffix}` } }] } },
+        beta_headers: ["context-management-2025-06-27"],
+      },
+      requestBody: {
+        model: "claude-selftest",
+        messages: [{ role: "user", content: "closure reproof native adapter telemetry selftest" }],
+        context_management: { edits: [{ type: "clear_tool_uses_20250919", keep: { type: "tool_use_id", value: `tool-${ids.suffix}` } }] },
+      },
+      headers: { "anthropic-beta": "context-management-2025-06-27" },
+      provider: "anthropic",
+      model: "claude-selftest",
+      endpoint: "https://api.anthropic.com/v1/messages",
+      method: "POST",
+      responseStatus: 200,
+      requestId: `req-closure-reproof-${ids.suffix}`,
+      sentAt: "2026-07-08T10:08:00.000Z",
+    });
+    const weakIds = createBoundIds(weakGroupId, "weak");
+    const strongIds = createBoundIds(strongGroupId, "strong");
+    recordProof(weakIds);
+    recordProof(strongIds);
+    const weakClosure = closeRepairByTimeline(weakIds);
+    const strongClosure = closeRepairByTimeline(strongIds);
+    recordStrongTelemetry(strongIds);
+    const report = buildApiMicrocompactNativeApplyProofRepairClosureReproofReport({
+      groupIds,
+      generatedAt: "2026-07-08T10:10:00.000Z",
+      nowMs: Date.parse("2026-07-08T10:10:00.000Z"),
+    });
+    const quality = evaluateApiMicrocompactNativeApplyProofRepairClosureReproof({
+      groupIds,
+      generatedAt: "2026-07-08T10:10:00.000Z",
+      nowMs: Date.parse("2026-07-08T10:10:00.000Z"),
+    });
+    const weak = (report.groups || []).find((row: any) => row.groupId === weakGroupId) || {};
+    const strong = (report.groups || []).find((row: any) => row.groupId === strongGroupId) || {};
+    const weakCandidate = weak.reproofCandidates?.[0] || {};
+    const checks = {
+      weakTimelineClosureDoesNotBecomeProviderStrong: Number(weak.timelineProvedRepairCount || 0) === 1
+        && Number(weak.providerStrongProofCount || 0) === 0
+        && Number(weak.providerStrongReproofNeededCount || 0) === 1
+        && weakCandidate.repair_closure_status === "timeline_proved"
+        && weakCandidate.provider_reproof_status === "needed"
+        && weakCandidate.nativeApplyStrongProof !== true,
+      weakCandidateCarriesPreciseReproofKeys: weakCandidate.task_id === weakIds.taskId
+        && weakCandidate.request_patch_checksum === weakIds.requestPatchChecksum
+        && weakCandidate.runner_request_id === weakIds.runnerRequestId
+        && weakCandidate.execution_id === weakIds.executionId
+        && weakCandidate.task_agent_session_id === weakIds.taskAgentSessionId
+        && weakCandidate.memory_context_snapshot_id === weakIds.memoryContextSnapshotId,
+      strongNativeTelemetrySatisfiesReproof: Number(strong.timelineProvedRepairCount || 0) === 1
+        && Number(strong.providerStrongProofCount || 0) === 1
+        && Number(strong.providerStrongReproofNeededCount || 0) === 0
+        && Number(strong.reproofCandidates?.length || 0) === 0,
+      qualitySeparatesTimelineAndProviderProof: quality.id === "api_microcompact_native_apply_proof_repair_closure_reproof"
+        && Number(quality.checked || 0) === 2
+        && Number(quality.passed || 0) === 1
+        && Number(quality.failed || 0) === 1
+        && quality.status === "fail",
+      liveTimelineClosuresHappened: weakClosure.lastBinding?.repair_work_item_completion?.closed >= 1
+        && strongClosure.lastBinding?.repair_work_item_completion?.closed >= 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      weak: {
+        timelineProvedRepairCount: weak.timelineProvedRepairCount,
+        providerStrongProofCount: weak.providerStrongProofCount,
+        providerStrongReproofNeededCount: weak.providerStrongReproofNeededCount,
+        candidate: weakCandidate,
+      },
+      strong: {
+        timelineProvedRepairCount: strong.timelineProvedRepairCount,
+        providerStrongProofCount: strong.providerStrongProofCount,
+        providerStrongReproofNeededCount: strong.providerStrongReproofNeededCount,
+      },
+      report: report.overall,
+      quality: {
+        checked: quality.checked,
+        passed: quality.passed,
+        failed: quality.failed,
+        status: quality.status,
+      },
+    };
+  } finally {
+    for (const taskId of taskIds) {
+      try {
+        const { purgeTaskAgentSessions } = require("../../tasks/agent-sessions");
+        purgeTaskAgentSessions(taskId);
+      } catch {}
+    }
+    for (const file of [...files, ...executionFiles]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyProofRepairClosureReproofWorkItemSelfTest() {
+  const groupId = `memory-center-api-microcompact-native-proof-repair-closure-reproof-work-selftest-${process.pid}-${Date.now()}`;
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const timelineBindingId = "timeline-binding-provider-reproof-work";
+  const originalWorkItemId = "api-native-proof-repair:provider-reproof-work";
+  try {
+    const at = "2026-07-08T10:30:00.000Z";
+    const originalRepairItem = {
+      id: originalWorkItemId,
+      work_item_id: originalWorkItemId,
+      taskId: "task-provider-reproof-work",
+      group_id: groupId,
+      source: "api_microcompact_native_apply_binding_repair",
+      status: "completed",
+      priority: "critical",
+      component: "api_microcompact_native_dispatch_binding",
+      completion_source: "replay_repair_timeline_binding",
+      resolutionReason: "timeline_binding_child_receipt_proved_native_repair",
+      target_project: "api",
+      proof_entry_id: "proof-provider-reproof-work",
+      plan_checksum: "plan-provider-reproof-work",
+      apply_plan_checksum: "apply-provider-reproof-work",
+      request_patch_checksum: "request-provider-reproof-work",
+      runner_request_id: "runner-provider-reproof-work",
+      request_telemetry_runner_request_id: "runner-provider-reproof-work",
+      execution_id: "execution-provider-reproof-work",
+      task_agent_session_id: "tas-provider-reproof-work",
+      native_session_id: "native-provider-reproof-work",
+      memory_context_snapshot_id: "snapshot-provider-reproof-work",
+      memory_context_snapshot_checksum: "snapshot-checksum-provider-reproof-work",
+      request_telemetry_status: "missing",
+      request_telemetry_source: "",
+      request_telemetry_session_status: "bound",
+      request_telemetry_dispatch_status: "runner_bound",
+      replay_repair_timeline_binding: {
+        timeline_binding_id: timelineBindingId,
+        brief_id: "brief-provider-reproof-work",
+        task_id: "task-provider-reproof-work",
+        assignment_id: "assignment-provider-reproof-work",
+        worker_context_packet_id: "wcp-provider-reproof-work",
+        task_agent_session_id: "tas-provider-reproof-work",
+        native_session_id: "native-provider-reproof-work",
+        memory_context_snapshot_id: "snapshot-provider-reproof-work",
+        memory_context_snapshot_checksum: "snapshot-checksum-provider-reproof-work",
+        execution_id: "execution-provider-reproof-work",
+        runner_request_id: "runner-provider-reproof-work",
+        receipt_status: "done",
+        event_types: REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS,
+        completed_at: at,
+      },
+      createdAt: at,
+      updatedAt: at,
+      completedAt: at,
+    };
+    writeGroupCompactBoundaryReplayRepairWorkItems(groupId, {
+      groupId,
+      items: [originalRepairItem],
+      stats: replayRepairWorkItemStats([originalRepairItem]),
+      updatedAt: at,
+    });
+    const closureReport = buildApiMicrocompactNativeApplyProofRepairClosureReproofReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-08T10:31:00.000Z",
+      nowMs: Date.parse("2026-07-08T10:31:00.000Z"),
+    });
+    const closureGroup = (closureReport.groups || []).find((row: any) => row.groupId === groupId) || {};
+    const firstWorkItemReport = buildApiMicrocompactNativeApplyProofRepairClosureReproofWorkItemReport({
+      closureReproofReport: closureReport,
+      generatedAt: "2026-07-08T10:32:00.000Z",
+    });
+    const firstGroup = (firstWorkItemReport.groups || []).find((row: any) => row.groupId === groupId) || {};
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const providerItem = (ledger.items || []).find(isApiMicrocompactNativeApplyProviderReproofWorkItem) || {};
+    const candidates = buildReplayRepairMainAgentDispatchCandidates(groupId, { ledger, limit: 20 });
+    const providerCandidate = (candidates.candidates || []).find((candidate: any) => candidate.source === "api_microcompact_native_apply_provider_reproof") || {};
+    const resolvedSummary = syncApiMicrocompactNativeApplyProviderReproofWorkItems(groupId, {
+      schema: "ccm-api-microcompact-native-apply-proof-repair-closure-reproof-group-v1",
+      groupId,
+      status: "ok",
+      timelineProvedRepairCount: 1,
+      providerStrongProofCount: 1,
+      providerStrongReproofNeededCount: 0,
+      reproofCandidates: [],
+    }, { at: "2026-07-08T10:33:00.000Z" });
+    const resolvedLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const resolvedProviderItem = (resolvedLedger.items || []).find(isApiMicrocompactNativeApplyProviderReproofWorkItem) || {};
+    const checks = {
+      closureReproofProducesCandidate: Number(closureGroup.providerStrongReproofNeededCount || 0) === 1
+        && closureGroup.reproofCandidates?.[0]?.provider_reproof_status === "needed"
+        && closureGroup.reproofCandidates?.[0]?.request_patch_checksum === "request-provider-reproof-work",
+      candidateMaterializesProviderReproofWorkItem: firstWorkItemReport.overall?.status === "ok"
+        && Number(firstWorkItemReport.overall?.expectedWorkItemCount || 0) === 1
+        && Number(firstWorkItemReport.overall?.coveredWorkItemCount || 0) === 1
+        && providerItem.source === "api_microcompact_native_apply_provider_reproof"
+        && replayRepairWorkItemOpen(providerItem.status),
+      workItemCarriesPreciseReproofKeys: providerItem.original_work_item_id === originalWorkItemId
+        && providerItem.timeline_binding_id === timelineBindingId
+        && providerItem.request_patch_checksum === "request-provider-reproof-work"
+        && providerItem.runner_request_id === "runner-provider-reproof-work"
+        && providerItem.execution_id === "execution-provider-reproof-work"
+        && providerItem.task_agent_session_id === "tas-provider-reproof-work"
+        && providerItem.memory_context_snapshot_id === "snapshot-provider-reproof-work",
+      genericDispatchCandidateSurfacesProviderReproof: providerCandidate.source === "api_microcompact_native_apply_provider_reproof"
+        && providerCandidate.provider_reproof_status === "needed"
+        && providerCandidate.provider_reproof_reason === "missing_native_apply_proof_entry"
+        && providerCandidate.request_patch_checksum === "request-provider-reproof-work"
+        && providerCandidate.runner_request_id === "runner-provider-reproof-work",
+      strongClosureClosesProviderReproofWorkItem: replayRepairWorkItemStatus(resolvedProviderItem.status) === "completed"
+        && resolvedProviderItem.provider_reproof_status === "strong"
+        && resolvedProviderItem.resolutionReason === "native_provider_reproof_strong"
+        && Number(resolvedSummary.completedCount || 0) >= 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      closure: closureReport.overall,
+      workItemReport: firstWorkItemReport.overall,
+      providerItem: {
+        id: providerItem.id || providerItem.work_item_id || "",
+        status: replayRepairWorkItemStatus(providerItem.status),
+        source: providerItem.source || "",
+        provider_reproof_status: providerItem.provider_reproof_status || "",
+        provider_reproof_reason: providerItem.provider_reproof_reason || "",
+        request_patch_checksum: providerItem.request_patch_checksum || "",
+        runner_request_id: providerItem.runner_request_id || "",
+      },
+      providerCandidate: {
+        candidate_id: providerCandidate.candidate_id || "",
+        source: providerCandidate.source || "",
+        provider_reproof_status: providerCandidate.provider_reproof_status || "",
+        request_patch_checksum: providerCandidate.request_patch_checksum || "",
+      },
+      resolvedProviderItem: {
+        status: replayRepairWorkItemStatus(resolvedProviderItem.status),
+        provider_reproof_status: resolvedProviderItem.provider_reproof_status || "",
+        resolutionReason: resolvedProviderItem.resolutionReason || "",
+      },
+    };
+  } finally {
+    for (const file of [workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyProviderReproofDispatchTimelineSelfTest() {
+  const groupId = `memory-center-api-microcompact-native-provider-reproof-dispatch-timeline-selftest-${process.pid}-${Date.now()}`;
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+  const assignmentBindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const timelineBindingFile = getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId);
+  try {
+    const {
+      syncReplayRepairDispatchPlansForCoordinator,
+      runCodedGroupOrchestrator,
+      recordReplayRepairDispatchBriefTimelineBinding,
+      readReplayRepairDispatchTimelineBindingLedgerForCoordinator,
+    } = require("../collaboration/group-orchestrator");
+    const providerWorkItem = {
+      id: "api-native-provider-reproof:dispatch-timeline",
+      work_item_id: "api-native-provider-reproof:dispatch-timeline",
+      taskId: "task-provider-reproof-dispatch",
+      group_id: groupId,
+      source: "api_microcompact_native_apply_provider_reproof",
+      status: "pending",
+      priority: "critical",
+      component: "api_microcompact_native_provider_reproof",
+      owner: "group-main-agent",
+      target_project: "api",
+      dispatch_target: "api",
+      provider_reproof_status: "needed",
+      provider_reproof_reason: "missing_native_request_adapter_telemetry",
+      reproof_candidate_id: "api-native-proof-closure-reproof:dispatch-timeline",
+      timeline_binding_id: "timeline-original-provider-reproof",
+      original_work_item_id: "api-native-proof-repair:original-dispatch-timeline",
+      proof_entry_id: "proof-provider-reproof-dispatch-timeline",
+      plan_checksum: "plan-provider-reproof-dispatch-timeline",
+      apply_plan_checksum: "apply-provider-reproof-dispatch-timeline",
+      request_patch_checksum: "request-provider-reproof-dispatch-timeline",
+      runner_request_id: "runner-provider-reproof-dispatch-timeline",
+      execution_id: "execution-provider-reproof-dispatch-timeline",
+      task_agent_session_id: "tas-provider-reproof-dispatch-timeline",
+      native_session_id: "native-provider-reproof-dispatch-timeline",
+      memory_context_snapshot_id: "snapshot-provider-reproof-dispatch-timeline",
+      memory_context_snapshot_checksum: "snapshot-checksum-provider-reproof-dispatch-timeline",
+      request_telemetry_status: "missing",
+      request_telemetry_source: "",
+      request_telemetry_session_status: "bound",
+      request_telemetry_dispatch_status: "runner_bound",
+      instruction: "补齐 provider native_request_adapter telemetry re-proof，不能把 timeline closure 当成 provider strong proof。",
+      expected: "providerReproofStatus=strong; nativeApplyStrongProof=true; requestTelemetrySessionBound=true; requestTelemetryDispatchBound=true",
+      prompt_patch: "只重跑 request-provider-reproof-dispatch-timeline 的 provider telemetry re-proof。",
+      createdAt: "2026-07-08T10:40:00.000Z",
+      updatedAt: "2026-07-08T10:40:00.000Z",
+    };
+    writeGroupCompactBoundaryReplayRepairWorkItems(groupId, {
+      groupId,
+      items: [providerWorkItem],
+      stats: replayRepairWorkItemStats([providerWorkItem]),
+      updatedAt: "2026-07-08T10:40:00.000Z",
+    });
+    const candidateSummary = buildReplayRepairMainAgentDispatchCandidates(groupId, { limit: 8 });
+    const providerCandidate = (candidateSummary.candidates || []).find((candidate: any) => candidate.source === "api_microcompact_native_apply_provider_reproof") || {};
+    const planLedger = syncReplayRepairDispatchPlansForCoordinator(groupId, candidateSummary, { at: "2026-07-08T10:41:00.000Z" });
+    const readyBrief = (planLedger.briefs || []).find((brief: any) => brief.status === "ready" && brief.source === "api_microcompact_native_apply_provider_reproof") || {};
+    const briefReport = buildApiMicrocompactNativeApplyProofRepairDispatchBriefReport({
+      candidateReport: {
+        schema: "ccm-api-microcompact-native-apply-proof-repair-dispatch-candidate-report-v1",
+        groups: [{
+          groupId,
+          file: candidateSummary.file,
+          nativeOpenItemCount: 1,
+          readyCount: 1,
+          dispatchMarkedCount: 1,
+          candidates: [providerCandidate],
+        }],
+      },
+      generatedAt: "2026-07-08T10:41:30.000Z",
+    });
+    const group = {
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator", agent: "coded-orchestrator" },
+        { project: "api", agent: "claude-code" },
+      ],
+    };
+    const result = runCodedGroupOrchestrator({
+      group,
+      message: [
+        "请让 api 项目执行 provider re-proof repair。",
+        `必须使用 brief ${readyBrief.brief_id}，work item ${readyBrief.work_item_id}。`,
+        "只补齐 request-provider-reproof-dispatch-timeline 的 native_request_adapter telemetry；不要把 timeline closure 当成 provider strong proof。",
+      ].join("\n"),
+      context: "Phase 98 selftest：验证 provider re-proof dispatch brief 到 assignment/timeline 的绑定。",
+    });
+    const assignment = (result.assignments || []).find((item: any) => item.project === "api") || {};
+    const assignmentReport = buildApiMicrocompactNativeApplyProofRepairAssignmentBindingReport({ groupIds: [groupId] });
+    const taskId = "task-provider-reproof-dispatch";
+    const sessionId = "tas-provider-reproof-dispatch-timeline";
+    const snapshotId = "snapshot-provider-reproof-dispatch-timeline";
+    const executionId = "execution-provider-reproof-dispatch-timeline";
+    let lastBinding: any = null;
+    for (const eventType of REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS) {
+      lastBinding = recordReplayRepairDispatchBriefTimelineBinding(groupId, {
+        brief: assignment.replay_repair_dispatch_brief || readyBrief,
+        task_id: taskId,
+        project: "api",
+        assignment_id: assignment.assignmentId || assignment.assignment_id || "assignment-provider-reproof-dispatch-timeline",
+        dispatch_key: assignment.dispatchKey || assignment.dispatch_key || "dispatch-key-provider-reproof-dispatch-timeline",
+        worker_context_packet_id: assignment.worker_context_packet?.packet_id || "wcp-provider-reproof-dispatch-timeline",
+        worker_handoff_id: "handoff-provider-reproof-dispatch-timeline",
+        memory_context_snapshot_id: snapshotId,
+        memory_context_snapshot_checksum: "snapshot-checksum-provider-reproof-dispatch-timeline",
+        task_agent_session_id: sessionId,
+        native_session_id: "native-provider-reproof-dispatch-timeline",
+        execution_id: executionId,
+        receipt_status: "done",
+        timeline_event: {
+          id: `tl-provider-reproof-${eventType}`,
+          type: eventType,
+          at: "2026-07-08T10:42:00.000Z",
+        },
+      }, { at: "2026-07-08T10:42:00.000Z" });
+    }
+    const timelineLedger = readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId);
+    const binding = (timelineLedger.entries || []).find((entry: any) => entry.brief_id === readyBrief.brief_id) || {};
+    const timelineReport = buildApiMicrocompactNativeApplyProofRepairTimelineBindingReport({ groupIds: [groupId] });
+    const postTimelineLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const stillOpenProviderItem = (postTimelineLedger.items || []).find((item: any) => item.source === "api_microcompact_native_apply_provider_reproof") || {};
+    const eventTypes = new Set((binding.event_types || []).map((item: any) => String(item || "")));
+    const checks = {
+      providerCandidateCarriesReproofMetadata: providerCandidate.source === "api_microcompact_native_apply_provider_reproof"
+        && providerCandidate.provider_reproof_status === "needed"
+        && providerCandidate.provider_reproof_reason === "missing_native_request_adapter_telemetry"
+        && providerCandidate.original_work_item_id === "api-native-proof-repair:original-dispatch-timeline",
+      providerBriefUsesNativeProofContract: readyBrief.source === "api_microcompact_native_apply_provider_reproof"
+        && readyBrief.provider_reproof_status === "needed"
+        && readyBrief.provider_reproof_reason === "missing_native_request_adapter_telemetry"
+        && /nativeApplyStrongProof=true/.test(readyBrief.worker_task || "")
+        && /provider_reproof=needed|providerReproofStatus=strong/.test(readyBrief.worker_task || ""),
+      providerBriefReportCoversMetadata: briefReport.overall?.status === "ok"
+        && Number(briefReport.overall?.readyBriefCount || 0) === 1
+        && Number(briefReport.overall?.metadataGapCount || 0) === 0,
+      assignmentBindingIncludesProviderReproof: assignmentReport.overall?.status === "ok"
+        && Number(assignmentReport.overall?.bindingCount || 0) === 1
+        && (assignmentReport.groups?.[0]?.bindings || [])[0]?.provider_reproof_status === "needed",
+      timelineBindingIncludesProviderReproof: timelineReport.overall?.status === "ok"
+        && Number(timelineReport.overall?.bindingCount || 0) === 1
+        && REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS.every(type => eventTypes.has(type))
+        && binding.provider_reproof_status === "needed"
+        && binding.original_work_item_id === "api-native-proof-repair:original-dispatch-timeline",
+      timelineDoesNotPrematurelyCloseProviderReproof: replayRepairWorkItemOpen(stillOpenProviderItem.status)
+        && !lastBinding?.repair_work_item_completion
+        && stillOpenProviderItem.provider_reproof_status === "needed",
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      briefReport: briefReport.overall,
+      assignmentReport: assignmentReport.overall,
+      timelineReport: timelineReport.overall,
+      providerBrief: {
+        brief_id: readyBrief.brief_id || "",
+        source: readyBrief.source || "",
+        provider_reproof_status: readyBrief.provider_reproof_status || "",
+        original_work_item_id: readyBrief.original_work_item_id || "",
+      },
+      timelineBinding: {
+        timeline_binding_id: binding.timeline_binding_id || "",
+        source: binding.source || "",
+        provider_reproof_status: binding.provider_reproof_status || "",
+        original_work_item_id: binding.original_work_item_id || "",
+        event_types: binding.event_types || [],
+      },
+      providerWorkItem: {
+        id: stillOpenProviderItem.id || stillOpenProviderItem.work_item_id || "",
+        status: replayRepairWorkItemStatus(stillOpenProviderItem.status),
+        provider_reproof_status: stillOpenProviderItem.provider_reproof_status || "",
+      },
+    };
+  } finally {
+    for (const file of [
+      workItemsFile,
+      `${workItemsFile}.bak`,
+      dispatchPlanFile,
+      `${dispatchPlanFile}.bak`,
+      assignmentBindingFile,
+      `${assignmentBindingFile}.bak`,
+      timelineBindingFile,
+      `${timelineBindingFile}.bak`,
+    ]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyProviderReproofWorkerContextInjectionSelfTest() {
+  const groupId = `memory-center-api-microcompact-native-provider-reproof-worker-context-selftest-${process.pid}-${Date.now()}`;
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+  const assignmentBindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  try {
+    const {
+      syncReplayRepairDispatchPlansForCoordinator,
+      runCodedGroupOrchestrator,
+    } = require("../collaboration/group-orchestrator");
+    const { renderWorkerContextPacket } = require("../../agents/runtime-kernel");
+    const providerWorkItem = {
+      id: "api-native-provider-reproof:worker-context",
+      work_item_id: "api-native-provider-reproof:worker-context",
+      taskId: "task-provider-reproof-worker-context",
+      group_id: groupId,
+      source: "api_microcompact_native_apply_provider_reproof",
+      status: "pending",
+      priority: "critical",
+      component: "api_microcompact_native_provider_reproof",
+      owner: "group-main-agent",
+      target_project: "api",
+      dispatch_target: "api",
+      provider_reproof_status: "needed",
+      provider_reproof_reason: "missing_native_request_adapter_telemetry",
+      reproof_candidate_id: "api-native-proof-closure-reproof:worker-context",
+      timeline_binding_id: "timeline-original-provider-worker-context",
+      original_work_item_id: "api-native-proof-repair:original-worker-context",
+      proof_entry_id: "proof-provider-reproof-worker-context",
+      plan_checksum: "plan-provider-reproof-worker-context",
+      apply_plan_checksum: "apply-provider-reproof-worker-context",
+      request_patch_checksum: "request-provider-reproof-worker-context",
+      runner_request_id: "runner-provider-reproof-worker-context",
+      execution_id: "execution-provider-reproof-worker-context",
+      task_agent_session_id: "tas-provider-reproof-worker-context",
+      native_session_id: "native-provider-reproof-worker-context",
+      memory_context_snapshot_id: "snapshot-provider-reproof-worker-context",
+      memory_context_snapshot_checksum: "snapshot-checksum-provider-reproof-worker-context",
+      request_telemetry_status: "missing",
+      request_telemetry_source: "",
+      request_telemetry_session_status: "bound",
+      request_telemetry_dispatch_status: "runner_bound",
+      instruction: "补齐 provider native_request_adapter telemetry re-proof，并把 provider re-proof 元数据稳定注入 WorkerContextPacket。",
+      expected: "providerReproofStatus=strong; nativeApplyStrongProof=true; requestTelemetrySessionBound=true; requestTelemetryDispatchBound=true",
+      prompt_patch: "只重跑 request-provider-reproof-worker-context 的 provider telemetry re-proof。",
+      createdAt: "2026-07-08T10:50:00.000Z",
+      updatedAt: "2026-07-08T10:50:00.000Z",
+    };
+    writeGroupCompactBoundaryReplayRepairWorkItems(groupId, {
+      groupId,
+      items: [providerWorkItem],
+      stats: replayRepairWorkItemStats([providerWorkItem]),
+      updatedAt: "2026-07-08T10:50:00.000Z",
+    });
+    const candidateSummary = buildReplayRepairMainAgentDispatchCandidates(groupId, { limit: 8 });
+    const planLedger = syncReplayRepairDispatchPlansForCoordinator(groupId, candidateSummary, { at: "2026-07-08T10:51:00.000Z" });
+    const readyBrief = (planLedger.briefs || []).find((brief: any) => brief.status === "ready" && brief.source === "api_microcompact_native_apply_provider_reproof") || {};
+    const group = {
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator", agent: "coded-orchestrator" },
+        { project: "api", agent: "claude-code" },
+      ],
+    };
+    const result = runCodedGroupOrchestrator({
+      group,
+      message: [
+        "请让 api 项目执行 provider re-proof worker context injection repair。",
+        `必须使用 brief ${readyBrief.brief_id}，work item ${readyBrief.work_item_id}。`,
+        "检查 request-provider-reproof-worker-context 的 native_request_adapter telemetry，并确认 WorkerContextPacket 中携带 provider re-proof 元数据。",
+      ].join("\n"),
+      context: "Phase 99 selftest：验证 provider re-proof brief 进入 WorkerContextPacket 结构化包和渲染文本。",
+    });
+    const assignment = (result.assignments || []).find((item: any) => item.project === "api") || {};
+    const packet = assignment.worker_context_packet || {};
+    const packetBrief = (packet.replay_repair_dispatch_briefs || []).find((item: any) => item.brief_id === readyBrief.brief_id) || {};
+    const renderedPacket = renderWorkerContextPacket(packet);
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const binding = (bindingLedger.entries || []).find((entry: any) => entry.brief_id === readyBrief.brief_id) || {};
+    const bindingPacketBrief = (binding.worker_context_packet_replay_briefs || []).find((item: any) => item.brief_id === readyBrief.brief_id) || {};
+    const renderFlags = binding.worker_context_packet_render_probe?.rendered_flags || {};
+    const injectionReport = buildApiMicrocompactNativeApplyProofRepairWorkerContextPacketInjectionReport({ groupIds: [groupId] });
+    const injectionCheck = evaluateApiMicrocompactNativeApplyProofRepairWorkerContextPacketInjection({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["api_microcompact_native_apply_proof_repair_worker_context_packet_injection"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((check: any) => check.id === "api_microcompact_native_apply_proof_repair_worker_context_packet_injection") || {};
+    const checks = {
+      assignmentPacketCarriesProviderReproofBrief: packetBrief.source === "api_microcompact_native_apply_provider_reproof"
+        && packetBrief.provider_reproof_status === "needed"
+        && packetBrief.provider_reproof_reason === "missing_native_request_adapter_telemetry"
+        && packetBrief.reproof_candidate_id === "api-native-proof-closure-reproof:worker-context"
+        && packetBrief.original_work_item_id === "api-native-proof-repair:original-worker-context"
+        && packetBrief.request_patch_checksum === "request-provider-reproof-worker-context"
+        && packetBrief.runner_request_id === "runner-provider-reproof-worker-context"
+        && packetBrief.should_create_real_task === false
+        && packetBrief.required_receipt_reference === true,
+      renderedWorkerContextCarriesProviderReproofBrief: renderedPacket.includes("provider_reproof=needed")
+        && renderedPacket.includes("provider_reason=missing_native_request_adapter_telemetry")
+        && renderedPacket.includes("reproof_candidate=api-native-proof-closure-reproof:worker-context")
+        && renderedPacket.includes("original_work_item=api-native-proof-repair:original-worker-context")
+        && renderedPacket.includes("request-provider-reproof-worker-context")
+        && renderedPacket.includes("runner-provider-reproof-worker-context")
+        && renderedPacket.includes("shouldCreateRealTask=false"),
+      bindingPersistsInjectedPacketSnapshot: bindingPacketBrief.brief_id === readyBrief.brief_id
+        && bindingPacketBrief.provider_reproof_status === "needed"
+        && bindingPacketBrief.provider_reproof_reason === "missing_native_request_adapter_telemetry"
+        && bindingPacketBrief.reproof_candidate_id === "api-native-proof-closure-reproof:worker-context"
+        && renderFlags.has_provider_reproof_status === true
+        && renderFlags.has_provider_reproof_reason === true
+        && renderFlags.has_original_work_item_id === true,
+      injectionReportCoversProviderReproofPacket: injectionReport.overall?.status === "ok"
+        && Number(injectionReport.overall?.bindingCount || 0) === 1
+        && Number(injectionReport.overall?.providerReproofBindingCount || 0) === 1
+        && Number(injectionReport.overall?.providerReproofPacketCount || 0) === 1
+        && Number(injectionReport.overall?.renderedProviderReproofCount || 0) === 1,
+      qualityCheckExposesWorkerContextInjection: injectionCheck.id === "api_microcompact_native_apply_proof_repair_worker_context_packet_injection"
+        && injectionCheck.status === "ok"
+        && qualityCheck.status === "ok"
+        && Number(qualityCheck.checked || 0) === 1
+        && Number(qualityCheck.passed || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      injectionReport: injectionReport.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+      packetBrief: {
+        brief_id: packetBrief.brief_id || "",
+        source: packetBrief.source || "",
+        provider_reproof_status: packetBrief.provider_reproof_status || "",
+        provider_reproof_reason: packetBrief.provider_reproof_reason || "",
+        reproof_candidate_id: packetBrief.reproof_candidate_id || "",
+        original_work_item_id: packetBrief.original_work_item_id || "",
+      },
+      binding: {
+        binding_id: binding.binding_id || "",
+        worker_context_packet_id: binding.worker_context_packet_id || "",
+        rendered_flags: renderFlags,
+      },
+    };
+  } finally {
+    for (const file of [
+      workItemsFile,
+      `${workItemsFile}.bak`,
+      dispatchPlanFile,
+      `${dispatchPlanFile}.bak`,
+      assignmentBindingFile,
+      `${assignmentBindingFile}.bak`,
+    ]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyProviderReproofReceiptConsumptionSelfTest() {
+  const groupId = `memory-center-api-microcompact-native-provider-reproof-receipt-consumption-selftest-${process.pid}-${Date.now()}`;
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+  const assignmentBindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const timelineBindingFile = getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId);
+  try {
+    const {
+      syncReplayRepairDispatchPlansForCoordinator,
+      runCodedGroupOrchestrator,
+      recordReplayRepairDispatchBriefTimelineBinding,
+      readReplayRepairDispatchTimelineBindingLedgerForCoordinator,
+    } = require("../collaboration/group-orchestrator");
+    const providerWorkItem = {
+      id: "api-native-provider-reproof:receipt-consumption",
+      work_item_id: "api-native-provider-reproof:receipt-consumption",
+      taskId: "task-provider-reproof-receipt-consumption",
+      group_id: groupId,
+      source: "api_microcompact_native_apply_provider_reproof",
+      status: "pending",
+      priority: "critical",
+      component: "api_microcompact_native_provider_reproof",
+      owner: "group-main-agent",
+      target_project: "api",
+      dispatch_target: "api",
+      provider_reproof_status: "needed",
+      provider_reproof_reason: "missing_native_request_adapter_telemetry",
+      reproof_candidate_id: "api-native-proof-closure-reproof:receipt-consumption",
+      timeline_binding_id: "timeline-original-provider-receipt-consumption",
+      original_work_item_id: "api-native-proof-repair:original-receipt-consumption",
+      proof_entry_id: "proof-provider-reproof-receipt-consumption",
+      plan_checksum: "plan-provider-reproof-receipt-consumption",
+      apply_plan_checksum: "apply-provider-reproof-receipt-consumption",
+      request_patch_checksum: "request-provider-reproof-receipt-consumption",
+      runner_request_id: "runner-provider-reproof-receipt-consumption",
+      execution_id: "execution-provider-reproof-receipt-consumption",
+      task_agent_session_id: "tas-provider-reproof-receipt-consumption",
+      native_session_id: "native-provider-reproof-receipt-consumption",
+      memory_context_snapshot_id: "snapshot-provider-reproof-receipt-consumption",
+      memory_context_snapshot_checksum: "snapshot-checksum-provider-reproof-receipt-consumption",
+      request_telemetry_status: "missing",
+      request_telemetry_source: "",
+      request_telemetry_session_status: "bound",
+      request_telemetry_dispatch_status: "runner_bound",
+      instruction: "补齐 provider native_request_adapter telemetry re-proof，并在回执中声明 replay repair brief usage。",
+      expected: "replayRepairDispatchBriefUsage=used; providerReproofStatus=needed; nativeApplyStrongProof 仍由 provider proof ledger 证明",
+      prompt_patch: "只重跑 request-provider-reproof-receipt-consumption 的 provider telemetry re-proof。",
+      createdAt: "2026-07-08T11:00:00.000Z",
+      updatedAt: "2026-07-08T11:00:00.000Z",
+    };
+    writeGroupCompactBoundaryReplayRepairWorkItems(groupId, {
+      groupId,
+      items: [providerWorkItem],
+      stats: replayRepairWorkItemStats([providerWorkItem]),
+      updatedAt: "2026-07-08T11:00:00.000Z",
+    });
+    const candidateSummary = buildReplayRepairMainAgentDispatchCandidates(groupId, { limit: 8 });
+    const planLedger = syncReplayRepairDispatchPlansForCoordinator(groupId, candidateSummary, { at: "2026-07-08T11:01:00.000Z" });
+    const readyBrief = (planLedger.briefs || []).find((brief: any) => brief.status === "ready" && brief.source === "api_microcompact_native_apply_provider_reproof") || {};
+    const group = {
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator", agent: "coded-orchestrator" },
+        { project: "api", agent: "claude-code" },
+      ],
+    };
+    const result = runCodedGroupOrchestrator({
+      group,
+      message: [
+        "请让 api 项目执行 provider re-proof receipt consumption repair。",
+        `必须使用 brief ${readyBrief.brief_id}，work item ${readyBrief.work_item_id}。`,
+        "完成后回执必须声明 replayRepairDispatchBriefUsage。",
+      ].join("\n"),
+      context: "Phase 100 selftest：验证 provider re-proof brief 注入后的 receipt consumption 审计。",
+    });
+    const assignment = (result.assignments || []).find((item: any) => item.project === "api") || {};
+    const receipt = {
+      status: "done",
+      summary: "已使用 provider re-proof brief 定位待补 request telemetry；provider strong proof 仍等待 native proof ledger。",
+      replayRepairDispatchBriefUsage: [{
+        briefId: readyBrief.brief_id,
+        workItemId: readyBrief.work_item_id,
+        usageState: "used",
+        providerReproofStatus: "needed",
+        requestPatchChecksum: "request-provider-reproof-receipt-consumption",
+        runnerRequestId: "runner-provider-reproof-receipt-consumption",
+        reason: "使用 WorkerContextPacket 中的 provider re-proof brief 执行精确 telemetry re-proof。",
+      }],
+      memoryUsed: [`replay repair brief ${readyBrief.brief_id}；work_item_id=${readyBrief.work_item_id}；request-provider-reproof-receipt-consumption`],
+      memoryIgnored: [],
+      blockers: [],
+      needs: [],
+    };
+    const taskId = "task-provider-reproof-receipt-consumption";
+    const sessionId = "tas-provider-reproof-receipt-consumption";
+    const snapshotId = "snapshot-provider-reproof-receipt-consumption";
+    const executionId = "execution-provider-reproof-receipt-consumption";
+    for (const eventType of REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS) {
+      recordReplayRepairDispatchBriefTimelineBinding(groupId, {
+        brief: assignment.replay_repair_dispatch_brief || readyBrief,
+        task_id: taskId,
+        project: "api",
+        assignment_id: assignment.assignmentId || assignment.assignment_id || "assignment-provider-reproof-receipt-consumption",
+        dispatch_key: assignment.dispatchKey || assignment.dispatch_key || "dispatch-key-provider-reproof-receipt-consumption",
+        worker_context_packet_id: assignment.worker_context_packet?.packet_id || "wcp-provider-reproof-receipt-consumption",
+        worker_handoff_id: "handoff-provider-reproof-receipt-consumption",
+        memory_context_snapshot_id: snapshotId,
+        memory_context_snapshot_checksum: "snapshot-checksum-provider-reproof-receipt-consumption",
+        task_agent_session_id: sessionId,
+        native_session_id: "native-provider-reproof-receipt-consumption",
+        execution_id: executionId,
+        receipt_status: eventType === "child_agent_receipt" ? "done" : "",
+        receipt: eventType === "child_agent_receipt" ? receipt : null,
+        timeline_event: {
+          id: `tl-provider-reproof-consumption-${eventType}`,
+          type: eventType,
+          at: "2026-07-08T11:02:00.000Z",
+        },
+      }, { at: "2026-07-08T11:02:00.000Z" });
+    }
+    const timelineLedger = readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId);
+    const binding = (timelineLedger.entries || []).find((entry: any) => entry.brief_id === readyBrief.brief_id) || {};
+    const consumptionReport = buildApiMicrocompactNativeApplyProofRepairReceiptConsumptionReport({ groupIds: [groupId] });
+    const consumptionCheck = evaluateApiMicrocompactNativeApplyProofRepairReceiptConsumption({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["api_microcompact_native_apply_proof_repair_receipt_consumption"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((check: any) => check.id === "api_microcompact_native_apply_proof_repair_receipt_consumption") || {};
+    const postTimelineLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const stillOpenProviderItem = (postTimelineLedger.items || []).find((item: any) => item.source === "api_microcompact_native_apply_provider_reproof") || {};
+    const checks = {
+      timelineBindingRecordsReceiptConsumption: binding.replay_repair_consumption_status === "used"
+        && binding.replay_repair_consumption_source === "receipt.replayRepairDispatchBriefUsage"
+        && /provider re-proof brief/.test(binding.replay_repair_consumption_reason || "")
+        && binding.provider_reproof_status === "needed"
+        && binding.original_work_item_id === "api-native-proof-repair:original-receipt-consumption",
+      consumptionReportCoversProviderReproofReceipt: consumptionReport.overall?.status === "ok"
+        && Number(consumptionReport.overall?.receiptBindingCount || 0) === 1
+        && Number(consumptionReport.overall?.providerReproofReceiptCount || 0) === 1
+        && Number(consumptionReport.overall?.providerReproofConsumedCount || 0) === 1
+        && Number(consumptionReport.overall?.metadataGapCount || 0) === 0,
+      qualityCheckExposesReceiptConsumption: consumptionCheck.id === "api_microcompact_native_apply_proof_repair_receipt_consumption"
+        && consumptionCheck.status === "ok"
+        && qualityCheck.status === "ok"
+        && Number(qualityCheck.checked || 0) === 1
+        && Number(qualityCheck.passed || 0) === 1,
+      receiptConsumptionDoesNotCloseProviderReproof: replayRepairWorkItemOpen(stillOpenProviderItem.status)
+        && stillOpenProviderItem.provider_reproof_status === "needed",
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      consumptionReport: consumptionReport.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+      timelineBinding: {
+        timeline_binding_id: binding.timeline_binding_id || "",
+        replay_repair_consumption_status: binding.replay_repair_consumption_status || "",
+        replay_repair_consumption_source: binding.replay_repair_consumption_source || "",
+        provider_reproof_status: binding.provider_reproof_status || "",
+      },
+      providerWorkItem: {
+        id: stillOpenProviderItem.id || stillOpenProviderItem.work_item_id || "",
+        status: replayRepairWorkItemStatus(stillOpenProviderItem.status),
+        provider_reproof_status: stillOpenProviderItem.provider_reproof_status || "",
+      },
+    };
+  } finally {
+    for (const file of [
+      workItemsFile,
+      `${workItemsFile}.bak`,
+      dispatchPlanFile,
+      `${dispatchPlanFile}.bak`,
+      assignmentBindingFile,
+      `${assignmentBindingFile}.bak`,
+      timelineBindingFile,
+      `${timelineBindingFile}.bak`,
+    ]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterApiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemorySelfTest() {
+  const groupId = `memory-center-api-microcompact-native-provider-reproof-receipt-typed-memory-selftest-${process.pid}-${Date.now()}`;
+  const timelineBindingFile = getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupId);
+  let typedDir = "";
+  try {
+    const {
+      buildGroupTypedMemoryRecall,
+      getGroupTypedMemoryDir,
+      readGroupTypedMemoryDistillationLedger,
+      scanGroupTypedMemoryDocuments,
+    } = require("../collaboration/group-memory-index");
+    const { recordReplayRepairDispatchBriefTimelineBinding } = require("../collaboration/group-orchestrator");
+    typedDir = getGroupTypedMemoryDir(groupId);
+    const providerBriefs = [
+      {
+        brief_id: "brief-provider-reproof-typed-memory-used",
+        work_item_id: "work-provider-reproof-typed-memory-used",
+        source: "api_microcompact_native_apply_provider_reproof",
+        target_project: "api",
+        provider_reproof_status: "needed",
+        provider_reproof_reason: "missing_native_request_adapter_telemetry",
+        reproof_candidate_id: "candidate-provider-reproof-typed-memory-used",
+        original_work_item_id: "original-provider-reproof-typed-memory-used",
+        request_patch_checksum: "request-provider-reproof-typed-memory-used",
+        runner_request_id: "runner-provider-reproof-typed-memory-used",
+      },
+      {
+        brief_id: "brief-provider-reproof-typed-memory-strong",
+        work_item_id: "work-provider-reproof-typed-memory-strong",
+        source: "api_microcompact_native_apply_provider_reproof",
+        target_project: "api",
+        provider_reproof_status: "needed",
+        provider_reproof_reason: "missing_native_request_adapter_telemetry",
+        reproof_candidate_id: "candidate-provider-reproof-typed-memory-strong",
+        original_work_item_id: "original-provider-reproof-typed-memory-strong",
+        request_patch_checksum: "request-provider-reproof-typed-memory-strong",
+        runner_request_id: "runner-provider-reproof-typed-memory-strong",
+      },
+      {
+        brief_id: "brief-provider-reproof-typed-memory-ignored",
+        work_item_id: "work-provider-reproof-typed-memory-ignored",
+        source: "api_microcompact_native_apply_provider_reproof",
+        target_project: "api",
+        provider_reproof_status: "needed",
+        provider_reproof_reason: "superseded_candidate",
+        reproof_candidate_id: "candidate-provider-reproof-typed-memory-ignored",
+        original_work_item_id: "original-provider-reproof-typed-memory-ignored",
+        request_patch_checksum: "request-provider-reproof-typed-memory-ignored",
+        runner_request_id: "runner-provider-reproof-typed-memory-ignored",
+      },
+    ];
+    const receiptRows = [
+      {
+        briefId: "brief-provider-reproof-typed-memory-used",
+        workItemId: "work-provider-reproof-typed-memory-used",
+        usageState: "used",
+        providerReproofStatus: "needed",
+        requestPatchChecksum: "request-provider-reproof-typed-memory-used",
+        runnerRequestId: "runner-provider-reproof-typed-memory-used",
+        reason: "PROVIDER_REPROOF_TYPED_MEMORY_USED_SENTINEL 已使用 provider re-proof brief 作为下一轮修复上下文。",
+      },
+      {
+        briefId: "brief-provider-reproof-typed-memory-strong",
+        workItemId: "work-provider-reproof-typed-memory-strong",
+        usageState: "strong",
+        providerReproofStatus: "needed",
+        requestPatchChecksum: "request-provider-reproof-typed-memory-strong",
+        runnerRequestId: "runner-provider-reproof-typed-memory-strong",
+        reason: "PROVIDER_REPROOF_TYPED_MEMORY_STRONG_SENTINEL 子 Agent 声称 strong，但仍需 native provider proof ledger。",
+      },
+      {
+        briefId: "brief-provider-reproof-typed-memory-ignored",
+        workItemId: "work-provider-reproof-typed-memory-ignored",
+        usageState: "ignored",
+        providerReproofStatus: "needed",
+        requestPatchChecksum: "request-provider-reproof-typed-memory-ignored",
+        runnerRequestId: "runner-provider-reproof-typed-memory-ignored",
+        reason: "PROVIDER_REPROOF_TYPED_MEMORY_IGNORED_SENTINEL 旧 provider re-proof brief 被忽略，应进入 caution memory。",
+      },
+    ];
+    const receipt = {
+      status: "done",
+      summary: "provider re-proof typed memory receipt consumption selftest",
+      replayRepairDispatchBriefUsage: receiptRows,
+      memoryUsed: ["brief-provider-reproof-typed-memory-used", "brief-provider-reproof-typed-memory-strong"],
+      memoryIgnored: ["brief-provider-reproof-typed-memory-ignored"],
+      blockers: [],
+      needs: [],
+    };
+    providerBriefs.forEach((brief, index) => {
+      recordReplayRepairDispatchBriefTimelineBinding(groupId, {
+        brief,
+        task_id: `task-provider-reproof-typed-memory-${index}`,
+        project: "api",
+        assignment_id: `assignment-provider-reproof-typed-memory-${index}`,
+        dispatch_key: `dispatch-provider-reproof-typed-memory-${index}`,
+        worker_context_packet_id: `wcp-provider-reproof-typed-memory-${index}`,
+        worker_handoff_id: `handoff-provider-reproof-typed-memory-${index}`,
+        memory_context_snapshot_id: `snapshot-provider-reproof-typed-memory-${index}`,
+        memory_context_snapshot_checksum: `snapshot-checksum-provider-reproof-typed-memory-${index}`,
+        task_agent_session_id: `tas-provider-reproof-typed-memory-${index}`,
+        native_session_id: `native-provider-reproof-typed-memory-${index}`,
+        execution_id: `execution-provider-reproof-typed-memory-${index}`,
+        receipt_status: "done",
+        receipt,
+        timeline_event: {
+          id: `tl-provider-reproof-typed-memory-${index}`,
+          type: "child_agent_receipt",
+          at: "2026-07-08T12:20:00.000Z",
+        },
+      }, { at: "2026-07-08T12:20:00.000Z" });
+    });
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const recall = buildGroupTypedMemoryRecall(groupId, "PROVIDER_REPROOF_TYPED_MEMORY_USED_SENTINEL request-provider-reproof-typed-memory-used", { disableLedger: true, forceMemory: true, max: 8 });
+    const cautionRecall = buildGroupTypedMemoryRecall(groupId, "PROVIDER_REPROOF_TYPED_MEMORY_IGNORED_SENTINEL request-provider-reproof-typed-memory-ignored", { disableLedger: true, forceMemory: true, max: 8 });
+    const report = buildApiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemoryReport({ groupIds: [groupId] });
+    const check = evaluateApiMicrocompactNativeApplyProviderReproofReceiptConsumptionTypedMemory({ groupIds: [groupId] });
+    const qualityReport = buildMemoryQualityReport({
+      checkIds: ["api_microcompact_native_apply_provider_reproof_receipt_consumption_typed_memory"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (qualityReport.checks || []).find((item: any) => item.id === "api_microcompact_native_apply_provider_reproof_receipt_consumption_typed_memory") || {};
+    const archiveRows = ledger.providerReproofReceiptConsumptionArchive?.rows || [];
+    const recallDoc = docs.find((doc: any) => doc.relPath === "provider-reproof-receipt-consumption-recall.md");
+    const cautionDoc = docs.find((doc: any) => doc.relPath === "provider-reproof-receipt-consumption-cautions.md");
+    const recallDocText = recallDoc?.file ? fs.readFileSync(recallDoc.file, "utf-8") : "";
+    const checks = {
+      timelineReceiptAutoDistillsTypedArchive: ledger.providerReproofReceiptConsumptionArchive?.archived_count === 3
+        && ledger.providerReproofReceiptConsumptionArchive?.promoted_count === 2
+        && ledger.providerReproofReceiptConsumptionArchive?.caution_count === 1,
+      archiveClassifiesStrongAsClaimOnly: archiveRows.some((row: any) => row.status === "strong" && row.strong_receipt_claim_only === true)
+        && recallDocText.includes("receipt strong is a consumption claim only"),
+      typedDocsSplitPromotedAndCaution: recallDoc?.type === "reference"
+        && cautionDoc?.type === "feedback",
+      recallProbeFindsPromotedProviderMemory: JSON.stringify(recall.recalled || []).includes("PROVIDER_REPROOF_TYPED_MEMORY_USED_SENTINEL")
+        && JSON.stringify(recall.recalled || []).includes("provider-reproof-receipt-consumption-recall.md"),
+      cautionProbeFindsFeedbackMemory: cautionRecall.recalled.some((item: any) => item.relPath === "provider-reproof-receipt-consumption-cautions.md" && item.type === "feedback")
+        && JSON.stringify(cautionRecall.recalled || []).includes("PROVIDER_REPROOF_TYPED_MEMORY_IGNORED_SENTINEL"),
+      reportCoversTypedMemoryDistillation: report.overall?.status === "ok"
+        && Number(report.overall?.providerReproofReceiptCount || 0) === 3
+        && Number(report.overall?.archivedReceiptCount || 0) === 3
+        && Number(report.overall?.promotedReceiptCount || 0) === 2
+        && Number(report.overall?.cautionReceiptCount || 0) === 1
+        && Number(report.overall?.strongReceiptClaimCount || 0) === 1
+        && Number(report.overall?.metadataGapCount || 0) === 0,
+      qualityCheckExposesTypedMemoryCoverage: check.id === "api_microcompact_native_apply_provider_reproof_receipt_consumption_typed_memory"
+        && check.status === "ok"
+        && qualityCheck.status === "ok"
+        && Number(qualityCheck.checked || 0) === 1
+        && Number(qualityCheck.passed || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+      docs: docs.filter((doc: any) => String(doc.relPath || "").includes("provider-reproof-receipt-consumption")).map((doc: any) => ({ relPath: doc.relPath, type: doc.type })),
+      recalled: recall.recalled.map((item: any) => item.relPath),
+      cautionRecalled: cautionRecall.recalled.map((item: any) => `${item.type}:${item.relPath}`),
+    };
+  } finally {
+    for (const file of [
+      timelineBindingFile,
+      `${timelineBindingFile}.bak`,
+    ]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (typedDir) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
   }
 }
 
@@ -9510,6 +25622,93 @@ export function runMemoryCenterGroupToolContinuitySnapshotSelfTest() {
     }
     for (const dir of [sessionDir, toolDir, typedDir]) {
       try { if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterTaskAgentMemoryContextSnapshotSelfTest() {
+  const groupId = `memory-center-task-agent-snapshot-selftest-${process.pid}-${Date.now()}`;
+  const taskId = `memory-center-task-agent-snapshot-task-${process.pid}-${Date.now()}`;
+  const groupFile = path.join(GROUP_MEMORY_DIR, `${groupId}.json`);
+  try {
+    const {
+      openTaskAgentSession,
+      bindTaskAgentMemoryContextSnapshot,
+      buildTaskAgentMemoryContextSnapshotInventory,
+      pruneTaskAgentMemoryContextSnapshots,
+    } = require("../../tasks/agent-sessions");
+    const { saveGroupMemory } = require("../collaboration/memory");
+    saveGroupMemory(groupId, {
+      groupId,
+      goal: "验证 Memory Center 能治理项目子 Agent 记忆上下文快照",
+      messageDigest: "TASK_AGENT_MEMORY_CONTEXT_SNAPSHOT_SENTINEL：每次第三方子 Agent 会话都必须绑定群聊记忆快照。",
+      compaction: { compactedMessageCount: 2, summaryChecksum: "task-agent-memory-snapshot-summary" },
+    });
+    const session = openTaskAgentSession({
+      scopeId: taskId,
+      taskId,
+      groupId,
+      project: "api",
+      agentType: "codex",
+    });
+    const bound = bindTaskAgentMemoryContextSnapshot(session.id, {
+      taskId,
+      groupId,
+      project: "api",
+      agentType: "codex",
+      nativeSessionId: "codex-native-memory-center-snapshot",
+      turn: 1,
+      executionId: "exec-memory-center-task-agent-snapshot",
+      traceId: "trace-memory-center-task-agent-snapshot",
+      workerContextPacket: {
+        packet_id: "wcp_memory_center_task_agent_snapshot",
+        memory: {
+          schema: "ccm-group-memory-context-v1",
+          target_project: "api",
+          group_state: { goal: "TASK_AGENT_MEMORY_CONTEXT_SNAPSHOT_SENTINEL" },
+          dispatch_freshness_gate: {
+            schema: "ccm-child-agent-memory-dispatch-freshness-gate-v1",
+            dispatch_gate_id: "gmd_memory_center_task_agent_snapshot",
+          },
+        },
+      },
+      renderedPrompt: "prompt contains TASK_AGENT_MEMORY_CONTEXT_SNAPSHOT_SENTINEL memory packet",
+    });
+    const inventory = buildTaskAgentMemoryContextSnapshotInventory({ groupId });
+    const report = buildTaskAgentMemoryContextSnapshotReport({ groupId });
+    const check = evaluateTaskAgentMemoryContextSnapshots({ groupId });
+    const groupOverview = buildGroupTaskAgentMemoryContextSnapshotOverview(groupId);
+    const retention = pruneTaskAgentMemoryContextSnapshots({ groupId, dryRun: true });
+    const checks = {
+      snapshotBoundToSession: !!bound?.session?.memoryContextSnapshotId
+        && bound.session.memoryContextSnapshotId === bound.snapshot.snapshot_id
+        && fs.existsSync(bound.snapshot.snapshot_file),
+      inventoryFindsSnapshot: inventory.schema === "ccm-task-agent-memory-context-snapshot-inventory-v1"
+        && inventory.summary?.snapshotCount === 1
+        && inventory.rows?.[0]?.workerContextPacketId === "wcp_memory_center_task_agent_snapshot"
+        && inventory.rows?.[0]?.gateIds?.includes("gmd_memory_center_task_agent_snapshot"),
+      reportScoresSnapshotOk: report.schema === "ccm-task-agent-memory-context-snapshot-quality-report-v1"
+        && report.overall?.status === "ok"
+        && Number(report.overall?.passed || 0) === 1,
+      qualityCheckCoversSnapshot: check.id === "task_agent_memory_context_snapshots"
+        && Number(check.checked || 0) === 1
+        && Number(check.passed || 0) === 1,
+      groupOverviewExposesSnapshot: groupOverview?.schema === "ccm-group-task-agent-memory-context-snapshot-overview-v1"
+        && groupOverview.status === "ok"
+        && groupOverview.rows?.some((row: any) => row.snapshotId === bound.snapshot.snapshot_id),
+      retentionDryRunIsSafe: retention.schema === "ccm-task-agent-memory-context-snapshot-retention-result-v1"
+        && retention.dryRun === true
+        && retention.candidateCount === 0
+        && fs.existsSync(bound.snapshot.snapshot_file),
+    };
+    return { pass: Object.values(checks).every(Boolean), checks, inventory, report };
+  } finally {
+    try {
+      const { purgeTaskAgentSessions } = require("../../tasks/agent-sessions");
+      purgeTaskAgentSessions(taskId);
+    } catch {}
+    for (const file of [groupFile, `${groupFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
     }
   }
 }
@@ -10637,12 +26836,42 @@ export function handleMemoryCenterApi(pathname: string, req: any, res: any, pars
         if (!String(data.reason || "").trim()) throw new Error("维护操作必须填写原因");
         let result: any = null;
         if (operation === "rollback") result = rollbackMemory(scope, scopeId, data.reason, data.actor || "local-user");
+        else if (operation === "prune_task_agent_memory_context_snapshots") {
+          const { pruneTaskAgentMemoryContextSnapshots } = require("../../tasks/agent-sessions");
+          result = pruneTaskAgentMemoryContextSnapshots({
+            ...data,
+            groupId: data.groupId || data.group_id || (scope === "group" ? scopeId : ""),
+            taskId: data.taskId || data.task_id || "",
+            sessionId: data.sessionId || data.session_id || "",
+            dryRun: data.dryRun === false || data.dry_run === false ? false : true,
+          });
+          appendAudit({
+            type: "memory_operation",
+            action: operation,
+            scope,
+            scopeId,
+            actor: data.actor || "local-user",
+            reason: data.reason,
+            dryRun: result.dryRun === true,
+            candidateCount: result.candidateCount || 0,
+            prunedCount: result.prunedCount || 0,
+            skippedCount: result.skippedCount || 0,
+          });
+        }
         else if (scope === "global" && operation === "compact") {
           const { loadGlobalAgentMemory, compactGlobalAgentSession } = require("../../agents/global/memory");
           result = { sessions: loadGlobalAgentMemory().sessions.map((session: any) => compactGlobalAgentSession(session.sessionId, { force: true, reason: data.reason })) };
         } else if (scope === "global" && operation === "rebuild") {
           const { rebuildGlobalAgentMemory } = require("../../agents/global/memory");
           result = rebuildGlobalAgentMemory(data.reason, data.actor || "local-user");
+        } else if (scope === "global" && operation === "archive_selftest_residue") {
+          const { archiveGlobalAgentMemorySelfTestResidues } = require("../../agents/global/memory");
+          result = archiveGlobalAgentMemorySelfTestResidues({
+            reason: data.reason,
+            actor: data.actor || "local-user",
+            dryRun: data.dryRun === true || data.dry_run === true,
+            files: data.files || data.file || [],
+          });
         } else if (scope === "global" && ["disable", "enable", "block_pattern", "remove_block_pattern"].includes(operation)) {
           const { getGlobalAgentMemoryPolicy, setGlobalAgentMemoryPolicy } = require("../../agents/global/memory");
           const current = getGlobalAgentMemoryPolicy();

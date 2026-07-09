@@ -21,6 +21,7 @@ function normalizeIndependentReviewEntries(value) {
         return {
             reviewer: String(item.reviewer || item.agent || item.by || item.reviewedBy || item.reviewed_by || "").trim(),
             verdict: String(item.verdict || item.status || item.result || "").trim().toLowerCase(),
+            reviewSubject: String(item.reviewSubject || item.review_subject || item.subject || "").trim(),
             summary: (0, memory_1.compactMemoryText)(item.summary || item.note || item.comment || item.message || "", 800),
             evidence: normalizeReceiptStringArray(item.evidence || item.checks || item.findings || item.filesReviewed || item.files_reviewed),
         };
@@ -41,6 +42,22 @@ function normalizePostCompactCandidateUsageEntries(value) {
             reason: (0, memory_1.compactMemoryText)(item.reason || item.note || item.evidence || "", 500),
         };
     }).filter((item) => item && (item.gateId || item.candidateId || item.value || item.usageState)).slice(0, 80);
+}
+function normalizeGlobalMemoryUsageEntries(value) {
+    const rawItems = Array.isArray(value) ? value : (value ? [value] : []);
+    return rawItems.map((raw) => {
+        const item = typeof raw === "string" ? { value: raw } : raw;
+        if (!item || typeof item !== "object")
+            return null;
+        return {
+            globalMemoryId: String(item.globalMemoryId || item.global_memory_id || item.memoryId || item.memory_id || item.id || "").trim(),
+            usageState: String(item.usageState || item.usage_state || item.status || item.state || "").trim().toLowerCase(),
+            currentSourceVerified: item.currentSourceVerified === true || item.current_source_verified === true || item.verified === true,
+            semanticRiskAcknowledged: item.semanticRiskAcknowledged === true || item.semantic_risk_acknowledged === true || item.semanticRisk === true || item.semantic_risk === true,
+            crossGroupSuppression: String(item.crossGroupSuppression || item.cross_group_suppression || item.suppression || "").trim().toLowerCase(),
+            reason: (0, memory_1.compactMemoryText)(item.reason || item.note || item.evidence || item.value || item.text || "", 600),
+        };
+    }).filter((item) => item && (item.globalMemoryId || item.usageState || item.reason)).slice(0, 80);
 }
 function uniqueReceiptStrings(...lists) {
     const seen = new Set();
@@ -126,6 +143,12 @@ function normalizeAgentReceipt(raw, agent) {
         || raw.post_compact_candidate_usage_rows
         || raw.candidateUsage
         || raw.candidate_usage);
+    const globalMemoryUsage = normalizeGlobalMemoryUsageEntries(raw.globalMemoryUsage
+        || raw.global_memory_usage
+        || raw.globalAgentMemoryUsage
+        || raw.global_agent_memory_usage
+        || raw.globalMemoryReceipt
+        || raw.global_memory_receipt);
     const ackRaw = raw.ack || raw.ACK || raw.acknowledgement || raw.acknowledgment || null;
     const ack = ackRaw && typeof ackRaw === "object" ? {
         understoodGoal: String(ackRaw.understoodGoal || ackRaw.goal || ackRaw.summary || "").trim(),
@@ -173,6 +196,7 @@ function normalizeAgentReceipt(raw, agent) {
         memoryUsed,
         memoryIgnored,
         postCompactCandidateUsage,
+        globalMemoryUsage,
     };
 }
 function extractAgentReceipt(response, agent) {
@@ -217,6 +241,7 @@ function formatAgentReceiptForReview(receipt) {
         ? independentReview.map((item) => [
             item.reviewer || "reviewer",
             item.verdict || "reviewed",
+            item.reviewSubject ? `复核对象=${item.reviewSubject}` : "",
             item.summary || item.evidence.join("；"),
         ].filter(Boolean).join(" - ")).join("；")
         : "无";
@@ -230,6 +255,7 @@ function formatAgentReceiptForReview(receipt) {
         `- 独立复核：${independentReviewLine}`,
         `- 使用记忆：${receipt.memoryUsed?.length ? receipt.memoryUsed.join("；") : "未声明"}`,
         `- 未用记忆：${receipt.memoryIgnored?.length ? receipt.memoryIgnored.join("；") : "无"}`,
+        `- 全局记忆：${receipt.globalMemoryUsage?.length ? receipt.globalMemoryUsage.map((item) => `${item.globalMemoryId || "global"}=${item.usageState || "declared"}${item.currentSourceVerified ? "/verified" : ""}`).join("；") : "未声明"}`,
         `- 压缩候选：${receipt.postCompactCandidateUsage?.length ? receipt.postCompactCandidateUsage.map((item) => `${item.candidateId || item.value || "candidate"}=${item.usageState || "unknown"}`).join("；") : "未声明"}`,
         `- 阻塞：${receipt.blockers.length ? receipt.blockers.join("；") : "无"}`,
         `- 需要补充：${receipt.needs.length ? receipt.needs.join("；") : "无"}`,

@@ -15,10 +15,16 @@ export declare const GROUP_MANUAL_COMPACT_BUFFER_TOKENS = 3000;
 export declare const GROUP_COMPACT_MAX_ACTIVE_MESSAGES = 120;
 export declare const GROUP_MICRO_COMPACT_VERSION = 1;
 export declare const GROUP_MICRO_COMPACT_MAX_RECORDS = 80;
+export declare const GROUP_API_MICROCOMPACT_EDIT_PLAN_VERSION = 1;
+export declare const GROUP_API_MICROCOMPACT_NATIVE_APPLY_PLAN_VERSION = 1;
+export declare const GROUP_API_MICROCOMPACT_DEFAULT_MAX_INPUT_TOKENS = 180000;
+export declare const GROUP_API_MICROCOMPACT_DEFAULT_TARGET_INPUT_TOKENS = 40000;
+export declare const GROUP_API_MICROCOMPACT_CONTEXT_MANAGEMENT_BETA = "context-management-2025-06-27";
 export declare const GROUP_TIME_BASED_MICRO_COMPACT_VERSION = 1;
 export declare const GROUP_TIME_BASED_MC_CLEARED_MESSAGE = "[Old group Agent result content cleared]";
 export declare const GROUP_POST_COMPACT_REINJECT_VERSION = 1;
 export declare const GROUP_POST_COMPACT_RECOVERY_AUDIT_VERSION = 1;
+export declare const GROUP_POST_COMPACT_CLEANUP_AUDIT_VERSION = 1;
 export declare const GROUP_POST_COMPACT_FILE_BUDGET = 5;
 export declare const GROUP_POST_COMPACT_SKILL_BUDGET = 5;
 export declare const GROUP_POST_COMPACT_VERIFICATION_BUDGET = 8;
@@ -27,6 +33,7 @@ export declare const GROUP_PARTIAL_COMPACT_SEGMENT_LIMIT = 12;
 export declare const GROUP_PTL_EMERGENCY_VERSION = 1;
 export declare const GROUP_PTL_RECOVERY_VERSION = 1;
 export declare const GROUP_PRESERVED_SEGMENT_VERSION = 1;
+export declare const GROUP_COMPACT_STRATEGY_DECISION_VERSION = 1;
 export declare const GROUP_COMPACTION_HOOK_LEDGER_VERSION = 1;
 type ConversationSummary = {
     primaryRequest: string;
@@ -117,6 +124,9 @@ export declare function buildGroupPreservedSegment(messages: any[], keepIndex: n
     transcriptPath: any;
     createdAt: any;
 };
+export declare function buildGroupApiMicroCompactEditPlan(messages?: any[], options?: any): any;
+export declare function buildGroupApiMicrocompactNativeApplyPlan(apiEditPlan?: any, options?: any): any;
+export declare function buildGroupCompactStrategyDecision(input?: any): any;
 export declare function buildGroupPtlRecoveryPlan(input?: any): {
     schema: string;
     version: number;
@@ -246,6 +256,39 @@ export declare function buildGroupPostCompactRecoveryAudit(input?: any): {
     passedChecks: number;
     checkCount: number;
 };
+export declare function buildGroupPostCompactCleanupAudit(input?: any): {
+    schema: string;
+    version: number;
+    status: string;
+    pass: boolean;
+    action: string;
+    createdAt: any;
+    groupId: string;
+    boundaryId: string;
+    compactStrategyDecisionId: string;
+    apiMicroCompactEditPlanId: string;
+    mode: string;
+    transcriptPath: string;
+    summaryChecksum: string;
+    partialSidecarOnly: boolean;
+    preserveInvokedSkills: boolean;
+    preserveToolContinuity: boolean;
+    resetDerivedCompactState: boolean;
+    childAgentIsolation: string;
+    sourceOfTruth: string;
+    skillHints: string[];
+    apiMicroCompactEditPlan: any;
+    cleanupActions: {
+        id: string;
+        action: string;
+        status: string;
+        evidence: any;
+    }[];
+    checks: any[];
+    failedChecks: any[];
+    passedChecks: number;
+    checkCount: number;
+};
 export declare function buildDeterministicConversationSummary(messages: any[], memory: any, previous?: any): ConversationSummary;
 export declare function renderConversationSummary(summary: any, maxChars?: number): string;
 export declare function buildBoundedRecentGroupContext(messages: any[], fullCount?: number): string;
@@ -260,17 +303,6 @@ export declare function compactGroupConversationMemory(input: {
     rebuild?: boolean;
     partialCompact?: any;
 }): Promise<{
-    compacted: boolean;
-    memory: any;
-    keepIndex: any;
-    partialCompact: any;
-    partialCompacted?: undefined;
-    partialSegment?: undefined;
-    contextPressureWarning?: undefined;
-    boundary?: undefined;
-    preCompactWarning?: undefined;
-    postCompactRecoveryAudit?: undefined;
-} | {
     compacted: boolean;
     partialCompacted: boolean;
     memory: any;
@@ -355,6 +387,41 @@ export declare function compactGroupConversationMemory(input: {
         reason: string;
         createdAt: any;
     };
+    compactStrategyDecision: any;
+    postCompactCleanupAudit: {
+        schema: string;
+        version: number;
+        status: string;
+        pass: boolean;
+        action: string;
+        createdAt: any;
+        groupId: string;
+        boundaryId: string;
+        compactStrategyDecisionId: string;
+        apiMicroCompactEditPlanId: string;
+        mode: string;
+        transcriptPath: string;
+        summaryChecksum: string;
+        partialSidecarOnly: boolean;
+        preserveInvokedSkills: boolean;
+        preserveToolContinuity: boolean;
+        resetDerivedCompactState: boolean;
+        childAgentIsolation: string;
+        sourceOfTruth: string;
+        skillHints: string[];
+        apiMicroCompactEditPlan: any;
+        cleanupActions: {
+            id: string;
+            action: string;
+            status: string;
+            evidence: any;
+        }[];
+        checks: any[];
+        failedChecks: any[];
+        passedChecks: number;
+        checkCount: number;
+    };
+    apiMicroCompactEditPlan: any;
     contextPressureWarning?: undefined;
     boundary?: undefined;
     preCompactWarning?: undefined;
@@ -393,8 +460,11 @@ export declare function compactGroupConversationMemory(input: {
         };
         createdAt: any;
     };
+    compactStrategyDecision: any;
+    apiMicroCompactEditPlan: any;
     partialCompacted?: undefined;
     partialSegment?: undefined;
+    postCompactCleanupAudit?: undefined;
     boundary?: undefined;
     preCompactWarning?: undefined;
     postCompactRecoveryAudit?: undefined;
@@ -433,6 +503,8 @@ export declare function compactGroupConversationMemory(input: {
         };
         preCompactTokenCount: any;
         postCompactTokenCount: any;
+        compactStrategyDecision: any;
+        apiMicroCompactEditPlan: any;
         post_compact_restore: {
             strategy: string;
             preservedMessageIds: string[];
@@ -459,6 +531,8 @@ export declare function compactGroupConversationMemory(input: {
                 transcriptPath: any;
                 createdAt: any;
             };
+            strategyDecision: any;
+            apiMicroCompactEditPlan: any;
             summaryChecksum: string;
             transcriptPath: string;
             microCompact: {
@@ -633,6 +707,7 @@ export declare function compactGroupConversationMemory(input: {
                 recoveredAt: any;
             };
             recoveryAudit: any;
+            cleanupAudit: any;
         };
         context_budget: {
             chars: number;
@@ -923,8 +998,43 @@ export declare function compactGroupConversationMemory(input: {
         passedChecks: number;
         checkCount: number;
     };
-    partialCompact?: undefined;
+    postCompactCleanupAudit: {
+        schema: string;
+        version: number;
+        status: string;
+        pass: boolean;
+        action: string;
+        createdAt: any;
+        groupId: string;
+        boundaryId: string;
+        compactStrategyDecisionId: string;
+        apiMicroCompactEditPlanId: string;
+        mode: string;
+        transcriptPath: string;
+        summaryChecksum: string;
+        partialSidecarOnly: boolean;
+        preserveInvokedSkills: boolean;
+        preserveToolContinuity: boolean;
+        resetDerivedCompactState: boolean;
+        childAgentIsolation: string;
+        sourceOfTruth: string;
+        skillHints: string[];
+        apiMicroCompactEditPlan: any;
+        cleanupActions: {
+            id: string;
+            action: string;
+            status: string;
+            evidence: any;
+        }[];
+        checks: any[];
+        failedChecks: any[];
+        passedChecks: number;
+        checkCount: number;
+    };
+    compactStrategyDecision: any;
+    apiMicroCompactEditPlan: any;
     partialCompacted?: undefined;
+    partialCompact?: undefined;
     partialSegment?: undefined;
 }>;
 export declare function runGroupMemoryPreservedSegmentSelfTest(): Promise<{
@@ -1191,6 +1301,79 @@ export declare function runGroupMemoryCompactionSelfTest(): {
     keepIndex: number;
     keptMessages: number;
     compactedMessages: number;
+};
+export declare function runGroupCompactStrategyDecisionSelfTest(): Promise<{
+    pass: boolean;
+    checks: {
+        directDecisionHasSchema: boolean;
+        directDecisionRecordsWindow: boolean;
+        directDecisionPassesInvariants: boolean;
+        compactResultCarriesDecision: boolean;
+        boundaryCarriesDecision: boolean;
+        decisionMentionsCcStyleMode: boolean;
+    };
+    decision: {
+        mode: any;
+        invariantPass: any;
+        decisionChecksum: any;
+    };
+}>;
+export declare function runGroupPostCompactCleanupAuditSelfTest(): Promise<{
+    pass: boolean;
+    checks: {
+        cleanupAuditHasSchema: boolean;
+        cleanupAuditRecordedEverywhere: boolean;
+        cleanupLinksStrategyAndRecovery: boolean;
+        cleanupPreservesRawTranscript: boolean;
+        cleanupPreservesSkillAndToolContinuity: boolean;
+        cleanupActionsCoverCcStyleState: boolean;
+        cleanupDoesNotMutateRawMessages: boolean;
+    };
+    audit: {
+        status: any;
+        actionIds: any;
+        failedChecks: any;
+    };
+}>;
+export declare function runGroupApiMicroCompactEditPlanSelfTest(): Promise<{
+    pass: boolean;
+    checks: {
+        directPlanHasSchema: any;
+        directPlanIncludesThinkingEdit: boolean;
+        directPlanIncludesToolEdit: boolean;
+        compactResultCarriesPlan: boolean;
+        boundaryAndCleanupCarryPlan: boolean;
+        planIsAdvisoryForThirdPartyCli: boolean;
+    };
+    plan: {
+        editCount: any;
+        checksum: any;
+        signalCounts: any;
+    };
+}>;
+export declare function runGroupApiMicrocompactNativeApplyPlanSelfTest(): {
+    pass: boolean;
+    checks: {
+        cliStaysAdvisory: boolean;
+        nativeApiBuildsRealRequestPatch: any;
+        nativePatchLinksEditPlan: any;
+        nativePatchBindsChildAgentSession: boolean;
+        missingBetaFailsClosed: boolean;
+    };
+    cli: {
+        mode: any;
+        reason: any;
+        failedChecks: any;
+    };
+    native: {
+        mode: any;
+        requestPatch: any;
+        checksum: any;
+    };
+    missingBeta: {
+        mode: any;
+        failedChecks: any;
+    };
 };
 export declare function runGroupMemoryQualityGateSelfTest(): {
     pass: boolean;

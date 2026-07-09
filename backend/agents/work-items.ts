@@ -1,4 +1,5 @@
 import * as crypto from "crypto";
+import { sanitizeMainAgentUserFacingText } from "./user-facing-text";
 
 export type MainAgentWorkItemStatus = "pending" | "in_progress" | "completed" | "blocked" | "failed" | "cancelled";
 
@@ -34,8 +35,22 @@ export type MainAgentWorkItemClaimResult = {
   ok: boolean;
   reason?: "task_not_found" | "already_claimed" | "already_resolved" | "blocked" | "agent_busy";
   item?: MainAgentWorkItem;
+  busy?: MainAgentWorkItem;
   items: MainAgentWorkItem[];
   blocking?: string[];
+};
+
+export type MainAgentWorkItemUnlockSummary = {
+  schema: "ccm-main-agent-work-item-unlock-summary-v1";
+  title: string;
+  status: "ready_to_dispatch" | "auto_dispatch_deferred" | "auto_dispatch_queued" | "auto_dispatch_blocked";
+  status_label: string;
+  headline: string;
+  rows: Array<{ id: string; target: string; owner: string; subject: string; label: string }>;
+  next_claimable: Array<{ id: string; target: string; owner: string; subject: string }>;
+  next_action: string;
+  display_policy: any;
+  technical: any;
 };
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
@@ -44,6 +59,11 @@ const WORK_ITEM_VERIFICATION_PATTERN = /验证|验收|测试|复核|检查|verif
 function compactText(value: any, max = 240) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   return text.length > max ? `${text.slice(0, max)}...` : text;
+}
+
+function workItemVisibleText(value: any, fallback = "", max = 240) {
+  const text = sanitizeMainAgentUserFacingText(value || fallback);
+  return compactText(text || fallback, max);
 }
 
 function stringList(value: any, limit = 20) {
@@ -270,6 +290,95 @@ function workItemHasVerificationSignal(item: MainAgentWorkItem) {
   return WORK_ITEM_VERIFICATION_PATTERN.test(text);
 }
 
+function workItemUserLabel(item: MainAgentWorkItem | null) {
+  if (!item) return "";
+  return compactText(item.target || item.owner || item.subject || item.id, 80);
+}
+
+function dependencyLabel(items: MainAgentWorkItem[], ref: any) {
+  const item = findWorkItemByRef(items, ref);
+  return workItemUserLabel(item) || compactText(ref, 80);
+}
+
+function workItemDependencyRows(items: MainAgentWorkItem[]) {
+  return items
+    .filter(item => item.blockedBy.length > 0)
+    .map(item => {
+      const dependencies = item.blockedBy.map(ref => {
+        const dependency = findWorkItemByRef(items, ref);
+        const status = dependency?.status || "pending";
+        return {
+          id: dependency?.id || compactText(ref, 80),
+          label: dependencyLabel(items, ref),
+          status,
+          completed: status === "completed",
+        };
+      });
+      const openDependencies = dependencies.filter(dep => dep.completed !== true);
+      const itemLabel = workItemVisibleText(workItemUserLabel(item) || "执行成员", "执行成员", 80);
+      const waitingLabels = (openDependencies.length ? openDependencies : dependencies).map(dep => dep.label).filter(Boolean);
+      return {
+        id: item.id,
+        target: item.target || item.owner,
+        subject: item.subject,
+        status: item.status,
+        dependency_count: dependencies.length,
+        open_dependency_count: openDependencies.length,
+        dependencies,
+        label: openDependencies.length
+          ? `${itemLabel} 等待 ${waitingLabels.join("、")} 完成后继续`
+          : `${itemLabel} 的前置依赖已完成，可以进入下一步`,
+        next_action: openDependencies.length
+          ? "等待前置工作完成后再派发，避免执行成员提前开工。"
+          : "可以派发给对应执行成员继续执行。",
+      };
+    });
+}
+
+function workItemOpenDependencyRefs(items: MainAgentWorkItem[], item: MainAgentWorkItem) {
+  return item.blockedBy.filter(ref => {
+    const dep = findWorkItemByRef(items, ref);
+    return dep && dep.status !== "completed";
+  });
+}
+
+function isWorkItemClaimableByDependency(items: MainAgentWorkItem[], item: MainAgentWorkItem) {
+  return ["pending", "blocked"].includes(String(item.status || "")) && workItemOpenDependencyRefs(items, item).length === 0;
+}
+
+function buildWorkItemDependencySummary(items: MainAgentWorkItem[], nextClaimable: MainAgentWorkItem[]) {
+  const rows = workItemDependencyRows(items);
+  const waiting = rows.filter(row => row.open_dependency_count > 0);
+  const readyRows = rows.filter(row => row.open_dependency_count === 0 && ["pending", "blocked"].includes(String(row.status || "")));
+  if (!rows.length && !nextClaimable.length) return null;
+  const status = waiting.length ? "waiting_dependency" : nextClaimable.length ? "ready_to_dispatch" : "tracking";
+  return {
+    schema: "ccm-main-agent-work-item-dependency-summary-v1",
+    title: "依赖与派发",
+    status,
+    status_label: status === "waiting_dependency" ? `${waiting.length} 项等待前置` : status === "ready_to_dispatch" ? `${nextClaimable.length} 项可派发` : "已记录",
+    headline: waiting.length
+      ? `还有 ${waiting.length} 个工作项需要等前置任务完成，我会按依赖顺序派发。`
+      : nextClaimable.length
+        ? `${nextClaimable.length} 个工作项已经解锁，可以继续派发。`
+        : "执行队列依赖关系已记录，我会继续跟踪。",
+    rows: rows.slice(0, 8),
+    ready: readyRows.map(row => ({ id: row.id, target: row.target, subject: row.subject, label: row.label })).slice(0, 6),
+    next_claimable: nextClaimable.map(item => ({ id: item.id, target: item.target, subject: item.subject })).slice(0, 6),
+    next_action: nextClaimable.length
+      ? "优先派发已解锁工作项，并继续监听前置任务状态。"
+      : waiting.length
+        ? "等待前置工作完成；完成后我会刷新可派发列表。"
+        : "继续跟踪执行队列状态。",
+    display_policy: {
+      user_text_first: true,
+      technical_default_collapsed: true,
+      hide_internal_protocols: true,
+      show_for_ordinary_conversation: false,
+    },
+  };
+}
+
 function buildWorkItemVerificationReminder(items: MainAgentWorkItem[]) {
   if (items.length < 3) return null;
   if (!items.every(item => item.status === "completed")) return null;
@@ -280,7 +389,7 @@ function buildWorkItemVerificationReminder(items: MainAgentWorkItem[]) {
     title: "执行队列还缺验收",
     headline: "工作项都完成了，但还没有看到专门的验证/验收工作项或验证证据。",
     reason: "3 个以上工作项全部完成时，需要在最终总结前补一次真实验收。",
-    next_action: "主 Agent 会补齐验收或说明无法验证的原因，再给出最终交付总结。",
+    next_action: "我会补齐验收或说明无法验证的原因，再给出最终交付总结。",
     display_policy: {
       user_text_first: true,
       technical_default_collapsed: true,
@@ -345,13 +454,110 @@ export function claimMainAgentWorkItem(items: MainAgentWorkItem[], itemRef: stri
   });
   if (blocking.length) return { ok: false, reason: "blocked", item: target, items, blocking };
   if (options.checkOwnerBusy) {
-    const busy = items.find(item => item.id !== target.id && item.owner === normalizedOwner && !TERMINAL_STATUSES.has(item.status));
-    if (busy) return { ok: false, reason: "agent_busy", item: busy, items };
+    const busy = items.find(item => item.id !== target.id && item.owner === normalizedOwner && item.status === "in_progress");
+    if (busy) return { ok: false, reason: "agent_busy", item: target, busy, items };
   }
   const nextItems = items.map(item => item.id === target.id
     ? { ...item, owner: normalizedOwner || item.owner, status: "in_progress" as const, startedAt: item.startedAt || now, updatedAt: now }
     : item);
   return { ok: true, item: nextItems.find(item => item.id === target.id), items: nextItems };
+}
+
+export function buildMainAgentWorkItemUnlockSummary(previousItems: MainAgentWorkItem[], nextItems: MainAgentWorkItem[], options: any = {}): MainAgentWorkItemUnlockSummary | null {
+  const unlocked = nextItems.filter(item => {
+    if (!isWorkItemClaimableByDependency(nextItems, item)) return false;
+    const before = findWorkItemByRef(previousItems, item.id) || findWorkItemByRef(previousItems, item.target) || findWorkItemByRef(previousItems, item.subject);
+    return before ? workItemOpenDependencyRefs(previousItems, before).length > 0 : item.blockedBy.length > 0;
+  });
+  if (!unlocked.length) return null;
+  const completedAgent = workItemVisibleText(options.completedAgent || options.agent || "前置工作", "前置工作", 80);
+  const rows = unlocked.map(item => {
+    const label = `${workItemVisibleText(workItemUserLabel(item) || "执行成员", "执行成员", 80)} 的前置依赖已完成，可以进入下一步`;
+    return { id: item.id, target: item.target, owner: item.owner, subject: item.subject, label };
+  }).slice(0, 8);
+  const status = options.status || "ready_to_dispatch";
+  const statusLabel: any = {
+    ready_to_dispatch: `${rows.length} 项已解锁`,
+    auto_dispatch_deferred: "已自动接上",
+    auto_dispatch_queued: "已加入队列",
+    auto_dispatch_blocked: "等待接续",
+  };
+  return {
+    schema: "ccm-main-agent-work-item-unlock-summary-v1",
+    title: "前置完成，下一步已解锁",
+    status,
+    status_label: options.status_label || statusLabel[status] || "已解锁",
+    headline: workItemVisibleText(options.headline || `${completedAgent} 完成后，${rows.length} 个后续工作项已经解锁，我会按顺序继续派发。`, "", 260),
+    rows,
+    next_claimable: rows.map(row => ({ id: row.id, target: row.target, owner: row.owner, subject: row.subject })),
+    next_action: workItemVisibleText(options.next_action || "我会优先接上已解锁工作项，并继续跟踪执行和验证。", "", 220),
+    display_policy: {
+      user_text_first: true,
+      technical_default_collapsed: true,
+      hide_internal_protocols: true,
+      show_for_ordinary_conversation: false,
+    },
+    technical: {
+      completed_agent: completedAgent,
+      unlocked_work_item_ids: rows.map(row => row.id),
+      auto_dispatch: options.auto_dispatch || null,
+    },
+  };
+}
+
+export function buildMainAgentWorkItemClaimSummary(result: MainAgentWorkItemClaimResult, owner = "", itemRef = "") {
+  const item = result.item || null;
+  const ownerLabel = workItemVisibleText(owner || item?.owner || item?.target || "执行成员", "执行成员", 80) || "执行成员";
+  const subject = compactText(item?.subject || item?.description || itemRef || "当前工作项", 160) || "当前工作项";
+  const blockingLabels = (result.blocking || []).map(ref => dependencyLabel(result.items, ref)).filter(Boolean);
+  let status = result.ok ? "claimed" : result.reason || "task_not_found";
+  let statusLabel = result.ok ? "已派发" : "继续等待";
+  let headline = `${ownerLabel} 已接下“${subject}”，我会继续跟踪执行和验证。`;
+  let nextAction = "等待执行成员提交结果和验证证据。";
+
+  if (!result.ok && result.reason === "blocked") {
+    headline = `“${subject}”还在等待${blockingLabels.length ? ` ${blockingLabels.join("、")} ` : "前置工作"}完成，暂不派发。`;
+    nextAction = "前置工作完成后，我会刷新执行队列并继续派发。";
+  } else if (!result.ok && result.reason === "agent_busy") {
+    const busySubject = compactText(result.busy?.subject || result.busy?.description || "另一个工作项", 160);
+    headline = `${ownerLabel} 正在处理“${busySubject}”，“${subject}”会继续等待。`;
+    nextAction = "当前工作完成后，我会重新检查并派发这个工作项。";
+  } else if (!result.ok && result.reason === "already_claimed") {
+    const activeOwner = compactText(item?.owner || item?.target || ownerLabel, 80);
+    headline = `“${subject}”正在由 ${activeOwner} 处理，我不会重复派发。`;
+    nextAction = "继续等待现有执行结果和验证证据。";
+  } else if (!result.ok && result.reason === "already_resolved") {
+    statusLabel = "已经处理";
+    headline = `“${subject}”已经完成或结束，不需要再次派发。`;
+    nextAction = "我会继续检查其他未完成工作项。";
+  } else if (!result.ok) {
+    status = "task_not_found";
+    statusLabel = "队列已刷新";
+    headline = "没有找到对应的可派发工作项，我会刷新执行队列。";
+    nextAction = "请从更新后的“下一步可派发”列表继续操作。";
+  }
+
+  return {
+    schema: "ccm-main-agent-work-item-claim-summary-v1",
+    title: "派发状态",
+    status,
+    status_label: statusLabel,
+    headline: workItemVisibleText(headline, "", 260),
+    next_action: workItemVisibleText(nextAction, "", 220),
+    work_item: item ? { id: item.id, target: item.target, owner: item.owner, subject: item.subject } : null,
+    display_policy: {
+      user_text_first: true,
+      technical_default_collapsed: true,
+      hide_internal_protocols: true,
+      show_for_ordinary_conversation: false,
+    },
+    technical: {
+      reason_code: result.reason || "",
+      work_item_id: item?.id || compactText(itemRef, 100),
+      blocking_refs: result.blocking || [],
+      busy_work_item_id: result.busy?.id || "",
+    },
+  };
 }
 
 export function requeueStaleMainAgentWorkItems(items: MainAgentWorkItem[], options: { staleMs?: number; nowMs?: number; reason?: string } = {}) {
@@ -369,7 +575,7 @@ export function requeueStaleMainAgentWorkItems(items: MainAgentWorkItem[], optio
       owner: "",
       attempt: Number(item.attempt || 1) + 1,
       updatedAt: now,
-      requeueReason: compactText(options.reason || "子 Agent 长时间无进展，主 Agent 可重新分配", 200),
+      requeueReason: workItemVisibleText(options.reason || "执行成员长时间无进展，我可以重新分配", "", 200),
     };
     requeued.push(updated);
     return updated;
@@ -382,17 +588,16 @@ export function buildMainAgentWorkItemSummary(items: MainAgentWorkItem[]) {
     acc[item.status] = Number(acc[item.status] || 0) + 1;
     return acc;
   }, {});
-  const nextClaimable = items.filter(item => item.status === "pending" && !item.blockedBy.some(ref => {
-    const dep = findWorkItemByRef(items, ref);
-    return dep && dep.status !== "completed";
-  }));
+  const nextClaimable = items.filter(item => isWorkItemClaimableByDependency(items, item));
   const verificationReminder = buildWorkItemVerificationReminder(items);
+  const dependencySummary = buildWorkItemDependencySummary(items, nextClaimable);
   return {
     total: items.length,
     counts,
     active: items.filter(item => item.status === "in_progress").map(item => item.owner || item.target).filter(Boolean),
     blocked: items.filter(item => item.status === "blocked").map(item => ({ id: item.id, target: item.target, blockers: item.blockers })),
     next_claimable: nextClaimable.map(item => ({ id: item.id, target: item.target, subject: item.subject })),
+    dependency_summary: dependencySummary,
     verification_nudge: Boolean(verificationReminder),
     verification_reminder: verificationReminder,
     all_completed: items.length > 0 && items.every(item => item.status === "completed"),
@@ -421,7 +626,22 @@ export function runMainAgentWorkItemSelfTest() {
   }, { now: "2026-07-07T00:00:00.000Z" });
   const web = items.find(item => item.target === "web");
   const claimWeb = claimMainAgentWorkItem(items, web?.id || "web", "web", { checkOwnerBusy: true, now: "2026-07-07T00:01:00.000Z" });
-  const busyClaim = claimMainAgentWorkItem(claimWeb.items, claimWeb.items.find(item => item.target === "api")?.id || "api", "web", { checkOwnerBusy: true });
+  const unlockSummary = buildMainAgentWorkItemUnlockSummary(blockedBefore, items, { completedAgent: "api" });
+  const busyItems = [
+    normalizeWorkItem({ id: "wi-busy", subject: "处理登录接口", owner: "web", target: "web", status: "in_progress" }, { taskId: "task-work-items", scopeId: "group-1", index: 1, now: "2026-07-07T00:00:00.000Z", source: "selftest" }),
+    normalizeWorkItem({ id: "wi-next", subject: "接入筛选页面", owner: "web", target: "web-next", status: "pending" }, { taskId: "task-work-items", scopeId: "group-1", index: 2, now: "2026-07-07T00:00:00.000Z", source: "selftest" }),
+  ];
+  const busyClaim = claimMainAgentWorkItem(busyItems, "wi-next", "web", { checkOwnerBusy: true });
+  const blockedClaim = claimMainAgentWorkItem(blockedBefore, blockedBefore.find(item => item.target === "web")?.id || "web", "web", { checkOwnerBusy: true });
+  const alreadyClaimed = claimMainAgentWorkItem(claimWeb.items, claimWeb.item?.id || "web", "other-web", { checkOwnerBusy: true });
+  const alreadyResolved = claimMainAgentWorkItem(items, items.find(item => item.target === "api")?.id || "api", "api", { checkOwnerBusy: true });
+  const missingClaim = claimMainAgentWorkItem(items, "missing-item", "web", { checkOwnerBusy: true });
+  const claimedSummary = buildMainAgentWorkItemClaimSummary(claimWeb, "web", web?.id || "web");
+  const blockedSummary = buildMainAgentWorkItemClaimSummary(blockedClaim, "web", "web");
+  const busySummary = buildMainAgentWorkItemClaimSummary(busyClaim, "web", "wi-next");
+  const claimedElsewhereSummary = buildMainAgentWorkItemClaimSummary(alreadyClaimed, "other-web", claimWeb.item?.id || "web");
+  const resolvedSummary = buildMainAgentWorkItemClaimSummary(alreadyResolved, "api", "api");
+  const missingSummary = buildMainAgentWorkItemClaimSummary(missingClaim, "web", "missing-item");
   const stale = requeueStaleMainAgentWorkItems(claimWeb.items, { nowMs: Date.parse("2026-07-07T01:00:00.000Z"), staleMs: 1000, reason: "selftest stale" });
   const summary = buildMainAgentWorkItemSummary(items);
   const missingVerificationSummary = buildMainAgentWorkItemSummary([
@@ -434,16 +654,39 @@ export function runMainAgentWorkItemSelfTest() {
     normalizeWorkItem({ id: "wi-2", subject: "接入页面", status: "completed" }, { taskId: "task-work-items", scopeId: "group-1", index: 2, now: "2026-07-07T00:00:00.000Z", source: "selftest" }),
     normalizeWorkItem({ id: "wi-3", subject: "运行验证", status: "completed", verification: ["npm test passed"] }, { taskId: "task-work-items", scopeId: "group-1", index: 3, now: "2026-07-07T00:00:00.000Z", source: "selftest" }),
   ]);
+  const visibleSummaryText = JSON.stringify({
+    unlockSummary,
+    claimedSummary,
+    blockedSummary,
+    busySummary,
+    claimedElsewhereSummary,
+    resolvedSummary,
+    missingSummary,
+    dependencySummary: summary.dependency_summary,
+    verificationReminder: missingVerificationSummary.verification_reminder,
+  });
   const checks = {
     derivesAssignments: items.length === 2,
     receiptCompletesDependency: items.find(item => item.target === "api")?.status === "completed",
     blocksBeforeDependencyDone: blockedBefore.find(item => item.target === "web")?.status === "blocked",
     claimAfterDependencyDone: claimWeb.ok && claimWeb.item?.status === "in_progress",
-    ownerBusyGuard: busyClaim.reason === "already_resolved" || busyClaim.reason === "agent_busy",
+    unlockSummaryFriendly: unlockSummary?.schema === "ccm-main-agent-work-item-unlock-summary-v1" && unlockSummary.headline.includes("后续工作项已经解锁") && unlockSummary.next_claimable.some(item => item.target === "web"),
+    ownerBusyGuard: busyClaim.reason === "agent_busy" && busyClaim.item?.id === "wi-next" && busyClaim.busy?.id === "wi-busy",
+    claimSummaryFriendlySuccess: claimedSummary.status === "claimed" && claimedSummary.headline.includes("已接下") && claimedSummary.technical.reason_code === "",
+    claimSummaryFriendlyBlocked: blockedSummary.status === "blocked" && blockedSummary.headline.includes("等待 api 完成") && !blockedSummary.headline.includes("blocked"),
+    claimSummaryFriendlyBusy: busySummary.status === "agent_busy" && busySummary.headline.includes("正在处理") && busySummary.headline.includes("会继续等待"),
+    claimSummaryFriendlyAlreadyClaimed: claimedElsewhereSummary.status === "already_claimed" && claimedElsewhereSummary.headline.includes("不会重复派发"),
+    claimSummaryFriendlyAlreadyResolved: resolvedSummary.status === "already_resolved" && resolvedSummary.headline.includes("不需要再次派发"),
+    claimSummaryFriendlyNotFound: missingSummary.status === "task_not_found" && missingSummary.headline.includes("刷新执行队列"),
+    claimSummaryKeepsRawReasonTechnical: busySummary.technical.reason_code === "agent_busy" && !busySummary.headline.includes("agent_busy"),
     staleRequeues: stale.requeued.length === 1 && stale.requeued[0].status === "pending",
     summaryCounts: summary.total === 2 && summary.counts.completed === 1,
+    dependencySummaryExplainsUnlockedWork: summary.dependency_summary?.schema === "ccm-main-agent-work-item-dependency-summary-v1"
+      && summary.dependency_summary?.headline.includes("已经解锁")
+      && summary.dependency_summary?.rows?.some((row: any) => row.label.includes("前置依赖已完成")),
     workItemVerificationReminderWhenAllDoneWithoutVerification: missingVerificationSummary.verification_reminder?.schema === "ccm-main-agent-work-item-verification-reminder-v1",
     workItemVerificationReminderSkippedWhenVerificationExists: verifiedSummary.verification_reminder === null && verifiedSummary.verification_nudge === false,
+    workItemVisibleTextUsesFriendlyRoles: !/主\s*Agent|子\s*Agent|下游\s*Agent/.test(visibleSummaryText),
   };
   return { pass: Object.values(checks).every(Boolean), checks, items, blockedBefore, claimWeb: { ok: claimWeb.ok, reason: claimWeb.reason }, stale: stale.requeued };
 }

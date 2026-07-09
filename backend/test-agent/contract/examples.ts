@@ -1,4 +1,5 @@
 import { TestAgentWorkOrder } from "../types";
+import type { TestAgentHandoff } from "../work-order-builder";
 
 export const TEST_AGENT_MINIMAL_WORK_ORDER_EXAMPLE: TestAgentWorkOrder = {
   schema: "ccm-test-agent-work-order-v1",
@@ -111,6 +112,15 @@ export const TEST_AGENT_WEB_APP_WORK_ORDER_EXAMPLE: TestAgentWorkOrder = {
       assertions: [
         { type: "urlIncludes", text: "/dashboard" },
         { type: "visible", role: "heading", name: "Dashboard" },
+        { type: "networkRequest", method: "POST", urlIncludes: "/api/login" },
+        { type: "networkRequest", method: "POST", urlIncludes: "/api/login", headerName: "content-type", headerValueIncludes: "application/json", bodyIncludes: "ada@example.test" },
+        { type: "networkRequest", method: "POST", urlIncludes: "/api/login", bodyJsonPath: "email", bodyJsonEquals: "ada@example.test" },
+        { type: "networkRequestNot", method: "POST", urlIncludes: "/api/login", bodyIncludes: "debugToken" },
+        { type: "networkRequestNot", method: "POST", urlIncludes: "/api/login", bodyJsonPath: "debugToken" },
+        { type: "networkResponse", status: 200, resourceType: "fetch", urlIncludes: "/api/login" },
+        { type: "networkResponse", status: 200, resourceType: "fetch", urlIncludes: "/api/login", bodyJsonPath: "user.email", bodyJsonEquals: "ada@example.test" },
+        { type: "networkResponseNot", status: 200, resourceType: "fetch", urlIncludes: "/api/login", bodyJsonPath: "error" },
+        { type: "networkRequestNot", method: "POST", urlIncludes: "/api/debug" },
         { type: "consoleNoErrors" },
         { type: "networkNoErrors" },
       ],
@@ -134,7 +144,157 @@ export const TEST_AGENT_WEB_APP_WORK_ORDER_EXAMPLE: TestAgentWorkOrder = {
   },
 };
 
+export const TEST_AGENT_MINIMAL_HANDOFF_EXAMPLE: TestAgentHandoff = {
+  taskId: "task-example",
+  groupId: "group-example",
+  issuedBy: "group-main-agent",
+  originalUserGoal: "Verify the delivered task has executable evidence.",
+  acceptanceCriteria: [
+    "The configured verification command passes.",
+  ],
+  completedTasks: [
+    "Project sub-agent marked the task complete.",
+  ],
+  completedByProjectAgents: ["project-agent"],
+  projects: [{
+    name: "example-project",
+    workDir: "C:\\path\\to\\project",
+    verificationCommands: ["npm test"],
+    agentSummary: "Project sub-agent reports the implementation is complete and ready for independent verification.",
+  }],
+  options: {
+    verificationOnly: true,
+    browserProvider: "none",
+  },
+  metadata: {
+    handoffSource: "group-main-agent-example",
+  },
+};
+
+export const TEST_AGENT_WEB_APP_HANDOFF_EXAMPLE: TestAgentHandoff = {
+  taskId: "task-web-login-flow",
+  groupId: "group-web-project",
+  issuedBy: "group-main-agent",
+  originalUserGoal: "Build a web login flow and prove that users can sign in and see the dashboard.",
+  acceptanceCriteria: [
+    "The project builds without errors.",
+    "The login page renders in a real browser.",
+    "A valid login reaches the dashboard.",
+    "The health API returns ok.",
+    "An invalid login is rejected without a server error.",
+    "No browser console errors are observed.",
+    "A screenshot artifact is captured.",
+  ],
+  completedTasks: [
+    "Frontend login form and dashboard route implemented.",
+    "Auth API and health endpoint implemented.",
+  ],
+  completedByProjectAgents: ["frontend-agent", "api-agent"],
+  requiredChecks: [
+    "build",
+    "unit_tests",
+    "browser_e2e",
+    "console_errors",
+    "screenshots",
+    "api",
+    "adversarial",
+  ],
+  projects: [{
+    name: "web-app",
+    workDir: "C:\\path\\to\\web-app",
+    runCommand: "npm run dev -- --host 127.0.0.1",
+    targetUrl: "http://127.0.0.1:5173",
+    startupUrl: "http://127.0.0.1:5173/login",
+    changedFiles: [
+      "src/pages/Login.tsx",
+      "src/pages/Dashboard.tsx",
+      "src/api/auth.ts",
+    ],
+    verificationCommands: [
+      "npm run build",
+      "npm test",
+    ],
+    httpChecks: [{
+      name: "Health API",
+      url: "http://127.0.0.1:5173/api/health",
+      assertions: [
+        { type: "status", status: 200 },
+        { type: "jsonPathEquals", path: "status", value: "ok" },
+      ],
+    }],
+    adversarialHttpChecks: [{
+      name: "Invalid login",
+      probeType: "negative_auth",
+      method: "POST",
+      url: "http://127.0.0.1:5173/api/login",
+      json: { email: "bad@example.test", password: "wrong-password" },
+      assertions: [
+        { type: "status", status: [400, 401] },
+        { type: "textNotIncludes", text: "stack trace" },
+      ],
+    }],
+    adversarialBrowserProbeTemplates: [{
+      name: "Invalid login stays on login page",
+      kind: "invalid_form_input",
+      probeType: "negative_auth_ui",
+      url: "http://127.0.0.1:5173/login",
+      fields: [
+        { label: "Email", value: "bad@example.test", exact: true },
+        { label: "Password", value: "wrong-password", exact: true },
+      ],
+      submit: { role: "button", name: "Sign in", exact: true },
+      expectedUrlIncludes: "/login",
+      expectedText: "Invalid",
+      assertions: [
+        { type: "consoleNoErrors" },
+      ],
+      screenshot: true,
+    }],
+    browserChecks: [{
+      name: "Valid login reaches dashboard",
+      url: "http://127.0.0.1:5173/login",
+      actions: [
+        { type: "fill", label: "Email", value: "ada@example.test", exact: true },
+        { type: "fill", label: "Password", value: "correct horse battery staple", exact: true },
+        { type: "click", role: "button", name: "Sign in", exact: true },
+      ],
+      assertions: [
+        { type: "urlIncludes", text: "/dashboard" },
+        { type: "visible", role: "heading", name: "Dashboard", exact: true },
+        { type: "consoleNoErrors" },
+        { type: "networkNoErrors" },
+      ],
+      screenshot: true,
+    }],
+    completedTasks: [
+      "Login UI submits credentials.",
+      "Successful auth redirects to dashboard.",
+      "Invalid auth response is handled without exposing server errors.",
+    ],
+    agentSummary: "Project sub-agents report the login UI, dashboard route, auth API, and health endpoint are implemented.",
+    risks: [
+      "Auth behavior depends on local seeded credentials.",
+    ],
+  }],
+  options: {
+    verificationOnly: true,
+    browserProvider: "auto",
+    autoDiscoverVerificationCommands: true,
+    collectBrowserArtifacts: true,
+    failOnConsoleError: true,
+    failOnHttpResourceError: true,
+  },
+  metadata: {
+    handoffSource: "group-main-agent-example",
+  },
+};
+
 export const TEST_AGENT_WORK_ORDER_EXAMPLES = {
   minimal: TEST_AGENT_MINIMAL_WORK_ORDER_EXAMPLE,
   webApp: TEST_AGENT_WEB_APP_WORK_ORDER_EXAMPLE,
+};
+
+export const TEST_AGENT_HANDOFF_EXAMPLES = {
+  minimal: TEST_AGENT_MINIMAL_HANDOFF_EXAMPLE,
+  webApp: TEST_AGENT_WEB_APP_HANDOFF_EXAMPLE,
 };

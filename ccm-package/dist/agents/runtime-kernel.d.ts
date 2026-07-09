@@ -45,6 +45,86 @@ export interface AgentPermissionRule {
     decision: AgentRuntimeDecision;
     reason: string;
 }
+export declare function compactWorkerContextMemoryForRetry(memory: any, options?: any): {
+    compacted: boolean;
+    memory: any;
+    summary: {
+        schema: string;
+        method: string;
+        status: string;
+        original_memory_hash: string;
+        compacted_memory_hash: string;
+        original_memory_chars: number;
+        compacted_memory_chars: number;
+        omitted_chars: number;
+        max_rendered_chars: number;
+        max_recall_items: number;
+        preserves_schema: boolean;
+    };
+};
+export declare function buildWorkerContextMemoryReinjectionProof(packet?: any): {
+    schema: string;
+    packet_id: any;
+    project: any;
+    memory_present: boolean;
+    memory_ignored: boolean;
+    memory_policy_reason: any;
+    rendered_memory_present: boolean;
+    source_schema: string;
+    group_id: string;
+    target_project: string;
+    packet_memory_hash: string;
+    packet_memory_chars: number;
+    rendered_memory_hash: string;
+    rendered_memory_chars: any;
+    memory_first: boolean;
+    compaction_retry_id: any;
+    memory_compaction_schema: any;
+    expected_compacted_memory_hash: string;
+    hash_matches_compaction: boolean;
+    status: string;
+};
+export declare function buildWorkerContextUsage(packet?: any, options?: any): {
+    schema: string;
+    version: number;
+    packet_id: any;
+    project: any;
+    task_id: any;
+    model_context_policy: string;
+    max_tokens: number;
+    reserved_output_tokens: number;
+    autocompact_buffer_tokens: number;
+    total_tokens: number;
+    total_chars: number;
+    free_tokens: number;
+    pressure: number;
+    status: string;
+    compact_recommended: boolean;
+    categories: {
+        id: string;
+        name: string;
+        tokens: number;
+        chars: number;
+        item_count: number;
+        source: string;
+        required: boolean;
+        included: boolean;
+    }[];
+    top_categories: {
+        id: string;
+        name: string;
+        tokens: number;
+        chars: number;
+    }[];
+    suggested_reductions: {
+        category_id: string;
+        name: string;
+        tokens: number;
+        suggestion: string;
+    }[];
+};
+export declare function renderWorkerContextUsage(usage?: any): string;
+export declare function refreshWorkerContextPacketUsage(packet?: any, options?: any): any;
 export declare function evaluateAgentRuntimePermission(input: AgentRuntimeLifecycleInput, rules?: AgentPermissionRule[]): {
     decision: AgentRuntimeDecision;
     allowed: boolean;
@@ -70,59 +150,12 @@ export declare function buildWorkerContextPacket(input: {
     taskId?: string;
     dependencies?: any[];
     contractInjections?: any[];
+    replayRepairDispatchBriefs?: any[];
     memory?: any;
+    memoryPolicy?: any;
     verification?: any;
-}): {
-    context_budget: {
-        chars: number;
-        estimated_tokens: number;
-        max_chars: number;
-        max_tokens: number;
-        reserved_output_tokens: number;
-        auto_compact_threshold: number;
-        warning_threshold: number;
-        blocking_threshold: number;
-        pressure: number;
-        compact_recommended: boolean;
-        boundary: {
-            type: string;
-            preserved_head_chars: number;
-            preserved_tail_chars: number;
-        };
-    };
-    packet_id: string;
-    version: number;
-    project: string;
-    task_id: string;
-    trace_id: string;
-    group: {
-        id: any;
-        name: any;
-        members: any;
-    };
-    goal: any;
-    task: string;
-    constraints: any;
-    document_findings: any;
-    dependencies: any[];
-    contract_injections: {
-        injection_id: any;
-        source_agent: any;
-        target_agent: any;
-        endpoint: any;
-        summary: any;
-        required_receipt_reference: boolean;
-    }[];
-    memory: any;
-    verification: any;
-    acceptance: {
-        ack_required_before_implementation: boolean;
-        receipt_required: boolean;
-        actual_diff_required: boolean;
-        verification_required: boolean;
-        contract_injection_receipt_required: boolean;
-    };
-};
+    contextUsageOptions?: any;
+}): any;
 export declare function renderWorkerContextPacket(packet: any): string;
 export declare function buildContractInjectionEvent(input: {
     traceId?: string;
@@ -175,64 +208,17 @@ export declare function runAgentRuntimeKernelSelfTest(): {
         readAllowed: boolean;
         highRiskAsks: boolean;
         contextBudgetComputed: boolean;
+        contextUsageComputed: any;
+        workerPacketHasMemoryReinjectionProof: boolean;
         workerPacketHasAckGate: boolean;
+        workerPacketRendersContextUsage: boolean;
         workerPacketRendersMemory: boolean;
         contractInjectionHasId: any;
         replaySuiteShape: boolean;
     };
     read: AgentRuntimeLifecycleRecord;
     high: AgentRuntimeLifecycleRecord;
-    packet: {
-        context_budget: {
-            chars: number;
-            estimated_tokens: number;
-            max_chars: number;
-            max_tokens: number;
-            reserved_output_tokens: number;
-            auto_compact_threshold: number;
-            warning_threshold: number;
-            blocking_threshold: number;
-            pressure: number;
-            compact_recommended: boolean;
-            boundary: {
-                type: string;
-                preserved_head_chars: number;
-                preserved_tail_chars: number;
-            };
-        };
-        packet_id: string;
-        version: number;
-        project: string;
-        task_id: string;
-        trace_id: string;
-        group: {
-            id: any;
-            name: any;
-            members: any;
-        };
-        goal: any;
-        task: string;
-        constraints: any;
-        document_findings: any;
-        dependencies: any[];
-        contract_injections: {
-            injection_id: any;
-            source_agent: any;
-            target_agent: any;
-            endpoint: any;
-            summary: any;
-            required_receipt_reference: boolean;
-        }[];
-        memory: any;
-        verification: any;
-        acceptance: {
-            ack_required_before_implementation: boolean;
-            receipt_required: boolean;
-            actual_diff_required: boolean;
-            verification_required: boolean;
-            contract_injection_receipt_required: boolean;
-        };
-    };
+    packet: any;
     replay: {
         pass: boolean;
         total: number;
@@ -249,5 +235,25 @@ export declare function runAgentRuntimeKernelSelfTest(): {
             verdict: string;
             latest_events: any;
         }[];
+    };
+};
+export declare function runWorkerContextUsageSelfTest(): {
+    pass: boolean;
+    checks: {
+        schema: boolean;
+        categorizesTaskAndMemory: boolean;
+        categorizesReplayBrief: boolean;
+        categorizesTypedRecall: boolean;
+        categorizesMemoryReinjectionProof: boolean;
+        keepsBudgetBuffers: boolean;
+        suggestsReductions: boolean;
+        statusOk: boolean;
+        renderedMentionsUsage: boolean;
+    };
+    usage: {
+        status: any;
+        total_tokens: any;
+        free_tokens: any;
+        top_categories: any;
     };
 };

@@ -1,9 +1,12 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import * as crypto from "crypto";
 import { getConfigInfo } from "../../core/db";
 import {
   buildWorkerContextPacket,
+  compactWorkerContextMemoryForRetry,
+  refreshWorkerContextPacketUsage,
   renderWorkerContextPacket,
 } from "../../agents/runtime-kernel";
 import {
@@ -18,6 +21,9 @@ import {
   getCollectedOutputAgent,
   parseTaskNotificationsFromText,
 } from "./agent-notifications";
+import {
+  distillProviderReproofReceiptConsumptionToTypedMemory,
+} from "./group-memory-index";
 
 export const COORDINATOR_PROJECT = "coordinator";
 
@@ -31,6 +37,13 @@ export const DEFAULT_GROUP_ORCHESTRATOR = {
 const CCM_DIR = path.join(os.homedir(), ".cc-connect");
 const ORCHESTRATOR_CONFIG_FILE = path.join(CCM_DIR, "group-orchestrator-config.json");
 const GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = path.join(CCM_DIR, "group-memory-replay-repair-work-items");
+const GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR = path.join(CCM_DIR, "group-memory-replay-repair-dispatch-plans");
+const GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_BINDINGS_DIR = path.join(CCM_DIR, "group-memory-replay-repair-dispatch-bindings");
+const GROUP_MEMORY_REPLAY_REPAIR_TIMELINE_BINDINGS_DIR = path.join(CCM_DIR, "group-memory-replay-repair-timeline-bindings");
+const GROUP_MEMORY_WORKER_CONTEXT_COMPACT_HOOKS_DIR = path.join(CCM_DIR, "group-memory-worker-context-compact-hooks");
+const GROUP_MEMORY_WORKER_CONTEXT_COMPACT_OUTCOMES_DIR = path.join(CCM_DIR, "group-memory-worker-context-compact-outcomes");
+const GROUP_MEMORY_WORKER_CONTEXT_COMPACT_STRATEGIES_DIR = path.join(CCM_DIR, "group-memory-worker-context-compact-strategies");
+const GROUP_MEMORY_WORKER_CONTEXT_PTL_EMERGENCIES_DIR = path.join(CCM_DIR, "group-memory-worker-context-ptl-emergencies");
 
 export function defaultOrchestratorConfig() {
   return {
@@ -1063,23 +1076,85 @@ function inferCodedExecutionPlan(message: string, analysis: any, routed: any[]) 
   return { executionOrder, routed: plannedRouted };
 }
 
-function buildAssignment(member: any, task: string, reason = "", dependsOn = "") {
-  return {
-    project: String(member?.project || "").trim(),
-    task: String(task || "").trim(),
+function buildAssignment(member: any, task: string, reason = "", dependsOn = "", options: any = {}) {
+  const groupId = String(options.group?.id || options.groupId || options.group_id || "").trim();
+  const project = String(member?.project || "").trim();
+  const taskText = String(task || "").trim();
+  const taskFingerprint = compactText(taskText, 240).toLowerCase().replace(/[`*_#>\[\]{}()（）【】]+/g, " ").replace(/[，。；、,.;:：\-—\s]+/g, " ").trim().slice(0, 220);
+  const dispatchKey = [groupId || "conversation", "coordinator", project || "unknown", taskFingerprint].filter(Boolean).join("|");
+  const baseAssignment: any = {
+    project,
+    task: taskText,
     reason: String(reason || "").trim(),
     dependsOn: String(dependsOn || "").trim(),
-    worker_context_packet: buildWorkerContextPacket({
-      project: String(member?.project || "").trim(),
-      task: String(task || "").trim(),
-      dependencies: dependsOn ? [{ project: dependsOn, reason: "前置依赖" }] : [],
-    }),
+    taskFingerprint,
+    dispatchKey,
+    assignmentId: [project || "unknown", dispatchKey, "initial", 1].filter(Boolean).join("::"),
+    attempt: 1,
+    sourceProject: "coordinator",
+    scopeId: groupId || "conversation",
   };
+  const briefMatch = groupId ? findReplayRepairDispatchBriefForAssignment(groupId, baseAssignment) : null;
+  const replayRepairDispatchBriefs = briefMatch?.brief ? [{
+    brief_id: briefMatch.brief.brief_id || "",
+    work_item_id: briefMatch.brief.work_item_id || "",
+    source: briefMatch.brief.source || "",
+    target_project: briefMatch.brief.target_project || baseAssignment.project,
+    proof_entry_id: briefMatch.brief.proof_entry_id || "",
+    request_patch_checksum: briefMatch.brief.request_patch_checksum || "",
+    worker_context_packet_id: briefMatch.brief.worker_context_packet_id || "",
+    worker_context_packet_binding_id: briefMatch.brief.worker_context_packet_binding_id || briefMatch.brief.binding_id || "",
+    worker_context_packet_memory_policy_reason: briefMatch.brief.worker_context_packet_memory_policy_reason || "",
+    binding_id: briefMatch.brief.binding_id || briefMatch.brief.worker_context_packet_binding_id || "",
+    source_assignment_id: briefMatch.brief.assignment_id || "",
+    source_dispatch_key: briefMatch.brief.dispatch_key || "",
+    provider_reproof_status: briefMatch.brief.provider_reproof_status || "",
+    provider_reproof_reason: briefMatch.brief.provider_reproof_reason || "",
+    reproof_candidate_id: briefMatch.brief.reproof_candidate_id || "",
+    timeline_binding_id: briefMatch.brief.timeline_binding_id || "",
+    original_work_item_id: briefMatch.brief.original_work_item_id || "",
+    request_telemetry_session_status: briefMatch.brief.request_telemetry_session_status || "",
+    request_telemetry_dispatch_status: briefMatch.brief.request_telemetry_dispatch_status || "",
+    runner_request_id: briefMatch.brief.runner_request_id || "",
+    execution_id: briefMatch.brief.execution_id || "",
+    should_create_real_task: false,
+  }] : [];
+  const initialWorkerContextPacket = buildWorkerContextPacketForAssignment(baseAssignment, dependsOn, replayRepairDispatchBriefs, options);
+  const initialPreDispatchGate = buildWorkerContextPreDispatchGateForCoordinator(baseAssignment, initialWorkerContextPacket);
+  const retryResult = maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment, dependsOn, replayRepairDispatchBriefs, initialWorkerContextPacket, initialPreDispatchGate, options);
+  const workerContextPacket = retryResult.packet;
+  const preDispatchGate = retryResult.gate;
+  const assignment: any = {
+    ...baseAssignment,
+    task: retryResult.task,
+    original_task_hash: retryResult.retry ? retryResult.retry.original_task_hash : "",
+    context_compaction_retry: retryResult.retry,
+    status: preDispatchGate.dispatch_ready === false ? "blocked" : "pending",
+    dispatchReady: preDispatchGate.dispatch_ready !== false,
+    dispatch_ready: preDispatchGate.dispatch_ready !== false,
+    worker_context_pre_dispatch_gate: preDispatchGate,
+    workerContextPreDispatchGate: preDispatchGate,
+    blockers: preDispatchGate.dispatch_ready === false ? [preDispatchGate.reason] : [],
+    needs: preDispatchGate.dispatch_ready === false ? ["先压缩 WorkerContextPacket 到预算内，再启动第三方子 Agent 会话"] : [],
+    worker_context_packet: workerContextPacket,
+  };
+  if (groupId) recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assignment);
+  if (briefMatch?.brief) {
+    assignment.replay_repair_dispatch_brief = {
+      ...replayRepairDispatchBriefs[0],
+      match_score: Number(briefMatch.match_score || 0),
+      matched_by: Array.isArray(briefMatch.matched_by) ? briefMatch.matched_by : [],
+      binding_policy: "attach_when_assignment_matches_ready_replay_repair_dispatch_brief",
+    };
+    const binding = recordReplayRepairDispatchBriefAssignmentBinding(groupId, assignment, briefMatch);
+    if (binding) assignment.replay_repair_dispatch_brief.binding_id = binding.binding_id;
+  }
+  return assignment;
 }
 
-function buildAssignmentsFromTargets(targets: any[]) {
+function buildAssignmentsFromTargets(targets: any[], options: any = {}) {
   return (targets || [])
-    .map((item: any) => buildAssignment(item.member, item.task, item.reason, item.dependsOn))
+    .map((item: any) => buildAssignment(item.member, item.task, item.reason, item.dependsOn, options))
     .filter((item: any) => item.project && item.task);
 }
 
@@ -1176,6 +1251,9 @@ export function runCodedGroupOrchestrator(input: {
   ragContext?: string;
   ragCitations?: string[];
   ragScoped?: boolean;
+  workerContextUsageOptions?: any;
+  autoWorkerContextCompactRetry?: boolean;
+  workerContextRetryOptions?: any;
 }) {
   const group = normalizeGroupOrchestrator(input.group);
   const coordinator = getCoordinatorMember(group);
@@ -1292,21 +1370,47 @@ export function runCodedGroupOrchestrator(input: {
     }),
   }));
   const plan = buildCoordinatorPlan(group, analysis, plannedRouted, executionOrder, coordinationStrategy);
-  const delegationLines = plannedRouted.map(item => buildVisibleAssignmentLine(item));
   const delegated = plannedRouted.map(item => item.member.project);
+  const assignments = buildAssignmentsFromTargets(plannedRouted, {
+    group,
+    analysis,
+    workerContextUsageOptions: input.workerContextUsageOptions || null,
+    autoWorkerContextCompactRetry: input.autoWorkerContextCompactRetry,
+    workerContextRetryOptions: input.workerContextRetryOptions || null,
+  });
+  const blockedAssignments = assignments.filter((item: any) => item.worker_context_pre_dispatch_gate?.dispatch_ready === false || item.dispatchReady === false || item.dispatch_ready === false);
+  const delegationLines = blockedAssignments.length
+    ? assignments.map((item: any) => {
+      const gate = item.worker_context_pre_dispatch_gate || {};
+      const prefix = gate.dispatch_ready === false ? "派发前暂停" : "可派发";
+      return `- ${item.project}：${prefix}；${gate.reason || compactText(item.task || "", 180)}`;
+    })
+    : plannedRouted.map(item => buildVisibleAssignmentLine(item));
   const dispatchPolicy = inferCodedDispatchPolicy(group, input.message, analysis, plannedRouted);
+  const finalDispatchPolicy = blockedAssignments.length
+    ? {
+      ...dispatchPolicy,
+      action: "hold",
+      requiresConfirmation: true,
+      reason: `WorkerContextPacket 派发前上下文预算阻断：${blockedAssignments.map((item: any) => item.project).join("、")}`,
+      risk: "worker_context_packet_over_budget",
+      nextStep: "先执行 worker_context_packet_context_usage_repair，重新生成预算内 WorkerContextPacket 后再派发子 Agent",
+    }
+    : dispatchPolicy;
 
   return {
     agent: coordinator.project,
     delegated,
-    assignments: buildAssignmentsFromTargets(plannedRouted),
+    assignments,
     executionOrder,
     coordinationStrategy,
     analysis,
     coordinationPlan: plan,
-    dispatchPolicy,
+    dispatchPolicy: finalDispatchPolicy,
     content: [
-      `好的，这个需求我安排 ${delegated.join("、")} 来处理。`,
+      blockedAssignments.length
+        ? `我已经形成派发计划，但 ${blockedAssignments.map((item: any) => item.project).join("、")} 的 WorkerContextPacket 超出上下文预算，已触发派发前 gate，暂不启动第三方子 Agent 会话。`
+        : `好的，这个需求我安排 ${delegated.join("、")} 来处理。`,
       "",
       buildCoordinatorPlanText(plan),
       "",
@@ -1545,6 +1649,1216 @@ export function runCoordinatorProtocolSelfTest() {
     sanitizedCoordinatorSummary,
     documentFindings: Array.isArray((result as any).analysis?.documentFindings) ? (result as any).analysis.documentFindings : [],
   };
+}
+
+export function runWorkerContextPreDispatchGateSelfTest() {
+  const groupId = `worker-context-pre-dispatch-gate-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+  try {
+    const group = normalizeGroupOrchestrator({
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator" },
+        { project: "api", agent: "claude-code" },
+      ],
+    });
+    const largeTask = [
+      "请直接在 api 项目实现并修复 PRE_DISPATCH_GATE_SENTINEL，修改代码后运行 npm run check。",
+      "需要携带一段很长的群聊上下文以触发 WorkerContextPacket over_budget。",
+      "CONTEXT_BLOCK ".repeat(1400),
+    ].join("\n");
+    const assignment = buildAssignment(
+      { project: "api", agent: "claude-code" },
+      largeTask,
+      "selftest context budget gate",
+      "",
+      {
+        group,
+        autoWorkerContextCompactRetry: false,
+        workerContextUsageOptions: {
+          maxTokens: 1000,
+          autoCompactBufferTokens: 120,
+        },
+      }
+    );
+    const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+    const binding = (ledger.entries || []).find((item: any) => item.source === "worker_context_packet_pre_dispatch_gate") || {};
+    const gate = assignment.worker_context_pre_dispatch_gate || {};
+    const result = runCodedGroupOrchestrator({
+      group,
+      message: largeTask,
+      context: "Phase 104 selftest: over-budget WorkerContextPacket must hold dispatch before child Agent launch.",
+      autoWorkerContextCompactRetry: false,
+      workerContextUsageOptions: {
+        maxTokens: 1000,
+        autoCompactBufferTokens: 120,
+      },
+    });
+    const routedAssignment = (result.assignments || []).find((item: any) => item.project === "api") || {};
+    const checks = {
+      assignmentGateBlocksOverBudget: gate.schema === "ccm-worker-context-pre-dispatch-gate-v1"
+        && gate.dispatch_ready === false
+        && gate.must_repair_before_dispatch === true
+        && gate.pressure_status === "over_budget"
+        && assignment.dispatchReady === false
+        && assignment.status === "blocked",
+      bindingLedgerPersistsGate: binding.schema === "ccm-worker-context-packet-assignment-binding-v1"
+        && binding.worker_context_packet_id === assignment.worker_context_packet?.packet_id
+        && binding.worker_context_pre_dispatch_gate?.dispatch_ready === false
+        && binding.worker_context_packet_context_usage?.status === "over_budget",
+      orchestratorHoldsBlockedDispatch: result.dispatchPolicy?.action === "hold"
+        && result.dispatchPolicy?.risk === "worker_context_packet_over_budget"
+        && routedAssignment.worker_context_pre_dispatch_gate?.dispatch_ready === false
+        && !String(result.content || "").includes("@api"),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      gate: {
+        gate_id: gate.gate_id || "",
+        dispatch_ready: gate.dispatch_ready,
+        pressure_status: gate.pressure_status || "",
+        total_tokens: gate.total_tokens || 0,
+        max_tokens: gate.max_tokens || 0,
+        free_tokens: gate.free_tokens || 0,
+      },
+      binding: {
+        binding_id: binding.binding_id || "",
+        source: binding.source || "",
+        dispatch_ready: binding.dispatch_ready,
+        usage_status: binding.worker_context_packet_context_usage?.status || "",
+      },
+      dispatchPolicy: result.dispatchPolicy,
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runWorkerContextCompactionRetrySelfTest() {
+  const groupId = `worker-context-compaction-retry-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+  try {
+    const group = normalizeGroupOrchestrator({
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator" },
+        { project: "api", agent: "claude-code" },
+      ],
+    });
+    const largeTask = [
+      "请直接在 api 项目实现并修复 COMPACTION_RETRY_SENTINEL，修改代码后运行 npm run check。",
+      "这段上下文很长，第一次 WorkerContextPacket 会 over_budget，但自动 compact retry 应该保留首尾和回执契约后恢复派发。",
+      "CONTEXT_RETRY_BLOCK ".repeat(1600),
+      "最后仍然必须输出 CCM_AGENT_RECEIPT，并说明验证结果。",
+    ].join("\n");
+    const result = runCodedGroupOrchestrator({
+      group,
+      message: largeTask,
+      context: "Phase 105 selftest: over-budget WorkerContextPacket should compact/rerender and recover dispatch.",
+      workerContextUsageOptions: {
+        maxTokens: 4000,
+        autoCompactBufferTokens: 300,
+      },
+      workerContextRetryOptions: {
+        maxTaskChars: 2200,
+      },
+    });
+    const assignment = (result.assignments || []).find((item: any) => item.project === "api") || {};
+    const retry = assignment.context_compaction_retry || assignment.worker_context_packet?.context_compaction_retry || {};
+    const gate = assignment.worker_context_pre_dispatch_gate || {};
+    const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+    const binding = (ledger.entries || []).find((item: any) => item.assignment_id === assignment.assignmentId || item.assignment_id === assignment.assignment_id) || {};
+    const checks = {
+      retryRecoveredDispatch: retry.schema === "ccm-worker-context-compaction-retry-v1"
+        && retry.status === "recovered"
+        && retry.from_usage_status === "over_budget"
+        && retry.retry_usage_status !== "over_budget"
+        && retry.recovered_dispatch_ready === true,
+      assignmentDispatchReadyAfterRetry: assignment.dispatchReady !== false
+        && assignment.status === "pending"
+        && gate.dispatch_ready !== false
+        && gate.auto_retry_status === "recovered"
+        && assignment.worker_context_packet?.context_usage?.status !== "over_budget",
+      orchestratorStillDispatchesMention: result.dispatchPolicy?.action === "delegate"
+        && String(result.content || "").includes("@api")
+        && !String(result.dispatchPolicy?.risk || "").includes("worker_context_packet_over_budget"),
+      bindingPersistsRetryProof: binding.source === "worker_context_packet_pre_dispatch_gate"
+        && binding.worker_context_packet_context_usage?.status !== "over_budget"
+        && binding.worker_context_pre_dispatch_gate?.auto_retry_status === "recovered"
+        && binding.worker_context_packet_compaction_retry?.status === "recovered",
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      retry: {
+        status: retry.status || "",
+        from_usage_status: retry.from_usage_status || "",
+        retry_usage_status: retry.retry_usage_status || "",
+        original_task_chars: retry.original_task_chars || 0,
+        compacted_task_chars: retry.compacted_task_chars || 0,
+      },
+      gate: {
+        dispatch_ready: gate.dispatch_ready,
+        auto_retry_status: gate.auto_retry_status || "",
+        pressure_status: gate.pressure_status || "",
+        total_tokens: gate.total_tokens || 0,
+        max_tokens: gate.max_tokens || 0,
+      },
+      dispatchPolicy: result.dispatchPolicy,
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runWorkerContextMemoryFirstCompactionRetrySelfTest() {
+  const groupId = `worker-context-memory-first-retry-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+  const hookFile = getWorkerContextCompactHookLedgerFileForCoordinator(groupId);
+  try {
+    const group = normalizeGroupOrchestrator({
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator" },
+        { project: "api", agent: "claude-code" },
+      ],
+    });
+    const task = "请在 api 项目检查 MEMORY_FIRST_RETRY_SENTINEL，保持 CCM_AGENT_RECEIPT 和验证记录。";
+    const memory = {
+      schema: "ccm-group-memory-context-v1",
+      group_id: groupId,
+      target_project: "api",
+      rendered_text: `MEMORY_FIRST_RETRY_SENTINEL\n${"重要群聊记忆片段 ".repeat(1800)}\n必须保留 receipt/verification 约束。`,
+      typed_memory_recall: {
+        recalled: Array.from({ length: 40 }, (_, index) => ({
+          relPath: `memory-${index}.md`,
+          type: "reference",
+          snippet: `typed recall ${index} ${"context ".repeat(20)}`,
+        })),
+      },
+      global_memory: `global recall ${"mission ".repeat(1200)}`,
+    };
+    const assignment = buildAssignment(
+      { project: "api", agent: "claude-code" },
+      task,
+      "selftest memory-first compact retry",
+      "",
+      {
+        group,
+        memory,
+        workerContextUsageOptions: {
+          maxTokens: 2600,
+          autoCompactBufferTokens: 120,
+        },
+        workerContextRetryOptions: {
+          memory: {
+            maxRenderedChars: 900,
+            maxJsonChars: 600,
+            maxRecallItems: 3,
+          },
+          maxTaskChars: 2200,
+        },
+      }
+    );
+    const retry = assignment.context_compaction_retry || assignment.worker_context_packet?.context_compaction_retry || {};
+    const gate = assignment.worker_context_pre_dispatch_gate || {};
+    const memoryProof = assignment.worker_context_packet?.memory_reinjection_proof || {};
+    const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+    const binding = (ledger.entries || []).find((item: any) => item.assignment_id === assignment.assignmentId || item.assignment_id === assignment.assignment_id) || {};
+    const hookLedger = readWorkerContextCompactHookLedgerForCoordinator(groupId);
+    const hookRunId = String(retry.compact_hook_run_id || binding.worker_context_packet_compact_hook_run_id || "");
+    const hookEntries = (hookLedger.entries || []).filter((item: any) => item.hook_run_id === hookRunId);
+    const checks = {
+      memoryFirstRetryRecovered: retry.schema === "ccm-worker-context-compaction-retry-v1"
+        && retry.status === "recovered"
+        && retry.memory_first === true
+        && retry.method === "memory_first_deterministic_context_compaction"
+        && retry.memory_compaction?.schema === "ccm-worker-context-memory-first-compaction-v1"
+        && retry.from_usage_status === "over_budget"
+        && retry.retry_usage_status !== "over_budget",
+      taskWasNotCompacted: assignment.task === task
+        && retry.original_task_hash === retry.compacted_task_hash
+        && Number(retry.original_task_chars || 0) === Number(retry.compacted_task_chars || 0),
+      dispatchReadyAfterMemoryRetry: assignment.dispatchReady !== false
+        && gate.dispatch_ready !== false
+        && gate.auto_retry_status === "recovered"
+        && assignment.worker_context_packet?.context_usage?.status !== "over_budget",
+      bindingPersistsMemoryRetry: binding.worker_context_packet_compaction_retry?.memory_first === true
+        && binding.worker_context_packet_compaction_retry?.memory_compaction?.status === "compacted"
+        && binding.worker_context_pre_dispatch_gate?.dispatch_ready !== false,
+      memoryProofReinjectedCompactedMemory: memoryProof.schema === "ccm-worker-context-memory-reinjection-proof-v1"
+        && memoryProof.status === "compacted_reinjected"
+        && memoryProof.memory_first === true
+        && memoryProof.hash_matches_compaction === true
+        && memoryProof.packet_memory_hash === retry.memory_compaction?.compacted_memory_hash,
+      bindingRenderProbeShowsMemoryProof: binding.worker_context_packet_memory_reinjection_proof?.status === "compacted_reinjected"
+        && binding.worker_context_packet_render_probe?.rendered_flags?.has_platform_memory === true
+        && binding.worker_context_packet_render_probe?.rendered_flags?.has_memory_reinjection_proof === true
+        && binding.worker_context_packet_render_probe?.rendered_flags?.has_memory_compaction_hash === true,
+      compactHookLedgerRecordsPreAndPost: !!hookRunId
+        && retry.compact_hook_run_id === hookRunId
+        && hookEntries.some((item: any) => item.phase === "pre" && item.initial_usage_status === "over_budget")
+        && hookEntries.some((item: any) => item.phase === "post" && item.final_usage_status !== "over_budget" && item.dispatch_ready === true)
+        && binding.worker_context_packet_compact_hook_run_id === hookRunId,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      retry: {
+        status: retry.status || "",
+        method: retry.method || "",
+        memory_first: retry.memory_first === true,
+        from_usage_status: retry.from_usage_status || "",
+        retry_usage_status: retry.retry_usage_status || "",
+        memory_omitted_chars: retry.memory_compaction?.omitted_chars || 0,
+        memory_reinjection_status: memoryProof.status || "",
+        compact_hook_run_id: retry.compact_hook_run_id || "",
+      },
+      hookLedger: {
+        file: hookLedger.file || "",
+        hook_run_id: hookRunId,
+        entry_count: hookEntries.length,
+        pre_count: hookEntries.filter((item: any) => item.phase === "pre").length,
+        post_count: hookEntries.filter((item: any) => item.phase === "post").length,
+      },
+      gate: {
+        dispatch_ready: gate.dispatch_ready,
+        auto_retry_status: gate.auto_retry_status || "",
+        pressure_status: gate.pressure_status || "",
+        total_tokens: gate.total_tokens || 0,
+        max_tokens: gate.max_tokens || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, hookFile, `${hookFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runWorkerContextPartialCompactionRetrySelfTest() {
+  const groupId = `worker-context-partial-compaction-retry-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+  const hookFile = getWorkerContextCompactHookLedgerFileForCoordinator(groupId);
+  try {
+    const group = normalizeGroupOrchestrator({
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator" },
+        { project: "api", agent: "claude-code" },
+      ],
+    });
+    const task = "请在 api 项目处理 PARTIAL_COMPACT_SENTINEL，并保留 replay repair 回执引用。";
+    const replayRepairDispatchBriefs = [{
+      brief_id: "brief-partial-compact-selftest",
+      work_item_id: "work-item-partial-compact-selftest",
+      source: "provider_reproof_repair",
+      target_project: "api",
+      proof_entry_id: "proof-entry-partial-compact-selftest",
+      request_patch_checksum: "patch-checksum-partial-compact-selftest",
+      provider_reproof_status: "needs_reproof",
+      provider_reproof_reason: `PARTIAL_COMPACT_SENTINEL ${"native provider proof repair narrative ".repeat(1700)}必须保留 proof/request/runner/execution 证据。`,
+      reproof_candidate_id: "candidate-partial-compact-selftest",
+      timeline_binding_id: "timeline-partial-compact-selftest",
+      original_work_item_id: "original-work-item-partial-compact-selftest",
+      request_telemetry_session_status: "bound",
+      request_telemetry_dispatch_status: "bound",
+      runner_request_id: "runner-request-partial-compact-selftest",
+      execution_id: "execution-partial-compact-selftest",
+      required_receipt_reference: true,
+      should_create_real_task: false,
+    }];
+    const baseAssignment: any = {
+      project: "api",
+      task,
+      reason: "selftest replay brief partial compact retry",
+      dependsOn: "",
+      taskFingerprint: "partial-compact-selftest",
+      dispatchKey: `${groupId}|coordinator|api|partial-compact-selftest`,
+      assignmentId: `api::${groupId}|coordinator|api|partial-compact-selftest::initial::1`,
+      attempt: 1,
+      sourceProject: "coordinator",
+      scopeId: groupId,
+    };
+    const options = {
+      group,
+      workerContextUsageOptions: {
+        maxTokens: 3000,
+        autoCompactBufferTokens: 120,
+      },
+      workerContextRetryOptions: {
+        replayRepairDispatchBriefs: {
+          maxStringChars: 180,
+          maxIdChars: 140,
+        },
+        maxTaskChars: 2200,
+      },
+    };
+    const initialPacket = buildWorkerContextPacketForAssignment(baseAssignment, "", replayRepairDispatchBriefs, options);
+    const initialGate = buildWorkerContextPreDispatchGateForCoordinator(baseAssignment, initialPacket);
+    const result = maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment, "", replayRepairDispatchBriefs, initialPacket, initialGate, options);
+    const assignment: any = {
+      ...baseAssignment,
+      task: result.task,
+      original_task_hash: result.retry ? result.retry.original_task_hash : "",
+      context_compaction_retry: result.retry,
+      status: result.gate.dispatch_ready === false ? "blocked" : "pending",
+      dispatchReady: result.gate.dispatch_ready !== false,
+      dispatch_ready: result.gate.dispatch_ready !== false,
+      worker_context_pre_dispatch_gate: result.gate,
+      workerContextPreDispatchGate: result.gate,
+      blockers: result.gate.dispatch_ready === false ? [result.gate.reason] : [],
+      worker_context_packet: result.packet,
+    };
+    recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assignment);
+    const retry = result.retry || result.packet?.context_compaction_retry || {};
+    const partial = retry.partial_compaction || retry.partialCompaction || {};
+    const rendered = renderWorkerContextPacket(result.packet);
+    const finalBrief = Array.isArray(result.packet?.replay_repair_dispatch_briefs)
+      ? result.packet.replay_repair_dispatch_briefs[0] || {}
+      : {};
+    const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+    const binding = (ledger.entries || []).find((item: any) => item.assignment_id === baseAssignment.assignmentId) || {};
+    const hookLedger = readWorkerContextCompactHookLedgerForCoordinator(groupId);
+    const hookRunId = String(retry.compact_hook_run_id || binding.worker_context_packet_compact_hook_run_id || "");
+    const hookEntries = (hookLedger.entries || []).filter((item: any) => item.hook_run_id === hookRunId);
+    const checks = {
+      initialGateBlockedByReplayBrief: initialGate.dispatch_ready === false
+        && initialPacket.context_usage?.status === "over_budget",
+      partialRetryRecovered: retry.schema === "ccm-worker-context-compaction-retry-v1"
+        && retry.status === "recovered"
+        && retry.method === "replay_brief_partial_compact"
+        && retry.partial_compact === true
+        && partial.schema === "ccm-worker-context-replay-brief-partial-compaction-v1"
+        && partial.category === "replay_repair_dispatch_briefs"
+        && Number(partial.omitted_chars || 0) > 1000,
+      taskWasNotCompacted: result.task === task
+        && retry.original_task_hash === retry.compacted_task_hash
+        && Number(retry.original_task_chars || 0) === Number(retry.compacted_task_chars || 0),
+      replayBriefIdentifiersPreserved: finalBrief.brief_id === "brief-partial-compact-selftest"
+        && finalBrief.work_item_id === "work-item-partial-compact-selftest"
+        && finalBrief.proof_entry_id === "proof-entry-partial-compact-selftest"
+        && finalBrief.request_patch_checksum === "patch-checksum-partial-compact-selftest"
+        && finalBrief.runner_request_id === "runner-request-partial-compact-selftest"
+        && finalBrief.execution_id === "execution-partial-compact-selftest"
+        && finalBrief.should_create_real_task === false
+        && finalBrief.required_receipt_reference === true
+        && String(finalBrief.provider_reproof_reason || "").includes("PARTIAL_COMPACT_SENTINEL"),
+      bindingPersistsPartialCompaction: binding.worker_context_packet_partial_compaction?.schema === "ccm-worker-context-replay-brief-partial-compaction-v1"
+        && binding.worker_context_packet_compaction_retry?.partial_compact === true
+        && binding.worker_context_packet_render_probe?.rendered_flags?.has_partial_compaction === true,
+      renderShowsPartialCompaction: rendered.includes("partial_compaction=replay_repair_dispatch_briefs")
+        && rendered.includes("Replay repair dispatch brief"),
+      compactHookLedgerRecordsPartialPost: !!hookRunId
+        && hookEntries.some((item: any) => item.phase === "pre" && item.initial_usage_status === "over_budget")
+        && hookEntries.some((item: any) => item.phase === "post"
+          && item.final_usage_status !== "over_budget"
+          && item.dispatch_ready === true
+          && item.result_summary?.partial_compact === true
+          && item.result_summary?.partial_compaction_category === "replay_repair_dispatch_briefs"),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      retry: {
+        status: retry.status || "",
+        method: retry.method || "",
+        partial_compact: retry.partial_compact === true,
+        partial_compaction_schema: partial.schema || "",
+        partial_omitted_chars: partial.omitted_chars || 0,
+        original_task_chars: retry.original_task_chars || 0,
+        compacted_task_chars: retry.compacted_task_chars || 0,
+      },
+      hookLedger: {
+        file: hookLedger.file || "",
+        hook_run_id: hookRunId,
+        entry_count: hookEntries.length,
+      },
+      gate: {
+        dispatch_ready: result.gate.dispatch_ready,
+        auto_retry_status: result.gate.auto_retry_status || "",
+        total_tokens: result.gate.total_tokens || 0,
+        max_tokens: result.gate.max_tokens || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, hookFile, `${hookFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runWorkerContextMetadataPartialCompactionRetrySelfTest() {
+  const groupId = `worker-context-metadata-partial-compaction-retry-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+  const hookFile = getWorkerContextCompactHookLedgerFileForCoordinator(groupId);
+  try {
+    const group = normalizeGroupOrchestrator({
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator" },
+        { project: "frontend", agent: "cursor" },
+      ],
+    });
+    const task = "请在 frontend 项目处理 METADATA_PARTIAL_SENTINEL，并保留 contract/dependency 回执。";
+    const analysis = {
+      summary: "验证 WorkerContextPacket metadata partial compact",
+      constraints: Array.from({ length: 10 }, (_, index) => `METADATA_PARTIAL_SENTINEL constraint ${index}: ${"必须保留用户约束和验收边界 ".repeat(80)}`),
+      documentFindings: Array.from({ length: 14 }, (_, index) => `docs/spec-${index}.md: ${"接口字段、页面交互、验收规则、历史决策 ".repeat(100)}`),
+    };
+    const contractInjections = Array.from({ length: 6 }, (_, index) => ({
+      injection_id: `contract-metadata-partial-${index}`,
+      source_agent: "backend",
+      target_agent: "frontend",
+      endpoint: `POST /api/metadata-partial/${index}`,
+      summary: `METADATA_CONTRACT_SENTINEL ${index}: ${"contract change narrative ".repeat(500)}`,
+      required_receipt_reference: true,
+    }));
+    const workerContextDependencies = Array.from({ length: 7 }, (_, index) => ({
+      project: `dependency-${index}`,
+      reason: `METADATA_DEPENDENCY_SENTINEL ${index}: ${"dependency blocker narrative ".repeat(520)}`,
+      dependency_id: `dep-metadata-partial-${index}`,
+      required_receipt_reference: true,
+    }));
+    const baseAssignment: any = {
+      project: "frontend",
+      task,
+      reason: "selftest metadata partial compact retry",
+      dependsOn: "",
+      taskFingerprint: "metadata-partial-compact-selftest",
+      dispatchKey: `${groupId}|coordinator|frontend|metadata-partial-compact-selftest`,
+      assignmentId: `frontend::${groupId}|coordinator|frontend|metadata-partial-compact-selftest::initial::1`,
+      attempt: 1,
+      sourceProject: "coordinator",
+      scopeId: groupId,
+    };
+    const options = {
+      group,
+      analysis,
+      contractInjections,
+      workerContextDependencies,
+      workerContextUsageOptions: {
+        maxTokens: 5200,
+        autoCompactBufferTokens: 120,
+      },
+      workerContextRetryOptions: {
+        metadata: {
+          maxItems: 4,
+          maxStringChars: 160,
+          maxContractItems: 4,
+          maxContractSummaryChars: 160,
+          maxDependencyReasonChars: 160,
+        },
+        maxTaskChars: 2200,
+      },
+    };
+    const initialPacket = buildWorkerContextPacketForAssignment(baseAssignment, "", [], options);
+    const initialGate = buildWorkerContextPreDispatchGateForCoordinator(baseAssignment, initialPacket);
+    const result = maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment, "", [], initialPacket, initialGate, options);
+    const assignment: any = {
+      ...baseAssignment,
+      task: result.task,
+      original_task_hash: result.retry ? result.retry.original_task_hash : "",
+      context_compaction_retry: result.retry,
+      status: result.gate.dispatch_ready === false ? "blocked" : "pending",
+      dispatchReady: result.gate.dispatch_ready !== false,
+      dispatch_ready: result.gate.dispatch_ready !== false,
+      worker_context_pre_dispatch_gate: result.gate,
+      workerContextPreDispatchGate: result.gate,
+      worker_context_packet: result.packet,
+    };
+    recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assignment);
+    const retry = result.retry || result.packet?.context_compaction_retry || {};
+    const partial = retry.partial_compaction || retry.partialCompaction || {};
+    const rendered = renderWorkerContextPacket(result.packet);
+    const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+    const binding = (ledger.entries || []).find((item: any) => item.assignment_id === baseAssignment.assignmentId) || {};
+    const hookLedger = readWorkerContextCompactHookLedgerForCoordinator(groupId);
+    const hookRunId = String(retry.compact_hook_run_id || binding.worker_context_packet_compact_hook_run_id || "");
+    const hookEntries = (hookLedger.entries || []).filter((item: any) => item.hook_run_id === hookRunId);
+    const finalContract = result.packet?.contract_injections?.[0] || {};
+    const finalDependency = result.packet?.dependencies?.[0] || {};
+    const checks = {
+      initialGateBlockedByMetadata: initialGate.dispatch_ready === false
+        && initialPacket.context_usage?.status === "over_budget"
+        && (initialPacket.context_usage?.top_categories || []).some((item: any) => ["constraints_and_documents", "contract_injections", "dependencies"].includes(item.id)),
+      metadataRetryRecovered: retry.schema === "ccm-worker-context-compaction-retry-v1"
+        && retry.status === "recovered"
+        && retry.method === "metadata_partial_compact"
+        && retry.partial_compact === true
+        && partial.schema === "ccm-worker-context-metadata-partial-compaction-v1"
+        && partial.category === "worker_context_metadata"
+        && Number(partial.omitted_chars || 0) > 1000,
+      taskWasNotCompacted: result.task === task
+        && retry.original_task_hash === retry.compacted_task_hash
+        && Number(retry.original_task_chars || 0) === Number(retry.compacted_task_chars || 0),
+      metadataIdentifiersPreserved: finalContract.injection_id === "contract-metadata-partial-0"
+        && finalContract.endpoint === "POST /api/metadata-partial/0"
+        && finalContract.required_receipt_reference === true
+        && finalDependency.project === "dependency-0"
+        && finalDependency.dependency_id === "dep-metadata-partial-0"
+        && Array.isArray(result.packet?.constraints)
+        && result.packet.constraints[0]?.includes("METADATA_PARTIAL_SENTINEL"),
+      bindingPersistsMetadataPartialCompaction: binding.worker_context_packet_partial_compaction?.schema === "ccm-worker-context-metadata-partial-compaction-v1"
+        && binding.worker_context_packet_compaction_retry?.partial_compact === true
+        && binding.worker_context_packet_render_probe?.rendered_flags?.has_partial_compaction === true,
+      renderShowsMetadataPartialCompaction: rendered.includes("partial_compaction=worker_context_metadata")
+        && rendered.includes("contract injection"),
+      compactHookLedgerRecordsMetadataPost: !!hookRunId
+        && hookEntries.some((item: any) => item.phase === "pre" && item.initial_usage_status === "over_budget")
+        && hookEntries.some((item: any) => item.phase === "post"
+          && item.final_usage_status !== "over_budget"
+          && item.dispatch_ready === true
+          && item.result_summary?.partial_compact === true
+          && item.result_summary?.partial_compaction_category === "worker_context_metadata"),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      retry: {
+        status: retry.status || "",
+        method: retry.method || "",
+        partial_compact: retry.partial_compact === true,
+        partial_compaction_schema: partial.schema || "",
+        partial_omitted_chars: partial.omitted_chars || 0,
+        original_task_chars: retry.original_task_chars || 0,
+        compacted_task_chars: retry.compacted_task_chars || 0,
+      },
+      gate: {
+        dispatch_ready: result.gate.dispatch_ready,
+        auto_retry_status: result.gate.auto_retry_status || "",
+        total_tokens: result.gate.total_tokens || 0,
+        max_tokens: result.gate.max_tokens || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, hookFile, `${hookFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runWorkerContextMetadataPartialCompactPolicySelfTest() {
+  const groupId = `worker-context-metadata-partial-compact-policy-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+  const hookFile = getWorkerContextCompactHookLedgerFileForCoordinator(groupId);
+  try {
+    const group = normalizeGroupOrchestrator({
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator" },
+        { project: "frontend", agent: "cursor" },
+      ],
+    });
+    const task = "请在 frontend 项目处理 POLICY_PARTIAL_SENTINEL，并保留未被策略选中的上下文字段。";
+    const analysis = {
+      summary: "验证 WorkerContextPacket partial compact policy",
+      constraints: Array.from({ length: 12 }, (_, index) => `POLICY_PARTIAL_SENTINEL constraint ${index}: ${"文档约束压力来源 ".repeat(160)}`),
+      documentFindings: Array.from({ length: 16 }, (_, index) => `docs/policy-${index}.md: ${"验收规则字段页面交互历史决策 ".repeat(180)}`),
+    };
+    const contractInjections = [{
+      injection_id: "contract-policy-unselected",
+      source_agent: "backend",
+      target_agent: "frontend",
+      endpoint: "GET /api/policy-unselected",
+      summary: "POLICY_CONTRACT_UNSELECTED_SHORT",
+      required_receipt_reference: true,
+    }];
+    const workerContextDependencies = [{
+      project: "api",
+      reason: "POLICY_DEPENDENCY_UNSELECTED_SHORT",
+      dependency_id: "dep-policy-unselected",
+      required_receipt_reference: true,
+    }];
+    const baseAssignment: any = {
+      project: "frontend",
+      task,
+      reason: "selftest metadata partial compact policy",
+      dependsOn: "",
+      taskFingerprint: "metadata-partial-compact-policy-selftest",
+      dispatchKey: `${groupId}|coordinator|frontend|metadata-partial-compact-policy-selftest`,
+      assignmentId: `frontend::${groupId}|coordinator|frontend|metadata-partial-compact-policy-selftest::initial::1`,
+      attempt: 1,
+      sourceProject: "coordinator",
+      scopeId: groupId,
+    };
+    const options = {
+      group,
+      analysis,
+      contractInjections,
+      workerContextDependencies,
+      workerContextUsageOptions: {
+        maxTokens: 4200,
+        autoCompactBufferTokens: 120,
+      },
+      workerContextRetryOptions: {
+        disableCompactStrategyMemory: true,
+        metadata: {
+          maxCategories: 1,
+          maxItems: 4,
+          maxStringChars: 150,
+        },
+        maxTaskChars: 2200,
+      },
+    };
+    const initialPacket = buildWorkerContextPacketForAssignment(baseAssignment, "", [], options);
+    const initialGate = buildWorkerContextPreDispatchGateForCoordinator(baseAssignment, initialPacket);
+    const result = maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment, "", [], initialPacket, initialGate, options);
+    const assignment: any = {
+      ...baseAssignment,
+      task: result.task,
+      context_compaction_retry: result.retry,
+      dispatchReady: result.gate.dispatch_ready !== false,
+      dispatch_ready: result.gate.dispatch_ready !== false,
+      worker_context_pre_dispatch_gate: result.gate,
+      workerContextPreDispatchGate: result.gate,
+      worker_context_packet: result.packet,
+    };
+    recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assignment);
+    const retry = result.retry || result.packet?.context_compaction_retry || {};
+    const partial = retry.partial_compaction || retry.partialCompaction || {};
+    const policy = retry.partial_compact_policy || retry.partialCompactPolicy || partial.partial_compact_policy || {};
+    const finalContract = result.packet?.contract_injections?.[0] || {};
+    const finalDependency = result.packet?.dependencies?.[0] || {};
+    const rendered = renderWorkerContextPacket(result.packet);
+    const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+    const binding = (ledger.entries || []).find((item: any) => item.assignment_id === baseAssignment.assignmentId) || {};
+    const hookLedger = readWorkerContextCompactHookLedgerForCoordinator(groupId);
+    const hookRunId = String(retry.compact_hook_run_id || binding.worker_context_packet_compact_hook_run_id || "");
+    const hookEntries = (hookLedger.entries || []).filter((item: any) => item.hook_run_id === hookRunId);
+    const checks = {
+      initialTopCategoryIsMetadataDocs: initialGate.dispatch_ready === false
+        && initialPacket.context_usage?.status === "over_budget"
+        && (initialPacket.context_usage?.top_categories || [])[0]?.id === "constraints_and_documents",
+      policySelectsOnlyDocs: retry.status === "recovered"
+        && retry.method === "metadata_partial_compact"
+        && policy.schema === "ccm-worker-context-partial-compact-policy-v1"
+        && Array.isArray(policy.selected_categories)
+        && policy.selected_categories.length === 1
+        && policy.selected_categories[0] === "constraints_and_documents"
+        && Array.isArray(policy.skipped_categories)
+        && policy.skipped_categories.includes("contract_injections")
+        && policy.skipped_categories.includes("dependencies"),
+      partialSummaryMatchesPolicy: partial.schema === "ccm-worker-context-metadata-partial-compaction-v1"
+        && Array.isArray(partial.categories)
+        && partial.categories.length === 1
+        && partial.categories[0] === "constraints_and_documents"
+        && partial.partial_compact_policy?.selected_categories?.[0] === "constraints_and_documents",
+      unselectedMetadataPreserved: finalContract.summary === "POLICY_CONTRACT_UNSELECTED_SHORT"
+        && finalDependency.reason === "POLICY_DEPENDENCY_UNSELECTED_SHORT"
+        && finalDependency.dependency_id === "dep-policy-unselected",
+      taskWasNotCompacted: result.task === task
+        && retry.original_task_hash === retry.compacted_task_hash,
+      bindingAndRenderExposePolicy: binding.worker_context_packet_partial_compact_policy?.schema === "ccm-worker-context-partial-compact-policy-v1"
+        && binding.worker_context_packet_partial_compact_policy?.selected_categories?.[0] === "constraints_and_documents"
+        && rendered.includes("partial_compact_policy=constraints_and_documents"),
+      hookRecordsPolicy: !!hookRunId
+        && hookEntries.some((item: any) => item.phase === "post"
+          && item.dispatch_ready === true
+          && Array.isArray(item.result_summary?.partial_compact_policy_selected)
+          && item.result_summary.partial_compact_policy_selected[0] === "constraints_and_documents"),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      retry: {
+        status: retry.status || "",
+        method: retry.method || "",
+        selected_categories: policy.selected_categories || [],
+        skipped_categories: policy.skipped_categories || [],
+        partial_categories: partial.categories || [],
+      },
+      gate: {
+        dispatch_ready: result.gate.dispatch_ready,
+        auto_retry_status: result.gate.auto_retry_status || "",
+        total_tokens: result.gate.total_tokens || 0,
+        max_tokens: result.gate.max_tokens || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, hookFile, `${hookFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runWorkerContextCompactOutcomeLedgerSelfTest() {
+  const groupId = `worker-context-compact-outcome-ledger-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+  const hookFile = getWorkerContextCompactHookLedgerFileForCoordinator(groupId);
+  const outcomeFile = getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId);
+  try {
+    const group = normalizeGroupOrchestrator({
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator" },
+        { project: "frontend", agent: "cursor" },
+      ],
+    });
+    const task = "请在 frontend 项目处理 OUTCOME_LEDGER_SENTINEL，保持任务正文不被压缩。";
+    const analysis = {
+      summary: "验证 WorkerContextPacket compact outcome ledger",
+      constraints: Array.from({ length: 10 }, (_, index) => `OUTCOME_LEDGER_SENTINEL constraint ${index}: ${"长期策略样本 ".repeat(180)}`),
+      documentFindings: Array.from({ length: 14 }, (_, index) => `docs/outcome-${index}.md: ${"压缩策略结果蒸馏依据 ".repeat(180)}`),
+    };
+    const baseAssignment: any = {
+      project: "frontend",
+      task,
+      reason: "selftest compact outcome ledger",
+      dependsOn: "",
+      taskFingerprint: "compact-outcome-ledger-selftest",
+      dispatchKey: `${groupId}|coordinator|frontend|compact-outcome-ledger-selftest`,
+      assignmentId: `frontend::${groupId}|coordinator|frontend|compact-outcome-ledger-selftest::initial::1`,
+      attempt: 1,
+      sourceProject: "coordinator",
+      scopeId: groupId,
+    };
+    const options = {
+      group,
+      analysis,
+      workerContextUsageOptions: {
+        maxTokens: 3800,
+        autoCompactBufferTokens: 120,
+      },
+      workerContextRetryOptions: {
+        metadata: {
+          maxCategories: 1,
+          maxItems: 4,
+          maxStringChars: 150,
+        },
+        maxTaskChars: 2200,
+      },
+    };
+    const initialPacket = buildWorkerContextPacketForAssignment(baseAssignment, "", [], options);
+    const initialGate = buildWorkerContextPreDispatchGateForCoordinator(baseAssignment, initialPacket);
+    const result = maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment, "", [], initialPacket, initialGate, options);
+    const assignment: any = {
+      ...baseAssignment,
+      task: result.task,
+      context_compaction_retry: result.retry,
+      dispatchReady: result.gate.dispatch_ready !== false,
+      dispatch_ready: result.gate.dispatch_ready !== false,
+      worker_context_pre_dispatch_gate: result.gate,
+      workerContextPreDispatchGate: result.gate,
+      worker_context_packet: result.packet,
+    };
+    recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assignment);
+    const retry = result.retry || result.packet?.context_compaction_retry || {};
+    const hookRunId = String(retry.compact_hook_run_id || "");
+    const outcomeLedger = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId);
+    const outcome = (outcomeLedger.entries || []).find((item: any) => item.hook_run_id === hookRunId && item.assignment_id === baseAssignment.assignmentId) || {};
+    const checks = {
+      outcomeLedgerCreated: outcomeLedger.schema === "ccm-worker-context-compact-outcome-ledger-v1"
+        && outcomeLedger.file === outcomeFile
+        && Number(outcomeLedger.stats?.total || 0) >= 1,
+      outcomeBindsRetryAndHook: outcome.hook_run_id === hookRunId
+        && outcome.retry_id === retry.retry_id
+        && outcome.method === "metadata_partial_compact"
+        && outcome.status === "recovered"
+        && outcome.dispatch_ready === true,
+      outcomeRecordsPolicyDecision: outcome.partial_compact_policy?.schema === "ccm-worker-context-partial-compact-policy-v1"
+        && outcome.partial_compact_policy?.selected_categories?.[0] === "constraints_and_documents"
+        && Array.isArray(outcome.partial_compact_policy?.skipped_categories),
+      outcomeRecordsRecoveryDelta: Number(outcome.token_delta || 0) > 0
+        && Number(outcome.free_token_delta || 0) > 0
+        && Number(outcome.partial_omitted_chars || 0) > 0,
+      outcomeShowsTaskPreserved: outcome.task_hash_unchanged === true
+        && outcome.task_compacted === false
+        && result.task === task,
+      statsAggregateOutcome: Number(outcomeLedger.stats?.partialCompactPolicy || 0) >= 1
+        && Number(outcomeLedger.stats?.taskPreserved || 0) >= 1
+        && Number(outcomeLedger.stats?.selectedCategoryCounts?.constraints_and_documents || 0) >= 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      outcome: {
+        status: outcome.status || "",
+        method: outcome.method || "",
+        selected_categories: outcome.partial_compact_policy?.selected_categories || [],
+        token_delta: outcome.token_delta || 0,
+        free_token_delta: outcome.free_token_delta || 0,
+        task_hash_unchanged: outcome.task_hash_unchanged === true,
+      },
+      stats: outcomeLedger.stats,
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, hookFile, `${hookFile}.bak`, outcomeFile, `${outcomeFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runWorkerContextCompactStrategyMemorySelfTest() {
+  const groupId = `worker-context-compact-strategy-memory-selftest-${process.pid}-${Date.now()}`;
+  const outcomeFile = getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId);
+  const strategyFile = getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId);
+  try {
+    const dependencyPolicy = {
+      schema: "ccm-worker-context-partial-compact-policy-v1",
+      method: "usage_top_category_pressure",
+      selected_categories: ["dependencies"],
+      skipped_categories: ["constraints_and_documents"],
+      max_categories: 1,
+      fallback_used: false,
+    };
+    const constraintsPolicy = {
+      schema: "ccm-worker-context-partial-compact-policy-v1",
+      method: "usage_top_category_pressure",
+      selected_categories: ["constraints_and_documents"],
+      skipped_categories: ["dependencies"],
+      max_categories: 1,
+      fallback_used: false,
+    };
+    writeJsonAtomicForCoordinator(outcomeFile, {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId,
+      file: outcomeFile,
+      updatedAt: "2026-07-09T15:00:02.000Z",
+      entries: [
+        {
+          schema: "ccm-worker-context-compact-outcome-entry-v1",
+          outcome_id: "wcco-strategy-dependency",
+          group_id: groupId,
+          assignment_id: "assignment-strategy-dependency",
+          method: "metadata_partial_compact",
+          status: "recovered",
+          dispatch_ready: true,
+          from_total_tokens: 7000,
+          retry_total_tokens: 2400,
+          from_free_tokens: -3300,
+          retry_free_tokens: 1300,
+          token_delta: 4600,
+          free_token_delta: 4600,
+          partial_compact: true,
+          task_compacted: false,
+          task_hash_unchanged: true,
+          partial_compaction_categories: ["dependencies"],
+          partial_compact_policy: dependencyPolicy,
+          partial_omitted_chars: 18000,
+          distillation_candidate: true,
+          at: "2026-07-09T15:00:01.000Z",
+        },
+        {
+          schema: "ccm-worker-context-compact-outcome-entry-v1",
+          outcome_id: "wcco-strategy-constraints",
+          group_id: groupId,
+          assignment_id: "assignment-strategy-constraints",
+          method: "metadata_partial_compact",
+          status: "blocked",
+          dispatch_ready: false,
+          from_total_tokens: 7100,
+          retry_total_tokens: 7000,
+          from_free_tokens: -3400,
+          retry_free_tokens: -3300,
+          token_delta: 100,
+          free_token_delta: 100,
+          partial_compact: true,
+          task_compacted: false,
+          task_hash_unchanged: true,
+          partial_compaction_categories: ["constraints_and_documents"],
+          partial_compact_policy: constraintsPolicy,
+          partial_omitted_chars: 600,
+          distillation_candidate: true,
+          at: "2026-07-09T15:00:02.000Z",
+        },
+      ],
+    });
+    const strategy = readWorkerContextCompactStrategyMemoryForCoordinator(groupId);
+    const packet = {
+      packet_id: "wcp-strategy-memory-selftest",
+      project: "frontend",
+      task: "验证 compact outcome strategy memory 会被下次 WorkerContextPacket policy 使用。",
+      constraints: ["CONSTRAINT_STRATEGY_TIE"],
+      document_findings: ["docs/strategy.md"],
+      dependencies: [{ project: "backend", reason: "DEPENDENCY_STRATEGY_TIE", dependency_id: "dep-strategy" }],
+      contract_injections: [],
+      context_usage: {
+        schema: "ccm-worker-context-usage-v1",
+        top_categories: [
+          { id: "constraints_and_documents", tokens: 900, chars: 2700 },
+          { id: "dependencies", tokens: 900, chars: 2700 },
+        ],
+      },
+    };
+    const policy = buildWorkerContextMetadataPartialCompactPolicyForCoordinator(packet, {
+      maxCategories: 1,
+      compactOutcomeStrategyMemory: strategy,
+    });
+    const rendered = renderWorkerContextPacket({
+      ...packet,
+      group: { id: groupId, name: "", members: ["frontend"] },
+      goal: "compact strategy memory selftest",
+      memory: null,
+      acceptance: {},
+      context_compaction_retry: {
+        schema: "ccm-worker-context-compaction-retry-v1",
+        status: "recovered",
+        method: "metadata_partial_compact",
+        partial_compact_policy: policy,
+        partial_compaction: {
+          schema: "ccm-worker-context-metadata-partial-compaction-v1",
+          category: "worker_context_metadata",
+          categories: policy.selected_categories,
+          omitted_chars: 18000,
+          preserved_fields: ["dependency.project", "dependency.reason"],
+          partial_compact_policy: policy,
+        },
+        preserved_receipt_contract: true,
+      },
+    });
+    const dependencyStats = (strategy.categories || []).find((item: any) => item.category === "dependencies") || {};
+    const checks = {
+      strategyMemoryCreated: strategy.schema === "ccm-worker-context-compact-strategy-memory-v1"
+        && strategy.file === strategyFile
+        && Number(strategy.sample_count || 0) === 2,
+      dependencyPreferredFromOutcome: strategy.preferred_categories?.[0] === "dependencies"
+        && Number(dependencyStats.recovered || 0) === 1
+        && Number(dependencyStats.avg_free_token_delta || 0) === 4600,
+      policyUsesStrategyMemory: policy.method === "usage_top_category_pressure_with_outcome_strategy"
+        && policy.compact_strategy_memory?.schema === "ccm-worker-context-compact-strategy-memory-v1",
+      equalPressureSelectsPreferredCategory: policy.selected_categories?.[0] === "dependencies",
+      workerPacketRendersStrategyMemory: rendered.includes("partial_compact_policy=dependencies")
+        && rendered.includes("compact_strategy_memory=")
+        && rendered.includes("preferred=dependencies"),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      strategy: {
+        preferred_categories: strategy.preferred_categories || [],
+        avoid_categories: strategy.avoid_categories || [],
+        sample_count: strategy.sample_count || 0,
+        categories: strategy.categories || [],
+      },
+      policy: {
+        method: policy.method || "",
+        selected_categories: policy.selected_categories || [],
+        compact_strategy_memory: policy.compact_strategy_memory || null,
+      },
+    };
+  } finally {
+    for (const file of [outcomeFile, `${outcomeFile}.bak`, strategyFile, `${strategyFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runWorkerContextPtlEmergencyDowngradeSelfTest() {
+  const groupId = `worker-context-ptl-emergency-downgrade-selftest-${process.pid}-${Date.now()}`;
+  const outcomeFile = getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId);
+  const strategyFile = getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId);
+  const ptlFile = getWorkerContextPtlEmergencyHintFileForCoordinator(groupId);
+  const hookFile = getWorkerContextCompactHookLedgerFileForCoordinator(groupId);
+  try {
+    const policy = {
+      schema: "ccm-worker-context-partial-compact-policy-v1",
+      method: "usage_top_category_pressure",
+      selected_categories: ["constraints_and_documents"],
+      skipped_categories: ["dependencies"],
+      max_categories: 1,
+      fallback_used: false,
+    };
+    writeJsonAtomicForCoordinator(outcomeFile, {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId,
+      file: outcomeFile,
+      updatedAt: "2026-07-09T16:00:03.000Z",
+      entries: [0, 1, 2].map((index: number) => ({
+        schema: "ccm-worker-context-compact-outcome-entry-v1",
+        outcome_id: `wcco-ptl-blocked-${index}`,
+        group_id: groupId,
+        assignment_id: `assignment-ptl-blocked-${index}`,
+        method: "metadata_partial_compact_then_deterministic_head_tail_critical_lines",
+        status: "blocked",
+        dispatch_ready: false,
+        from_total_tokens: 9800 + index,
+        retry_total_tokens: 7600 + index,
+        from_free_tokens: -6400,
+        retry_free_tokens: -4200,
+        token_delta: 2200,
+        free_token_delta: 2200,
+        partial_compact: true,
+        task_compacted: index === 2,
+        task_hash_unchanged: index !== 2,
+        partial_compaction_categories: ["constraints_and_documents"],
+        partial_compact_policy: policy,
+        partial_omitted_chars: 4000,
+        distillation_candidate: true,
+        at: `2026-07-09T16:00:0${index}.000Z`,
+      })),
+    });
+    const ptlHint = readWorkerContextPtlEmergencyHintForCoordinator(groupId);
+    const group = normalizeGroupOrchestrator({
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator" },
+        { project: "frontend", agent: "cursor" },
+      ],
+    });
+    const task = `请处理 PTL_EMERGENCY_SENTINEL。\n${"需要保留验收和回执契约，但任务正文很长。".repeat(900)}`;
+    const baseAssignment: any = {
+      project: "frontend",
+      task,
+      reason: "selftest ptl emergency downgrade",
+      dependsOn: "",
+      taskFingerprint: "ptl-emergency-downgrade-selftest",
+      dispatchKey: `${groupId}|coordinator|frontend|ptl-emergency-downgrade-selftest`,
+      assignmentId: `frontend::${groupId}|coordinator|frontend|ptl-emergency-downgrade-selftest::initial::1`,
+      attempt: 1,
+      sourceProject: "coordinator",
+      scopeId: groupId,
+    };
+    const options = {
+      group,
+      analysis: { summary: "验证 WorkerContextPacket PTL emergency downgrade", constraints: [], documentFindings: [] },
+      workerContextUsageOptions: {
+        maxTokens: 5200,
+        autoCompactBufferTokens: 120,
+      },
+      workerContextRetryOptions: {
+        maxTaskChars: 7000,
+      },
+    };
+    const initialPacket = buildWorkerContextPacketForAssignment(baseAssignment, "", [], options);
+    const initialGate = buildWorkerContextPreDispatchGateForCoordinator(baseAssignment, initialPacket);
+    const result = maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment, "", [], initialPacket, initialGate, options);
+    const retry = result.retry || result.packet?.context_compaction_retry || {};
+    const rendered = renderWorkerContextPacket(result.packet);
+    const outcomeLedger = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId);
+    const latestOutcome = (outcomeLedger.entries || []).slice(-1)[0] || {};
+    const checks = {
+      ptlHintEngaged: ptlHint.schema === "ccm-worker-context-ptl-emergency-hint-v1"
+        && ptlHint.engaged === true
+        && ptlHint.emergency_level === "critical"
+        && Number(ptlHint.blocked_outcome_count || 0) === 3,
+      retryUsesPtlHint: retry.ptl_emergency_hint?.engaged === true
+        && retry.ptl_emergency_hint?.emergency_level === "critical",
+      taskCompactedWithEmergencyBudget: retry.status === "recovered"
+        && Number(retry.compacted_task_chars || 0) > 0
+        && Number(retry.compacted_task_chars || 0) <= 2400
+        && Number(retry.original_task_chars || 0) > Number(retry.compacted_task_chars || 0),
+      renderedExposesPtlDowngrade: rendered.includes("ptl_emergency_downgrade=critical"),
+      outcomeCarriesPtlHint: latestOutcome.ptl_emergency_hint?.engaged === true
+        && latestOutcome.ptl_emergency_hint?.emergency_level === "critical",
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      ptlHint: {
+        engaged: ptlHint.engaged,
+        emergency_level: ptlHint.emergency_level,
+        blocked_outcome_count: ptlHint.blocked_outcome_count,
+        repeated_failed_categories: ptlHint.repeated_failed_categories || [],
+      },
+      retry: {
+        status: retry.status || "",
+        method: retry.method || "",
+        original_task_chars: retry.original_task_chars || 0,
+        compacted_task_chars: retry.compacted_task_chars || 0,
+        ptl_emergency_level: retry.ptl_emergency_hint?.emergency_level || "",
+      },
+    };
+  } finally {
+    for (const file of [outcomeFile, `${outcomeFile}.bak`, strategyFile, `${strategyFile}.bak`, ptlFile, `${ptlFile}.bak`, hookFile, `${hookFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runWorkerContextIgnoreMemoryPolicySelfTest() {
+  const groupId = `worker-context-ignore-memory-policy-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+  try {
+    const group = normalizeGroupOrchestrator({
+      id: groupId,
+      members: [
+        { project: "coordinator", role: "coordinator" },
+        { project: "frontend", agent: "cursor" },
+      ],
+    });
+    const memory = {
+      schema: "ccm-group-memory-context-v1",
+      group_id: groupId,
+      target_project: "frontend",
+      memory_policy: {
+        ignored: true,
+        ignore_reason: "user_requested_ignore_memory",
+        priority: "user_ignore_memory_request_over_platform_memory",
+        use: "must_not_use_group_memory",
+        boundary: "current_worker_context_packet",
+      },
+      rendered_text: "子 Agent 受控记忆包（平台生成，本轮用户要求忽略记忆）：不要引用任何历史内容。",
+    };
+    const baseAssignment: any = {
+      project: "frontend",
+      task: "忽略记忆，只根据当前文件状态处理 IGNORE_MEMORY_SENTINEL。",
+      reason: "selftest ignore memory policy",
+      dependsOn: "",
+      taskFingerprint: "ignore-memory-policy-selftest",
+      dispatchKey: `${groupId}|coordinator|frontend|ignore-memory-policy-selftest`,
+      assignmentId: `frontend::${groupId}|coordinator|frontend|ignore-memory-policy-selftest::initial::1`,
+      attempt: 1,
+      sourceProject: "coordinator",
+      scopeId: groupId,
+    };
+    const packet = buildWorkerContextPacketForAssignment(baseAssignment, "", [], {
+      group,
+      memory,
+      workerContextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+    });
+    const gate = buildWorkerContextPreDispatchGateForCoordinator(baseAssignment, packet);
+    const assignment = {
+      ...baseAssignment,
+      worker_context_packet: packet,
+      worker_context_pre_dispatch_gate: gate,
+      dispatch_ready: gate.dispatch_ready !== false,
+      dispatchReady: gate.dispatch_ready !== false,
+    };
+    const binding: any = recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assignment) || {};
+    const rendered = renderWorkerContextPacket(packet);
+    const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+    const persisted = (ledger.entries || []).find((item: any) => item.assignment_id === baseAssignment.assignmentId) || {};
+    const categories = new Map((packet.context_usage?.categories || []).map((item: any) => [item.id, item]));
+    const checks = {
+      packetCarriesIgnorePolicy: packet.memory_policy?.schema === "ccm-worker-context-memory-policy-v1"
+        && packet.memory_policy?.ignored === true
+        && packet.acceptance?.memory_ignored_receipt_required === true,
+      proofMarksIgnoredByPolicy: packet.memory_reinjection_proof?.status === "ignored_by_policy"
+        && packet.memory_reinjection_proof?.memory_ignored === true,
+      usageCategorizesPolicy: Number((categories.get("memory_policy") as any)?.tokens || 0) > 0,
+      renderedRequiresMemoryIgnoredReceipt: rendered.includes("Memory policy：ignored")
+        && rendered.includes("memoryIgnored")
+        && rendered.includes("must_not_use_group_memory"),
+      bindingPersistsIgnorePolicy: persisted.worker_context_packet_memory_policy?.ignored === true
+        && persisted.worker_context_packet_render_probe?.rendered_flags?.has_memory_ignored_policy === true
+        && binding.worker_context_packet_memory_policy?.ignored === true,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      memoryPolicy: packet.memory_policy,
+      proof: {
+        status: packet.memory_reinjection_proof?.status || "",
+        memory_ignored: packet.memory_reinjection_proof?.memory_ignored === true,
+      },
+      binding: {
+        memory_policy_ignored: persisted.worker_context_packet_memory_policy?.ignored === true,
+        render_probe_ignored: persisted.worker_context_packet_render_probe?.rendered_flags?.has_memory_ignored_policy === true,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
 }
 
 export function buildCodedCoordinatorSummary(group: any, outputs: string[]) {
@@ -1879,6 +3193,2151 @@ function getReplayRepairWorkItemsFileForCoordinator(groupId: string) {
   return path.join(GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR, `${safe}.json`);
 }
 
+function getReplayRepairDispatchPlansFileForCoordinator(groupId: string) {
+  const safe = String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
+  return path.join(GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_PLANS_DIR, `${safe}.json`);
+}
+
+function getReplayRepairDispatchBindingsFileForCoordinator(groupId: string) {
+  const safe = String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
+  return path.join(GROUP_MEMORY_REPLAY_REPAIR_DISPATCH_BINDINGS_DIR, `${safe}.json`);
+}
+
+function getReplayRepairDispatchTimelineBindingsFileForCoordinator(groupId: string) {
+  const safe = String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
+  return path.join(GROUP_MEMORY_REPLAY_REPAIR_TIMELINE_BINDINGS_DIR, `${safe}.json`);
+}
+
+function getWorkerContextCompactHookLedgerFileForCoordinator(groupId: string) {
+  const safe = String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
+  return path.join(GROUP_MEMORY_WORKER_CONTEXT_COMPACT_HOOKS_DIR, `${safe}.json`);
+}
+
+function getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId: string) {
+  const safe = String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
+  return path.join(GROUP_MEMORY_WORKER_CONTEXT_COMPACT_OUTCOMES_DIR, `${safe}.json`);
+}
+
+function getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId: string) {
+  const safe = String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
+  return path.join(GROUP_MEMORY_WORKER_CONTEXT_COMPACT_STRATEGIES_DIR, `${safe}.json`);
+}
+
+function getWorkerContextPtlEmergencyHintFileForCoordinator(groupId: string) {
+  const safe = String(groupId || "unknown").replace(/[^a-zA-Z0-9._:-]+/g, "-").slice(0, 160) || "unknown";
+  return path.join(GROUP_MEMORY_WORKER_CONTEXT_PTL_EMERGENCIES_DIR, `${safe}.json`);
+}
+
+function writeJsonAtomicForCoordinator(file: string, value: any) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(value, null, 2), "utf-8");
+  fs.renameSync(temp, file);
+}
+
+function hashCoordinator(value: any, length = 16) {
+  return crypto.createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex").slice(0, length);
+}
+
+function normalizeWorkerContextCompactHookEntryForCoordinator(raw: any = {}) {
+  const ok = raw.ok !== false && String(raw.status || "ok") !== "fail";
+  return {
+    schema: "ccm-worker-context-compact-hook-entry-v1",
+    entry_id: String(raw.entry_id || raw.entryId || `wcch-entry:${hashCoordinator([raw.hook_run_id, raw.phase, raw.assignment_id, raw.retry_packet_id, Date.now(), Math.random()], 14)}`),
+    hook_run_id: String(raw.hook_run_id || raw.hookRunId || ""),
+    group_id: String(raw.group_id || raw.groupId || ""),
+    phase: String(raw.phase || "") === "post" ? "post" : "pre",
+    ok,
+    status: ok ? String(raw.status || "ok") : "fail",
+    assignment_id: String(raw.assignment_id || raw.assignmentId || ""),
+    dispatch_key: String(raw.dispatch_key || raw.dispatchKey || ""),
+    project: String(raw.project || ""),
+    from_packet_id: String(raw.from_packet_id || raw.fromPacketId || ""),
+    retry_packet_id: String(raw.retry_packet_id || raw.retryPacketId || ""),
+    method: String(raw.method || ""),
+    memory_first: raw.memory_first === true || raw.memoryFirst === true,
+    initial_usage_status: String(raw.initial_usage_status || raw.initialUsageStatus || ""),
+    final_usage_status: String(raw.final_usage_status || raw.finalUsageStatus || ""),
+    dispatch_ready: raw.dispatch_ready === false || raw.dispatchReady === false ? false : true,
+    result_summary: raw.result_summary || raw.resultSummary || {},
+    error: compactText(raw.error || "", 500),
+    at: String(raw.at || new Date().toISOString()),
+  };
+}
+
+function buildWorkerContextCompactHookStatsForCoordinator(entries: any[] = []) {
+  const stats: any = {
+    total: entries.length,
+    ok: 0,
+    failed: 0,
+    pre: { total: 0, ok: 0, failed: 0 },
+    post: { total: 0, ok: 0, failed: 0 },
+    latestAt: "",
+  };
+  for (const entry of entries) {
+    const phase = entry.phase === "post" ? "post" : "pre";
+    stats[phase].total++;
+    if (entry.ok === false || entry.status === "fail") {
+      stats.failed++;
+      stats[phase].failed++;
+    } else {
+      stats.ok++;
+      stats[phase].ok++;
+    }
+    if (entry.at && (!stats.latestAt || String(entry.at) > stats.latestAt)) stats.latestAt = String(entry.at);
+  }
+  return stats;
+}
+
+export function readWorkerContextCompactHookLedgerForCoordinator(groupId: string) {
+  const file = getWorkerContextCompactHookLedgerFileForCoordinator(groupId);
+  try {
+    const ledger = JSON.parse(fs.readFileSync(file, "utf-8"));
+    if (ledger?.schema === "ccm-worker-context-compact-hook-ledger-v1") {
+      const entries = Array.isArray(ledger.entries) ? ledger.entries.map(normalizeWorkerContextCompactHookEntryForCoordinator) : [];
+      return {
+        ...ledger,
+        file,
+        entries,
+        stats: buildWorkerContextCompactHookStatsForCoordinator(entries),
+      };
+    }
+  } catch {}
+  return {
+    schema: "ccm-worker-context-compact-hook-ledger-v1",
+    version: 1,
+    groupId,
+    file,
+    entries: [],
+    stats: buildWorkerContextCompactHookStatsForCoordinator([]),
+    updatedAt: "",
+  };
+}
+
+function appendWorkerContextCompactHookEntriesForCoordinator(groupId: string, entries: any[] = []) {
+  const normalized = entries
+    .map((entry: any) => normalizeWorkerContextCompactHookEntryForCoordinator({ ...entry, group_id: entry.group_id || groupId }))
+    .filter((entry: any) => entry.group_id || groupId);
+  if (!normalized.length) return readWorkerContextCompactHookLedgerForCoordinator(groupId);
+  const ledger = readWorkerContextCompactHookLedgerForCoordinator(groupId);
+  const nextEntries = [...(ledger.entries || []), ...normalized].slice(-500);
+  const next = {
+    schema: "ccm-worker-context-compact-hook-ledger-v1",
+    version: 1,
+    groupId,
+    file: ledger.file || getWorkerContextCompactHookLedgerFileForCoordinator(groupId),
+    entries: nextEntries,
+    stats: buildWorkerContextCompactHookStatsForCoordinator(nextEntries),
+    updatedAt: normalized[normalized.length - 1]?.at || new Date().toISOString(),
+  };
+  writeJsonAtomicForCoordinator(next.file, next);
+  return next;
+}
+
+function normalizeWorkerContextCompactOutcomeEntryForCoordinator(raw: any = {}) {
+  const status = String(raw.status || raw.retry_status || raw.retryStatus || "").trim() || (raw.dispatch_ready === false || raw.dispatchReady === false ? "blocked" : "recovered");
+  const partialPolicy = raw.partial_compact_policy || raw.partialCompactPolicy || {};
+  const ptlHint = raw.ptl_emergency_hint || raw.ptlEmergencyHint || null;
+  const selectedCategories = Array.isArray(partialPolicy.selected_categories || partialPolicy.selectedCategories)
+    ? (partialPolicy.selected_categories || partialPolicy.selectedCategories).map((item: any) => String(item || "")).filter(Boolean)
+    : [];
+  const skippedCategories = Array.isArray(partialPolicy.skipped_categories || partialPolicy.skippedCategories)
+    ? (partialPolicy.skipped_categories || partialPolicy.skippedCategories).map((item: any) => String(item || "")).filter(Boolean)
+    : [];
+  const compactStrategyMemory = partialPolicy.compact_strategy_memory || partialPolicy.compactStrategyMemory || null;
+  return {
+    schema: "ccm-worker-context-compact-outcome-entry-v1",
+    outcome_id: String(raw.outcome_id || raw.outcomeId || `wcco:${hashCoordinator([raw.group_id, raw.assignment_id, raw.retry_id, raw.retry_packet_id, raw.at || Date.now()], 14)}`),
+    group_id: String(raw.group_id || raw.groupId || ""),
+    assignment_id: String(raw.assignment_id || raw.assignmentId || ""),
+    dispatch_key: String(raw.dispatch_key || raw.dispatchKey || ""),
+    project: String(raw.project || ""),
+    hook_run_id: String(raw.hook_run_id || raw.hookRunId || ""),
+    retry_id: String(raw.retry_id || raw.retryId || ""),
+    method: String(raw.method || ""),
+    status,
+    dispatch_ready: raw.dispatch_ready === false || raw.dispatchReady === false ? false : true,
+    from_packet_id: String(raw.from_packet_id || raw.fromPacketId || ""),
+    retry_packet_id: String(raw.retry_packet_id || raw.retryPacketId || ""),
+    initial_usage_status: String(raw.initial_usage_status || raw.initialUsageStatus || ""),
+    final_usage_status: String(raw.final_usage_status || raw.finalUsageStatus || ""),
+    from_total_tokens: Number(raw.from_total_tokens || raw.fromTotalTokens || 0),
+    retry_total_tokens: Number(raw.retry_total_tokens || raw.retryTotalTokens || 0),
+    from_free_tokens: Number(raw.from_free_tokens || raw.fromFreeTokens || 0),
+    retry_free_tokens: Number(raw.retry_free_tokens || raw.retryFreeTokens || 0),
+    token_delta: Number(raw.token_delta || raw.tokenDelta || 0),
+    free_token_delta: Number(raw.free_token_delta || raw.freeTokenDelta || 0),
+    memory_first: raw.memory_first === true || raw.memoryFirst === true,
+    partial_compact: raw.partial_compact === true || raw.partialCompact === true,
+    task_compacted: raw.task_compacted === true || raw.taskCompacted === true,
+    task_hash_unchanged: raw.task_hash_unchanged === true || raw.taskHashUnchanged === true,
+    partial_compaction_categories: Array.isArray(raw.partial_compaction_categories || raw.partialCompactionCategories)
+      ? (raw.partial_compaction_categories || raw.partialCompactionCategories).map((item: any) => String(item || "")).filter(Boolean)
+      : [],
+    partial_compact_policy: partialPolicy?.schema ? {
+      schema: partialPolicy.schema,
+      method: partialPolicy.method || "",
+      selected_categories: selectedCategories,
+      skipped_categories: skippedCategories,
+      max_categories: Number(partialPolicy.max_categories || partialPolicy.maxCategories || 0),
+      fallback_used: partialPolicy.fallback_used === true || partialPolicy.fallbackUsed === true,
+      compact_strategy_memory: compactStrategyMemory?.schema ? {
+        schema: String(compactStrategyMemory.schema || ""),
+        strategy_id: String(compactStrategyMemory.strategy_id || compactStrategyMemory.strategyId || ""),
+        source_ledger_file: String(compactStrategyMemory.source_ledger_file || compactStrategyMemory.sourceLedgerFile || ""),
+        sample_count: Number(compactStrategyMemory.sample_count || compactStrategyMemory.sampleCount || 0),
+        preferred_categories: Array.isArray(compactStrategyMemory.preferred_categories || compactStrategyMemory.preferredCategories)
+          ? (compactStrategyMemory.preferred_categories || compactStrategyMemory.preferredCategories).map((item: any) => String(item || "")).filter(Boolean)
+          : [],
+        avoid_categories: Array.isArray(compactStrategyMemory.avoid_categories || compactStrategyMemory.avoidCategories)
+          ? (compactStrategyMemory.avoid_categories || compactStrategyMemory.avoidCategories).map((item: any) => String(item || "")).filter(Boolean)
+          : [],
+      } : null,
+    } : null,
+    ptl_emergency_hint: ptlHint?.schema ? normalizeWorkerContextPtlEmergencyHintForCoordinator(ptlHint, raw.group_id || raw.groupId || "") : null,
+    omitted_chars: Number(raw.omitted_chars || raw.omittedChars || 0),
+    memory_omitted_chars: Number(raw.memory_omitted_chars || raw.memoryOmittedChars || 0),
+    partial_omitted_chars: Number(raw.partial_omitted_chars || raw.partialOmittedChars || 0),
+    original_task_hash: String(raw.original_task_hash || raw.originalTaskHash || ""),
+    compacted_task_hash: String(raw.compacted_task_hash || raw.compactedTaskHash || ""),
+    source: String(raw.source || "worker_context_packet_compaction_retry"),
+    distillation_candidate: raw.distillation_candidate === false || raw.distillationCandidate === false ? false : true,
+    at: String(raw.at || new Date().toISOString()),
+  };
+}
+
+function buildWorkerContextCompactOutcomeStatsForCoordinator(entries: any[] = []) {
+  const recovered = entries.filter((item: any) => item.status === "recovered" || item.dispatch_ready === true);
+  const blocked = entries.filter((item: any) => item.status === "blocked" || item.dispatch_ready === false);
+  const partialPolicyRows = entries.filter((item: any) => item.partial_compact_policy?.schema === "ccm-worker-context-partial-compact-policy-v1");
+  const selectedCounts: Record<string, number> = {};
+  for (const entry of partialPolicyRows) {
+    for (const category of entry.partial_compact_policy?.selected_categories || []) {
+      selectedCounts[category] = Number(selectedCounts[category] || 0) + 1;
+    }
+  }
+  return {
+    total: entries.length,
+    recovered: recovered.length,
+    blocked: blocked.length,
+    memoryFirst: entries.filter((item: any) => item.memory_first === true).length,
+    partialCompact: entries.filter((item: any) => item.partial_compact === true).length,
+    partialCompactPolicy: partialPolicyRows.length,
+    taskCompacted: entries.filter((item: any) => item.task_compacted === true).length,
+    taskPreserved: entries.filter((item: any) => item.task_hash_unchanged === true).length,
+    totalOmittedChars: entries.reduce((sum, item) => sum + Number(item.omitted_chars || 0), 0),
+    partialOmittedChars: entries.reduce((sum, item) => sum + Number(item.partial_omitted_chars || 0), 0),
+    selectedCategoryCounts: selectedCounts,
+    latestAt: entries.reduce((latest: string, item: any) => item.at && (!latest || item.at > latest) ? item.at : latest, ""),
+  };
+}
+
+const WORKER_CONTEXT_METADATA_COMPACT_CATEGORIES = [
+  "constraints_and_documents",
+  "contract_injections",
+  "dependencies",
+];
+
+function workerContextCompactOutcomeCategoriesForCoordinator(entry: any = {}) {
+  const selected = Array.isArray(entry.partial_compact_policy?.selected_categories)
+    ? entry.partial_compact_policy.selected_categories
+    : [];
+  const fallback = Array.isArray(entry.partial_compaction_categories)
+    ? entry.partial_compaction_categories
+    : [];
+  const supported = new Set(WORKER_CONTEXT_METADATA_COMPACT_CATEGORIES);
+  return [...new Set([...selected, ...fallback]
+    .map((item: any) => String(item || "").trim())
+    .filter((item: string) => supported.has(item)))];
+}
+
+function normalizeWorkerContextCompactStrategyMemoryForCoordinator(raw: any = {}, groupId = "") {
+  const categories = Array.isArray(raw.categories) ? raw.categories.map((item: any = {}) => ({
+    category: String(item.category || ""),
+    attempts: Number(item.attempts || 0),
+    recovered: Number(item.recovered || 0),
+    blocked: Number(item.blocked || 0),
+    recovery_rate: Number(item.recovery_rate || 0),
+    task_preserved: Number(item.task_preserved || 0),
+    task_compacted: Number(item.task_compacted || 0),
+    avg_token_delta: Number(item.avg_token_delta || 0),
+    avg_free_token_delta: Number(item.avg_free_token_delta || 0),
+    avg_partial_omitted_chars: Number(item.avg_partial_omitted_chars || 0),
+    strategy_score: Number(item.strategy_score || 0),
+    recommendation: String(item.recommendation || "observe"),
+    latest_at: String(item.latest_at || ""),
+  })).filter((item: any) => item.category) : [];
+  return {
+    schema: "ccm-worker-context-compact-strategy-memory-v1",
+    version: 1,
+    strategy_id: String(raw.strategy_id || raw.strategyId || `wccs:${hashCoordinator([groupId || raw.groupId || raw.group_id || "", categories], 14)}`),
+    groupId: String(raw.groupId || raw.group_id || groupId || ""),
+    file: String(raw.file || ""),
+    source_ledger_file: String(raw.source_ledger_file || raw.sourceLedgerFile || ""),
+    source_ledger_updated_at: String(raw.source_ledger_updated_at || raw.sourceLedgerUpdatedAt || ""),
+    sample_count: Number(raw.sample_count || raw.sampleCount || 0),
+    category_count: Number(raw.category_count || raw.categoryCount || categories.length),
+    preferred_categories: Array.isArray(raw.preferred_categories || raw.preferredCategories)
+      ? (raw.preferred_categories || raw.preferredCategories).map((item: any) => String(item || "")).filter(Boolean)
+      : categories.filter((item: any) => item.recommendation === "prefer").map((item: any) => item.category),
+    avoid_categories: Array.isArray(raw.avoid_categories || raw.avoidCategories)
+      ? (raw.avoid_categories || raw.avoidCategories).map((item: any) => String(item || "")).filter(Boolean)
+      : categories.filter((item: any) => item.recommendation === "avoid").map((item: any) => item.category),
+    categories,
+    generated_at: String(raw.generated_at || raw.generatedAt || new Date().toISOString()),
+    updatedAt: String(raw.updatedAt || raw.updated_at || raw.generated_at || raw.generatedAt || new Date().toISOString()),
+  };
+}
+
+function buildWorkerContextCompactStrategyMemoryForCoordinator(groupId: string, entries: any[] = [], options: any = {}) {
+  const file = getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId);
+  const sourceLedgerFile = String(options.sourceLedgerFile || options.source_ledger_file || getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId));
+  const sourceLedgerUpdatedAt = String(options.sourceLedgerUpdatedAt || options.source_ledger_updated_at || "");
+  const nowIso = String(options.generatedAt || options.generated_at || new Date().toISOString());
+  const supported = new Set(WORKER_CONTEXT_METADATA_COMPACT_CATEGORIES);
+  const byCategory: Record<string, any> = {};
+  let sampleCount = 0;
+  for (const entry of entries || []) {
+    if (entry?.distillation_candidate === false) continue;
+    const categories = workerContextCompactOutcomeCategoriesForCoordinator(entry).filter((category: string) => supported.has(category));
+    if (!categories.length) continue;
+    sampleCount++;
+    for (const category of categories) {
+      const row = byCategory[category] || {
+        category,
+        attempts: 0,
+        recovered: 0,
+        blocked: 0,
+        task_preserved: 0,
+        task_compacted: 0,
+        total_token_delta: 0,
+        total_free_token_delta: 0,
+        total_partial_omitted_chars: 0,
+        latest_at: "",
+      };
+      row.attempts += 1;
+      if (entry.status === "recovered" || entry.dispatch_ready === true) row.recovered += 1;
+      if (entry.status === "blocked" || entry.dispatch_ready === false) row.blocked += 1;
+      if (entry.task_hash_unchanged === true) row.task_preserved += 1;
+      if (entry.task_compacted === true) row.task_compacted += 1;
+      row.total_token_delta += Math.max(0, Number(entry.token_delta || 0));
+      row.total_free_token_delta += Math.max(0, Number(entry.free_token_delta || 0));
+      row.total_partial_omitted_chars += Math.max(0, Number(entry.partial_omitted_chars || 0));
+      if (entry.at && (!row.latest_at || String(entry.at) > row.latest_at)) row.latest_at = String(entry.at);
+      byCategory[category] = row;
+    }
+  }
+  const categories = Object.values(byCategory).map((row: any) => {
+    const attempts = Math.max(1, Number(row.attempts || 0));
+    const recoveryRate = Number(row.recovered || 0) / attempts;
+    const taskPreservedRate = Number(row.task_preserved || 0) / attempts;
+    const blockedRate = Number(row.blocked || 0) / attempts;
+    const avgTokenDelta = Math.round(Number(row.total_token_delta || 0) / attempts);
+    const avgFreeTokenDelta = Math.round(Number(row.total_free_token_delta || 0) / attempts);
+    const avgPartialOmittedChars = Math.round(Number(row.total_partial_omitted_chars || 0) / attempts);
+    const strategyScore = Math.round(
+      recoveryRate * 1000
+      + Math.min(500, avgFreeTokenDelta / 8)
+      + taskPreservedRate * 120
+      - blockedRate * 300
+      - Number(row.task_compacted || 0) * 35
+    );
+    const recommendation = Number(row.recovered || 0) > 0 && avgFreeTokenDelta > 0
+      ? "prefer"
+      : Number(row.attempts || 0) >= 2 && Number(row.recovered || 0) === 0 ? "avoid" : "observe";
+    return {
+      category: row.category,
+      attempts: Number(row.attempts || 0),
+      recovered: Number(row.recovered || 0),
+      blocked: Number(row.blocked || 0),
+      recovery_rate: Math.round(recoveryRate * 1000) / 1000,
+      task_preserved: Number(row.task_preserved || 0),
+      task_compacted: Number(row.task_compacted || 0),
+      avg_token_delta: avgTokenDelta,
+      avg_free_token_delta: avgFreeTokenDelta,
+      avg_partial_omitted_chars: avgPartialOmittedChars,
+      strategy_score: strategyScore,
+      recommendation,
+      latest_at: row.latest_at || "",
+    };
+  }).sort((a: any, b: any) =>
+    Number(b.strategy_score || 0) - Number(a.strategy_score || 0)
+    || Number(b.avg_free_token_delta || 0) - Number(a.avg_free_token_delta || 0)
+    || a.category.localeCompare(b.category)
+  );
+  const preferred = categories
+    .filter((item: any) => item.recommendation === "prefer")
+    .map((item: any) => item.category);
+  const avoid = categories
+    .filter((item: any) => item.recommendation === "avoid")
+    .map((item: any) => item.category);
+  return normalizeWorkerContextCompactStrategyMemoryForCoordinator({
+    schema: "ccm-worker-context-compact-strategy-memory-v1",
+    version: 1,
+    strategy_id: `wccs:${hashCoordinator([groupId, sourceLedgerUpdatedAt, categories], 14)}`,
+    groupId,
+    file,
+    source_ledger_file: sourceLedgerFile,
+    source_ledger_updated_at: sourceLedgerUpdatedAt,
+    sample_count: sampleCount,
+    category_count: categories.length,
+    preferred_categories: preferred.length ? preferred : categories.map((item: any) => item.category),
+    avoid_categories: avoid,
+    categories,
+    generated_at: nowIso,
+    updatedAt: nowIso,
+  }, groupId);
+}
+
+function writeWorkerContextCompactStrategyMemoryForCoordinator(groupId: string, entries: any[] = [], options: any = {}) {
+  const strategy = buildWorkerContextCompactStrategyMemoryForCoordinator(groupId, entries, options);
+  writeJsonAtomicForCoordinator(strategy.file || getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId), strategy);
+  return strategy;
+}
+
+export function readWorkerContextCompactStrategyMemoryForCoordinator(groupId: string) {
+  const file = getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId);
+  try {
+    const strategy = JSON.parse(fs.readFileSync(file, "utf-8"));
+    if (strategy?.schema === "ccm-worker-context-compact-strategy-memory-v1") {
+      return normalizeWorkerContextCompactStrategyMemoryForCoordinator({ ...strategy, file }, groupId);
+    }
+  } catch {}
+  const outcomeLedger = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId);
+  if (Array.isArray(outcomeLedger.entries) && outcomeLedger.entries.length) {
+    return writeWorkerContextCompactStrategyMemoryForCoordinator(groupId, outcomeLedger.entries, {
+      sourceLedgerFile: outcomeLedger.file,
+      sourceLedgerUpdatedAt: outcomeLedger.updatedAt || outcomeLedger.stats?.latestAt || "",
+    });
+  }
+  return normalizeWorkerContextCompactStrategyMemoryForCoordinator({
+    groupId,
+    file,
+    source_ledger_file: getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId),
+    sample_count: 0,
+    categories: [],
+  }, groupId);
+}
+
+function normalizeWorkerContextPtlEmergencyHintForCoordinator(raw: any = {}, groupId = "") {
+  const recommendedRetryOptions = raw.recommended_retry_options || raw.recommendedRetryOptions || {};
+  return {
+    schema: "ccm-worker-context-ptl-emergency-hint-v1",
+    version: 1,
+    hint_id: String(raw.hint_id || raw.hintId || `wcptl:${hashCoordinator([groupId || raw.groupId || raw.group_id || "", raw.reason || "", raw.generated_at || Date.now()], 14)}`),
+    groupId: String(raw.groupId || raw.group_id || groupId || ""),
+    file: String(raw.file || getWorkerContextPtlEmergencyHintFileForCoordinator(groupId || raw.groupId || raw.group_id || "")),
+    engaged: raw.engaged === true,
+    emergency_level: String(raw.emergency_level || raw.emergencyLevel || (raw.engaged ? "warning" : "none")),
+    reason: String(raw.reason || ""),
+    blocked_outcome_count: Number(raw.blocked_outcome_count || raw.blockedOutcomeCount || 0),
+    task_compacted_blocked_count: Number(raw.task_compacted_blocked_count || raw.taskCompactedBlockedCount || 0),
+    repeated_failed_categories: Array.isArray(raw.repeated_failed_categories || raw.repeatedFailedCategories)
+      ? (raw.repeated_failed_categories || raw.repeatedFailedCategories).map((item: any) => String(item || "")).filter(Boolean)
+      : [],
+    source_ledger_file: String(raw.source_ledger_file || raw.sourceLedgerFile || ""),
+    source_strategy_file: String(raw.source_strategy_file || raw.sourceStrategyFile || ""),
+    recommended_retry_options: {
+      memory: recommendedRetryOptions.memory || recommendedRetryOptions.memoryOptions || {},
+      replayRepairDispatchBriefs: recommendedRetryOptions.replayRepairDispatchBriefs || recommendedRetryOptions.replay_repair_dispatch_briefs || {},
+      metadata: recommendedRetryOptions.metadata || recommendedRetryOptions.metadataPartialCompact || {},
+      maxTaskChars: Number(recommendedRetryOptions.maxTaskChars || recommendedRetryOptions.max_task_chars || 0),
+    },
+    generated_at: String(raw.generated_at || raw.generatedAt || new Date().toISOString()),
+    updatedAt: String(raw.updatedAt || raw.updated_at || raw.generated_at || raw.generatedAt || new Date().toISOString()),
+  };
+}
+
+function buildWorkerContextPtlEmergencyHintForCoordinator(groupId: string, entries: any[] = [], strategy: any = {}, options: any = {}) {
+  const file = getWorkerContextPtlEmergencyHintFileForCoordinator(groupId);
+  const sourceLedgerFile = String(options.sourceLedgerFile || options.source_ledger_file || getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId));
+  const sourceStrategyFile = String(options.sourceStrategyFile || options.source_strategy_file || strategy?.file || getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId));
+  const nowIso = String(options.generatedAt || options.generated_at || new Date().toISOString());
+  const distillable = (entries || []).filter((entry: any) => entry?.distillation_candidate !== false);
+  const blocked = distillable.filter((entry: any) => entry.status === "blocked" || entry.dispatch_ready === false);
+  const taskCompactedBlocked = blocked.filter((entry: any) => entry.task_compacted === true);
+  const repeatedFailedCategories = (Array.isArray(strategy?.categories) ? strategy.categories : [])
+    .filter((item: any) =>
+      Number(item.attempts || 0) >= 2
+      && (Number(item.recovered || 0) === 0 || String(item.recommendation || "") === "avoid")
+    )
+    .map((item: any) => String(item.category || ""))
+    .filter(Boolean);
+  const engaged = blocked.length >= 2 || taskCompactedBlocked.length > 0 || repeatedFailedCategories.length > 0;
+  const emergencyLevel = taskCompactedBlocked.length > 0 || blocked.length >= 3 ? "critical" : engaged ? "warning" : "none";
+  const reasonParts = [
+    blocked.length >= 2 ? `blocked_outcomes=${blocked.length}` : "",
+    taskCompactedBlocked.length > 0 ? `task_compacted_still_blocked=${taskCompactedBlocked.length}` : "",
+    repeatedFailedCategories.length ? `failed_categories=${repeatedFailedCategories.join(",")}` : "",
+  ].filter(Boolean);
+  return normalizeWorkerContextPtlEmergencyHintForCoordinator({
+    schema: "ccm-worker-context-ptl-emergency-hint-v1",
+    version: 1,
+    hint_id: `wcptl:${hashCoordinator([groupId, sourceLedgerFile, sourceStrategyFile, blocked.length, taskCompactedBlocked.length, repeatedFailedCategories], 14)}`,
+    groupId,
+    file,
+    engaged,
+    emergency_level: emergencyLevel,
+    reason: engaged
+      ? `WorkerContextPacket repeated compact failure requires PTL emergency downgrade: ${reasonParts.join("; ")}`
+      : "WorkerContextPacket compact outcomes do not require PTL emergency downgrade.",
+    blocked_outcome_count: blocked.length,
+    task_compacted_blocked_count: taskCompactedBlocked.length,
+    repeated_failed_categories: repeatedFailedCategories,
+    source_ledger_file: sourceLedgerFile,
+    source_strategy_file: sourceStrategyFile,
+    recommended_retry_options: {
+      memory: {
+        maxRenderedChars: emergencyLevel === "critical" ? 900 : 1400,
+        maxJsonChars: emergencyLevel === "critical" ? 700 : 1000,
+        maxRecallItems: emergencyLevel === "critical" ? 3 : 5,
+      },
+      replayRepairDispatchBriefs: {
+        maxBriefs: emergencyLevel === "critical" ? 4 : 6,
+        maxStringChars: emergencyLevel === "critical" ? 120 : 180,
+        maxIdChars: emergencyLevel === "critical" ? 100 : 140,
+      },
+      metadata: {
+        maxCategories: 1,
+        maxItems: emergencyLevel === "critical" ? 2 : 3,
+        maxStringChars: emergencyLevel === "critical" ? 100 : 140,
+        maxDependencyReasonChars: emergencyLevel === "critical" ? 100 : 140,
+        maxContractSummaryChars: emergencyLevel === "critical" ? 100 : 140,
+      },
+      maxTaskChars: emergencyLevel === "critical" ? 1400 : 2200,
+    },
+    generated_at: nowIso,
+    updatedAt: nowIso,
+  }, groupId);
+}
+
+function writeWorkerContextPtlEmergencyHintForCoordinator(groupId: string, entries: any[] = [], strategy: any = {}, options: any = {}) {
+  const hint = buildWorkerContextPtlEmergencyHintForCoordinator(groupId, entries, strategy, options);
+  if (hint.engaged || options.writeEmpty === true || options.write_empty === true) {
+    writeJsonAtomicForCoordinator(getWorkerContextPtlEmergencyHintFileForCoordinator(groupId), hint);
+  }
+  return hint;
+}
+
+export function readWorkerContextPtlEmergencyHintForCoordinator(groupId: string) {
+  const file = getWorkerContextPtlEmergencyHintFileForCoordinator(groupId);
+  try {
+    const hint = JSON.parse(fs.readFileSync(file, "utf-8"));
+    if (hint?.schema === "ccm-worker-context-ptl-emergency-hint-v1") {
+      return normalizeWorkerContextPtlEmergencyHintForCoordinator({ ...hint, file }, groupId);
+    }
+  } catch {}
+  const outcomeLedger = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId);
+  const strategy = readWorkerContextCompactStrategyMemoryForCoordinator(groupId);
+  return writeWorkerContextPtlEmergencyHintForCoordinator(groupId, outcomeLedger.entries || [], strategy, {
+    sourceLedgerFile: outcomeLedger.file,
+    sourceStrategyFile: strategy.file,
+    sourceLedgerUpdatedAt: outcomeLedger.updatedAt || outcomeLedger.stats?.latestAt || "",
+  });
+}
+
+function mergeWorkerContextRetryOptionsForCoordinator(base: any = {}, override: any = {}) {
+  return {
+    ...base,
+    ...override,
+    memory: { ...(base.memory || base.memoryOptions || {}), ...(override.memory || {}) },
+    memoryOptions: { ...(base.memoryOptions || base.memory || {}), ...(override.memory || {}) },
+    replayRepairDispatchBriefs: {
+      ...(base.replayRepairDispatchBriefs || base.replay_repair_dispatch_briefs || {}),
+      ...(override.replayRepairDispatchBriefs || override.replay_repair_dispatch_briefs || {}),
+    },
+    replay_repair_dispatch_briefs: {
+      ...(base.replay_repair_dispatch_briefs || base.replayRepairDispatchBriefs || {}),
+      ...(override.replayRepairDispatchBriefs || override.replay_repair_dispatch_briefs || {}),
+    },
+    metadata: { ...(base.metadata || base.metadataPartialCompact || base.metadata_partial_compact || {}), ...(override.metadata || {}) },
+    metadataPartialCompact: { ...(base.metadataPartialCompact || base.metadata || {}), ...(override.metadata || {}) },
+    metadata_partial_compact: { ...(base.metadata_partial_compact || base.metadata || {}), ...(override.metadata || {}) },
+    maxTaskChars: Number(override.maxTaskChars || override.max_task_chars || base.maxTaskChars || base.max_task_chars || 0) || undefined,
+    max_task_chars: Number(override.maxTaskChars || override.max_task_chars || base.max_task_chars || base.maxTaskChars || 0) || undefined,
+  };
+}
+
+export function readWorkerContextCompactOutcomeLedgerForCoordinator(groupId: string) {
+  const file = getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId);
+  try {
+    const ledger = JSON.parse(fs.readFileSync(file, "utf-8"));
+    if (ledger?.schema === "ccm-worker-context-compact-outcome-ledger-v1") {
+      const entries = Array.isArray(ledger.entries) ? ledger.entries.map(normalizeWorkerContextCompactOutcomeEntryForCoordinator) : [];
+      return {
+        ...ledger,
+        file,
+        entries,
+        stats: buildWorkerContextCompactOutcomeStatsForCoordinator(entries),
+      };
+    }
+  } catch {}
+  return {
+    schema: "ccm-worker-context-compact-outcome-ledger-v1",
+    version: 1,
+    groupId,
+    file,
+    entries: [],
+    stats: buildWorkerContextCompactOutcomeStatsForCoordinator([]),
+    updatedAt: "",
+  };
+}
+
+function appendWorkerContextCompactOutcomeEntriesForCoordinator(groupId: string, entries: any[] = []) {
+  const normalized = entries
+    .map((entry: any) => normalizeWorkerContextCompactOutcomeEntryForCoordinator({ ...entry, group_id: entry.group_id || groupId }))
+    .filter((entry: any) => entry.group_id || groupId);
+  if (!normalized.length) return readWorkerContextCompactOutcomeLedgerForCoordinator(groupId);
+  const ledger = readWorkerContextCompactOutcomeLedgerForCoordinator(groupId);
+  const nextEntries = [...(ledger.entries || []), ...normalized].slice(-1000);
+  const next = {
+    schema: "ccm-worker-context-compact-outcome-ledger-v1",
+    version: 1,
+    groupId,
+    file: ledger.file || getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId),
+    entries: nextEntries,
+    stats: buildWorkerContextCompactOutcomeStatsForCoordinator(nextEntries),
+    updatedAt: normalized[normalized.length - 1]?.at || new Date().toISOString(),
+  };
+  writeJsonAtomicForCoordinator(next.file, next);
+  try {
+    const strategy = writeWorkerContextCompactStrategyMemoryForCoordinator(groupId, nextEntries, {
+      sourceLedgerFile: next.file,
+      sourceLedgerUpdatedAt: next.updatedAt,
+    });
+    writeWorkerContextPtlEmergencyHintForCoordinator(groupId, nextEntries, strategy, {
+      sourceLedgerFile: next.file,
+      sourceStrategyFile: strategy.file,
+      sourceLedgerUpdatedAt: next.updatedAt,
+    });
+  } catch {}
+  return next;
+}
+
+function workerContextUsagePressureStatusForCoordinator(usage: any = {}) {
+  const status = String(usage.status || "").trim();
+  if (["compact_recommended", "critical", "over_budget"].includes(status)) return status;
+  const pressure = Number(usage.pressure || 0);
+  const freeTokens = Number(usage.free_tokens || 0);
+  if (usage.compact_recommended === true || pressure >= 82 || freeTokens < 0) {
+    if (pressure >= 100 || freeTokens < 0) return "over_budget";
+    if (pressure >= 90) return "critical";
+    return "compact_recommended";
+  }
+  return "";
+}
+
+function workerContextUsageTopCategoriesForCoordinator(usage: any = {}) {
+  const explicit = Array.isArray(usage.top_categories || usage.topCategories)
+    ? (usage.top_categories || usage.topCategories)
+    : [];
+  const fallback = Array.isArray(usage.categories) ? usage.categories : [];
+  return (explicit.length ? explicit : fallback)
+    .filter((item: any) => Number(item.tokens || 0) > 0 && !["free_space", "autocompact_buffer"].includes(String(item.id || item.category_id || "")))
+    .sort((a: any, b: any) => Number(b.tokens || 0) - Number(a.tokens || 0))
+    .slice(0, 8)
+    .map((item: any) => ({
+      id: String(item.id || item.category_id || item.categoryId || ""),
+      name: String(item.name || item.label || item.id || item.category_id || ""),
+      tokens: Number(item.tokens || 0),
+      chars: Number(item.chars || 0),
+    }));
+}
+
+function compactWorkerContextTaskForRetry(task: any, options: any = {}) {
+  const text = String(task || "").trim();
+  const maxChars = Math.max(1200, Number(options.maxTaskChars || options.max_task_chars || 6000));
+  if (text.length <= maxChars) {
+    return {
+      compacted: false,
+      text,
+      originalChars: text.length,
+      compactedChars: text.length,
+      omittedChars: 0,
+      criticalLines: [],
+    };
+  }
+  const headChars = Math.max(600, Math.floor(maxChars * 0.42));
+  const tailChars = Math.max(500, Math.floor(maxChars * 0.28));
+  const criticalPattern = /CCM_AGENT_RECEIPT|ACK gate|验证要求|验收|交付物|本次任务|需求理解|用户约束|文档依据|Replay repair|brief_id|work_item_id|proof|request_patch_checksum|runner|execution|Context usage budget|WorkerContextPacket/i;
+  const criticalLines = uniqueCoordinatorStrings(text.split(/\r?\n/g)
+    .map(line => line.trim())
+    .filter(line => line && criticalPattern.test(line))
+    .map(line => compactText(line, 220)))
+    .slice(0, 18);
+  const marker = [
+    "",
+    `[AUTO_CONTEXT_COMPACT omitted_chars=${Math.max(0, text.length - headChars - tailChars)} original_sha=${hashCoordinator(text, 24)}]`,
+    "Preserved critical dispatch lines:",
+    ...(criticalLines.length ? criticalLines.map(line => `- ${line}`) : ["- ACK gate / CCM_AGENT_RECEIPT / verification contract retained by WorkerContextPacket acceptance fields."]),
+    "[/AUTO_CONTEXT_COMPACT]",
+    "",
+  ].join("\n");
+  let compacted = `${text.slice(0, headChars).trimEnd()}${marker}${text.slice(-tailChars).trimStart()}`.trim();
+  if (compacted.length > maxChars + 600) {
+    const markerBudget = Math.min(1800, marker.length);
+    const compactHead = Math.max(500, Math.floor((maxChars - markerBudget) * 0.58));
+    const compactTail = Math.max(400, Math.floor((maxChars - markerBudget) * 0.30));
+    compacted = `${text.slice(0, compactHead).trimEnd()}${marker}${text.slice(-compactTail).trimStart()}`.trim();
+  }
+  return {
+    compacted: true,
+    text: compacted,
+    originalChars: text.length,
+    compactedChars: compacted.length,
+    omittedChars: Math.max(0, text.length - compacted.length),
+    criticalLines,
+  };
+}
+
+const WORKER_CONTEXT_REPLAY_BRIEF_PARTIAL_COMPACT_FIELDS = [
+  "brief_id",
+  "work_item_id",
+  "source",
+  "target_project",
+  "proof_entry_id",
+  "request_patch_checksum",
+  "provider_reproof_status",
+  "provider_reproof_reason",
+  "reproof_candidate_id",
+  "timeline_binding_id",
+  "original_work_item_id",
+  "request_telemetry_session_status",
+  "request_telemetry_dispatch_status",
+  "runner_request_id",
+  "execution_id",
+];
+
+function replayBriefPartialCompactValue(raw: any = {}, key: string) {
+  const aliases: Record<string, string[]> = {
+    brief_id: ["brief_id", "briefId"],
+    work_item_id: ["work_item_id", "workItemId"],
+    target_project: ["target_project", "targetProject"],
+    proof_entry_id: ["proof_entry_id", "proofEntryId"],
+    request_patch_checksum: ["request_patch_checksum", "requestPatchChecksum"],
+    provider_reproof_status: ["provider_reproof_status", "providerReproofStatus"],
+    provider_reproof_reason: ["provider_reproof_reason", "providerReproofReason"],
+    reproof_candidate_id: ["reproof_candidate_id", "reproofCandidateId"],
+    timeline_binding_id: ["timeline_binding_id", "timelineBindingId"],
+    original_work_item_id: ["original_work_item_id", "originalWorkItemId"],
+    request_telemetry_session_status: ["request_telemetry_session_status", "requestTelemetrySessionStatus"],
+    request_telemetry_dispatch_status: ["request_telemetry_dispatch_status", "requestTelemetryDispatchStatus"],
+    runner_request_id: ["runner_request_id", "runnerRequestId"],
+    execution_id: ["execution_id", "executionId"],
+  };
+  for (const alias of aliases[key] || [key]) {
+    if (raw[alias] !== undefined && raw[alias] !== null && raw[alias] !== "") return raw[alias];
+  }
+  return "";
+}
+
+function compactReplayRepairDispatchBriefsForWorkerContextRetry(briefs: any[] = [], options: any = {}) {
+  const list = Array.isArray(briefs) ? briefs : [];
+  if (!list.length) return { compacted: false, briefs: list, summary: null };
+  const maxBriefs = Math.max(1, Number(options.maxBriefs || options.max_briefs || 12));
+  const maxStringChars = Math.max(80, Number(options.maxStringChars || options.max_string_chars || 360));
+  const idMaxChars = Math.max(80, Number(options.maxIdChars || options.max_id_chars || 220));
+  const beforeText = JSON.stringify(list || []);
+  const truncatedFields: any[] = [];
+  const compactedBriefs = list.slice(0, maxBriefs).map((item: any = {}, index: number) => {
+    const next: any = {};
+    for (const field of WORKER_CONTEXT_REPLAY_BRIEF_PARTIAL_COMPACT_FIELDS) {
+      const rawValue = replayBriefPartialCompactValue(item, field);
+      const rawText = String(rawValue || "").trim();
+      const limit = field === "provider_reproof_reason" ? maxStringChars : idMaxChars;
+      const compacted = rawText.length > limit ? compactText(rawText, limit) : rawText;
+      if (rawText.length > compacted.length) {
+        truncatedFields.push({
+          index,
+          field,
+          original_chars: rawText.length,
+          compacted_chars: compacted.length,
+          original_hash: hashCoordinator(rawText, 16),
+        });
+      }
+      next[field] = compacted;
+    }
+    next.required_receipt_reference = true;
+    next.should_create_real_task = false;
+    return next;
+  });
+  const afterText = JSON.stringify(compactedBriefs || []);
+  const omittedByBriefLimit = list.length > compactedBriefs.length
+    ? beforeText.length - JSON.stringify(list.slice(0, maxBriefs) || []).length
+    : 0;
+  const compacted = afterText.length < beforeText.length;
+  const summary = compacted ? {
+    schema: "ccm-worker-context-replay-brief-partial-compaction-v1",
+    method: "preserve_replay_brief_ids_receipts_and_provider_proof_fields",
+    category: "replay_repair_dispatch_briefs",
+    status: "compacted",
+    original_brief_count: list.length,
+    compacted_brief_count: compactedBriefs.length,
+    original_briefs_hash: hashCoordinator(beforeText, 24),
+    compacted_briefs_hash: hashCoordinator(afterText, 24),
+    original_briefs_chars: beforeText.length,
+    compacted_briefs_chars: afterText.length,
+    omitted_chars: Math.max(0, beforeText.length - afterText.length),
+    omitted_by_brief_limit_chars: Math.max(0, omittedByBriefLimit),
+    max_string_chars: maxStringChars,
+    max_id_chars: idMaxChars,
+    preserved_fields: WORKER_CONTEXT_REPLAY_BRIEF_PARTIAL_COMPACT_FIELDS,
+    truncated_field_count: truncatedFields.length,
+    truncated_fields: truncatedFields.slice(0, 24),
+    preserves_receipt_reference: true,
+    preserves_real_task_suppression: true,
+    generated_at: new Date().toISOString(),
+  } : null;
+  return { compacted, briefs: compactedBriefs, summary };
+}
+
+function combineWorkerContextPartialCompactionSummariesForCoordinator(summaries: any[] = []) {
+  const items = (summaries || []).filter((item: any) => item?.schema);
+  if (items.length <= 1) return items[0] || null;
+  return {
+    schema: "ccm-worker-context-partial-compaction-set-v1",
+    method: "ordered_category_partial_compactions_before_task_compaction",
+    category: "multi_category",
+    status: items.every((item: any) => item.status === "compacted") ? "compacted" : "attempted",
+    categories: items.map((item: any) => item.category || "").filter(Boolean),
+    item_count: items.length,
+    items,
+    omitted_chars: items.reduce((sum, item) => sum + Number(item.omitted_chars || 0), 0),
+    preserves_receipt_reference: items.every((item: any) => item.preserves_receipt_reference !== false),
+    preserves_real_task_suppression: items.every((item: any) => item.preserves_real_task_suppression !== false),
+    generated_at: new Date().toISOString(),
+  };
+}
+
+function workerContextPartialCompactMethodForCoordinator(memoryCompacted: boolean, summaries: any[] = [], taskCompacted = false) {
+  const categories = (summaries || []).map((item: any) => String(item?.category || "")).filter(Boolean);
+  const parts = [];
+  if (memoryCompacted) parts.push("memory_first");
+  if (categories.includes("replay_repair_dispatch_briefs")) parts.push("replay_brief_partial");
+  if (categories.includes("worker_context_metadata")) parts.push("metadata_partial");
+  if (taskCompacted) parts.push("deterministic_head_tail_critical_lines");
+  return parts.length ? `${parts.join("_then_")}_compact`.replace("_critical_lines_compact", "_critical_lines") : "deterministic_head_tail_critical_lines";
+}
+
+function compactWorkerContextMetadataStringsForCoordinator(values: any[] = [], options: any = {}, defaults: any = {}) {
+  const list = Array.isArray(values) ? values.map((item: any) => String(item || "").trim()).filter(Boolean) : [];
+  const maxItems = Math.max(1, Number(options.maxItems || options.max_items || defaults.maxItems || 8));
+  const maxStringChars = Math.max(80, Number(options.maxStringChars || options.max_string_chars || defaults.maxStringChars || 260));
+  return list.slice(0, maxItems).map((item: string) => compactText(item, maxStringChars));
+}
+
+function buildWorkerContextMetadataPartialCompactPolicyForCoordinator(packet: any = {}, options: any = {}) {
+  const supported = new Set(["constraints_and_documents", "contract_injections", "dependencies"]);
+  const usage = packet.context_usage || packet.contextUsage || {};
+  const topCategories = Array.isArray(usage.top_categories || usage.topCategories)
+    ? (usage.top_categories || usage.topCategories)
+    : [];
+  const maxCategories = Math.max(1, Number(options.maxCategories || options.max_categories || 3));
+  const minTokens = Math.max(0, Number(options.minCategoryTokens || options.min_category_tokens || 1));
+  const rawStrategy = options.compactOutcomeStrategyMemory
+    || options.compact_outcome_strategy_memory
+    || options.compactStrategyMemory
+    || options.compact_strategy_memory
+    || options.strategyMemory
+    || options.strategy_memory
+    || null;
+  const compactStrategyMemory = rawStrategy?.schema === "ccm-worker-context-compact-strategy-memory-v1"
+    && (Number(rawStrategy.sample_count || rawStrategy.sampleCount || 0) > 0 || (Array.isArray(rawStrategy.categories) && rawStrategy.categories.length > 0))
+    ? normalizeWorkerContextCompactStrategyMemoryForCoordinator(rawStrategy)
+    : null;
+  const strategyByCategory = new Map((compactStrategyMemory?.categories || []).map((item: any) => [String(item.category || ""), item]));
+  const candidates = topCategories
+    .map((item: any, index: number) => {
+      const category = String(item.id || item.category_id || item.categoryId || "");
+      const strategy = strategyByCategory.get(category) || {};
+      const candidate: any = {
+        category,
+        tokens: Number(item.tokens || 0),
+        chars: Number(item.chars || 0),
+        rank: index + 1,
+      };
+      if (compactStrategyMemory?.schema) {
+        candidate.strategy_score = Number((strategy as any).strategy_score || 0);
+        candidate.strategy_recovery_rate = Number((strategy as any).recovery_rate || 0);
+        candidate.strategy_avg_free_token_delta = Number((strategy as any).avg_free_token_delta || 0);
+        candidate.strategy_recommendation = String((strategy as any).recommendation || "");
+      }
+      return candidate;
+    })
+    .filter((item: any) => supported.has(item.category) && item.tokens >= minTokens)
+    .sort((a: any, b: any) =>
+      Number(b.tokens || 0) - Number(a.tokens || 0)
+      || Number(b.strategy_score || 0) - Number(a.strategy_score || 0)
+      || Number(b.chars || 0) - Number(a.chars || 0)
+    )
+    .slice(0, maxCategories);
+  const availableFallbackCategories = [
+    (Array.isArray(packet.constraints) && packet.constraints.length) || (Array.isArray(packet.document_findings) && packet.document_findings.length) ? "constraints_and_documents" : "",
+    Array.isArray(packet.contract_injections) && packet.contract_injections.length ? "contract_injections" : "",
+    Array.isArray(packet.dependencies) && packet.dependencies.length ? "dependencies" : "",
+  ].filter(Boolean);
+  const strategyPreferredFallback = (compactStrategyMemory?.preferred_categories || [])
+    .filter((category: string) => availableFallbackCategories.includes(category));
+  const fallbackCategories = [...new Set([...strategyPreferredFallback, ...availableFallbackCategories])];
+  const selectedCategories = candidates.length
+    ? candidates.map((item: any) => item.category)
+    : fallbackCategories.slice(0, maxCategories);
+  const skippedCategories = fallbackCategories.filter((category: string) => !selectedCategories.includes(category));
+  const compactStrategySummary = compactStrategyMemory?.schema ? {
+    schema: compactStrategyMemory.schema,
+    strategy_id: compactStrategyMemory.strategy_id || "",
+    source_ledger_file: compactStrategyMemory.source_ledger_file || "",
+    sample_count: Number(compactStrategyMemory.sample_count || 0),
+    preferred_categories: compactStrategyMemory.preferred_categories || [],
+    avoid_categories: compactStrategyMemory.avoid_categories || [],
+  } : null;
+  return {
+    schema: "ccm-worker-context-partial-compact-policy-v1",
+    method: compactStrategySummary ? "usage_top_category_pressure_with_outcome_strategy" : "usage_top_category_pressure",
+    source: compactStrategySummary ? "worker_context_usage.top_categories+compact_outcome_strategy_memory" : "worker_context_usage.top_categories",
+    supported_categories: [...supported],
+    selected_categories: selectedCategories,
+    skipped_categories: skippedCategories,
+    selected_count: selectedCategories.length,
+    max_categories: maxCategories,
+    min_category_tokens: minTokens,
+    candidates,
+    compact_strategy_memory: compactStrategySummary || undefined,
+    fallback_used: candidates.length === 0 && selectedCategories.length > 0,
+    reason: selectedCategories.length
+      ? `Selected ${selectedCategories.join(",")} from WorkerContextPacket context_usage top categories before task compaction${compactStrategySummary ? " with compact outcome strategy memory." : "."}`
+      : "No supported metadata category was present in WorkerContextPacket context_usage top categories.",
+    generated_at: new Date().toISOString(),
+  };
+}
+
+function compactWorkerContextMetadataCategoriesForRetry(packet: any = {}, baseOptions: any = {}, options: any = {}) {
+  const policy = buildWorkerContextMetadataPartialCompactPolicyForCoordinator(packet, options);
+  const selectedCategories = new Set(policy.selected_categories || []);
+  const constraints = Array.isArray(packet.constraints) ? packet.constraints : [];
+  const documentFindings = Array.isArray(packet.document_findings) ? packet.document_findings : [];
+  const dependencies = Array.isArray(packet.dependencies) ? packet.dependencies : [];
+  const contractInjections = Array.isArray(packet.contract_injections) ? packet.contract_injections : [];
+  const beforeValue = {
+    constraints: selectedCategories.has("constraints_and_documents") ? constraints : [],
+    document_findings: selectedCategories.has("constraints_and_documents") ? documentFindings : [],
+    dependencies: selectedCategories.has("dependencies") ? dependencies : [],
+    contract_injections: selectedCategories.has("contract_injections") ? contractInjections : [],
+  };
+  const beforeText = JSON.stringify(beforeValue);
+  if (!policy.selected_categories.length || !beforeText || beforeText === "{}") return { compacted: false, options: baseOptions, summary: null, policy };
+  const maxItems = Math.max(1, Number(options.maxItems || options.max_items || 8));
+  const maxStringChars = Math.max(80, Number(options.maxStringChars || options.max_string_chars || 260));
+  const maxDependencyReasonChars = Math.max(80, Number(options.maxDependencyReasonChars || options.max_dependency_reason_chars || maxStringChars));
+  const maxContractSummaryChars = Math.max(80, Number(options.maxContractSummaryChars || options.max_contract_summary_chars || maxStringChars));
+  const compactedConstraints = selectedCategories.has("constraints_and_documents")
+    ? compactWorkerContextMetadataStringsForCoordinator(constraints, { maxItems, maxStringChars }, { maxItems: 8, maxStringChars: 220 })
+    : constraints;
+  const compactedDocumentFindings = selectedCategories.has("constraints_and_documents")
+    ? compactWorkerContextMetadataStringsForCoordinator(documentFindings, { maxItems, maxStringChars }, { maxItems: 8, maxStringChars: 260 })
+    : documentFindings;
+  const compactedDependencies = selectedCategories.has("dependencies") ? dependencies.slice(0, maxItems).map((item: any = {}) => ({
+    project: String(item.project || item.target_project || item.targetProject || item.name || "").trim(),
+    reason: compactText(String(item.reason || item.summary || item.blocker || "前置依赖").trim(), maxDependencyReasonChars),
+    dependency_id: item.dependency_id || item.dependencyId || item.id || "",
+    required_receipt_reference: item.required_receipt_reference === true || item.requiredReceiptReference === true,
+  })) : dependencies;
+  const compactedContractInjections = selectedCategories.has("contract_injections") ? contractInjections.slice(0, Math.max(1, Number(options.maxContractItems || options.max_contract_items || maxItems))).map((item: any = {}) => ({
+    injection_id: item.injection_id || item.injectionId || "",
+    source_agent: item.source_agent || item.sourceAgent || item.source || "",
+    target_agent: item.target_agent || item.targetAgent || item.target || packet.project || "",
+    endpoint: item.endpoint || item.type || "",
+    summary: compactText(String(item.summary || item.change || "").trim(), maxContractSummaryChars),
+    required_receipt_reference: true,
+  })) : contractInjections;
+  const afterValue = {
+    constraints: selectedCategories.has("constraints_and_documents") ? compactedConstraints : [],
+    document_findings: selectedCategories.has("constraints_and_documents") ? compactedDocumentFindings : [],
+    dependencies: selectedCategories.has("dependencies") ? compactedDependencies : [],
+    contract_injections: selectedCategories.has("contract_injections") ? compactedContractInjections : [],
+  };
+  const afterText = JSON.stringify(afterValue);
+  const compacted = afterText.length < beforeText.length;
+  const compactedOptions = compacted ? {
+    ...baseOptions,
+    analysis: {
+      ...(baseOptions.analysis || {}),
+      constraints: compactedConstraints,
+      documentFindings: compactedDocumentFindings,
+    },
+    workerContextDependencies: compactedDependencies,
+    contractInjections: compactedContractInjections,
+  } : baseOptions;
+  const summary = compacted ? {
+    schema: "ccm-worker-context-metadata-partial-compaction-v1",
+    method: "top_category_metadata_field_compaction",
+    category: "worker_context_metadata",
+    categories: (policy.selected_categories || []).filter((category: string) => {
+      if (category === "constraints_and_documents") return constraints.length || documentFindings.length;
+      if (category === "contract_injections") return contractInjections.length;
+      if (category === "dependencies") return dependencies.length;
+      return false;
+    }),
+    partial_compact_policy: policy,
+    selected_from_top_categories: policy.selected_categories || [],
+    skipped_categories: policy.skipped_categories || [],
+    status: "compacted",
+    original_metadata_hash: hashCoordinator(beforeText, 24),
+    compacted_metadata_hash: hashCoordinator(afterText, 24),
+    original_metadata_chars: beforeText.length,
+    compacted_metadata_chars: afterText.length,
+    omitted_chars: Math.max(0, beforeText.length - afterText.length),
+    original_counts: {
+      constraints: constraints.length,
+      document_findings: documentFindings.length,
+      dependencies: dependencies.length,
+      contract_injections: contractInjections.length,
+    },
+    compacted_counts: {
+      constraints: compactedConstraints.length,
+      document_findings: compactedDocumentFindings.length,
+      dependencies: compactedDependencies.length,
+      contract_injections: compactedContractInjections.length,
+    },
+    max_items: maxItems,
+    max_string_chars: maxStringChars,
+    max_dependency_reason_chars: maxDependencyReasonChars,
+    max_contract_summary_chars: maxContractSummaryChars,
+    preserved_fields: [
+      "constraints",
+      "documentFindings",
+      "dependency.project",
+      "dependency.reason",
+      "dependency.dependency_id",
+      "contract.injection_id",
+      "contract.source_agent",
+      "contract.target_agent",
+      "contract.endpoint",
+      "contract.required_receipt_reference",
+    ],
+    preserves_receipt_reference: true,
+    preserves_real_task_suppression: true,
+    generated_at: new Date().toISOString(),
+  } : null;
+  return { compacted, options: compactedOptions, summary, policy };
+}
+
+function buildWorkerContextPacketForAssignment(baseAssignment: any, dependsOn: string, replayRepairDispatchBriefs: any[], options: any = {}) {
+  const dependencies = Array.isArray(options.workerContextDependencies || options.worker_context_dependencies)
+    ? (options.workerContextDependencies || options.worker_context_dependencies)
+    : dependsOn ? [{ project: dependsOn, reason: "前置依赖" }] : [];
+  const memory = options.memory || options.workerMemory || options.worker_memory || null;
+  const memoryPolicy = options.memoryPolicy || options.memory_policy || (memory && typeof memory === "object" ? (memory.memory_policy || memory.memoryPolicy) : null) || null;
+  return buildWorkerContextPacket({
+    group: options.group || null,
+    project: baseAssignment.project,
+    task: baseAssignment.task,
+    analysis: baseAssignment.analysis || options.analysis || null,
+    dependencies,
+    contractInjections: baseAssignment.contractInjections || baseAssignment.contract_injections || options.contractInjections || options.contract_injections || [],
+    replayRepairDispatchBriefs,
+    memory,
+    memoryPolicy,
+    contextUsageOptions: options.workerContextUsageOptions || options.worker_context_usage_options || null,
+  });
+}
+
+function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment: any, dependsOn: string, replayRepairDispatchBriefs: any[], initialPacket: any, initialGate: any, options: any = {}) {
+  const retryEnabled = options.autoWorkerContextCompactRetry !== false && options.auto_worker_context_compact_retry !== false;
+  if (!retryEnabled || initialGate?.dispatch_ready !== false) {
+    return {
+      task: baseAssignment.task,
+      packet: initialPacket,
+      gate: initialGate,
+      retry: null,
+    };
+  }
+  const rawRetryOptions = options.workerContextRetryOptions || options.worker_context_retry_options || {};
+  let activeReplayRepairDispatchBriefs = replayRepairDispatchBriefs;
+  const partialCompactionSummaries: any[] = [];
+  const originalMemory = options.memory || options.workerMemory || options.worker_memory || null;
+  const groupId = String(baseAssignment.scopeId || options.group?.id || options.groupId || options.group_id || "conversation");
+  const strategyMemoryDisabled = rawRetryOptions.disableCompactStrategyMemory === true
+    || rawRetryOptions.disable_compact_strategy_memory === true
+    || options.disableCompactStrategyMemory === true
+    || options.disable_compact_strategy_memory === true;
+  const compactStrategyMemory = strategyMemoryDisabled ? null : readWorkerContextCompactStrategyMemoryForCoordinator(groupId);
+  const ptlEmergencyHint = readWorkerContextPtlEmergencyHintForCoordinator(groupId);
+  const retryOptions = ptlEmergencyHint.engaged
+    ? mergeWorkerContextRetryOptionsForCoordinator(rawRetryOptions, ptlEmergencyHint.recommended_retry_options || {})
+    : rawRetryOptions;
+  const compactHookRunId = `wcch_${hashCoordinator([
+    groupId,
+    baseAssignment.assignmentId || baseAssignment.assignment_id || "",
+    initialPacket.packet_id || "",
+    "worker-context-compact-retry",
+  ], 16)}`;
+  appendWorkerContextCompactHookEntriesForCoordinator(groupId, [{
+    hook_run_id: compactHookRunId,
+    phase: "pre",
+    assignment_id: baseAssignment.assignmentId || baseAssignment.assignment_id || "",
+    dispatch_key: baseAssignment.dispatchKey || baseAssignment.dispatch_key || "",
+    project: baseAssignment.project || "",
+    from_packet_id: initialPacket.packet_id || "",
+    method: "worker_context_memory_first_retry",
+    memory_first: true,
+    initial_usage_status: initialPacket.context_usage?.status || "",
+    dispatch_ready: false,
+    result_summary: {
+      over_budget: initialGate?.dispatch_ready === false,
+      total_tokens: Number(initialPacket.context_usage?.total_tokens || 0),
+      max_tokens: Number(initialPacket.context_usage?.max_tokens || 0),
+      free_tokens: Number(initialPacket.context_usage?.free_tokens || 0),
+      memory_present: !!originalMemory,
+      task_chars: String(baseAssignment.task || "").length,
+      ptl_emergency_engaged: ptlEmergencyHint.engaged === true,
+      ptl_emergency_level: ptlEmergencyHint.engaged ? ptlEmergencyHint.emergency_level : "",
+    },
+    at: new Date().toISOString(),
+  }]);
+  const recordPostHook = (packet: any = initialPacket, gate: any = initialGate, retry: any = null, summary: any = {}) => {
+    const at = new Date().toISOString();
+    const hookLedger = appendWorkerContextCompactHookEntriesForCoordinator(groupId, [{
+      hook_run_id: compactHookRunId,
+      phase: "post",
+      assignment_id: baseAssignment.assignmentId || baseAssignment.assignment_id || "",
+      dispatch_key: baseAssignment.dispatchKey || baseAssignment.dispatch_key || "",
+      project: baseAssignment.project || "",
+      from_packet_id: initialPacket.packet_id || "",
+      retry_packet_id: packet?.packet_id || retry?.retry_packet_id || "",
+      method: retry?.method || summary.method || "worker_context_memory_first_retry",
+      memory_first: retry?.memory_first === true || summary.memory_first === true,
+      initial_usage_status: initialPacket.context_usage?.status || "",
+      final_usage_status: packet?.context_usage?.status || retry?.retry_usage_status || "",
+      dispatch_ready: gate?.dispatch_ready !== false,
+      ok: gate?.dispatch_ready !== false,
+      status: gate?.dispatch_ready === false ? "blocked" : "ok",
+      result_summary: {
+        retry_status: retry?.status || summary.retry_status || "",
+        auto_retry_status: gate?.auto_retry_status || retry?.status || "",
+        total_tokens: Number(packet?.context_usage?.total_tokens || 0),
+        max_tokens: Number(packet?.context_usage?.max_tokens || 0),
+        free_tokens: Number(packet?.context_usage?.free_tokens || 0),
+        memory_reinjection_status: packet?.memory_reinjection_proof?.status || "",
+        memory_hash_matches_compaction: packet?.memory_reinjection_proof?.hash_matches_compaction === true,
+        omitted_chars: Number(retry?.omitted_chars || 0),
+        ptl_emergency_engaged: retry?.ptl_emergency_hint?.engaged === true || retry?.ptlEmergencyHint?.engaged === true,
+        ptl_emergency_level: retry?.ptl_emergency_hint?.emergency_level || retry?.ptlEmergencyHint?.emergencyLevel || "",
+        ...summary,
+      },
+      at,
+    }]);
+    const retryObj = retry || {};
+    const partialCompaction = retryObj.partial_compaction || retryObj.partialCompaction || null;
+    const partialItems = Array.isArray(retryObj.partial_compactions || retryObj.partialCompactions)
+      ? (retryObj.partial_compactions || retryObj.partialCompactions)
+      : partialCompaction?.schema === "ccm-worker-context-partial-compaction-set-v1" && Array.isArray(partialCompaction.items)
+        ? partialCompaction.items
+        : partialCompaction?.schema ? [partialCompaction] : [];
+    const partialPolicy = retryObj.partial_compact_policy
+      || retryObj.partialCompactPolicy
+      || partialCompaction?.partial_compact_policy
+      || partialCompaction?.partialCompactPolicy
+      || partialItems.find((item: any) => item?.partial_compact_policy || item?.partialCompactPolicy)?.partial_compact_policy
+      || partialItems.find((item: any) => item?.partial_compact_policy || item?.partialCompactPolicy)?.partialCompactPolicy
+      || null;
+    const partialCategories = partialItems.flatMap((item: any) => Array.isArray(item?.categories) ? item.categories : [item?.category]).map((item: any) => String(item || "")).filter(Boolean);
+    const ptlHint = retryObj.ptl_emergency_hint || retryObj.ptlEmergencyHint || summary.ptl_emergency_hint || summary.ptlEmergencyHint || null;
+    const fromTotalTokens = Number(retryObj.from_total_tokens || initialPacket.context_usage?.total_tokens || 0);
+    const retryTotalTokens = Number(retryObj.retry_total_tokens || packet?.context_usage?.total_tokens || 0);
+    const fromFreeTokens = Number(retryObj.from_free_tokens || initialPacket.context_usage?.free_tokens || 0);
+    const retryFreeTokens = Number(retryObj.retry_free_tokens || packet?.context_usage?.free_tokens || 0);
+    if (retryObj.schema || summary.retry_status) {
+      appendWorkerContextCompactOutcomeEntriesForCoordinator(groupId, [{
+        group_id: groupId,
+        assignment_id: baseAssignment.assignmentId || baseAssignment.assignment_id || "",
+        dispatch_key: baseAssignment.dispatchKey || baseAssignment.dispatch_key || "",
+        project: baseAssignment.project || "",
+        hook_run_id: compactHookRunId,
+        retry_id: retryObj.retry_id || retryObj.retryId || "",
+        method: retryObj.method || summary.method || "",
+        status: retryObj.status || summary.retry_status || (gate?.dispatch_ready === false ? "blocked" : "recovered"),
+        dispatch_ready: gate?.dispatch_ready !== false,
+        from_packet_id: retryObj.from_packet_id || initialPacket.packet_id || "",
+        retry_packet_id: retryObj.retry_packet_id || packet?.packet_id || "",
+        initial_usage_status: initialPacket.context_usage?.status || retryObj.from_usage_status || "",
+        final_usage_status: packet?.context_usage?.status || retryObj.retry_usage_status || "",
+        from_total_tokens: fromTotalTokens,
+        retry_total_tokens: retryTotalTokens,
+        from_free_tokens: fromFreeTokens,
+        retry_free_tokens: retryFreeTokens,
+        token_delta: fromTotalTokens - retryTotalTokens,
+        free_token_delta: retryFreeTokens - fromFreeTokens,
+        memory_first: retryObj.memory_first === true || summary.memory_first === true,
+        partial_compact: retryObj.partial_compact === true || summary.partial_compact === true,
+        task_compacted: summary.task_compacted === true || (!!retryObj.original_task_hash && !!retryObj.compacted_task_hash && retryObj.original_task_hash !== retryObj.compacted_task_hash),
+        task_hash_unchanged: !!retryObj.original_task_hash && retryObj.original_task_hash === retryObj.compacted_task_hash,
+        partial_compaction_categories: partialCategories.length ? partialCategories : summary.partial_compaction_categories || [],
+        partial_compact_policy: partialPolicy,
+        ptl_emergency_hint: ptlHint,
+        omitted_chars: Number(retryObj.omitted_chars || 0),
+        memory_omitted_chars: Number(retryObj.memory_compaction?.omitted_chars || retryObj.memoryCompaction?.omitted_chars || 0),
+        partial_omitted_chars: partialCompaction?.schema === "ccm-worker-context-partial-compaction-set-v1"
+          ? Number(partialCompaction.omitted_chars || 0)
+          : partialItems.reduce((sum: number, item: any) => sum + Number(item?.omitted_chars || 0), 0),
+        original_task_hash: retryObj.original_task_hash || "",
+        compacted_task_hash: retryObj.compacted_task_hash || "",
+        at,
+      }]);
+    }
+    return hookLedger;
+  };
+  const memoryCompact = compactWorkerContextMemoryForRetry(originalMemory, retryOptions.memory || retryOptions.memoryOptions || {});
+  if (memoryCompact.compacted) {
+    const memoryRetryOptions = { ...options, memory: memoryCompact.memory };
+    const memoryRetryAssignment = { ...baseAssignment };
+    const memoryRetryBasePacket = buildWorkerContextPacketForAssignment(memoryRetryAssignment, dependsOn, activeReplayRepairDispatchBriefs, memoryRetryOptions);
+    const memoryRetryBase = {
+      schema: "ccm-worker-context-compaction-retry-v1",
+      retry_id: `worker-context-retry:${hashCoordinator([baseAssignment.scopeId, baseAssignment.assignmentId, initialPacket.packet_id, memoryRetryBasePacket.packet_id, "memory-first"], 14)}`,
+      method: "memory_first_deterministic_context_compaction",
+      status: "attempted",
+      from_packet_id: initialPacket.packet_id || "",
+      retry_packet_id: memoryRetryBasePacket.packet_id || "",
+      from_usage_status: initialPacket.context_usage?.status || "",
+      from_total_tokens: Number(initialPacket.context_usage?.total_tokens || 0),
+      from_max_tokens: Number(initialPacket.context_usage?.max_tokens || 0),
+      from_free_tokens: Number(initialPacket.context_usage?.free_tokens || 0),
+      compact_hook_run_id: compactHookRunId,
+      memory_first: true,
+      memory_compaction: memoryCompact.summary,
+      ptl_emergency_hint: ptlEmergencyHint.engaged ? ptlEmergencyHint : undefined,
+      original_task_hash: hashCoordinator(baseAssignment.task || "", 24),
+      compacted_task_hash: hashCoordinator(baseAssignment.task || "", 24),
+      original_task_chars: String(baseAssignment.task || "").length,
+      compacted_task_chars: String(baseAssignment.task || "").length,
+      omitted_chars: Number(memoryCompact.summary?.omitted_chars || 0),
+      critical_line_count: 0,
+      preserved_receipt_contract: true,
+      generated_at: new Date().toISOString(),
+    };
+    let memoryRetryPacket = refreshWorkerContextPacketUsage({
+      ...memoryRetryBasePacket,
+      context_compaction_retry: memoryRetryBase,
+    }, options.workerContextUsageOptions || options.worker_context_usage_options || {});
+    let memoryRetryGate = buildWorkerContextPreDispatchGateForCoordinator(memoryRetryAssignment, memoryRetryPacket);
+    const memoryRetry = {
+      ...memoryRetryBase,
+      status: memoryRetryGate.dispatch_ready === false ? "blocked" : "recovered",
+      retry_usage_status: memoryRetryPacket.context_usage?.status || "",
+      retry_total_tokens: Number(memoryRetryPacket.context_usage?.total_tokens || 0),
+      retry_max_tokens: Number(memoryRetryPacket.context_usage?.max_tokens || 0),
+      retry_free_tokens: Number(memoryRetryPacket.context_usage?.free_tokens || 0),
+      recovered_dispatch_ready: memoryRetryGate.dispatch_ready !== false,
+    };
+    memoryRetryPacket = refreshWorkerContextPacketUsage({
+      ...memoryRetryPacket,
+      context_compaction_retry: memoryRetry,
+    }, options.workerContextUsageOptions || options.worker_context_usage_options || {});
+    memoryRetryGate = buildWorkerContextPreDispatchGateForCoordinator(memoryRetryAssignment, memoryRetryPacket);
+    if (memoryRetryGate.dispatch_ready !== false) {
+      recordPostHook(memoryRetryPacket, memoryRetryGate, memoryRetryPacket.context_compaction_retry || memoryRetry, {
+        retry_status: "recovered",
+        memory_first_recovered: true,
+      });
+      return {
+        task: baseAssignment.task,
+        packet: memoryRetryPacket,
+        gate: {
+          ...memoryRetryGate,
+          context_compaction_retry: memoryRetryPacket.context_compaction_retry || memoryRetry,
+          auto_retry_status: "recovered",
+        },
+        retry: memoryRetryPacket.context_compaction_retry || memoryRetry,
+      };
+    }
+    initialPacket = memoryRetryPacket;
+    initialGate = memoryRetryGate;
+    options = memoryRetryOptions;
+  }
+  const replayBriefPartialCompact = compactReplayRepairDispatchBriefsForWorkerContextRetry(
+    activeReplayRepairDispatchBriefs,
+    retryOptions.replayRepairDispatchBriefs || retryOptions.replay_repair_dispatch_briefs || retryOptions.partialCompact || retryOptions.partial_compact || {}
+  );
+  if (replayBriefPartialCompact.compacted) {
+    activeReplayRepairDispatchBriefs = replayBriefPartialCompact.briefs;
+    partialCompactionSummaries.push(replayBriefPartialCompact.summary);
+    const partialRetryAssignment = { ...baseAssignment };
+    const partialRetryBasePacket = buildWorkerContextPacketForAssignment(partialRetryAssignment, dependsOn, activeReplayRepairDispatchBriefs, options);
+    const partialRetryBase = {
+      schema: "ccm-worker-context-compaction-retry-v1",
+      retry_id: `worker-context-retry:${hashCoordinator([baseAssignment.scopeId, baseAssignment.assignmentId, initialPacket.packet_id, partialRetryBasePacket.packet_id, "replay-brief-partial"], 14)}`,
+      method: workerContextPartialCompactMethodForCoordinator(memoryCompact.compacted === true, [replayBriefPartialCompact.summary], false),
+      status: "attempted",
+      from_packet_id: initialPacket.packet_id || "",
+      retry_packet_id: partialRetryBasePacket.packet_id || "",
+      from_usage_status: initialPacket.context_usage?.status || "",
+      from_total_tokens: Number(initialPacket.context_usage?.total_tokens || 0),
+      from_max_tokens: Number(initialPacket.context_usage?.max_tokens || 0),
+      from_free_tokens: Number(initialPacket.context_usage?.free_tokens || 0),
+      compact_hook_run_id: compactHookRunId,
+      memory_first: memoryCompact.compacted === true,
+      memory_compaction: memoryCompact.summary || null,
+      partial_compact: true,
+      partial_compaction: replayBriefPartialCompact.summary,
+      partial_compactions: [replayBriefPartialCompact.summary],
+      ptl_emergency_hint: ptlEmergencyHint.engaged ? ptlEmergencyHint : undefined,
+      original_task_hash: hashCoordinator(baseAssignment.task || "", 24),
+      compacted_task_hash: hashCoordinator(baseAssignment.task || "", 24),
+      original_task_chars: String(baseAssignment.task || "").length,
+      compacted_task_chars: String(baseAssignment.task || "").length,
+      omitted_chars: Number(memoryCompact.summary?.omitted_chars || 0) + Number(replayBriefPartialCompact.summary?.omitted_chars || 0),
+      critical_line_count: 0,
+      preserved_receipt_contract: true,
+      generated_at: new Date().toISOString(),
+    };
+    let partialRetryPacket = refreshWorkerContextPacketUsage({
+      ...partialRetryBasePacket,
+      context_compaction_retry: partialRetryBase,
+    }, options.workerContextUsageOptions || options.worker_context_usage_options || {});
+    let partialRetryGate = buildWorkerContextPreDispatchGateForCoordinator(partialRetryAssignment, partialRetryPacket);
+    const partialRetry = {
+      ...partialRetryBase,
+      status: partialRetryGate.dispatch_ready === false ? "blocked" : "recovered",
+      retry_usage_status: partialRetryPacket.context_usage?.status || "",
+      retry_total_tokens: Number(partialRetryPacket.context_usage?.total_tokens || 0),
+      retry_max_tokens: Number(partialRetryPacket.context_usage?.max_tokens || 0),
+      retry_free_tokens: Number(partialRetryPacket.context_usage?.free_tokens || 0),
+      recovered_dispatch_ready: partialRetryGate.dispatch_ready !== false,
+    };
+    partialRetryPacket = refreshWorkerContextPacketUsage({
+      ...partialRetryPacket,
+      context_compaction_retry: partialRetry,
+    }, options.workerContextUsageOptions || options.worker_context_usage_options || {});
+    partialRetryGate = buildWorkerContextPreDispatchGateForCoordinator(partialRetryAssignment, partialRetryPacket);
+    if (partialRetryGate.dispatch_ready !== false) {
+      recordPostHook(partialRetryPacket, partialRetryGate, partialRetryPacket.context_compaction_retry || partialRetry, {
+        retry_status: "recovered",
+        partial_compact: true,
+        partial_compaction_category: replayBriefPartialCompact.summary?.category || "",
+      });
+      return {
+        task: baseAssignment.task,
+        packet: partialRetryPacket,
+        gate: {
+          ...partialRetryGate,
+          context_compaction_retry: partialRetryPacket.context_compaction_retry || partialRetry,
+          auto_retry_status: "recovered",
+        },
+        retry: partialRetryPacket.context_compaction_retry || partialRetry,
+      };
+    }
+    initialPacket = partialRetryPacket;
+    initialGate = partialRetryGate;
+  }
+  const metadataPartialCompact = compactWorkerContextMetadataCategoriesForRetry(
+    initialPacket,
+    options,
+    {
+      ...(retryOptions.metadata || retryOptions.metadataPartialCompact || retryOptions.metadata_partial_compact || retryOptions.partialCompact || retryOptions.partial_compact || {}),
+      compactOutcomeStrategyMemory: compactStrategyMemory,
+    }
+  );
+  if (metadataPartialCompact.compacted) {
+    options = metadataPartialCompact.options;
+    partialCompactionSummaries.push(metadataPartialCompact.summary);
+    const metadataRetryAssignment = { ...baseAssignment };
+    const metadataRetryBasePacket = buildWorkerContextPacketForAssignment(metadataRetryAssignment, dependsOn, activeReplayRepairDispatchBriefs, options);
+    const partialCompaction = combineWorkerContextPartialCompactionSummariesForCoordinator(partialCompactionSummaries);
+    const metadataRetryBase = {
+      schema: "ccm-worker-context-compaction-retry-v1",
+      retry_id: `worker-context-retry:${hashCoordinator([baseAssignment.scopeId, baseAssignment.assignmentId, initialPacket.packet_id, metadataRetryBasePacket.packet_id, "metadata-partial"], 14)}`,
+      method: workerContextPartialCompactMethodForCoordinator(memoryCompact.compacted === true, partialCompactionSummaries, false),
+      status: "attempted",
+      from_packet_id: initialPacket.packet_id || "",
+      retry_packet_id: metadataRetryBasePacket.packet_id || "",
+      from_usage_status: initialPacket.context_usage?.status || "",
+      from_total_tokens: Number(initialPacket.context_usage?.total_tokens || 0),
+      from_max_tokens: Number(initialPacket.context_usage?.max_tokens || 0),
+      from_free_tokens: Number(initialPacket.context_usage?.free_tokens || 0),
+      compact_hook_run_id: compactHookRunId,
+      memory_first: memoryCompact.compacted === true,
+      memory_compaction: memoryCompact.summary || null,
+      partial_compact: true,
+      partial_compaction: partialCompaction,
+      partial_compactions: [...partialCompactionSummaries],
+      partial_compact_policy: metadataPartialCompact.policy || metadataPartialCompact.summary?.partial_compact_policy || null,
+      compact_strategy_memory: metadataPartialCompact.policy?.compact_strategy_memory || undefined,
+      ptl_emergency_hint: ptlEmergencyHint.engaged ? ptlEmergencyHint : undefined,
+      original_task_hash: hashCoordinator(baseAssignment.task || "", 24),
+      compacted_task_hash: hashCoordinator(baseAssignment.task || "", 24),
+      original_task_chars: String(baseAssignment.task || "").length,
+      compacted_task_chars: String(baseAssignment.task || "").length,
+      omitted_chars: Number(memoryCompact.summary?.omitted_chars || 0)
+        + partialCompactionSummaries.reduce((sum, item) => sum + Number(item?.omitted_chars || 0), 0),
+      critical_line_count: 0,
+      preserved_receipt_contract: true,
+      generated_at: new Date().toISOString(),
+    };
+    let metadataRetryPacket = refreshWorkerContextPacketUsage({
+      ...metadataRetryBasePacket,
+      context_compaction_retry: metadataRetryBase,
+    }, options.workerContextUsageOptions || options.worker_context_usage_options || {});
+    let metadataRetryGate = buildWorkerContextPreDispatchGateForCoordinator(metadataRetryAssignment, metadataRetryPacket);
+    const metadataRetry = {
+      ...metadataRetryBase,
+      status: metadataRetryGate.dispatch_ready === false ? "blocked" : "recovered",
+      retry_usage_status: metadataRetryPacket.context_usage?.status || "",
+      retry_total_tokens: Number(metadataRetryPacket.context_usage?.total_tokens || 0),
+      retry_max_tokens: Number(metadataRetryPacket.context_usage?.max_tokens || 0),
+      retry_free_tokens: Number(metadataRetryPacket.context_usage?.free_tokens || 0),
+      recovered_dispatch_ready: metadataRetryGate.dispatch_ready !== false,
+    };
+    metadataRetryPacket = refreshWorkerContextPacketUsage({
+      ...metadataRetryPacket,
+      context_compaction_retry: metadataRetry,
+    }, options.workerContextUsageOptions || options.worker_context_usage_options || {});
+    metadataRetryGate = buildWorkerContextPreDispatchGateForCoordinator(metadataRetryAssignment, metadataRetryPacket);
+    if (metadataRetryGate.dispatch_ready !== false) {
+      recordPostHook(metadataRetryPacket, metadataRetryGate, metadataRetryPacket.context_compaction_retry || metadataRetry, {
+        retry_status: "recovered",
+        partial_compact: true,
+        partial_compaction_category: metadataPartialCompact.summary?.category || "",
+        partial_compaction_categories: partialCompactionSummaries.flatMap((item: any) => item?.categories || [item?.category]).filter(Boolean),
+        partial_compact_policy_selected: metadataPartialCompact.policy?.selected_categories || [],
+        partial_compact_policy_skipped: metadataPartialCompact.policy?.skipped_categories || [],
+        compact_strategy_preferred: metadataPartialCompact.policy?.compact_strategy_memory?.preferred_categories || [],
+      });
+      return {
+        task: baseAssignment.task,
+        packet: metadataRetryPacket,
+        gate: {
+          ...metadataRetryGate,
+          context_compaction_retry: metadataRetryPacket.context_compaction_retry || metadataRetry,
+          auto_retry_status: "recovered",
+        },
+        retry: metadataRetryPacket.context_compaction_retry || metadataRetry,
+      };
+    }
+    initialPacket = metadataRetryPacket;
+    initialGate = metadataRetryGate;
+  }
+  const compactedTask = compactWorkerContextTaskForRetry(baseAssignment.task, retryOptions);
+  if (!compactedTask.compacted) {
+    const partialSummaryForNoTask = combineWorkerContextPartialCompactionSummariesForCoordinator(partialCompactionSummaries);
+    recordPostHook(initialPacket, initialGate, null, {
+      retry_status: "blocked",
+      method: partialSummaryForNoTask
+        ? memoryCompact.compacted
+          ? "memory_first_partial_no_task_compaction_available"
+          : "partial_no_task_compaction_available"
+        : memoryCompact.compacted ? "memory_first_no_task_compaction_available" : "no_compaction_available",
+      memory_first: memoryCompact.compacted === true,
+      partial_compact: !!partialSummaryForNoTask,
+      partial_compaction_category: partialSummaryForNoTask?.category || "",
+    });
+    return {
+      task: baseAssignment.task,
+      packet: initialPacket,
+      gate: initialGate,
+      retry: null,
+    };
+  }
+  const retryAssignment = { ...baseAssignment, task: compactedTask.text };
+  const retryBasePacket = buildWorkerContextPacketForAssignment(retryAssignment, dependsOn, activeReplayRepairDispatchBriefs, options);
+  const taskPartialCompaction = combineWorkerContextPartialCompactionSummariesForCoordinator(partialCompactionSummaries);
+  const taskRetryMethod = workerContextPartialCompactMethodForCoordinator(memoryCompact.compacted === true, partialCompactionSummaries, true);
+  const retryBase = {
+    schema: "ccm-worker-context-compaction-retry-v1",
+    retry_id: `worker-context-retry:${hashCoordinator([baseAssignment.scopeId, baseAssignment.assignmentId, initialPacket.packet_id, retryBasePacket.packet_id], 14)}`,
+    method: taskRetryMethod,
+    status: "attempted",
+    from_packet_id: initialPacket.packet_id || "",
+    retry_packet_id: retryBasePacket.packet_id || "",
+    from_usage_status: initialPacket.context_usage?.status || "",
+    from_total_tokens: Number(initialPacket.context_usage?.total_tokens || 0),
+    from_max_tokens: Number(initialPacket.context_usage?.max_tokens || 0),
+    from_free_tokens: Number(initialPacket.context_usage?.free_tokens || 0),
+    compact_hook_run_id: compactHookRunId,
+    memory_first: memoryCompact.compacted === true,
+    memory_compaction: memoryCompact.summary || null,
+    partial_compact: !!taskPartialCompaction,
+    partial_compaction: taskPartialCompaction,
+    partial_compactions: [...partialCompactionSummaries],
+    partial_compact_policy: taskPartialCompaction?.partial_compact_policy
+      || (Array.isArray(taskPartialCompaction?.items) ? taskPartialCompaction.items.find((item: any) => item?.partial_compact_policy)?.partial_compact_policy : null)
+      || null,
+    ptl_emergency_hint: ptlEmergencyHint.engaged ? ptlEmergencyHint : undefined,
+    original_task_hash: hashCoordinator(baseAssignment.task || "", 24),
+    compacted_task_hash: hashCoordinator(compactedTask.text || "", 24),
+    original_task_chars: compactedTask.originalChars,
+    compacted_task_chars: compactedTask.compactedChars,
+    omitted_chars: compactedTask.omittedChars
+      + Number(memoryCompact.summary?.omitted_chars || 0)
+      + partialCompactionSummaries.reduce((sum, item) => sum + Number(item?.omitted_chars || 0), 0),
+    critical_line_count: compactedTask.criticalLines.length,
+    preserved_receipt_contract: true,
+    generated_at: new Date().toISOString(),
+  };
+  let retryPacket = refreshWorkerContextPacketUsage({
+    ...retryBasePacket,
+    context_compaction_retry: retryBase,
+  }, options.workerContextUsageOptions || options.worker_context_usage_options || {});
+  let retryGate = buildWorkerContextPreDispatchGateForCoordinator(retryAssignment, retryPacket);
+  const retry = {
+    ...retryBase,
+    status: retryGate.dispatch_ready === false ? "blocked" : "recovered",
+    retry_usage_status: retryPacket.context_usage?.status || "",
+    retry_total_tokens: Number(retryPacket.context_usage?.total_tokens || 0),
+    retry_max_tokens: Number(retryPacket.context_usage?.max_tokens || 0),
+    retry_free_tokens: Number(retryPacket.context_usage?.free_tokens || 0),
+    recovered_dispatch_ready: retryGate.dispatch_ready !== false,
+  };
+  retryPacket = refreshWorkerContextPacketUsage({
+    ...retryPacket,
+    context_compaction_retry: retry,
+  }, options.workerContextUsageOptions || options.worker_context_usage_options || {});
+  retryGate = buildWorkerContextPreDispatchGateForCoordinator(retryAssignment, retryPacket);
+  recordPostHook(retryPacket, retryGate, retryPacket.context_compaction_retry || retry, {
+    retry_status: retryGate.dispatch_ready === false ? "blocked" : "recovered",
+    task_compacted: true,
+    partial_compact: !!taskPartialCompaction,
+    partial_compaction_category: taskPartialCompaction?.category || "",
+    partial_compaction_categories: partialCompactionSummaries.flatMap((item: any) => item?.categories || [item?.category]).filter(Boolean),
+  });
+  return {
+    task: compactedTask.text,
+    packet: retryPacket,
+    gate: {
+      ...retryGate,
+      context_compaction_retry: retryPacket.context_compaction_retry || retry,
+      auto_retry_status: retryGate.dispatch_ready === false ? "blocked" : "recovered",
+    },
+    retry: retryPacket.context_compaction_retry || retry,
+  };
+}
+
+function buildWorkerContextPreDispatchGateForCoordinator(assignment: any = {}, packet: any = {}) {
+  const usage = packet.context_usage || packet.contextUsage || {};
+  const retry = packet.context_compaction_retry || packet.contextCompactionRetry || null;
+  const pressureStatus = workerContextUsagePressureStatusForCoordinator(usage);
+  const overBudget = pressureStatus === "over_budget";
+  const compactRecommended = !!pressureStatus;
+  const topCategories = workerContextUsageTopCategoriesForCoordinator(usage);
+  const suggestedReductions = Array.isArray(usage.suggested_reductions || usage.suggestedReductions)
+    ? (usage.suggested_reductions || usage.suggestedReductions).slice(0, 8)
+    : [];
+  const packetId = String(packet.packet_id || "").trim();
+  const gateId = `worker-context-pre-dispatch:${hashCoordinator([
+    assignment.scopeId || assignment.scope_id || "",
+    assignment.assignmentId || assignment.assignment_id || "",
+    assignment.dispatchKey || assignment.dispatch_key || "",
+    packetId,
+  ], 14)}`;
+  return {
+    schema: "ccm-worker-context-pre-dispatch-gate-v1",
+    gate_id: gateId,
+    gateId,
+    assignment_id: assignment.assignmentId || assignment.assignment_id || "",
+    dispatch_key: assignment.dispatchKey || assignment.dispatch_key || "",
+    project: assignment.project || "",
+    worker_context_packet_id: packetId,
+    usage_status: usage.status || "",
+    pressure_status: pressureStatus || usage.status || "ok",
+    dispatch_ready: !overBudget,
+    dispatchReady: !overBudget,
+    blocked: overBudget,
+    compact_recommended: compactRecommended,
+    must_repair_before_dispatch: overBudget,
+    reason: overBudget
+      ? `WorkerContextPacket over budget before child dispatch: ${Number(usage.total_tokens || 0)}/${Number(usage.max_tokens || 0)} tokens, free=${Number(usage.free_tokens || 0)}.`
+      : compactRecommended
+        ? `WorkerContextPacket ${pressureStatus}; compact recommended before this packet grows further.`
+        : "WorkerContextPacket context usage is within pre-dispatch budget.",
+    repair_source: overBudget ? "worker_context_packet_context_usage_repair" : "",
+    context_compaction_retry: retry,
+    auto_retry_status: retry?.status || "",
+    next_step: overBudget
+      ? "compact_worker_context_packet_before_child_dispatch"
+      : compactRecommended
+        ? "prefer_compact_before_large_followup"
+        : "dispatch_child_agent",
+    total_tokens: Number(usage.total_tokens || 0),
+    max_tokens: Number(usage.max_tokens || 0),
+    free_tokens: Number(usage.free_tokens || 0),
+    pressure: Number(usage.pressure || 0),
+    autocompact_buffer_tokens: Number(usage.autocompact_buffer_tokens || 0),
+    top_categories: topCategories,
+    suggested_reductions: suggestedReductions,
+    generated_at: new Date().toISOString(),
+  };
+}
+
+export function readReplayRepairDispatchPlanLedgerForCoordinator(groupId: string) {
+  const file = getReplayRepairDispatchPlansFileForCoordinator(groupId);
+  try {
+    const ledger = JSON.parse(fs.readFileSync(file, "utf-8"));
+    if (ledger?.schema === "ccm-replay-repair-main-agent-dispatch-brief-ledger-v1") {
+      return { ...ledger, file: ledger.file || file };
+    }
+  } catch {}
+  return {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-ledger-v1",
+    version: 1,
+    groupId,
+    file,
+    updatedAt: "",
+    briefCount: 0,
+    readyCount: 0,
+    supersededCount: 0,
+    briefs: [],
+  };
+}
+
+export function readReplayRepairDispatchBindingLedgerForCoordinator(groupId: string) {
+  const file = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+  try {
+    const ledger = JSON.parse(fs.readFileSync(file, "utf-8"));
+    if (ledger?.schema === "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1") {
+      return {
+        ...ledger,
+        file: ledger.file || file,
+        entries: Array.isArray(ledger.entries) ? ledger.entries : [],
+      };
+    }
+  } catch {}
+  return {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+    version: 1,
+    groupId,
+    file,
+    updatedAt: "",
+    bindingCount: 0,
+    nativeBindingCount: 0,
+    entries: [],
+  };
+}
+
+export function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId: string, assignment: any = {}, options: any = {}) {
+  const packet = assignment.worker_context_packet || assignment.workerContextPacket || {};
+  if (!groupId || !assignment?.project || !packet?.packet_id) return null;
+  const at = String(options.at || new Date().toISOString());
+  const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+  const entries = Array.isArray(ledger.entries) ? [...ledger.entries] : [];
+  const gate = assignment.worker_context_pre_dispatch_gate
+    || assignment.workerContextPreDispatchGate
+    || buildWorkerContextPreDispatchGateForCoordinator(assignment, packet);
+  let rendered = "";
+  try { rendered = renderWorkerContextPacket(packet); } catch {}
+  const bindingId = `worker-context-packet-assignment:${hashCoordinator([
+    groupId,
+    assignment.assignmentId || assignment.assignment_id || "",
+    assignment.dispatchKey || assignment.dispatch_key || "",
+    packet.packet_id || "",
+  ], 14)}`;
+  const entry = {
+    schema: "ccm-worker-context-packet-assignment-binding-v1",
+    binding_id: bindingId,
+    groupId,
+    source: "worker_context_packet_pre_dispatch_gate",
+    project: assignment.project || "",
+    assignment_id: assignment.assignmentId || assignment.assignment_id || "",
+    dispatch_key: assignment.dispatchKey || assignment.dispatch_key || "",
+    task_fingerprint: assignment.taskFingerprint || assignment.task_fingerprint || "",
+    worker_context_packet_id: packet.packet_id || "",
+    worker_context_packet_context_usage: packet.context_usage || packet.contextUsage || null,
+    worker_context_packet_memory_policy: packet.memory_policy || packet.memoryPolicy || null,
+    worker_context_packet_acceptance: packet.acceptance || null,
+    worker_context_packet_compaction_retry: packet.context_compaction_retry || packet.contextCompactionRetry || null,
+    worker_context_packet_partial_compaction: (packet.context_compaction_retry || packet.contextCompactionRetry || {})?.partial_compaction
+      || (packet.context_compaction_retry || packet.contextCompactionRetry || {})?.partialCompaction
+      || null,
+    worker_context_packet_partial_compact_policy: (packet.context_compaction_retry || packet.contextCompactionRetry || {})?.partial_compact_policy
+      || (packet.context_compaction_retry || packet.contextCompactionRetry || {})?.partialCompactPolicy
+      || (packet.context_compaction_retry || packet.contextCompactionRetry || {})?.partial_compaction?.partial_compact_policy
+      || (packet.context_compaction_retry || packet.contextCompactionRetry || {})?.partialCompaction?.partialCompactPolicy
+      || null,
+    worker_context_packet_compact_hook_run_id: (packet.context_compaction_retry || packet.contextCompactionRetry || {})?.compact_hook_run_id || "",
+    worker_context_packet_memory_reinjection_proof: packet.memory_reinjection_proof || packet.memoryReinjectionProof || null,
+    worker_context_pre_dispatch_gate: gate,
+    dispatch_ready: gate.dispatch_ready !== false,
+    dispatchReady: gate.dispatch_ready !== false,
+    worker_context_packet_render_probe: {
+      packet_id: packet.packet_id || "",
+      rendered_flags: {
+        has_context_usage_budget: rendered.includes("Context usage budget"),
+        has_worker_context_packet: rendered.includes("WorkerContextPacket"),
+        has_platform_memory: rendered.includes("平台记忆"),
+        has_memory_policy: rendered.includes("Memory policy"),
+        has_memory_ignored_policy: rendered.includes("Memory policy：ignored") || rendered.includes("memoryIgnored"),
+        has_memory_reinjection_proof: rendered.includes("Memory reinjection proof"),
+        has_memory_compaction_hash: !!(packet.memory_reinjection_proof?.expected_compacted_memory_hash || packet.memoryReinjectionProof?.expectedCompactedMemoryHash)
+          && rendered.includes(packet.memory_reinjection_proof?.expected_compacted_memory_hash || packet.memoryReinjectionProof?.expectedCompactedMemoryHash || ""),
+        has_memory_context_compact_marker: rendered.includes("memory-context-compact"),
+        has_partial_compaction: rendered.includes("partial_compaction="),
+      },
+      rendered_excerpt: compactText(rendered, 1200),
+    },
+    should_create_real_task: gate.dispatch_ready !== false,
+    at,
+  };
+  const existingIndex = entries.findIndex((item: any) => item.binding_id === bindingId);
+  if (existingIndex >= 0) entries[existingIndex] = { ...entries[existingIndex], ...entry, first_seen_at: entries[existingIndex].first_seen_at || entries[existingIndex].at || at, at };
+  else entries.push({ ...entry, first_seen_at: at });
+  const next = {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+    version: 1,
+    groupId,
+    file: ledger.file || getReplayRepairDispatchBindingsFileForCoordinator(groupId),
+    updatedAt: at,
+    bindingCount: entries.length,
+    nativeBindingCount: entries.filter((item: any) => isApiMicrocompactNativeProofRepairSourceForCoordinator(item.source)).length,
+    workerContextPacketBindingCount: entries.filter((item: any) => item.worker_context_packet_id).length,
+    preDispatchGateCount: entries.filter((item: any) => item.worker_context_pre_dispatch_gate?.schema === "ccm-worker-context-pre-dispatch-gate-v1").length,
+    blockedPreDispatchGateCount: entries.filter((item: any) => item.worker_context_pre_dispatch_gate?.dispatch_ready === false).length,
+    entries: entries.slice(-160),
+  };
+  writeJsonAtomicForCoordinator(next.file, next);
+  return entry;
+}
+
+export function readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId: string) {
+  const file = getReplayRepairDispatchTimelineBindingsFileForCoordinator(groupId);
+  try {
+    const ledger = JSON.parse(fs.readFileSync(file, "utf-8"));
+    if (ledger?.schema === "ccm-replay-repair-main-agent-dispatch-brief-timeline-ledger-v1") {
+      return {
+        ...ledger,
+        file: ledger.file || file,
+        entries: Array.isArray(ledger.entries) ? ledger.entries : [],
+      };
+    }
+  } catch {}
+  return {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-timeline-ledger-v1",
+    version: 1,
+    groupId,
+    file,
+    updatedAt: "",
+    bindingCount: 0,
+    nativeBindingCount: 0,
+    entries: [],
+  };
+}
+
+function uniqueCoordinatorStrings(values: any[] = []) {
+  return [...new Set((values || []).map((item: any) => String(item || "").trim()).filter(Boolean))];
+}
+
+const REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS_FOR_COORDINATOR = [
+  "dispatch",
+  "child_agent_start",
+  "worker_handoff_ready",
+  "task_agent_memory_context_snapshot",
+  "child_agent_receipt",
+];
+
+function replayRepairWorkItemStatusForCoordinator(value: any) {
+  const status = String(value || "").trim().toLowerCase();
+  if (["in_progress", "running", "claimed", "dispatching"].includes(status)) return "in_progress";
+  if (["blocked", "needs_info", "needs_user", "waiting"].includes(status)) return "blocked";
+  if (["completed", "done", "resolved", "ok"].includes(status)) return "completed";
+  if (["cancelled", "canceled", "superseded"].includes(status)) return "cancelled";
+  return "pending";
+}
+
+function replayRepairWorkItemOpenForCoordinator(status: any) {
+  return ["pending", "in_progress", "blocked"].includes(replayRepairWorkItemStatusForCoordinator(status));
+}
+
+const API_MICROCOMPACT_NATIVE_PROOF_REPAIR_SOURCES_FOR_COORDINATOR = new Set([
+  "api_microcompact_native_apply_binding_repair",
+  "api_microcompact_native_apply_provider_reproof",
+]);
+
+function isApiMicrocompactNativeProofRepairSourceForCoordinator(source: any) {
+  return API_MICROCOMPACT_NATIVE_PROOF_REPAIR_SOURCES_FOR_COORDINATOR.has(String(source || "").trim());
+}
+
+function isTimelineClosableNativeRepairSourceForCoordinator(source: any) {
+  return String(source || "").trim() === "api_microcompact_native_apply_binding_repair";
+}
+
+function replayRepairWorkItemStatsForCoordinator(items: any[] = []) {
+  const normalized = (Array.isArray(items) ? items : []).map((item: any) => replayRepairWorkItemStatusForCoordinator(item.status));
+  return {
+    total: normalized.length,
+    openItemCount: normalized.filter(status => replayRepairWorkItemOpenForCoordinator(status)).length,
+    pendingCount: normalized.filter(status => status === "pending").length,
+    inProgressCount: normalized.filter(status => status === "in_progress").length,
+    blockedCount: normalized.filter(status => status === "blocked").length,
+    completedCount: normalized.filter(status => status === "completed").length,
+    cancelledCount: normalized.filter(status => status === "cancelled").length,
+  };
+}
+
+function timelineBindingHasRequiredNativeRepairEvidence(binding: any = {}) {
+  if (!isTimelineClosableNativeRepairSourceForCoordinator(binding.source)) return false;
+  const eventTypes = new Set((Array.isArray(binding.event_types) ? binding.event_types : []).map((item: any) => String(item || "").trim()).filter(Boolean));
+  if (!REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS_FOR_COORDINATOR.every(type => eventTypes.has(type))) return false;
+  const receiptStatus = String(binding.receipt_status || binding.receiptStatus || "").trim();
+  return !!binding.brief_id
+    && !!binding.work_item_id
+    && !!binding.task_id
+    && !!binding.assignment_id
+    && !!binding.dispatch_key
+    && !!binding.worker_context_packet_id
+    && !!binding.task_agent_session_id
+    && !!binding.memory_context_snapshot_id
+    && !!binding.execution_id
+    && !!binding.runner_request_id
+    && !!binding.proof_entry_id
+    && !!binding.request_patch_checksum
+    && !!binding.request_telemetry_session_status
+    && !!binding.request_telemetry_dispatch_status
+    && ["done", "completed", "ok"].includes(receiptStatus);
+}
+
+function timelineBindingMatchesRepairWorkItem(binding: any = {}, item: any = {}) {
+  const bindingWorkItemId = String(binding.work_item_id || "").trim();
+  const itemId = String(item.work_item_id || item.id || "").trim();
+  if (bindingWorkItemId && itemId && bindingWorkItemId === itemId) return true;
+  const bindingRequest = String(binding.request_patch_checksum || "").trim();
+  const itemRequest = String(item.request_patch_checksum || "").trim();
+  if (bindingRequest && itemRequest && bindingRequest === itemRequest) return true;
+  const bindingRunner = String(binding.runner_request_id || "").trim();
+  const itemRunner = String(item.runner_request_id || item.request_telemetry_runner_request_id || "").trim();
+  if (bindingRunner && itemRunner && bindingRunner === itemRunner) return true;
+  const bindingProof = String(binding.proof_entry_id || "").trim();
+  const itemProof = String(item.proof_entry_id || "").trim();
+  return !!bindingProof && !!itemProof && bindingProof === itemProof;
+}
+
+function closeReplayRepairWorkItemsFromTimelineBindingForCoordinator(groupId: string, binding: any = {}, at = new Date().toISOString()) {
+  if (!groupId || !timelineBindingHasRequiredNativeRepairEvidence(binding)) return { closed: 0, itemIds: [] };
+  const file = getReplayRepairWorkItemsFileForCoordinator(groupId);
+  let ledger: any = null;
+  try { ledger = JSON.parse(fs.readFileSync(file, "utf-8")); } catch { return { closed: 0, itemIds: [] }; }
+  const items = Array.isArray(ledger?.items) ? ledger.items : [];
+  let closed = 0;
+  const itemIds: string[] = [];
+  const nextItems = items.map((item: any) => {
+    if (!isTimelineClosableNativeRepairSourceForCoordinator(item.source)) return item;
+    if (!replayRepairWorkItemOpenForCoordinator(item.status)) return item;
+    if (!timelineBindingMatchesRepairWorkItem(binding, item)) return item;
+    closed += 1;
+    itemIds.push(String(item.work_item_id || item.id || ""));
+    const evidence = [
+      ...(Array.isArray(item.evidence) ? item.evidence : []),
+      `timeline_binding=${binding.timeline_binding_id || ""}`,
+      `timeline_events=${(binding.event_types || []).join(",")}`,
+      binding.receipt_status ? `receipt_status=${binding.receipt_status}` : "",
+    ].filter(Boolean);
+    const verification = [
+      ...(Array.isArray(item.verification) ? item.verification : []),
+      "timeline binding 已证明 dispatch->session->snapshot->execution->receipt 闭环",
+    ];
+    return {
+      ...item,
+      status: "completed",
+      updatedAt: at,
+      completedAt: item.completedAt || item.completed_at || at,
+      resolutionReason: "timeline_binding_child_receipt_proved_native_repair",
+      completion_source: "replay_repair_timeline_binding",
+      replay_repair_timeline_binding: {
+        timeline_binding_id: binding.timeline_binding_id || "",
+        brief_id: binding.brief_id || "",
+        task_id: binding.task_id || "",
+        assignment_id: binding.assignment_id || "",
+        worker_context_packet_id: binding.worker_context_packet_id || "",
+        task_agent_session_id: binding.task_agent_session_id || "",
+        memory_context_snapshot_id: binding.memory_context_snapshot_id || "",
+        execution_id: binding.execution_id || "",
+        runner_request_id: binding.runner_request_id || "",
+        receipt_status: binding.receipt_status || "",
+        event_types: binding.event_types || [],
+        completed_at: at,
+      },
+      blockers: [],
+      needs: [],
+      evidence: uniqueCoordinatorStrings(evidence).slice(-24),
+      verification: uniqueCoordinatorStrings(verification).slice(-24),
+    };
+  });
+  if (!closed) return { closed: 0, itemIds: [] };
+  const next = {
+    ...ledger,
+    schema: ledger.schema || "ccm-compact-boundary-replay-repair-work-items-v1",
+    version: ledger.version || 1,
+    groupId: ledger.groupId || groupId,
+    file: ledger.file || file,
+    items: nextItems.slice(-160),
+    stats: replayRepairWorkItemStatsForCoordinator(nextItems),
+    updatedAt: at,
+    latestTimelineCompletion: {
+      timeline_binding_id: binding.timeline_binding_id || "",
+      brief_id: binding.brief_id || "",
+      closed,
+      itemIds,
+      at,
+    },
+  };
+  writeJsonAtomicForCoordinator(file, next);
+  return { closed, itemIds };
+}
+
+function mergeReplayRepairTimelineBinding(current: any = {}, incoming: any = {}) {
+  const eventRefs = [
+    ...(Array.isArray(current.event_refs) ? current.event_refs : []),
+    ...(Array.isArray(incoming.event_refs) ? incoming.event_refs : []),
+  ];
+  const seenRefs = new Set<string>();
+  const mergedRefs = eventRefs.filter((event: any) => {
+    const key = `${event.type || ""}|${event.id || ""}|${event.at || ""}`;
+    if (seenRefs.has(key)) return false;
+    seenRefs.add(key);
+    return true;
+  }).slice(-40);
+  const merged: any = {
+    ...current,
+    ...incoming,
+    first_seen_at: current.first_seen_at || current.at || incoming.at || incoming.updated_at || "",
+    at: incoming.at || current.at || "",
+    updated_at: incoming.updated_at || incoming.at || current.updated_at || "",
+    event_types: uniqueCoordinatorStrings([...(current.event_types || []), ...(incoming.event_types || [])]).slice(0, 40),
+    event_refs: mergedRefs,
+  };
+  for (const key of [
+    "task_id",
+    "project",
+    "assignment_id",
+    "dispatch_key",
+    "worker_context_packet_id",
+    "worker_handoff_id",
+    "memory_context_snapshot_id",
+    "memory_context_snapshot_checksum",
+    "task_agent_session_id",
+    "native_session_id",
+    "execution_id",
+    "runner_request_id",
+    "proof_entry_id",
+    "request_patch_checksum",
+    "provider_reproof_status",
+    "provider_reproof_reason",
+    "reproof_candidate_id",
+    "original_timeline_binding_id",
+    "original_work_item_id",
+    "request_telemetry_session_status",
+    "request_telemetry_dispatch_status",
+    "receipt_status",
+    "replay_repair_consumption_status",
+    "replay_repair_consumption_reason",
+    "replay_repair_consumption_source",
+    "replay_repair_consumption_state",
+  ]) {
+    merged[key] = incoming[key] || current[key] || "";
+  }
+  return merged;
+}
+
+function replayRepairConsumptionStringListForCoordinator(value: any): string[] {
+  if (Array.isArray(value)) return value.map((item: any) => typeof item === "string" ? item : JSON.stringify(item || {})).filter(Boolean);
+  if (value === undefined || value === null || value === "") return [];
+  return [typeof value === "string" ? value : JSON.stringify(value || {})].filter(Boolean);
+}
+
+function replayRepairConsumptionRowsForCoordinator(receipt: any = {}) {
+  const rows = [
+    ...(Array.isArray(receipt.replayRepairDispatchBriefUsage) ? receipt.replayRepairDispatchBriefUsage : []),
+    ...(Array.isArray(receipt.replay_repair_dispatch_brief_usage) ? receipt.replay_repair_dispatch_brief_usage : []),
+    ...(Array.isArray(receipt.replayRepairBriefUsage) ? receipt.replayRepairBriefUsage : []),
+    ...(Array.isArray(receipt.replay_repair_brief_usage) ? receipt.replay_repair_brief_usage : []),
+    ...(Array.isArray(receipt.replayRepairUsage) ? receipt.replayRepairUsage : []),
+    ...(Array.isArray(receipt.replay_repair_usage) ? receipt.replay_repair_usage : []),
+  ];
+  return rows.filter((row: any) => row && typeof row === "object");
+}
+
+function replayRepairConsumptionMatchesBriefForCoordinator(row: any = {}, brief: any = {}) {
+  const rowBriefId = String(row.brief_id || row.briefId || "").trim();
+  const briefId = String(brief.brief_id || brief.briefId || "").trim();
+  if (rowBriefId && briefId && rowBriefId === briefId) return true;
+  const rowWorkItem = String(row.work_item_id || row.workItemId || "").trim();
+  const workItem = String(brief.work_item_id || brief.workItemId || "").trim();
+  if (rowWorkItem && workItem && rowWorkItem === workItem) return true;
+  const rowRequest = String(row.request_patch_checksum || row.requestPatchChecksum || "").trim();
+  const request = String(brief.request_patch_checksum || brief.requestPatchChecksum || "").trim();
+  return !!rowRequest && !!request && rowRequest === request;
+}
+
+function normalizeReplayRepairConsumptionStatusForCoordinator(value: any, fallback = "") {
+  const status = String(value || fallback || "").trim().toLowerCase();
+  if (["strong", "native_strong", "provider_strong"].includes(status)) return "strong";
+  if (["used", "consumed", "applied"].includes(status)) return "used";
+  if (["verified", "checked", "rechecked"].includes(status)) return "verified";
+  if (["ignored", "not_used", "skipped"].includes(status)) return "ignored";
+  if (["blocked", "failed", "needs_info", "needs-user", "needs_user"].includes(status)) return "blocked";
+  return "";
+}
+
+function classifyReplayRepairBriefConsumptionForCoordinator(brief: any = {}, receipt: any = null) {
+  if (!receipt || typeof receipt !== "object" || !Object.keys(receipt).length) return null;
+  const rows = replayRepairConsumptionRowsForCoordinator(receipt);
+  const matchedRow = rows.find((row: any) => replayRepairConsumptionMatchesBriefForCoordinator(row, brief));
+  if (matchedRow) {
+    const status = normalizeReplayRepairConsumptionStatusForCoordinator(
+      matchedRow.usage_state || matchedRow.usageState || matchedRow.status || matchedRow.provider_reproof_status || matchedRow.providerReproofStatus,
+      String(matchedRow.provider_reproof_status || matchedRow.providerReproofStatus || "").trim().toLowerCase() === "strong" ? "strong" : "used",
+    );
+    return {
+      status: status || "used",
+      state: String(matchedRow.usage_state || matchedRow.usageState || matchedRow.status || ""),
+      reason: compactText(matchedRow.reason || matchedRow.summary || "", 360),
+      source: "receipt.replayRepairDispatchBriefUsage",
+    };
+  }
+  const tokens = [
+    brief.brief_id,
+    brief.work_item_id,
+    brief.request_patch_checksum,
+    brief.proof_entry_id,
+    brief.runner_request_id,
+  ].map((item: any) => String(item || "").trim()).filter(Boolean);
+  const containsToken = (values: any[]) => {
+    const text = replayRepairConsumptionStringListForCoordinator(values).join("\n");
+    return tokens.some(token => token && text.includes(token));
+  };
+  if (containsToken(receipt.memoryUsed || receipt.memory_used || receipt.used)) {
+    const text = replayRepairConsumptionStringListForCoordinator(receipt.memoryUsed || receipt.memory_used || receipt.used).join("\n");
+    return {
+      status: /provider[_\s-]*reproof[_\s-]*status\s*[:=]\s*strong|nativeApplyStrongProof\s*[:=]\s*true/i.test(text) ? "strong" : "used",
+      state: "",
+      reason: compactText(text, 360),
+      source: "receipt.memoryUsed",
+    };
+  }
+  if (containsToken(receipt.memoryIgnored || receipt.memory_ignored || receipt.ignored)) {
+    const text = replayRepairConsumptionStringListForCoordinator(receipt.memoryIgnored || receipt.memory_ignored || receipt.ignored).join("\n");
+    return {
+      status: "ignored",
+      state: "",
+      reason: compactText(text, 360),
+      source: "receipt.memoryIgnored",
+    };
+  }
+  const blockerText = replayRepairConsumptionStringListForCoordinator([
+    ...(Array.isArray(receipt.blockers) ? receipt.blockers : []),
+    ...(Array.isArray(receipt.needs) ? receipt.needs : []),
+    receipt.summary || "",
+  ]).join("\n");
+  if (tokens.some(token => token && blockerText.includes(token)) || ["blocked", "failed", "needs_info"].includes(String(receipt.status || "").trim())) {
+    return {
+      status: "blocked",
+      state: String(receipt.status || ""),
+      reason: compactText(blockerText || receipt.summary || "receipt blocked without replay repair usage declaration", 360),
+      source: "receipt.blockers",
+    };
+  }
+  return {
+    status: "missing",
+    state: "",
+    reason: "receipt did not declare replay repair brief usage",
+    source: "receipt",
+  };
+}
+
+export function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, input: any = {}, options: any = {}) {
+  const brief = input.brief || input.replay_repair_dispatch_brief || input.replayRepairDispatchBrief || input;
+  const briefId = String(brief.brief_id || brief.briefId || input.brief_id || "").trim();
+  if (!groupId || !briefId) return null;
+  const at = String(options.at || input.at || new Date().toISOString());
+  const event = input.timeline_event || input.timelineEvent || null;
+  const eventType = String(input.timeline_event_type || input.timelineEventType || event?.type || options.timelineEventType || "").trim();
+  const consumption = classifyReplayRepairBriefConsumptionForCoordinator(brief, input.receipt || input.ccm_receipt || input.delivery_summary || null);
+  const assignmentId = String(input.assignment_id || input.assignmentId || "").trim();
+  const dispatchKey = String(input.dispatch_key || input.dispatchKey || "").trim();
+  const taskId = String(input.task_id || input.taskId || "").trim();
+  const project = String(input.project || input.target_project || input.targetProject || brief.target_project || brief.targetProject || "").trim();
+  const timelineBindingId = `replay-repair-brief-timeline:${hashCoordinator([
+    groupId,
+    taskId,
+    project,
+    briefId,
+    assignmentId,
+    dispatchKey,
+  ], 14)}`;
+  const entry = {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-timeline-binding-v1",
+    timeline_binding_id: timelineBindingId,
+    groupId,
+    task_id: taskId,
+    project,
+    brief_id: briefId,
+    work_item_id: brief.work_item_id || brief.workItemId || input.work_item_id || "",
+    source: brief.source || input.source || "",
+    assignment_id: assignmentId,
+    dispatch_key: dispatchKey,
+    worker_context_packet_id: input.worker_context_packet_id || input.workerContextPacketId || "",
+    worker_handoff_id: input.worker_handoff_id || input.workerHandoffId || "",
+    memory_context_snapshot_id: input.memory_context_snapshot_id || input.memoryContextSnapshotId || "",
+    memory_context_snapshot_checksum: input.memory_context_snapshot_checksum || input.memoryContextSnapshotChecksum || "",
+    task_agent_session_id: input.task_agent_session_id || input.taskAgentSessionId || "",
+    native_session_id: input.native_session_id || input.nativeSessionId || "",
+    execution_id: input.execution_id || input.executionId || brief.execution_id || brief.executionId || "",
+    proof_entry_id: brief.proof_entry_id || brief.proofEntryId || input.proof_entry_id || "",
+    request_patch_checksum: brief.request_patch_checksum || brief.requestPatchChecksum || input.request_patch_checksum || "",
+    provider_reproof_status: brief.provider_reproof_status || brief.providerReproofStatus || input.provider_reproof_status || "",
+    provider_reproof_reason: brief.provider_reproof_reason || brief.providerReproofReason || input.provider_reproof_reason || "",
+    reproof_candidate_id: brief.reproof_candidate_id || brief.reproofCandidateId || input.reproof_candidate_id || "",
+    original_timeline_binding_id: brief.timeline_binding_id || brief.original_timeline_binding_id || input.original_timeline_binding_id || "",
+    original_work_item_id: brief.original_work_item_id || brief.originalWorkItemId || input.original_work_item_id || "",
+    request_telemetry_session_status: brief.request_telemetry_session_status || brief.requestTelemetrySessionStatus || input.request_telemetry_session_status || "",
+    request_telemetry_dispatch_status: brief.request_telemetry_dispatch_status || brief.requestTelemetryDispatchStatus || input.request_telemetry_dispatch_status || "",
+    runner_request_id: brief.runner_request_id || brief.runnerRequestId || input.runner_request_id || "",
+    receipt_status: input.receipt_status || input.receiptStatus || "",
+    replay_repair_consumption_status: consumption?.status || "",
+    replay_repair_consumption_reason: consumption?.reason || "",
+    replay_repair_consumption_source: consumption?.source || "",
+    replay_repair_consumption_state: consumption?.state || "",
+    should_create_real_task: false,
+    event_types: eventType ? [eventType] : [],
+    event_refs: eventType || event?.id ? [{
+      type: eventType || event?.type || "",
+      id: event?.id || input.timeline_event_id || input.timelineEventId || "",
+      at: event?.at || at,
+      worker_context_packet_id: input.worker_context_packet_id || input.workerContextPacketId || "",
+      memory_context_snapshot_id: input.memory_context_snapshot_id || input.memoryContextSnapshotId || "",
+      task_agent_session_id: input.task_agent_session_id || input.taskAgentSessionId || "",
+      execution_id: input.execution_id || input.executionId || brief.execution_id || brief.executionId || "",
+    }] : [],
+    at,
+    updated_at: at,
+  };
+  const ledger = readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId);
+  const entries = Array.isArray(ledger.entries) ? [...ledger.entries] : [];
+  const existingIndex = entries.findIndex((item: any) => item.timeline_binding_id === timelineBindingId);
+  if (existingIndex >= 0) entries[existingIndex] = mergeReplayRepairTimelineBinding(entries[existingIndex], entry);
+  else entries.push({ ...entry, first_seen_at: at });
+  const next = {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-timeline-ledger-v1",
+    version: 1,
+    groupId,
+    file: ledger.file || getReplayRepairDispatchTimelineBindingsFileForCoordinator(groupId),
+    updatedAt: at,
+    bindingCount: entries.length,
+    nativeBindingCount: entries.filter((item: any) => isApiMicrocompactNativeProofRepairSourceForCoordinator(item.source)).length,
+    entries: entries.slice(-160),
+  };
+  writeJsonAtomicForCoordinator(next.file, next);
+  const finalEntry = existingIndex >= 0 ? entries[existingIndex] : entry;
+  if (String(finalEntry.source || "") === "api_microcompact_native_apply_provider_reproof"
+    && ["strong", "used", "verified", "ignored", "blocked"].includes(String(finalEntry.replay_repair_consumption_status || "").trim().toLowerCase())) {
+    try {
+      distillProviderReproofReceiptConsumptionToTypedMemory(groupId, { rows: [finalEntry] }, {
+        reason: "replay-repair-timeline-receipt-consumption",
+        updatedAt: at,
+      });
+    } catch {}
+  }
+  const completion = closeReplayRepairWorkItemsFromTimelineBindingForCoordinator(groupId, finalEntry, at);
+  return completion.closed > 0 ? { ...finalEntry, repair_work_item_completion: completion } : finalEntry;
+}
+
 function replayRepairStatusForCoordinator(item: any) {
   const status = String(item?.status || "").toLowerCase();
   if (["in_progress", "running", "claimed", "dispatching"].includes(status)) return "in_progress";
@@ -1894,6 +5353,358 @@ function replayRepairPriorityRankForCoordinator(priority: any) {
   if (value === "high") return 1;
   if (value === "medium") return 2;
   return 3;
+}
+
+function candidateNativeBindingForCoordinator(candidate: any = {}) {
+  return [
+    candidate.proof_entry_id ? `proof=${candidate.proof_entry_id}` : "",
+    candidate.request_patch_checksum ? `request=${candidate.request_patch_checksum}` : "",
+    candidate.provider_reproof_status ? `provider_reproof=${candidate.provider_reproof_status}` : "",
+    candidate.provider_reproof_reason ? `provider_reason=${candidate.provider_reproof_reason}` : "",
+    candidate.timeline_binding_id ? `timeline=${candidate.timeline_binding_id}` : "",
+    candidate.request_telemetry_source ? `source=${candidate.request_telemetry_source}` : "",
+    candidate.request_telemetry_session_status ? `session=${candidate.request_telemetry_session_status}` : "",
+    candidate.request_telemetry_dispatch_status ? `dispatch=${candidate.request_telemetry_dispatch_status}` : "",
+    candidate.runner_request_id ? `runner=${candidate.runner_request_id}` : "",
+    candidate.execution_id ? `execution=${candidate.execution_id}` : "",
+  ].filter(Boolean);
+}
+
+function readyReplayRepairDispatchBriefsForCoordinator(groupId: string) {
+  const ledger = readReplayRepairDispatchPlanLedgerForCoordinator(groupId);
+  return (Array.isArray(ledger.briefs) ? ledger.briefs : [])
+    .filter((brief: any) => String(brief.status || "") === "ready");
+}
+
+function replayRepairBriefMatchText(value: any) {
+  return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function replayRepairBriefMatchScore(brief: any = {}, assignment: any = {}) {
+  const project = String(assignment.project || assignment.targetName || "").trim();
+  const text = replayRepairBriefMatchText([
+    assignment.task,
+    assignment.reason,
+    assignment.dependsOn,
+  ].filter(Boolean).join("\n"));
+  const target = String(brief.dispatch_target || brief.target_project || "").trim();
+  if (target && project && target !== project) return { score: 0, matched: [] };
+  let score = target && project && target === project ? 20 : 0;
+  const tokens = [
+    { value: brief.brief_id, weight: 80, key: "brief_id" },
+    { value: brief.work_item_id, weight: 70, key: "work_item_id" },
+    { value: brief.request_patch_checksum, weight: 55, key: "request_patch_checksum" },
+    { value: brief.runner_request_id, weight: 45, key: "runner_request_id" },
+    { value: brief.proof_entry_id, weight: 35, key: "proof_entry_id" },
+  ];
+  const matched: string[] = [];
+  for (const token of tokens) {
+    const value = replayRepairBriefMatchText(token.value);
+    if (value && text.includes(value)) {
+      score += token.weight;
+      matched.push(token.key);
+    }
+  }
+  if (/replay|repair|修复|记忆|压缩|compact|native|proof|证明|runner|telemetry|派发/.test(text)) score += 18;
+  if (isApiMicrocompactNativeProofRepairSourceForCoordinator(brief.source) && /native|proof|证明|runner|telemetry|microcompact|原生|re-proof/.test(text)) score += 18;
+  return { score, matched };
+}
+
+function findReplayRepairDispatchBriefForAssignment(groupId: string, assignment: any = {}) {
+  if (!groupId) return null;
+  const briefs = readyReplayRepairDispatchBriefsForCoordinator(groupId);
+  let best: any = null;
+  for (const brief of briefs) {
+    const match = replayRepairBriefMatchScore(brief, assignment);
+    if (Number(match.score || 0) < 45) continue;
+    if (!best || Number(match.score || 0) > Number(best.match_score || 0)) {
+      best = {
+        brief,
+        match_score: match.score,
+        matched_by: match.matched || [],
+      };
+    }
+  }
+  return best;
+}
+
+function normalizeReplayRepairPacketBriefForCoordinator(item: any = {}) {
+  return {
+    brief_id: item.brief_id || item.briefId || "",
+    work_item_id: item.work_item_id || item.workItemId || "",
+    source: item.source || "",
+    target_project: item.target_project || item.targetProject || "",
+    proof_entry_id: item.proof_entry_id || item.proofEntryId || "",
+    request_patch_checksum: item.request_patch_checksum || item.requestPatchChecksum || "",
+    provider_reproof_status: item.provider_reproof_status || item.providerReproofStatus || "",
+    provider_reproof_reason: item.provider_reproof_reason || item.providerReproofReason || "",
+    reproof_candidate_id: item.reproof_candidate_id || item.reproofCandidateId || "",
+    timeline_binding_id: item.timeline_binding_id || item.timelineBindingId || "",
+    original_work_item_id: item.original_work_item_id || item.originalWorkItemId || "",
+    request_telemetry_session_status: item.request_telemetry_session_status || item.requestTelemetrySessionStatus || "",
+    request_telemetry_dispatch_status: item.request_telemetry_dispatch_status || item.requestTelemetryDispatchStatus || "",
+    runner_request_id: item.runner_request_id || item.runnerRequestId || "",
+    execution_id: item.execution_id || item.executionId || "",
+    required_receipt_reference: item.required_receipt_reference !== false && item.requiredReceiptReference !== false,
+    should_create_real_task: item.should_create_real_task === false || item.shouldCreateRealTask === false ? false : item.should_create_real_task,
+  };
+}
+
+function replayRepairPacketBriefMatchesForCoordinator(packetBrief: any = {}, brief: any = {}) {
+  const packetBriefId = String(packetBrief.brief_id || "").trim();
+  const briefId = String(brief.brief_id || "").trim();
+  if (packetBriefId && briefId && packetBriefId === briefId) return true;
+  const packetWorkItem = String(packetBrief.work_item_id || "").trim();
+  const briefWorkItem = String(brief.work_item_id || "").trim();
+  return !!packetWorkItem && !!briefWorkItem && packetWorkItem === briefWorkItem;
+}
+
+function buildReplayRepairWorkerContextPacketProbeForCoordinator(assignment: any = {}, brief: any = {}) {
+  const packet = assignment.worker_context_packet || assignment.workerContextPacket || {};
+  const packetBriefs = (Array.isArray(packet.replay_repair_dispatch_briefs) ? packet.replay_repair_dispatch_briefs : [])
+    .map(normalizeReplayRepairPacketBriefForCoordinator);
+  const matchingBrief = packetBriefs.find((item: any) => replayRepairPacketBriefMatchesForCoordinator(item, brief)) || {};
+  let rendered = "";
+  try { rendered = renderWorkerContextPacket(packet); } catch {}
+  const renderedIncludes = (value: any) => {
+    const text = String(value || "").trim();
+    return !text || rendered.includes(text);
+  };
+  return {
+    packet_id: packet.packet_id || "",
+    context_usage: packet.context_usage || packet.contextUsage || null,
+    replay_repair_dispatch_brief_count: packetBriefs.length,
+    matching_brief: matchingBrief,
+    rendered_flags: {
+      has_brief_id: renderedIncludes(brief.brief_id),
+      has_work_item_id: renderedIncludes(brief.work_item_id),
+      has_source: renderedIncludes(brief.source),
+      has_proof_entry_id: renderedIncludes(brief.proof_entry_id),
+      has_request_patch_checksum: renderedIncludes(brief.request_patch_checksum),
+      has_provider_reproof_status: renderedIncludes(brief.provider_reproof_status),
+      has_provider_reproof_reason: renderedIncludes(brief.provider_reproof_reason),
+      has_reproof_candidate_id: renderedIncludes(brief.reproof_candidate_id),
+      has_timeline_binding_id: renderedIncludes(brief.timeline_binding_id),
+      has_original_work_item_id: renderedIncludes(brief.original_work_item_id),
+      has_request_telemetry_session_status: renderedIncludes(brief.request_telemetry_session_status),
+      has_request_telemetry_dispatch_status: renderedIncludes(brief.request_telemetry_dispatch_status),
+      has_runner_request_id: renderedIncludes(brief.runner_request_id),
+      has_execution_id: renderedIncludes(brief.execution_id),
+      has_should_create_real_task_false: rendered.includes("shouldCreateRealTask=false"),
+      has_context_usage_budget: rendered.includes("Context usage budget"),
+      has_platform_memory: rendered.includes("平台记忆"),
+      has_memory_reinjection_proof: rendered.includes("Memory reinjection proof"),
+      has_memory_compaction_hash: !!(packet.memory_reinjection_proof?.expected_compacted_memory_hash || packet.memoryReinjectionProof?.expectedCompactedMemoryHash)
+        && rendered.includes(packet.memory_reinjection_proof?.expected_compacted_memory_hash || packet.memoryReinjectionProof?.expectedCompactedMemoryHash || ""),
+    },
+    rendered_excerpt: compactText(rendered, 1200),
+    briefs: packetBriefs,
+  };
+}
+
+export function recordReplayRepairDispatchBriefAssignmentBinding(groupId: string, assignment: any = {}, match: any = {}, options: any = {}) {
+  const brief = match?.brief || match || {};
+  if (!groupId || !brief.brief_id || !assignment?.project) return null;
+  const at = String(options.at || new Date().toISOString());
+  const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+  const entries = Array.isArray(ledger.entries) ? [...ledger.entries] : [];
+  const packetProbe = buildReplayRepairWorkerContextPacketProbeForCoordinator(assignment, brief);
+  const bindingId = `replay-repair-brief-assignment:${hashCoordinator([
+    groupId,
+    brief.brief_id,
+    assignment.assignmentId || assignment.assignment_id || "",
+    assignment.dispatchKey || assignment.dispatch_key || "",
+  ], 14)}`;
+  const entry = {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-v1",
+    binding_id: bindingId,
+    groupId,
+    brief_id: brief.brief_id || "",
+    work_item_id: brief.work_item_id || "",
+    source: brief.source || "",
+    project: assignment.project || assignment.targetName || "",
+    assignment_id: assignment.assignmentId || assignment.assignment_id || "",
+    dispatch_key: assignment.dispatchKey || assignment.dispatch_key || "",
+    task_fingerprint: assignment.taskFingerprint || assignment.task_fingerprint || "",
+    worker_context_packet_id: assignment.worker_context_packet?.packet_id || assignment.workerContextPacket?.packet_id || "",
+    source_worker_context_packet_id: brief.worker_context_packet_id || "",
+    source_worker_context_packet_binding_id: brief.worker_context_packet_binding_id || brief.binding_id || "",
+    source_worker_context_packet_memory_policy_reason: brief.worker_context_packet_memory_policy_reason || "",
+    worker_context_packet_context_usage: packetProbe.context_usage,
+    proof_entry_id: brief.proof_entry_id || "",
+    request_patch_checksum: brief.request_patch_checksum || "",
+    provider_reproof_status: brief.provider_reproof_status || "",
+    provider_reproof_reason: brief.provider_reproof_reason || "",
+    reproof_candidate_id: brief.reproof_candidate_id || "",
+    timeline_binding_id: brief.timeline_binding_id || "",
+    original_work_item_id: brief.original_work_item_id || "",
+    request_telemetry_session_status: brief.request_telemetry_session_status || "",
+    request_telemetry_dispatch_status: brief.request_telemetry_dispatch_status || "",
+    runner_request_id: brief.runner_request_id || "",
+    execution_id: brief.execution_id || "",
+    should_create_real_task: false,
+    worker_context_packet_replay_briefs: packetProbe.briefs,
+    worker_context_packet_render_probe: {
+      packet_id: packetProbe.packet_id,
+      replay_repair_dispatch_brief_count: packetProbe.replay_repair_dispatch_brief_count,
+      matching_brief: packetProbe.matching_brief,
+      rendered_flags: packetProbe.rendered_flags,
+      rendered_excerpt: packetProbe.rendered_excerpt,
+    },
+    match_score: Number(match.match_score || 0),
+    matched_by: Array.isArray(match.matched_by) ? match.matched_by : [],
+    at,
+  };
+  const existingIndex = entries.findIndex((item: any) => item.binding_id === bindingId);
+  if (existingIndex >= 0) entries[existingIndex] = { ...entries[existingIndex], ...entry, first_seen_at: entries[existingIndex].first_seen_at || entries[existingIndex].at || at, at };
+  else entries.push({ ...entry, first_seen_at: at });
+  const next = {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+    version: 1,
+    groupId,
+    file: ledger.file || getReplayRepairDispatchBindingsFileForCoordinator(groupId),
+    updatedAt: at,
+    bindingCount: entries.length,
+    nativeBindingCount: entries.filter((item: any) => isApiMicrocompactNativeProofRepairSourceForCoordinator(item.source)).length,
+    entries: entries.slice(-120),
+  };
+  writeJsonAtomicForCoordinator(next.file, next);
+  return entry;
+}
+
+export function buildReplayRepairDispatchBriefForCoordinator(groupId: string, candidate: any = {}, index = 0, existing: any = {}, at = new Date().toISOString()) {
+  const workItemId = String(candidate.work_item_id || candidate.workItemId || `repair-${index}`).trim();
+  const targetProject = compactText(candidate.dispatch_target || candidate.targetProject || candidate.target_project || candidate.repair_target || "memory-context", 120);
+  const nativeBinding = candidateNativeBindingForCoordinator(candidate);
+  const nativeProofSource = isApiMicrocompactNativeProofRepairSourceForCoordinator(candidate.source);
+  const ignoreMemoryReceiptSource = String(candidate.source || "") === "worker_context_ignore_memory_receipt_repair";
+  const briefId = `replay-repair-dispatch-brief:${hashCoordinator([groupId, workItemId, targetProject, candidate.candidate_id || ""], 14)}`;
+  const workerTask = [
+    `主 Agent Replay Repair 工作简报：${targetProject}`,
+    "",
+    `目标：修复群聊 ${groupId} 的压缩/记忆上下文恢复缺口。`,
+    `来源候选：${candidate.candidate_id || ""}`,
+    `work_item_id：${workItemId}`,
+    `组件：${candidate.component || "replay_renderer"}`,
+    `优先级：${candidate.priority || "medium"}`,
+    candidate.source ? `来源类型：${candidate.source}` : "",
+    nativeBinding.length ? `native proof 绑定：${nativeBinding.join("；")}` : "",
+    "",
+    "执行边界：只有当前用户消息或主 Agent 明确把本简报派发给你时，才执行修复；如果只是作为上下文注入，不要自行创建额外任务。",
+    "",
+    "修复要求：",
+    candidate.instruction ? `- ${candidate.instruction}` : "",
+    candidate.expected ? `- 期望结果：${candidate.expected}` : "",
+    candidate.prompt_patch ? `- 建议补丁/恢复信息：${candidate.prompt_patch}` : "",
+    "",
+    "验证要求：",
+    "- 重新运行对应 Memory Center replay/native proof 检查，证明缺口关闭。",
+    nativeProofSource
+      ? "- 对 API microcompact native_applied 修复，必须证明 nativeApplyStrongProof=true、requestTelemetrySessionBound=true、requestTelemetryDispatchBound=true，并保留 runnerRequestId/executionId 绑定。"
+      : ignoreMemoryReceiptSource
+      ? "- 对 ignore-memory receipt 修复，不得重新注入或使用群聊/typed/global 记忆；只要求补齐 corrected CCM_AGENT_RECEIPT.memoryIgnored，并证明 memoryUsed 未声明历史记忆。"
+      : "- 必须证明压缩后子 Agent 记忆包能重新包含缺失上下文。",
+    "",
+    ignoreMemoryReceiptSource
+      ? "回执要求：最后追加 corrected CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、memoryUsed、memoryIgnored；memoryIgnored 必须声明 user_requested_ignore_memory / must_not_use_group_memory，memoryUsed 不得声明任何群聊/typed/global 历史记忆。"
+      : "回执要求：最后追加 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs；如果是 native proof 修复，还要写明 proof_entry_id、request_patch_checksum、runner_request_id。"
+  ].filter(Boolean).join("\n");
+  return {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-v1",
+    brief_id: briefId,
+    groupId,
+    status: "ready",
+    should_create_real_task: false,
+    source_candidate_id: candidate.candidate_id || "",
+    work_item_id: workItemId,
+    source: candidate.source || "",
+    priority: candidate.priority || "medium",
+    component: candidate.component || "replay_renderer",
+    target_project: targetProject,
+    dispatch_target: candidate.dispatch_target || targetProject,
+    recommended_action: candidate.recommendedAction || "main_agent_review_and_dispatch_to_child_agent",
+    proof_entry_id: candidate.proof_entry_id || "",
+    plan_checksum: candidate.plan_checksum || "",
+    request_patch_checksum: candidate.request_patch_checksum || "",
+    worker_context_packet_id: candidate.worker_context_packet_id || "",
+    worker_context_packet_binding_id: candidate.worker_context_packet_binding_id || candidate.binding_id || "",
+    worker_context_packet_memory_policy_reason: candidate.worker_context_packet_memory_policy_reason || "",
+    binding_id: candidate.binding_id || candidate.worker_context_packet_binding_id || "",
+    assignment_id: candidate.assignment_id || "",
+    dispatch_key: candidate.dispatch_key || "",
+    provider_reproof_status: candidate.provider_reproof_status || "",
+    provider_reproof_reason: candidate.provider_reproof_reason || "",
+    reproof_candidate_id: candidate.reproof_candidate_id || "",
+    timeline_binding_id: candidate.timeline_binding_id || "",
+    original_work_item_id: candidate.original_work_item_id || "",
+    request_telemetry_status: candidate.request_telemetry_status || "",
+    request_telemetry_source: candidate.request_telemetry_source || "",
+    request_telemetry_session_status: candidate.request_telemetry_session_status || "",
+    request_telemetry_dispatch_status: candidate.request_telemetry_dispatch_status || "",
+    runner_request_id: candidate.runner_request_id || "",
+    execution_id: candidate.execution_id || "",
+    worker_task: compactText(workerTask, 2600),
+    verification: nativeProofSource
+      ? [
+        "runMemoryCenterApiMicrocompactNativeApplyProofRepairDispatchCandidateSelfTest 或同等 native proof 检查",
+        "runMemoryCenterApiMicrocompactNativeApplyProviderReproofDispatchTimelineSelfTest 或同等 provider re-proof 派发链检查",
+        "buildMemoryQualityReport({checkIds:['api_microcompact_native_apply_proof_repair_dispatch_candidates']})",
+        "buildMemoryQualityReport({checkIds:['api_microcompact_native_apply_proof_repair_closure_reproof_work_items']})",
+      ]
+      : ["重新运行 compact boundary replay repair dispatch candidate 检查"],
+    createdAt: existing.createdAt || existing.created_at || at,
+    updatedAt: at,
+  };
+}
+
+export function syncReplayRepairDispatchPlansForCoordinator(groupId: string, summaryInput: any = null, options: any = {}) {
+  const at = String(options.at || new Date().toISOString());
+  const summary = summaryInput?.schema ? summaryInput : readReplayRepairDispatchCandidatesForCoordinator(groupId, Number(options.limit || 8));
+  const ledger = readReplayRepairDispatchPlanLedgerForCoordinator(groupId);
+  const previous = Array.isArray(ledger.briefs) ? ledger.briefs : [];
+  const previousByWorkId = new Map(previous.map((brief: any) => [String(brief.work_item_id || ""), brief]));
+  const activeCandidates = Array.isArray(summary?.candidates) ? summary.candidates : [];
+  const activeWorkIds = new Set(activeCandidates.map((candidate: any) => String(candidate.work_item_id || "")).filter(Boolean));
+  const nextReady = activeCandidates.map((candidate: any, index: number) => {
+    const existing = previousByWorkId.get(String(candidate.work_item_id || "")) || {};
+    return buildReplayRepairDispatchBriefForCoordinator(groupId, candidate, index, existing, at);
+  });
+  const superseded = previous
+    .filter((brief: any) => String(brief.status || "ready") === "ready" && !activeWorkIds.has(String(brief.work_item_id || "")))
+    .map((brief: any) => ({
+      ...brief,
+      status: "superseded",
+      updatedAt: at,
+      resolutionReason: "candidate_no_longer_active",
+    }));
+  const closed = previous.filter((brief: any) => !["ready", ""].includes(String(brief.status || "ready")) && !activeWorkIds.has(String(brief.work_item_id || "")));
+  const briefs = [...nextReady, ...superseded, ...closed]
+    .sort((a: any, b: any) => {
+      const statusRank = String(a.status || "") === String(b.status || "") ? 0 : String(a.status || "") === "ready" ? -1 : 1;
+      if (statusRank) return statusRank;
+      return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    })
+    .slice(0, 80);
+  const next = {
+    schema: "ccm-replay-repair-main-agent-dispatch-brief-ledger-v1",
+    version: 1,
+    groupId,
+    file: ledger.file || getReplayRepairDispatchPlansFileForCoordinator(groupId),
+    sourceCandidateFile: summary?.file || getReplayRepairWorkItemsFileForCoordinator(groupId),
+    updatedAt: at,
+    briefCount: briefs.length,
+    readyCount: briefs.filter((brief: any) => String(brief.status || "") === "ready").length,
+    supersededCount: briefs.filter((brief: any) => String(brief.status || "") === "superseded").length,
+    shouldCreateRealTask: false,
+    briefs,
+  };
+  const comparableCurrent = JSON.stringify({ briefs: previous, sourceCandidateFile: ledger.sourceCandidateFile || "" });
+  const comparableNext = JSON.stringify({ briefs: next.briefs, sourceCandidateFile: next.sourceCandidateFile || "" });
+  if (comparableCurrent !== comparableNext || !fs.existsSync(next.file)) {
+    writeJsonAtomicForCoordinator(next.file, next);
+    return next;
+  }
+  return { ...ledger, ...next, updatedAt: ledger.updatedAt || next.updatedAt };
 }
 
 function readReplayRepairDispatchCandidatesForCoordinator(groupId: string, limit = 8) {
@@ -1931,9 +5742,33 @@ function readReplayRepairDispatchCandidatesForCoordinator(groupId: string, limit
           status,
           priority: item.priority || "medium",
           component: item.component || "replay_renderer",
+          source: item.source || "",
+          subject: item.subject || item.title || "",
           targetProject,
           dispatch_target: dispatchTarget,
           repair_target: item.repair_target || "",
+          proof_entry_id: item.proof_entry_id || "",
+          plan_checksum: item.plan_checksum || "",
+          apply_plan_checksum: item.apply_plan_checksum || "",
+          request_patch_checksum: item.request_patch_checksum || "",
+          worker_context_packet_id: item.worker_context_packet_id || item.packet_id || "",
+          worker_context_packet_binding_id: item.worker_context_packet_binding_id || item.binding_id || "",
+          worker_context_packet_memory_policy_reason: item.worker_context_packet_memory_policy_reason || "",
+          binding_id: item.binding_id || item.worker_context_packet_binding_id || "",
+          assignment_id: item.assignment_id || "",
+          dispatch_key: item.dispatch_key || "",
+          provider_reproof_status: item.provider_reproof_status || "",
+          provider_reproof_reason: item.provider_reproof_reason || "",
+          reproof_candidate_id: item.reproof_candidate_id || "",
+          timeline_binding_id: item.timeline_binding_id || "",
+          original_work_item_id: item.original_work_item_id || "",
+          request_telemetry_entry_id: item.request_telemetry_entry_id || "",
+          request_telemetry_status: item.request_telemetry_status || "",
+          request_telemetry_source: item.request_telemetry_source || "",
+          request_telemetry_session_status: item.request_telemetry_session_status || "",
+          request_telemetry_dispatch_status: item.request_telemetry_dispatch_status || "",
+          runner_request_id: item.runner_request_id || item.request_telemetry_runner_request_id || "",
+          execution_id: item.execution_id || "",
           instruction: compactText(item.instruction || item.description || item.expected || item.subject || "", 360),
           expected: compactText(item.expected || "", 180),
           prompt_patch: compactText(item.prompt_patch || "", 900),
@@ -1954,6 +5789,7 @@ function readReplayRepairDispatchCandidatesForCoordinator(groupId: string, limit
       claimedCount: openItems.filter((item: any) => replayRepairStatusForCoordinator(item) === "in_progress" && String(item.owner || "") === "group-main-agent").length,
       dispatchMarkedCount: openItems.filter((item: any) => String(item.dispatch_target || item.dispatchTarget || "").trim()).length,
       readyCount: candidates.filter((candidate: any) => candidate.dispatch_target || candidate.status === "in_progress").length,
+      shouldCreateRealTask: false,
       candidates,
     };
   } catch {
@@ -1966,22 +5802,42 @@ function buildCoordinatorReplayRepairDispatchContext(group: any) {
   if (!groupId) return "";
   const summary = readReplayRepairDispatchCandidatesForCoordinator(groupId, 8);
   if (!summary?.schema || Number(summary.candidateCount || 0) <= 0) return "";
+  const dispatchPlanLedger = syncReplayRepairDispatchPlansForCoordinator(groupId, summary, { limit: 8 });
+  const readyBriefs = Array.isArray(dispatchPlanLedger.briefs)
+    ? dispatchPlanLedger.briefs.filter((brief: any) => String(brief.status || "") === "ready")
+    : [];
   const lines = [
     "群聊记忆 Replay 修复派发候选（系统只读注入，不自动创建真实任务）：",
-    `- groupId=${groupId}；candidate=${summary.candidateCount || 0}；ready=${summary.readyCount || 0}；dispatchMarked=${summary.dispatchMarkedCount || 0}；shouldCreateRealTask=false；ledger=${summary.file || "未记录"}`,
+    `- groupId=${groupId}；candidate=${summary.candidateCount || 0}；ready=${summary.readyCount || 0}；dispatchMarked=${summary.dispatchMarkedCount || 0}；dispatchBriefs=${readyBriefs.length}；shouldCreateRealTask=false；ledger=${summary.file || "未记录"}；briefLedger=${dispatchPlanLedger.file || "未记录"}`,
     "- 使用规则：这些候选表示 compact boundary replay 发现的记忆上下文缺口。你可以把它们作为本轮规划依据，但只有在当前消息/任务来源允许执行时，才把候选整理成 targets[].task；不要因为候选存在就自行创建任务。",
   ];
   for (const candidate of Array.isArray(summary.candidates) ? summary.candidates.slice(0, 8) : []) {
+    const nativeBinding = candidateNativeBindingForCoordinator(candidate).join("；");
     lines.push([
       `- candidate_id=${candidate.candidate_id || ""}`,
       `work_item=${candidate.work_item_id || ""}`,
       `priority=${candidate.priority || "medium"}`,
       `status=${candidate.status || "pending"}`,
       `target=${candidate.dispatch_target || candidate.targetProject || candidate.repair_target || "memory-context"}`,
+      nativeBinding ? `native=${nativeBinding}` : "",
       `action=${candidate.recommendedAction || "review"}`,
       `instruction=${compactText(candidate.instruction || candidate.expected || candidate.subject || "", 260)}`,
       candidate.prompt_patch ? `promptPatch=${compactText(candidate.prompt_patch, 260)}` : "",
     ].filter(Boolean).join("；"));
+  }
+  if (readyBriefs.length) {
+    lines.push("群聊记忆 Replay 修复派发简报（可复制为 targets[].task 的自包含 worker prompt）：");
+    for (const brief of readyBriefs.slice(0, 5)) {
+      const nativeBinding = candidateNativeBindingForCoordinator(brief).join("；");
+      lines.push([
+        `- brief=${brief.brief_id || ""}`,
+        `work_item=${brief.work_item_id || ""}`,
+        `target=${brief.dispatch_target || brief.target_project || "memory-context"}`,
+        nativeBinding ? `native=${nativeBinding}` : "",
+        `shouldCreateRealTask=false`,
+        `workerTask=${compactText(brief.worker_task || "", 520)}`,
+      ].filter(Boolean).join("；"));
+    }
   }
   return lines.join("\n");
 }
@@ -2244,7 +6100,7 @@ function buildCoordinatorResultFromAnalysis(group: any, message: string, analysi
   return {
     agent: coordinator.project,
     delegated,
-    assignments: buildAssignmentsFromTargets(effectiveTargets),
+    assignments: buildAssignmentsFromTargets(effectiveTargets, { group, analysis }),
     analysis,
     coordinationPlan,
     dispatchPolicy,

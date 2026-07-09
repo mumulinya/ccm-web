@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { sanitizeUserFacingAgentText, summarizeWorkEvents } from '../../utils/agentDisplay.js'
+import { sanitizeUserFacingPlanText, summarizeWorkEvents } from '../../utils/agentDisplay.js'
 
 const props = defineProps({
   msg: { type: Object, required: true },
@@ -18,7 +18,7 @@ const panelState = computed(() => {
 })
 const latestEvent = computed(() => events.value[events.value.length - 1] || null)
 const compactWorkText = (value, max = 320) => {
-  const text = sanitizeUserFacingAgentText(value, '')
+  const text = sanitizeUserFacingPlanText(value, '')
   return text.length > max ? `${text.slice(0, max)}...` : text
 }
 const workEventLabel = (kind) => ({
@@ -65,7 +65,7 @@ const formatWorkDuration = () => {
     <summary v-else class="work-events-head">
       <div class="work-head-main">
         <span class="work-agent-dot"></span>
-        <span class="work-title">子 Agent 执行摘要</span>
+        <span class="work-title">执行成员执行摘要</span>
         <span :class="['work-state-pill', panelState.tone]">{{ panelState.label }}</span>
       </div>
       <div class="work-head-meta">

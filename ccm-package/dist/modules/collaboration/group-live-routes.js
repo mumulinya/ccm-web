@@ -45,6 +45,7 @@ const daily_dev_backlog_1 = require("./daily-dev-backlog");
 const logs_1 = require("./logs");
 const storage_1 = require("./storage");
 const reliability_ledger_1 = require("../../system/reliability-ledger");
+const user_facing_text_1 = require("../../agents/user-facing-text");
 function compactGroupLiveText(value, max = 180) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
     return text.length > max ? `${text.slice(0, max)}...` : text;
@@ -52,11 +53,12 @@ function compactGroupLiveText(value, max = 180) {
 const GROUP_CLARIFICATION_INTERNAL_PATTERN = /CCM_AGENT_RECEIPT|<\s*\/?\s*task-notification|task-notification|receipt[-_\s]*status|trace_id|session_id|native_session|task_agent_session|WorkerContextPacket|raw\s+payload|raw_report|execution_id|Coordinator|Pipeline/i;
 function sanitizeGroupClarificationText(value, fallback = "", max = 220) {
     let text = compactGroupLiveText(value, max).replace(/\*\*/g, "").trim();
+    const fallbackText = (0, user_facing_text_1.sanitizeMainAgentRoleLanguage)(fallback);
     if (!text)
-        return fallback;
+        return fallbackText;
     if (GROUP_CLARIFICATION_INTERNAL_PATTERN.test(text))
-        return fallback;
-    return text;
+        return fallbackText;
+    return (0, user_facing_text_1.sanitizeMainAgentRoleLanguage)(text);
 }
 function extractClarificationQuestion(responseText, fallback = "") {
     const text = String(responseText || "");
@@ -73,7 +75,7 @@ function buildGroupClarificationSummary(input) {
     const missing = Array.isArray(input.analysis?.missingInfo) ? input.analysis.missingInfo : [];
     const fallbackQuestion = missing[0] || input.dispatchPolicy?.reason || "请补充目标、范围或验收标准。";
     const question = sanitizeGroupClarificationText(extractClarificationQuestion(input.responseText, fallbackQuestion), "请补充目标、范围或验收标准。", 260);
-    const reason = sanitizeGroupClarificationText(input.dispatchPolicy?.reason || missing[0] || "信息还不够明确，主 Agent 需要先确认关键边界。", "信息还不够明确，主 Agent 需要先确认关键边界。", 220);
+    const reason = sanitizeGroupClarificationText(input.dispatchPolicy?.reason || missing[0] || "信息还不够明确，我需要先确认关键边界。", "信息还不够明确，我需要先确认关键边界。", 220);
     const suggestions = [
         members.length ? `说明影响哪些项目或成员：${members.join("、")}` : "",
         "补充你希望完成的验收标准",
@@ -84,12 +86,12 @@ function buildGroupClarificationSummary(input) {
         title: "需要你补充信息",
         status: "waiting_user",
         status_label: "等待你回复",
-        headline: "主 Agent 已暂停派发，先确认一个关键问题。",
+        headline: "我已暂停派发，先确认一个关键问题。",
         question,
         reason,
         answer_suggestions: suggestions,
-        next_action: "你回复后，主 Agent 会带着补充信息继续判断：直接回答、进入计划确认，或派发子 Agent。",
-        coordinator: input.coordinator || "主 Agent",
+        next_action: "你回复后，我会带着补充信息继续判断：直接回答、进入计划确认，或安排执行成员。",
+        coordinator: (0, user_facing_text_1.sanitizeMainAgentRoleLanguage)(input.coordinator || "我"),
         display_policy: {
             user_visible: true,
             show_todo: false,
@@ -136,10 +138,10 @@ function buildGroupTaskIntakeSummary(input) {
             ? "已暂停自动执行，等待你确认计划"
             : compactGroupLiveText(input.queueResult?.message || "已保存，等待执行通道恢复或手动启动", 160);
     const nextAction = requiresConfirmation
-        ? "等待你确认执行前计划；确认后主 Agent 再派发子 Agent。"
+        ? "等待你确认执行前计划；确认后我再安排执行成员。"
         : queued
-            ? "等待主 Agent 启动执行、派发子 Agent，并回收结果说明。"
-            : "等待执行通道恢复或手动启动；启动后再派发子 Agent。";
+            ? "等待我启动执行、安排执行成员，并回收结果说明。"
+            : "等待执行通道恢复或手动启动；启动后再安排执行成员。";
     return {
         schema: "ccm-group-task-intake-summary-v1",
         title: "接下来",
@@ -149,10 +151,10 @@ function buildGroupTaskIntakeSummary(input) {
             ? `我已为「${goal}」整理执行前计划。`
             : `我已接管「${goal}」，会按任务链路继续推进。`,
         items: [
-            { label: "主 Agent", value: `${input.coordinator || "主 Agent"} 已接管需求` },
+            { label: "负责人", value: `${(0, user_facing_text_1.sanitizeMainAgentRoleLanguage)(input.coordinator || "我")} 已接管需求` },
             { label: "执行前检查", value: requiresConfirmation ? "计划已生成，需先确认范围" : "只读检查已完成" },
             { label: "队列状态", value: queueText },
-            { label: "后续跟踪", value: "等待子 Agent 提交结果说明，主 Agent 再验收和总结" },
+            { label: "后续跟踪", value: "等待执行成员提交结果说明，我再验收和总结" },
         ],
         next_action: nextAction,
         display_policy: {
@@ -265,7 +267,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     });
                     const statusSummary = (0, group_routes_1.buildGroupStatusFollowupSummary)({ status: mainAgentStatus });
                     const responseMessageId = "m" + Date.now().toString(36) + "gstatus" + crypto.randomBytes(2).toString("hex");
-                    const workflow = buildWorkflowMeta("monitoring", "主 Agent 已汇报当前进展");
+                    const workflow = buildWorkflowMeta("monitoring", "我已汇报当前进展");
                     (0, storage_1.appendGroupMessage)(group_id, {
                         id: responseMessageId,
                         role: "assistant",
@@ -296,7 +298,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         "Connection": "keep-alive",
                         "Access-Control-Allow-Origin": "*",
                     });
-                    writeSse(res, { type: "status", text: "主 Agent 正在整理当前任务进展...", agent: coordinator.project });
+                    writeSse(res, { type: "status", text: "正在整理当前任务进展...", agent: coordinator.project });
                     writeSse(res, {
                         type: "agent_done",
                         agent: coordinator.project,
@@ -475,7 +477,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         intake_state: planModePreflight.requires_confirmation ? "awaiting_confirmation" : "confirmed",
                         intake_draft: planModePreflight,
                         status_detail: planModePreflight.requires_confirmation
-                            ? "执行前计划已准备好，等待你确认后才会派发子 Agent"
+                            ? "执行前计划已准备好，等待你确认后才会安排执行成员"
                             : "执行前计划已完成，低风险任务自动进入执行队列",
                         workflow_meta: {
                             ...(task.workflow_meta || {}),
@@ -496,7 +498,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     }) || task;
                     const intakeTimelineEvent = appendTaskTimelineEvent(task.id, {
                         type: planModePreflight.requires_confirmation ? "plan_mode_waiting_confirmation" : "plan_mode_auto_continue",
-                        title: planModePreflight.requires_confirmation ? "主 Agent 已生成执行前计划" : "主 Agent 已完成执行前计划",
+                        title: planModePreflight.requires_confirmation ? "执行前计划已生成" : "执行前计划已完成",
                         detail: planModePreflight.risk?.summary || taskTitle,
                         status: "active",
                         phase: "intake",
@@ -506,7 +508,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     const intakeProgressCheckpoint = {
                         schema: "ccm-main-agent-live-checkpoint-v1",
                         id: intakeTimelineEvent?.id || `intake-${task.id}`,
-                        label: planModePreflight.requires_confirmation ? "主 Agent 已生成执行前计划" : "主 Agent 已完成执行前计划",
+                        label: planModePreflight.requires_confirmation ? "执行前计划已生成" : "执行前计划已完成",
                         detail: compactMemoryText(planModePreflight.risk?.summary || taskTitle, 180),
                         status: "active",
                         phase: "intake",
@@ -516,7 +518,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     const receiptMessageId = "m" + Date.now().toString(36) + "mission";
                     const understoodGoal = compactMemoryText(userMessage || task.title, 180).replace(/[。.!！]+$/g, "");
                     const receiptContent = planModePreflight.requires_confirmation
-                        ? `我先按只读方式看了一轮：${understoodGoal}。这个需求${planModePreflight.risk?.summary ? `因为「${planModePreflight.risk.summary}」` : "需要先确认范围"}，我已经整理好执行前计划。你确认后，我再派发子 Agent 开始修改。`
+                        ? `我先按只读方式看了一轮：${understoodGoal}。这个需求${planModePreflight.risk?.summary ? `因为「${planModePreflight.risk.summary}」` : "需要先确认范围"}，我已经整理好执行前计划。你确认后，我再安排执行成员开始修改。`
                         : `我明白了：${understoodGoal}。我已完成执行前只读检查，风险较低，会进入队列开始修改和检查，进度会持续更新在下方任务卡中。`;
                     const queueResult = task.auto_execute && task.intake_state !== "awaiting_confirmation"
                         ? enqueueTask(task.id, ctx)
@@ -555,7 +557,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         queue: queueResult,
                         intakeSummary,
                         intake_summary: intakeSummary,
-                        workflow: buildWorkflowMeta("understanding", "主 Agent 已接管"),
+                        workflow: buildWorkflowMeta("understanding", "我已接管"),
                         planMode: planModePreflight,
                         plan_mode: planModePreflight,
                         taskCard: intakeTaskCard,
@@ -567,9 +569,9 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     updateGroupMemory(group_id, {
                         goal: userMessageForHistory,
                         currentPhase: "understanding",
-                        decision: `项目主 Agent 已创建持久任务 ${task.id}`,
+                        decision: `已创建持久任务 ${task.id}`,
                         reason: task.title,
-                        nextAction: planModePreflight.requires_confirmation ? "等待用户确认执行前计划" : "主 Agent读取需求和项目上下文，生成执行计划并分派子 Agent",
+                        nextAction: planModePreflight.requires_confirmation ? "等待用户确认执行前计划" : "我会读取需求和项目上下文，生成执行计划并安排执行成员",
                     });
                     (0, logs_1.addTaskLog)(task.id, queueResult?.queued ? "success" : "warning", queueText);
                     if (groupOperationKey)
@@ -585,7 +587,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         taskIntent,
                         dispatchPolicy: planModePreflight.requires_confirmation
                             ? { action: "await_confirmation", reason: planModePreflight.risk?.summary || taskIntent.reason, nextStep: "等待用户确认执行前计划" }
-                            : { action: "delegate", reason: taskIntent.reason, nextStep: queueResult?.queued ? "等待子 Agent 执行并提交结果说明" : "等待执行通道恢复或手动启动" },
+                            : { action: "delegate", reason: taskIntent.reason, nextStep: queueResult?.queued ? "等待执行成员执行并提交结果说明" : "等待执行通道恢复或手动启动" },
                         assignments: [{ project: coordinator.project, task: task.title }],
                         observations: {
                             task_created: true,
@@ -666,20 +668,20 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     writeSse(res, {
                         type: "status",
                         text: projectAnalysisRequest
-                            ? `🔎 主 Agent ${coordinator.project} 正在只读分析项目...`
+                            ? `🔎 正在只读分析项目...`
                             : conversationalOnly
-                                ? `💬 主 Agent ${coordinator.project} 正在回复...`
-                                : `🧠 主 Agent ${coordinator.project} 正在协调群聊...`,
+                                ? `💬 正在回复...`
+                                : `🧠 正在协调群聊...`,
                         agent: coordinator.project
                     });
-                    ctx.setAgentActivity(coordinator.project, "working", projectAnalysisRequest ? "主 Agent 正在只读分析项目" : conversationalOnly ? "主 Agent 正在回复" : "主 Agent 正在协调群聊", { tab: "groups", groupId: group_id });
-                    ctx.broadcastPetSpeech(coordinator.project, { role: "status", text: projectAnalysisRequest ? "正在查看项目上下文..." : conversationalOnly ? "正在回复..." : "主 Agent 正在协调群聊...", source: "group" });
+                    ctx.setAgentActivity(coordinator.project, "working", projectAnalysisRequest ? "正在只读分析项目" : conversationalOnly ? "正在回复" : "正在协调群聊", { tab: "groups", groupId: group_id });
+                    ctx.broadcastPetSpeech(coordinator.project, { role: "status", text: projectAnalysisRequest ? "正在查看项目上下文..." : conversationalOnly ? "正在回复..." : "正在协调群聊...", source: "group" });
                     updateGroupMemory(group_id, {
                         ...(conversationalOnly ? {} : { goal: userMessageForHistory }),
                         currentPhase: projectAnalysisRequest ? "project_analysis" : conversationalOnly ? "conversation" : "understanding",
-                        decision: projectAnalysisRequest ? `只读项目分析：${taskIntent.reason}` : conversationalOnly ? `普通对话：${taskIntent.reason}` : "用户把消息交给主 Agent 协调",
+                        decision: projectAnalysisRequest ? `只读项目分析：${taskIntent.reason}` : conversationalOnly ? `普通对话：${taskIntent.reason}` : "用户把消息交给我协调",
                         reason: routing.targetLabel,
-                        nextAction: projectAnalysisRequest ? "主 Agent 基于项目上下文直接回答，不创建任务卡" : conversationalOnly ? "主 Agent 直接回复用户，不创建任务卡" : "主 Agent 先判断是否需要派发子 Agent",
+                        nextAction: projectAnalysisRequest ? "我会基于项目上下文直接回答，不创建任务卡" : conversationalOnly ? "我会直接回复用户，不创建任务卡" : "我会先判断是否需要安排执行成员",
                     });
                     const context = buildGroupContextPacket(group_id, { recentLimit: 20, olderLimit: 36, fullCount: 6 });
                     const sharedFilesContext = buildCoordinatorSharedFilesContext(ctx, group);
@@ -703,7 +705,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                             : conversationalOnly
                                 ? { action: "answer", reason: taskIntent.reason, nextStep: "已按普通对话回复用户" }
                                 : (coordinatorResult.dispatchPolicy || null);
-                        const workflowMeta = getInitialWorkflowMeta(planAssignments, dispatchPolicy, "主 Agent 初始计划");
+                        const workflowMeta = getInitialWorkflowMeta(planAssignments, dispatchPolicy, "初始计划");
                         const mainAgentDecision = appendMainAgentDecisionTrace({
                             groupId: group_id,
                             traceId: messageTraceId,
@@ -768,9 +770,9 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         });
                         updateGroupMemory(group_id, {
                             currentPhase: workflowMeta.phase,
-                            decision: `${dispatchPolicy?.action || "unknown"}：${dispatchPolicy?.reason || "主 Agent 已完成派发判断"}`,
+                            decision: `${dispatchPolicy?.action || "unknown"}：${dispatchPolicy?.reason || "我已完成派发判断"}`,
                             reason: dispatchPolicy?.risk || "",
-                            nextAction: clarificationSummary?.next_action || dispatchPolicy?.nextStep || (planAssignments.length ? "等待子 Agent 提交结果说明" : "等待用户继续补充"),
+                            nextAction: clarificationSummary?.next_action || dispatchPolicy?.nextStep || (planAssignments.length ? "等待执行成员提交结果说明" : "等待用户继续补充"),
                         });
                         (0, logs_1.addGroupLog)(group_id, "success", "orchestrator", `主 Agent ${coordinator.project} 回复完成`, {
                             response_length: outputText.length,
@@ -780,7 +782,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         let crossOutputs = [];
                         const validMentions = getCoordinatorActionMentions(coordinatorResult, group, coordinator.project);
                         if (validMentions.length > 0) {
-                            writeSse(res, { type: "status", text: "🧩 主 Agent 正在分派子 Agent..." });
+                            writeSse(res, { type: "status", text: "🧩 正在安排执行成员..." });
                             const execOrder = coordinatorResult.executionOrder || "parallel";
                             crossOutputs = await processCrossAgents(group_id, group, coordinator.project, outputText, validMentions, configs, ctx, res, 0, new Set(), execOrder, responseMessageId);
                             await runCoordinatorReviewLoop({
@@ -864,7 +866,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                                     authorizationReadiness: agentPrompt.authorizationReadiness,
                                 });
                                 if (runtimeToolContext.dispatchBlocked) {
-                                    const reason = runtimeToolContext.dispatchGate?.reason || `${member.project} MCP/Skill 授权未就绪，已阻止派发子 Agent`;
+                                    const reason = runtimeToolContext.dispatchGate?.reason || `${member.project} MCP/Skill 授权未就绪，已阻止安排执行成员`;
                                     (0, logs_1.addGroupLog)(group_id, "warning", "runtime-tool-dispatch-blocked", reason, { agent: member.project, runtime_tool_dispatch_gate: runtimeToolContext.dispatchGate });
                                     writeSse(res, { type: "agent_done", agent: member.project, text: `⚠️ ${reason}`, blocked: true, runtime_tool_dispatch_gate: runtimeToolContext.dispatchGate });
                                     resolve();
@@ -925,9 +927,9 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     updateGroupMemory(group_id, {
                         goal: userMessageForHistory,
                         currentPhase: "understanding",
-                        decision: "用户直接点名主 Agent",
+                        decision: "用户直接点名协调处理",
                         reason: target_project_actual,
-                        nextAction: "主 Agent 判断是否直接答复或派发子 Agent",
+                        nextAction: "我会判断是否直接答复或安排执行成员",
                     });
                     const context = buildGroupContextPacket(group_id, { recentLimit: 20, olderLimit: 36, fullCount: 6 });
                     const coordinatorResult = await (0, group_orchestrator_1.runGroupOrchestrator)({
@@ -940,7 +942,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     const responseMessageId = "m" + Date.now().toString(36) + "coord" + crypto.randomBytes(2).toString("hex");
                     const planAssignments2 = normalizePlanAssignments(coordinatorResult.assignments || []);
                     const dispatchPolicy2 = coordinatorResult.dispatchPolicy || null;
-                    const workflowMeta2 = getInitialWorkflowMeta(planAssignments2, dispatchPolicy2, "主 Agent 初始计划");
+                    const workflowMeta2 = getInitialWorkflowMeta(planAssignments2, dispatchPolicy2, "初始计划");
                     if (useStream) {
                         res.writeHead(200, {
                             "Content-Type": "text/event-stream",
@@ -977,16 +979,16 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     });
                     updateGroupMemory(group_id, {
                         currentPhase: workflowMeta2.phase,
-                        decision: `${dispatchPolicy2?.action || "unknown"}：${dispatchPolicy2?.reason || "主 Agent 已完成派发判断"}`,
+                        decision: `${dispatchPolicy2?.action || "unknown"}：${dispatchPolicy2?.reason || "我已完成派发判断"}`,
                         reason: dispatchPolicy2?.risk || "",
-                        nextAction: dispatchPolicy2?.nextStep || (planAssignments2.length ? "等待子 Agent 提交结果说明" : "等待用户继续补充"),
+                        nextAction: dispatchPolicy2?.nextStep || (planAssignments2.length ? "等待执行成员提交结果说明" : "等待用户继续补充"),
                     });
                     const validMentions = getCoordinatorActionMentions(coordinatorResult, group, coordinatorProject);
                     let crossOutputs = [];
                     let reviewResult = null;
                     if (validMentions.length > 0) {
                         if (useStream)
-                            writeSse(res, { type: "status", text: "🧩 代码协调器正在分派子 Agent..." });
+                            writeSse(res, { type: "status", text: "🧩 正在安排执行成员..." });
                         const execOrder2 = coordinatorResult.executionOrder || "parallel";
                         crossOutputs = await processCrossAgents(group_id, group, coordinatorProject, coordinatorResult.content, validMentions, configs, ctx, useStream ? res : null, 0, new Set(), execOrder2, responseMessageId);
                         reviewResult = await runCoordinatorReviewLoop({
@@ -1035,7 +1037,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     authorizationReadiness: toolContext.authorizationReadiness,
                 });
                 if (runtimeToolContext.dispatchBlocked) {
-                    const reason = runtimeToolContext.dispatchGate?.reason || `${target_project_actual} MCP/Skill 授权未就绪，已阻止派发子 Agent`;
+                    const reason = runtimeToolContext.dispatchGate?.reason || `${target_project_actual} MCP/Skill 授权未就绪，已阻止安排执行成员`;
                     (0, logs_1.addGroupLog)(group_id, "warning", "runtime-tool-dispatch-blocked", reason, { agent: target_project_actual, runtime_tool_dispatch_gate: runtimeToolContext.dispatchGate });
                     if (useStream) {
                         if (!res.headersSent) {
@@ -1129,7 +1131,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         const downstreamOutput = qaResult.resumedOutput || outputText;
                         const validMentions = extractActionableMentions(downstreamOutput, group, target_project_actual);
                         if (validMentions.length > 0) {
-                            writeSse(res, { type: "status", text: "🧩 主 Agent 正在分配任务..." });
+                            writeSse(res, { type: "status", text: "🧩 正在分配任务..." });
                             try {
                                 await processCrossAgents(group_id, group, target_project_actual, downstreamOutput, validMentions, configs, ctx, res);
                             }
@@ -1246,7 +1248,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         authorizationReadiness: toolContext.authorizationReadiness,
                     });
                     if (runtimeToolContext.dispatchBlocked) {
-                        const reason = runtimeToolContext.dispatchGate?.reason || `${member.project} MCP/Skill 授权未就绪，已阻止派发子 Agent`;
+                        const reason = runtimeToolContext.dispatchGate?.reason || `${member.project} MCP/Skill 授权未就绪，已阻止安排执行成员`;
                         (0, logs_1.addGroupLog)(group_id, "warning", "runtime-tool-dispatch-blocked", reason, { agent: member.project, runtime_tool_dispatch_gate: runtimeToolContext.dispatchGate });
                         replies.push({ project: member.project, reply: "", blocked: true, error: reason, runtime_tool_dispatch_gate: runtimeToolContext.dispatchGate });
                         continue;

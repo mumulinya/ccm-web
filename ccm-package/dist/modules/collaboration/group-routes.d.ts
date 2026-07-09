@@ -32,6 +32,10 @@ export declare function buildGroupMainAgentStatus(input: {
         label: string;
         active_form: string;
         detail: string;
+        recent_action: string;
+        recentAction: string;
+        needs_action: string;
+        needsAction: string;
         status: string;
         status_label: string;
         progress_label: string;
@@ -41,6 +45,9 @@ export declare function buildGroupMainAgentStatus(input: {
         display_policy: {
             user_visible: boolean;
             technical_details_default_collapsed: boolean;
+            hide_internal_protocols: boolean;
+            archive_completed_todo: boolean;
+            visible_when_completed: boolean;
         };
     };
     currentTodoSummary: {
@@ -52,6 +59,10 @@ export declare function buildGroupMainAgentStatus(input: {
         label: string;
         active_form: string;
         detail: string;
+        recent_action: string;
+        recentAction: string;
+        needs_action: string;
+        needsAction: string;
         status: string;
         status_label: string;
         progress_label: string;
@@ -61,6 +72,9 @@ export declare function buildGroupMainAgentStatus(input: {
         display_policy: {
             user_visible: boolean;
             technical_details_default_collapsed: boolean;
+            hide_internal_protocols: boolean;
+            archive_completed_todo: boolean;
+            visible_when_completed: boolean;
         };
     };
     progress_refresh_summary: {
@@ -229,10 +243,13 @@ export declare function runGroupStatusFollowupSelfTest(): {
         groupStatusFollowupFriendly: boolean;
         groupStatusFollowupShowsChildAgentWaitingState: boolean;
         groupStatusDerivesChildAgentRows: boolean;
+        groupStatusCurrentTodoPostTurnVisible: boolean;
         groupStatusDerivesPickupSummary: boolean;
         groupStatusFollowupUsesPickupSummary: boolean;
         groupStatusShowsProgressRefreshSummary: boolean;
         groupStatusFollowupUsesProgressRefreshSummary: boolean;
+        groupStatusFollowupShowsReworkState: boolean;
+        groupStatusFollowupShowsUserActionSummary: boolean;
         groupStatusFollowupHidesProtocol: boolean;
         groupStatusFollowupNoTodo: boolean;
     };
