@@ -33,6 +33,42 @@ export const sanitizeUserFacingLegacyTerminology = (value = '') => String(value 
   .replace(/子\s*Agent\s*回执/g, '执行成员结果说明')
   .replace(/主\s*Agent\s*回执/g, '处理说明')
   .replace(/回执/g, '结果说明')
+  .replace(/派发群聊主\s*Agent/g, '安排群聊执行')
+  .replace(/发送群聊主\s*Agent\s*指令/g, '发送协作群指令')
+  .replace(/群聊主\s*Agent/g, '协作群')
+  .replace(/全局主\s*Agent\s*(已|正在|会|必须|需要|可以|将|要)/g, '我$1')
+  .replace(/全局主\s*Agent/g, '我')
+  .replace(/全局协调流程\s*(已|正在|会|必须|需要|可以|将|要)/g, '我$1')
+  .replace(/全局协调流程/g, '我')
+  .replace(/全局\s*监工/g, '全局任务跟进')
+  .replace(/监工中/g, '持续跟进中')
+  .replace(/监工状态/g, '持续跟进状态')
+  .replace(/异步监工/g, '持续跟进')
+  .replace(/主\s*Agent\s*工作链路/g, '处理链路')
+  .replace(/主\s*Agent\s*执行计划/g, '执行计划')
+  .replace(/主\s*Agent\s*工作计划/g, '执行计划')
+  .replace(/主\s*Agent\s*返工计划/g, '返工计划')
+  .replace(/主\s*Agent\s*复盘/g, '复盘')
+  .replace(/主\s*Agent\s*计划/g, '执行计划')
+  .replace(/主\s*Agent\s*验收/g, '最终验收')
+  .replace(/主\s*Agent\s*(已|正在|会|必须|需要|可以|将|要)/g, '我$1')
+  .replace(/等待\s*主\s*Agent/g, '等待我')
+  .replace(/负责\s*主\s*Agent/g, '负责人')
+  .replace(/主\s*Agent/g, '我')
+  .replace(/派发给\s*(\d+)\s*个子\s*Agent\s*执行/g, '安排 $1 个执行成员处理')
+  .replace(/派发子\s*Agent\s*工作单/g, '安排执行成员任务')
+  .replace(/子\s*Agent\s*工作单/g, '执行成员任务')
+  .replace(/派发给子\s*Agent\s*执行/g, '安排执行成员处理')
+  .replace(/已派发给子\s*Agent/g, '已安排给执行成员')
+  .replace(/派发子\s*Agent/g, '安排执行成员')
+  .replace(/子\s*Agent\s*执行摘要/g, '执行成员执行摘要')
+  .replace(/子\s*Agent\s*进展摘要/g, '执行成员进展')
+  .replace(/子\s*Agent\s*执行计划/g, '执行成员接单计划')
+  .replace(/子\s*Agent\s*状态/g, '执行成员状态')
+  .replace(/子\s*Agent\s*结果说明/g, '执行成员结果说明')
+  .replace(/子\s*Agent\/项目/g, '执行成员/项目')
+  .replace(/子\s*Agent/g, '执行成员')
+  .replace(/项目\s*Agent/g, '项目执行成员')
   .replace(/\breceipt[-_\s]*status\b/gi, '结果状态')
   .replace(/\braw\s+receipts?\b/gi, '底层执行记录')
   .replace(/\breceipts?\b/gi, '结果说明')
@@ -49,12 +85,12 @@ export const sanitizeUserFacingLegacyTerminology = (value = '') => String(value 
   .replace(/\bverified\b/gi, '已核对')
   .replace(/used\s*\/\s*ignored\s*\/\s*verified/gi, '已使用/未使用/已核对')
 
-export const sanitizeUserFacingAgentText = (value, fallback = 'Agent 正在处理当前请求。', max = 260) => {
+export const sanitizeUserFacingAgentText = (value, fallback = '我正在处理当前请求。', max = 260) => {
   let text = String(value || '').replace(/\s+/g, ' ').trim()
   if (!text) text = fallback
   if (INTERNAL_TEXT_PATTERN.test(text)) {
-    if (/error|失败|权限|denied|invalid|门禁/i.test(text)) text = 'Agent 遇到需要处理的执行保护或权限问题，排障信息已放入技术详情。'
-    else if (/done|完成|receipt|回执/i.test(text)) text = '执行成员已提交结构化完成信息，我正在汇总验收。'
+    if (/error|失败|权限|denied|invalid|门禁/i.test(text)) text = '我遇到需要处理的执行保护或权限问题，排障信息已放入技术详情。'
+    else if (/done|完成|receipt|回执/i.test(text)) text = '执行成员已提交结构化结果说明，我正在汇总验收。'
     else text = fallback
   }
   text = text
@@ -77,6 +113,10 @@ export const sanitizeUserFacingPlanText = (value, fallback = '计划信息已整
     .replace(/派发群聊主\s*Agent/g, '安排群聊执行')
     .replace(/群聊主\s*Agent/g, '协作群')
     .replace(/全局主\s*Agent/g, '全局协调流程')
+    .replace(/全局\s*监工/g, '全局任务跟进')
+    .replace(/监工中/g, '持续跟进中')
+    .replace(/监工状态/g, '持续跟进状态')
+    .replace(/异步监工/g, '持续跟进')
     .replace(/下游\s*Agent/g, '下游执行成员')
     .replace(/执行\s*Agent/g, '执行成员')
     .replace(/确认后派发/g, '确认后安排')
@@ -108,6 +148,9 @@ export const sanitizeUserFacingPlanText = (value, fallback = '计划信息已整
     .replace(/\bcoordinator\b/gi, '我来协调')
     .replace(/我\s+与/g, '我与')
     .replace(/我\s+的/g, '我的')
+    .replace(/我\s+已/g, '我已')
+    .replace(/我\s+正在/g, '我正在')
+    .replace(/我\s+会/g, '我会')
     .replace(/执行成员\s+([\u4e00-\u9fff])/g, '执行成员$1')
   return text.length > max ? `${text.slice(0, max)}...` : text
 }
@@ -218,7 +261,7 @@ export const getTechnicalDetailSections = (source, fallbackTechnical = null) => 
   if (technical.session_ids?.length) records.push({ label: '会话', value: technical.session_ids.join('、') })
   if (technical.run_id) records.push({ label: 'Run', value: technical.run_id })
   if (technical.parent_run_id) records.push({ label: '上轮', value: technical.parent_run_id })
-  if (technical.supervisor_id) records.push({ label: '监工', value: technical.supervisor_id })
+  if (technical.supervisor_id) records.push({ label: '跟进记录', value: technical.supervisor_id })
   if (technical.gap_fingerprint) records.push({ label: '缺口指纹', value: technical.gap_fingerprint })
   return [
     { id: 'troubleshooting', title: '排障摘要', items: troubleshooting },
@@ -327,11 +370,11 @@ export const summarizeWorkEvents = (events = []) => {
   if (counts.tool) parts.push(`工具 ${counts.tool} 次`)
   if (counts.output) parts.push(`输出 ${counts.output} 条`)
   if (counts.status) parts.push(`状态 ${counts.status} 条`)
-  if (counts.done) parts.push('已完成')
+  if (counts.done) parts.push('已回传结果')
   if (counts.error) parts.push('有错误')
   const summary = sanitizeUserFacingAgentText(
     parts.length ? parts.join('，') : last?.text,
-    done ? '执行成员已完成执行，等待我汇总。' : hasError ? '执行成员执行遇到问题，排障信息已折叠。' : '执行成员正在执行。',
+    done ? '执行成员已回传结果，等待我汇总验收。' : hasError ? '执行成员执行遇到问题，排障信息已折叠。' : '执行成员正在执行。',
     160
   )
   return {

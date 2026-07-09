@@ -43,6 +43,334 @@ function verdictLabel(value) {
         return "待补齐";
     return sanitizeWorkchainUserText(value, "已记录", 80);
 }
+function scrubWorkchainTestAgentPathText(value) {
+    return String(value || "")
+        .replace(/[A-Za-z]:[\\/][^\s；;，。)）]+/g, "技术详情里的证据文件")
+        .replace(/(^|[\s（(])\/[^\s；;，。)）]*(?:test-agent-artifacts|screenshots|browser-artifacts|report\.json|report\.md|verdict\.json|artifact-manifest\.json)[^\s；;，。)）]*/gi, "$1技术详情里的证据文件")
+        .replace(/\b(?:report\.json|report\.md|verdict\.json|artifact-manifest\.json)\b/gi, "证据文件");
+}
+function testAgentFailureTypeLabel(type) {
+    const value = String(type || "").trim().toLowerCase();
+    const labels = {
+        issue: "工作单问题",
+        server: "服务启动",
+        command: "命令验证",
+        http: "接口检查",
+        browser: "浏览器检查",
+        required_check: "必检项",
+        acceptance: "验收条件",
+    };
+    return labels[value] || "复核问题";
+}
+function sanitizeTestAgentFailureText(value, fallback = "复核发现需要处理的问题。", max = 220) {
+    return sanitizeWorkchainUserText(scrubWorkchainTestAgentPathText(value || fallback), fallback, max);
+}
+function looksLikeTestAgentFailureItem(item) {
+    if (!item || typeof item !== "object")
+        return false;
+    return !!(item.type || item.title || item.reason || item.nextAction || item.diagnostics);
+}
+function collectTestAgentFailureItemsFromSource(source, depth = 0, seenObjects = new Set()) {
+    if (!source || depth > 5)
+        return [];
+    if (typeof source !== "object")
+        return [];
+    if (seenObjects.has(source))
+        return [];
+    seenObjects.add(source);
+    const rows = [];
+    if (Array.isArray(source)) {
+        for (const item of source)
+            rows.push(...collectTestAgentFailureItemsFromSource(item, depth + 1, seenObjects));
+        return rows;
+    }
+    const direct = source.failureSummary || source.failure_summary;
+    if (Array.isArray(direct))
+        rows.push(...direct.filter(looksLikeTestAgentFailureItem));
+    const verdict = source.verdict || source.testAgentVerdict || source.test_agent_verdict;
+    if (verdict && typeof verdict === "object") {
+        const verdictFailures = verdict.failureSummary || verdict.failure_summary;
+        if (Array.isArray(verdictFailures))
+            rows.push(...verdictFailures.filter(looksLikeTestAgentFailureItem));
+    }
+    const nestedKeys = [
+        "testAgentReport",
+        "test_agent_report",
+        "testAgentReceipt",
+        "test_agent_receipt",
+        "receipt",
+        "delivery_report",
+        "deliveryReport",
+        "independentReview",
+        "independent_review",
+        "independent_review_summary",
+        "independentReviewSummary",
+    ];
+    for (const key of nestedKeys) {
+        if (source[key])
+            rows.push(...collectTestAgentFailureItemsFromSource(source[key], depth + 1, seenObjects));
+    }
+    return rows;
+}
+function collectTestAgentFailureItems(input) {
+    const summary = input.summary || {};
+    const completion = input.completion || {};
+    const technical = input.technical || {};
+    const rows = [
+        ...collectTestAgentFailureItemsFromSource(summary),
+        ...collectTestAgentFailureItemsFromSource(completion),
+        ...collectTestAgentFailureItemsFromSource(technical),
+    ];
+    const seen = new Set();
+    const result = [];
+    for (const item of rows) {
+        const key = [
+            item?.type || "",
+            item?.project || "",
+            item?.title || "",
+            item?.reason || "",
+            item?.nextAction || "",
+        ].join("|");
+        if (seen.has(key))
+            continue;
+        seen.add(key);
+        result.push(item);
+    }
+    return result.slice(0, 8);
+}
+function testAgentFailureNeedsRework(item) {
+    return /failed|fail|not_verified|rework|未通过|失败|返工/i.test(String(item?.status || item?.result || item?.recommendation || item?.reason || ""));
+}
+function testAgentFailureNeedsUser(item) {
+    return /blocked|unknown|need_human|needs_human|manual|人工|确认|待确认|阻塞/i.test(String(item?.status || item?.result || item?.recommendation || item?.reason || ""));
+}
+function summarizeTestAgentFailureItem(item) {
+    const type = testAgentFailureTypeLabel(item?.type);
+    const project = sanitizeTestAgentFailureText(item?.project, "", 70);
+    const title = sanitizeTestAgentFailureText(item?.title || item?.reason, "复核发现问题", 100);
+    const reason = sanitizeTestAgentFailureText(item?.reason || item?.status, "需要补齐或修复后再验收。", 160);
+    const prefix = project ? `${project}：${type}` : type;
+    return `${prefix}「${title}」未通过：${reason}`;
+}
+function summarizeTestAgentDiagnosticItem(item) {
+    const diagnostics = Array.isArray(item?.diagnostics) ? item.diagnostics : [];
+    const nextActions = item?.nextAction ? [item.nextAction] : [];
+    const first = [...diagnostics, ...nextActions]
+        .map(value => sanitizeTestAgentFailureText(value, "", 180))
+        .find(Boolean);
+    if (!first)
+        return "";
+    const title = sanitizeTestAgentFailureText(item?.title || item?.type, "该问题", 70);
+    return `${title}：${first}`;
+}
+function collectTestAgentFailureSummary(input) {
+    const items = collectTestAgentFailureItems(input);
+    const failureLines = [...new Set(items.map(summarizeTestAgentFailureItem).filter(Boolean))].slice(0, 5);
+    const diagnosticLines = [...new Set(items.map(summarizeTestAgentDiagnosticItem).filter(Boolean))].slice(0, 4);
+    const hasRework = items.some(testAgentFailureNeedsRework);
+    const hasNeedsUser = items.some(testAgentFailureNeedsUser);
+    const primaryLine = failureLines[0] || "";
+    return { items, failureLines, diagnosticLines, hasRework, hasNeedsUser, primaryLine };
+}
+function collectTestAgentReviewSourcesFromSource(source, depth = 0, seenObjects = new Set()) {
+    if (!source || depth > 5 || typeof source !== "object")
+        return [];
+    if (seenObjects.has(source))
+        return [];
+    seenObjects.add(source);
+    if (Array.isArray(source)) {
+        return source.flatMap(item => collectTestAgentReviewSourcesFromSource(item, depth + 1, seenObjects));
+    }
+    const rows = [];
+    const hasReviewPayload = source.schema === "ccm-test-agent-report-v1"
+        || source.schema === "ccm-test-agent-verdict-v1"
+        || source.requiredCheckCoverage
+        || source.required_check_coverage
+        || source.acceptanceCoverage
+        || source.acceptance_coverage
+        || source.requiredCheckSummary
+        || source.required_check_summary
+        || source.acceptanceSummary
+        || source.acceptance_summary
+        || source.failedRequiredChecks
+        || source.failedAcceptanceCriteria
+        || source.unknownRequiredChecks
+        || source.unknownAcceptanceCriteria;
+    if (hasReviewPayload)
+        rows.push(source);
+    const nestedKeys = [
+        "verdict",
+        "testAgentVerdict",
+        "test_agent_verdict",
+        "testAgentReport",
+        "test_agent_report",
+        "testAgentReceipt",
+        "test_agent_receipt",
+        "receipt",
+        "delivery_report",
+        "deliveryReport",
+        "independentReview",
+        "independent_review",
+        "independent_review_summary",
+        "independentReviewSummary",
+    ];
+    for (const key of nestedKeys) {
+        if (source[key])
+            rows.push(...collectTestAgentReviewSourcesFromSource(source[key], depth + 1, seenObjects));
+    }
+    return rows;
+}
+function collectTestAgentReviewSources(input) {
+    const rows = [
+        ...collectTestAgentReviewSourcesFromSource(input.summary),
+        ...collectTestAgentReviewSourcesFromSource(input.completion),
+        ...collectTestAgentReviewSourcesFromSource(input.technical),
+        ...collectTestAgentReviewSourcesFromSource(input.rawEvents),
+    ];
+    const seen = new Set();
+    const result = [];
+    for (const item of rows) {
+        const key = [
+            item?.schema || "",
+            item?.id || item?.reportId || "",
+            item?.workOrderId || item?.work_order_id || "",
+            item?.status || "",
+            item?.recommendation || "",
+            JSON.stringify(item?.requiredCheckSummary || item?.acceptanceSummary || item?.failedRequiredChecks || item?.failedAcceptanceCriteria || "").slice(0, 180),
+        ].join("|");
+        if (seen.has(key))
+            continue;
+        seen.add(key);
+        result.push(item);
+    }
+    return result.slice(0, 12);
+}
+function testAgentCoverageItemKey(item = {}) {
+    const evidence = Array.isArray(item.evidence) ? item.evidence.join("|") : "";
+    return [item.check || item.criterion || "", item.status || "", item.missingReason || "", evidence].join("|") || JSON.stringify(item || {});
+}
+function uniqueTestAgentCoverageItems(...lists) {
+    const seen = new Set();
+    const result = [];
+    for (const list of lists) {
+        for (const item of asList(list)) {
+            if (!item || typeof item !== "object")
+                continue;
+            const key = testAgentCoverageItemKey(item);
+            if (seen.has(key))
+                continue;
+            seen.add(key);
+            result.push(item);
+        }
+    }
+    return result;
+}
+function testAgentCoverageLabel(type) {
+    const value = String(type || "").trim().toLowerCase();
+    const labels = {
+        commands: "命令验证",
+        command: "命令验证",
+        build: "构建检查",
+        unit_tests: "单元测试",
+        http: "接口检查",
+        api: "接口检查",
+        browser_e2e: "浏览器流程",
+        browser_network: "浏览器网络",
+        browser_visual: "视觉检查",
+        browser_layout: "布局检查",
+        screenshots: "截图证据",
+        console_errors: "控制台错误检查",
+        independent_review: "独立复核",
+    };
+    return labels[value] || sanitizeTestAgentFailureText(type || "检查项", "检查项", 80);
+}
+function testAgentSummaryItems(summary, key, fallbackStatus) {
+    return asList(summary?.[key]).map((item) => ({ ...item, status: item?.status || fallbackStatus }));
+}
+function collectTestAgentSummaryItems(source, kind, status) {
+    const summaryKey = kind === "required" ? "requiredCheckSummary" : "acceptanceSummary";
+    const summarySnakeKey = kind === "required" ? "required_check_summary" : "acceptance_summary";
+    const listKey = status === "not_verified" ? "notVerified" : "unknown";
+    const summaries = [
+        source?.[summaryKey],
+        source?.[summarySnakeKey],
+        source?.verdict?.[summaryKey],
+        source?.verdict?.[summarySnakeKey],
+    ].filter(value => value && typeof value === "object" && !Array.isArray(value));
+    return summaries.flatMap(summary => testAgentSummaryItems(summary, listKey, status));
+}
+function collectTestAgentCoverageByStatusFromSource(source, kind, status) {
+    const coverageKey = kind === "required" ? "requiredCheckCoverage" : "acceptanceCoverage";
+    const coverageSnakeKey = kind === "required" ? "required_check_coverage" : "acceptance_coverage";
+    const verdictList = kind === "required"
+        ? status === "not_verified" ? source?.failedRequiredChecks : source?.unknownRequiredChecks
+        : status === "not_verified" ? source?.failedAcceptanceCriteria : source?.unknownAcceptanceCriteria;
+    return uniqueTestAgentCoverageItems(verdictList, asList(source?.[coverageKey]).filter((item) => item?.status === status), asList(source?.[coverageSnakeKey]).filter((item) => item?.status === status), collectTestAgentSummaryItems(source, kind, status));
+}
+function summarizeTestAgentCoverageGap(item, kind, state) {
+    if (kind === "required") {
+        const reason = item?.missingReason ? `：${sanitizeTestAgentFailureText(item.missingReason, "", 140)}` : "";
+        return `必检项：${testAgentCoverageLabel(item?.check)}${state === "failed" ? "未覆盖" : "待确认"}${reason}`;
+    }
+    const criterion = sanitizeTestAgentFailureText(item?.criterion || "未命名验收条件", "未命名验收条件", 180);
+    return `验收条件${state === "failed" ? "未通过" : "待确认"}：${criterion}`;
+}
+function testAgentAcceptanceWeakReason(item) {
+    const strength = String(item?.matchStrength || item?.match_strength || "").toLowerCase();
+    const source = String(item?.evidenceSource || item?.evidence_source || "").toLowerCase();
+    const evidence = asList(item?.evidence).filter(Boolean);
+    if (strength === "fallback" || source === "single_criterion_report_status")
+        return "只是从整体复核结果推断，建议补一条直接验证证据";
+    if (strength === "none" || source === "none")
+        return "缺少可直接对应到该验收条件的证据";
+    if (!evidence.length && (strength || source))
+        return "缺少可展示的验收证据样本";
+    return "";
+}
+function collectTestAgentWeakAcceptanceItemsFromSource(source) {
+    const summaries = [
+        source?.acceptanceSummary,
+        source?.acceptance_summary,
+        source?.verdict?.acceptanceSummary,
+        source?.verdict?.acceptance_summary,
+    ].filter(value => value && typeof value === "object" && !Array.isArray(value));
+    const summaryItems = summaries.flatMap(summary => testAgentSummaryItems(summary, "verified", "verified"));
+    const coverageItems = [
+        ...asList(source?.acceptanceCoverage),
+        ...asList(source?.acceptance_coverage),
+        ...asList(source?.verdict?.acceptanceCoverage),
+        ...asList(source?.verdict?.acceptance_coverage),
+    ].filter((item) => item?.status === "verified");
+    return uniqueTestAgentCoverageItems(summaryItems, coverageItems)
+        .filter((item) => !!testAgentAcceptanceWeakReason(item));
+}
+function collectTestAgentCoverageSummary(input) {
+    const sources = collectTestAgentReviewSources(input);
+    const failedRequired = uniqueTestAgentCoverageItems(...sources.map(source => collectTestAgentCoverageByStatusFromSource(source, "required", "not_verified")));
+    const unknownRequired = uniqueTestAgentCoverageItems(...sources.map(source => collectTestAgentCoverageByStatusFromSource(source, "required", "unknown")));
+    const failedAcceptance = uniqueTestAgentCoverageItems(...sources.map(source => collectTestAgentCoverageByStatusFromSource(source, "acceptance", "not_verified")));
+    const unknownAcceptance = uniqueTestAgentCoverageItems(...sources.map(source => collectTestAgentCoverageByStatusFromSource(source, "acceptance", "unknown")));
+    const weakAcceptance = uniqueTestAgentCoverageItems(...sources.map(collectTestAgentWeakAcceptanceItemsFromSource));
+    const failedLines = [
+        ...failedRequired.map(item => summarizeTestAgentCoverageGap(item, "required", "failed")),
+        ...failedAcceptance.map(item => summarizeTestAgentCoverageGap(item, "acceptance", "failed")),
+    ];
+    const unknownLines = [
+        ...unknownRequired.map(item => summarizeTestAgentCoverageGap(item, "required", "unknown")),
+        ...unknownAcceptance.map(item => summarizeTestAgentCoverageGap(item, "acceptance", "unknown")),
+    ];
+    const weakLines = weakAcceptance.map((item) => {
+        const criterion = sanitizeTestAgentFailureText(item?.criterion || "未命名验收条件", "未命名验收条件", 180);
+        const reason = sanitizeTestAgentFailureText(testAgentAcceptanceWeakReason(item), "建议补充直接验证证据。", 180);
+        return `验收证据待确认：${criterion}（${reason}）`;
+    });
+    return {
+        sources,
+        failedLines: [...new Set(failedLines)].slice(0, 6),
+        unknownLines: [...new Set(unknownLines)].slice(0, 6),
+        weakLines: [...new Set(weakLines)].slice(0, 6),
+    };
+}
 function formatReviewEvidence(item) {
     if (!item)
         return "";
@@ -92,36 +420,64 @@ function getIndependentReviewGateState(input) {
     const completion = input.completion || {};
     const deliveryReport = summary.delivery_report || summary.deliveryReport || completion.delivery_report || completion.deliveryReport || {};
     const gate = summary.independent_review_gate || summary.independentReviewGate || deliveryReport.independent_review_gate || deliveryReport.independentReviewGate || {};
+    const testAgentFailures = collectTestAgentFailureSummary(input);
+    const testAgentCoverage = collectTestAgentCoverageSummary(input);
     const failedEvidence = [
         ...asList(gate.failed_evidence || gate.failedEvidence),
         ...asList(deliveryReport.failed_independent_review || deliveryReport.failedIndependentReview),
     ].filter(Boolean);
     const required = summary.independent_review_required === true
         || deliveryReport.independent_review_required === true
-        || gate.required === true;
-    const passed = summary.independent_review_gate_passed === true
+        || gate.required === true
+        || testAgentFailures.items.length > 0
+        || testAgentCoverage.failedLines.length > 0
+        || testAgentCoverage.unknownLines.length > 0
+        || testAgentCoverage.weakLines.length > 0;
+    const hasCoverageFailure = testAgentCoverage.failedLines.length > 0;
+    const hasCoverageNeedsUser = testAgentCoverage.unknownLines.length > 0 || testAgentCoverage.weakLines.length > 0;
+    const rawPassed = summary.independent_review_gate_passed === true
         || deliveryReport.independent_review_gate_passed === true
         || gate.pass === true
         || gate.status === "passed";
+    const passed = rawPassed && !testAgentFailures.hasRework && !testAgentFailures.hasNeedsUser && !hasCoverageFailure && !hasCoverageNeedsUser;
     const failed = required && !passed && (gate.status === "failed"
         || Number(gate.failed_count || gate.failedCount || 0) > 0
-        || failedEvidence.length > 0);
+        || failedEvidence.length > 0
+        || testAgentFailures.hasRework
+        || hasCoverageFailure);
     const firstFailure = failedEvidence.find((item) => item && typeof item === "object") || {};
     const subject = sanitizeWorkchainUserText(firstFailure.reviewSubject || firstFailure.review_subject || firstFailure.subject || firstFailure.requester || "", "", 90);
     const reviewer = sanitizeWorkchainUserText(firstFailure.reviewer || firstFailure.agent || "TestAgent", "TestAgent", 80);
-    const failedText = subject
-        ? `${reviewer} 复核 ${subject} 未通过，需要原实现成员返工后重新复核`
-        : "复杂变更独立复核未通过，需要原实现成员返工后重新复核";
+    const coverageFailedText = testAgentCoverage.failedLines[0] || "";
+    const coverageNeedsUserText = testAgentCoverage.unknownLines[0] || testAgentCoverage.weakLines[0] || "";
+    const failedText = testAgentFailures.primaryLine
+        ? `TestAgent 复核未通过：${testAgentFailures.primaryLine}`
+        : coverageFailedText
+            ? `TestAgent 复核未通过：${coverageFailedText}`
+            : subject
+                ? `${reviewer} 对 ${subject} 的复核未通过，需要原实现成员返工后重新复核`
+                : "复杂变更独立复核未通过，需要原实现成员返工后重新复核";
+    const diagnosticAction = testAgentFailures.diagnosticLines[0]
+        ? `先按复核诊断处理：${testAgentFailures.diagnosticLines[0]}；修复后重新运行 TestAgent/独立复核。`
+        : "";
+    const needsUser = required && !passed && !failed && (hasCoverageNeedsUser || !!coverageNeedsUserText);
     return {
         required,
         passed,
         failed,
         missing: required && !passed && !failed,
+        needsUser,
         gate,
         failedEvidence,
+        testAgentFailures,
+        testAgentCoverage,
         failedText,
-        riskText: failed ? failedText : "",
-        nextAction: failed ? "先让原实现成员修复复核失败点，修复后重新运行 TestAgent/独立复核。" : "",
+        riskText: failed ? failedText : needsUser ? `TestAgent 复核需要确认：${coverageNeedsUserText}` : "",
+        nextAction: failed
+            ? diagnosticAction || "先让原实现成员修复复核失败点，修复后重新运行 TestAgent/独立复核。"
+            : needsUser
+                ? "先补齐或确认 TestAgent 标记的待确认验收项，再继续最终总结。"
+                : "",
     };
 }
 function formatAcceptanceEvidence(item) {
@@ -160,6 +516,8 @@ function collectIndependentReviewEvidence(input) {
     const deliveryReport = summary.delivery_report || summary.deliveryReport || completion.delivery_report || completion.deliveryReport || {};
     const gate = summary.independent_review_gate || summary.independentReviewGate || deliveryReport.independent_review_gate || deliveryReport.independentReviewGate || {};
     const gateState = getIndependentReviewGateState(input);
+    const testAgentFailures = gateState.testAgentFailures || collectTestAgentFailureSummary(input);
+    const testAgentCoverage = gateState.testAgentCoverage || collectTestAgentCoverageSummary(input);
     return stringList([
         ...asList(deliveryReport.independent_review || deliveryReport.independentReview),
         ...asList(summary.independent_review || summary.independentReview),
@@ -168,6 +526,11 @@ function collectIndependentReviewEvidence(input) {
         ...asList(gate.failed_evidence || gate.failedEvidence).map(formatReviewEvidence),
         ...collectReceiptReviewEvidence(asList(summary.receipts)),
         ...collectReceiptReviewEvidence(asList(completion.receipts)),
+        ...testAgentFailures.failureLines.map((item) => `返工重点：${item}`),
+        ...testAgentFailures.diagnosticLines.map((item) => `排查建议：${item}`),
+        ...testAgentCoverage.failedLines.map((item) => `返工重点：${item}`),
+        ...testAgentCoverage.unknownLines.map((item) => `待确认：${item}`),
+        ...testAgentCoverage.weakLines.map((item) => `证据强度：${item}`),
         gateState.required
             ? gateState.passed
                 ? "复杂变更独立复核已通过"
@@ -447,11 +810,11 @@ function checkpointLabelFromEvent(item, surface) {
     if (type === "conflict_plan")
         return "已启用修改冲突保护";
     if (type === "global_mission_handoff_ready")
-        return "全局 Agent 已补齐子任务交接";
+        return "我已补齐子任务交接";
     if (type === "worker_handoff_ready")
         return `${agent}工作单已补齐`;
     if (type === "global_mission_plan")
-        return "全局 Agent 已制定跨项目计划";
+        return "我已制定跨项目计划";
     if (type === "dispatch")
         return "已安排执行成员";
     if (type === "direct_task")
@@ -493,7 +856,7 @@ function checkpointLabelFromEvent(item, surface) {
     if (type === "native_session_retry")
         return `${agent}恢复会话继续执行`;
     if (type === "runtime_fallback" || type === "runtime_switch")
-        return agent ? `${agent}切换执行通道` : "Agent 已切换执行通道";
+        return agent ? `${agent}切换执行通道` : "我已切换执行通道";
     if (type === "permission_drift")
         return agent ? `${agent}权限状态已校正` : "权限状态已校正";
     if (type === "runtime_debt_cleanup")
@@ -501,11 +864,11 @@ function checkpointLabelFromEvent(item, surface) {
     if (type === "task_rollback")
         return "已安全撤销改动";
     if (type === "global_supervisor_cycle")
-        return "全局监工已检查子任务";
+        return "我已检查子任务进展";
     if (type === "global_supervisor_rework")
-        return "全局监工已安排返工";
+        return "我已安排子任务返工";
     if (type === "global_supervisor_waiting_user")
-        return "全局监工等待你处理阻塞";
+        return "我在等待你处理阻塞";
     if (type === "global_supervisor_completed")
         return "全局任务已通过交付验收";
     if (type === "global_direct_dispatch_completion_synced")
@@ -817,7 +1180,7 @@ function buildFinalSummaryQuality(input, evidence, terminal, headline, nextActio
         { id: "outcome", label: "完成内容", passed: !!headline, detail: headline },
         { id: "evidence", label: "交付证据", passed: !required || evidence.evidence.length > 0 || evidence.files.length > 0 || evidence.workersDone > 0 || evidence.receipts > 0, detail: evidence.evidence.slice(0, 3).join("；") },
         { id: "verification", label: "验证或验收", passed: !required || (strongVerificationEvidence && !failedVerificationEvidence && !failedAcceptanceEvidence), detail: verificationStatus },
-        { id: "independent_review", label: "独立复核", passed: !required || !evidence.independentReviewGate?.required || evidence.independentReviewGate.passed === true, detail: evidence.independentReviewGate?.failed ? evidence.independentReviewGate.failedText : evidence.independentReviewGate?.missing ? "复杂变更独立复核仍需补齐。" : evidence.independentReviewGate?.passed ? "复杂变更独立复核已通过。" : "" },
+        { id: "independent_review", label: "独立复核", passed: !required || !evidence.independentReviewGate?.required || evidence.independentReviewGate.passed === true, detail: evidence.independentReviewGate?.failed ? evidence.independentReviewGate.failedText : evidence.independentReviewGate?.needsUser ? evidence.independentReviewGate.riskText : evidence.independentReviewGate?.missing ? "复杂变更独立复核仍需补齐。" : evidence.independentReviewGate?.passed ? "复杂变更独立复核已通过。" : "" },
         { id: "risk", label: "风险说明", passed: !required || !!riskStatus, detail: riskStatus },
         { id: "next_action", label: "下一步", passed: !required || !!nextAction, detail: nextAction },
     ];
@@ -861,8 +1224,14 @@ function buildWorkchainQualityFollowup(quality) {
     const independentReviewGap = Array.isArray(quality.checks)
         ? quality.checks.find((item) => item?.id === "independent_review" && item?.passed === false)
         : null;
+    const independentReviewDetail = sanitizeWorkchainUserText(independentReviewGap?.detail || "", "", 220);
+    const independentReviewNeedsConfirmation = /需要确认|待确认|证据待确认|人工确认/i.test(independentReviewDetail);
     const nextAction = independentReviewGap
-        ? "先让原实现成员修复复核未通过的问题，修复后重新运行 TestAgent/独立复核，再给出最终交付总结。"
+        ? independentReviewDetail && !/复杂变更独立复核仍需补齐/.test(independentReviewDetail)
+            ? independentReviewNeedsConfirmation
+                ? `${independentReviewDetail}。确认或补齐证据后重新运行 TestAgent/独立复核，再给出最终交付总结。`
+                : `${independentReviewDetail}。修复后重新运行 TestAgent/独立复核，再给出最终交付总结。`
+            : "先让原实现成员修复复核未通过的问题，修复后重新运行 TestAgent/独立复核，再给出最终交付总结。"
         : `先补齐${missing[0]}，再给出最终交付总结。`;
     return {
         schema: "ccm-main-agent-quality-followup-v1",
@@ -904,8 +1273,18 @@ function buildUserVisibleText(input, evidence) {
             return explicitText;
         return "已受理并进入持续跟踪；最终交付通过验收后，我会再给你完整总结。";
     }
-    if (evidence.independentReviewGate?.failed)
-        return "这轮还不能算完成：独立复核未通过，需要原实现成员返工后重新复核。";
+    if (evidence.independentReviewGate?.failed) {
+        const failure = sanitizeWorkchainUserText(evidence.independentReviewGate.failedText || "", "", 260);
+        return failure
+            ? `这轮还不能算完成：${failure}。`
+            : "这轮还不能算完成：独立复核未通过，需要原实现成员返工后重新复核。";
+    }
+    if (evidence.independentReviewGate?.needsUser) {
+        const detail = sanitizeWorkchainUserText(evidence.independentReviewGate.riskText || "", "", 260);
+        return detail
+            ? `这轮还需要确认：${detail}。`
+            : "这轮还需要确认：TestAgent 标记了待确认的验收项。";
+    }
     if (["failed"].includes(status) || phase === "failed")
         return sanitizeWorkchainUserText(explicit, "这次处理没有完成；原因和排障信息已放在技术详情里。");
     if (["cancelled", "canceled"].includes(status) || phase === "cancelled")
@@ -918,11 +1297,15 @@ function buildUserVisibleText(input, evidence) {
             parts.push(`修改了 ${evidence.files.length} 个文件`);
         if (evidence.verification.length)
             parts.push(`完成 ${evidence.verification.length} 项检查`);
-        if (evidence.independentReview.length && !evidence.independentReviewGate?.failed)
+        if (evidence.independentReview.length && !evidence.independentReviewGate?.failed && !evidence.independentReviewGate?.needsUser)
             parts.push(`完成独立复核`);
         if (evidence.workersDone)
             parts.push(`${evidence.workersDone} 个执行目标已完成`);
-        return parts.length ? `已完成：${parts.join("，")}。` : "已完成本轮处理，并整理了结果给你。";
+        return parts.length
+            ? `已完成：${parts.join("，")}。`
+            : input.mode === "conversation"
+                ? "回复已整理给你。"
+                : "处理结果已整理，是否已经交付以验收和最终总结为准。";
     }
     if (["waiting_confirmation", "waiting_clarification"].includes(status) || phase === "needs_user")
         return sanitizeWorkchainUserText(explicit, "我需要你确认目标、范围或授权后再继续。");
@@ -1055,7 +1438,7 @@ function formatMainAgentCompletionReply(options) {
         return original;
     if (!generic && shouldShape && replyAlreadyHasFinalSummaryShape(original))
         return original;
-    const headline = sanitizeWorkchainUserText(summary.headline, "本轮处理已完成。", 360);
+    const headline = sanitizeWorkchainUserText(summary.headline, "处理结果已整理，是否已经交付以验收和最终总结为准。", 360);
     const evidenceLines = narrativeList(summary.evidence, 6, "处理证据已整理，技术细节已放入技术详情。");
     const verificationLines = narrativeList(summary.verification, 6, "验证记录已整理，技术细节已放入技术详情。");
     const verificationStatus = sanitizeWorkchainUserText(summary.verification_status, "", 260);
@@ -1075,7 +1458,7 @@ function formatMainAgentCompletionReply(options) {
     else if (shouldShape && quality.required)
         lines.push(quality.passed === false
             ? "处理总结：本轮已有处理记录，但还缺少可验收的交付证据。"
-            : "处理总结：我已完成本轮处理，但没有更多可展示的业务证据。");
+            : "处理总结：处理结果已整理，但没有更多可展示的业务证据。");
     if (shouldShape && qualityMissing.length) {
         lines.push(`还需补齐：\n- ${qualityMissing.join("\n- ")}${qualityHeadline ? `\n${qualityHeadline}` : ""}`);
     }
@@ -1143,6 +1526,122 @@ function runMainAgentWorkchainSelfTest() {
                         summary: "登录恢复验证仍未通过。",
                         evidence: ["npm test 未通过"],
                     }],
+            },
+        },
+    });
+    const failedTestAgentSummary = buildMainAgentWorkchain({
+        surface: "global",
+        status: "completed",
+        mode: "delegation",
+        userText: "已完成。",
+        summary: {
+            actual_file_changes: [{ path: "src/session.ts" }],
+            verification_executed: ["npm test"],
+            acceptance_gate_passed: true,
+            test_agent_report: {
+                schema: "ccm-test-agent-report-v1",
+                status: "failed",
+                recommendation: "rework",
+                failureSummary: [{
+                        type: "browser",
+                        project: "web-app",
+                        title: "登录恢复浏览器复核",
+                        status: "failed",
+                        reason: "会话请求没有恢复登录态；失败截图在 C:/tmp/test-agent-artifacts/workchain/screenshots/login.failure.png。",
+                        nextAction: "先修复会话恢复请求，再重新运行浏览器复核。",
+                        diagnostics: [
+                            "打开失败截图核对页面是否仍停留在登录态。",
+                            "检查浏览器网络日志中的 /api/session 请求。",
+                        ],
+                    }],
+                metadata: {
+                    artifactFiles: {
+                        reportMarkdownPath: "C:/tmp/test-agent-artifacts/workchain/report.md",
+                        manifestPath: "C:/tmp/test-agent-artifacts/workchain/artifact-manifest.json",
+                    },
+                },
+            },
+        },
+    });
+    const summaryOnlyTestAgentGap = buildMainAgentWorkchain({
+        surface: "group",
+        status: "completed",
+        mode: "delegation",
+        userText: "已完成。",
+        summary: {
+            actual_file_changes: [{ path: "src/login.ts" }],
+            verification_executed: ["npm test"],
+            acceptance_gate_passed: true,
+            test_agent_report: {
+                schema: "ccm-test-agent-report-v1",
+                status: "passed",
+                recommendation: "accept",
+                verdict: {
+                    schema: "ccm-test-agent-verdict-v1",
+                    status: "passed",
+                    recommendation: "accept",
+                    canAccept: true,
+                    requiredCheckSummary: {
+                        total: 1,
+                        statusCounts: { verified: 0, not_verified: 1, unknown: 0 },
+                        verified: [],
+                        notVerified: [{ check: "browser_e2e", status: "not_verified", evidence: [], missingReason: "浏览器流程没有实际执行证据" }],
+                        unknown: [],
+                    },
+                    acceptanceSummary: {
+                        total: 1,
+                        statusCounts: { verified: 1, not_verified: 0, unknown: 0 },
+                        matchStrengthCounts: { direct: 1, token: 0, fallback: 0, none: 0 },
+                        evidenceSourceCounts: { matched_evidence: 1, single_criterion_report_status: 0, none: 0 },
+                        verified: [{ criterion: "登录恢复可用", status: "verified", evidence: ["浏览器断言通过"], matchStrength: "direct", evidenceSource: "matched_evidence" }],
+                        notVerified: [],
+                        unknown: [],
+                    },
+                },
+            },
+        },
+    });
+    const weakTestAgentAcceptanceSummary = buildMainAgentWorkchain({
+        surface: "global",
+        status: "completed",
+        mode: "delegation",
+        userText: "已完成。",
+        summary: {
+            actual_file_changes: [{ path: "src/session.ts" }],
+            verification_executed: ["npm test"],
+            acceptance_gate_passed: true,
+            test_agent_report: {
+                schema: "ccm-test-agent-report-v1",
+                status: "passed",
+                recommendation: "accept",
+                verdict: {
+                    schema: "ccm-test-agent-verdict-v1",
+                    status: "passed",
+                    recommendation: "accept",
+                    canAccept: true,
+                    requiredCheckSummary: {
+                        total: 1,
+                        statusCounts: { verified: 1, not_verified: 0, unknown: 0 },
+                        verified: [{ check: "commands", status: "verified", evidence: ["npm test"] }],
+                        notVerified: [],
+                        unknown: [],
+                    },
+                    acceptanceSummary: {
+                        total: 1,
+                        statusCounts: { verified: 1, not_verified: 0, unknown: 0 },
+                        matchStrengthCounts: { direct: 0, token: 0, fallback: 1, none: 0 },
+                        evidenceSourceCounts: { matched_evidence: 0, single_criterion_report_status: 1, none: 0 },
+                        verified: [{
+                                criterion: "登录恢复需要真实浏览器证据",
+                                status: "verified",
+                                evidence: ["整体报告通过"],
+                                matchStrength: "fallback",
+                                evidenceSource: "single_criterion_report_status",
+                            }],
+                        notVerified: [],
+                        unknown: [],
+                    },
+                },
             },
         },
     });
@@ -1240,7 +1739,7 @@ function runMainAgentWorkchainSelfTest() {
         risks: [],
     }, true, "已完成", "继续");
     const checks = {
-        simpleHasSummary: simple.user_visible_text.includes("已完成"),
+        simpleHasSummary: simple.user_visible_text.includes("回复已整理给你"),
         groupEvidenceVisible: group.completion_summary.evidence.length >= 5,
         groupCompletionSummaryIncludesReviewEvidence: group.completion_summary.acceptance?.some((item) => item.includes("最终验收已通过"))
             && group.completion_summary.independent_review?.some((item) => item.includes("test-agent"))
@@ -1257,6 +1756,38 @@ function runMainAgentWorkchainSelfTest() {
         failedReviewKeepsTodoActive: failedReview.todo_plan?.quality_followup_required === true
             && failedReview.todo_plan?.current_step?.id === "quality-followup"
             && failedReview.todo_plan?.current_step?.activeForm?.includes("独立复核"),
+        testAgentFailureSummaryBlocksFalseCompletion: failedTestAgentSummary.completion_summary.final_summary_quality?.passed === false
+            && failedTestAgentSummary.completion_summary.final_summary_quality?.checks?.some((item) => item.id === "independent_review" && item.passed === false)
+            && failedTestAgentSummary.user_visible_text.includes("TestAgent 复核未通过")
+            && failedTestAgentSummary.user_visible_text.includes("登录恢复浏览器复核")
+            && failedTestAgentSummary.completion_summary.independent_review?.some((item) => item.includes("返工重点") && item.includes("浏览器检查"))
+            && failedTestAgentSummary.completion_summary.independent_review?.some((item) => item.includes("排查建议") && item.includes("打开失败截图核对页面"))
+            && failedTestAgentSummary.completion_summary.next_action?.includes("重新运行 TestAgent")
+            && failedTestAgentSummary.todo_plan?.quality_followup_required === true
+            && !/^已完成/.test(failedTestAgentSummary.user_visible_text || "")
+            && !/test-agent-artifacts|artifact-manifest|report\.md|C:\/tmp|ccm-test-agent-report-v1/i.test(JSON.stringify({
+                text: failedTestAgentSummary.user_visible_text,
+                review: failedTestAgentSummary.completion_summary.independent_review,
+                next: failedTestAgentSummary.completion_summary.next_action,
+            })),
+        testAgentSummaryOnlyCoverageGapBlocksFalseCompletion: summaryOnlyTestAgentGap.completion_summary.final_summary_quality?.passed === false
+            && summaryOnlyTestAgentGap.completion_summary.final_summary_quality?.checks?.some((item) => item.id === "independent_review" && item.passed === false)
+            && summaryOnlyTestAgentGap.user_visible_text.includes("TestAgent 复核未通过")
+            && summaryOnlyTestAgentGap.user_visible_text.includes("必检项：浏览器流程未覆盖")
+            && summaryOnlyTestAgentGap.completion_summary.independent_review?.some((item) => item.includes("返工重点") && item.includes("浏览器流程未覆盖"))
+            && summaryOnlyTestAgentGap.completion_summary.next_action?.includes("重新运行 TestAgent")
+            && !/^已完成/.test(summaryOnlyTestAgentGap.user_visible_text || ""),
+        testAgentWeakAcceptanceSummaryNeedsConfirmation: weakTestAgentAcceptanceSummary.completion_summary.final_summary_quality?.passed === false
+            && weakTestAgentAcceptanceSummary.completion_summary.final_summary_quality?.checks?.some((item) => item.id === "independent_review" && item.passed === false)
+            && weakTestAgentAcceptanceSummary.user_visible_text.includes("还需要确认")
+            && weakTestAgentAcceptanceSummary.user_visible_text.includes("验收证据待确认")
+            && weakTestAgentAcceptanceSummary.completion_summary.independent_review?.some((item) => item.includes("证据强度") && item.includes("整体复核结果推断"))
+            && weakTestAgentAcceptanceSummary.completion_summary.next_action?.includes("确认或补齐证据")
+            && !/fallback|single_criterion_report_status|ccm-test-agent-verdict-v1/i.test(JSON.stringify({
+                text: weakTestAgentAcceptanceSummary.user_visible_text,
+                review: weakTestAgentAcceptanceSummary.completion_summary.independent_review,
+                next: weakTestAgentAcceptanceSummary.completion_summary.next_action,
+            })),
         workchainQualityRequiresProtocolSanitizer: group.completion_summary.final_summary_quality?.checks?.some((item) => item.id === "user_visible_protocol_sanitized" && item.passed === true)
             && protocolLeak.completion_summary.final_summary_quality?.checks?.some((item) => item.id === "user_visible_protocol_sanitized" && item.passed === true),
         workchainVisibleProtocolLeakSanitized: !WORKCHAIN_USER_VISIBLE_PROTOCOL_PATTERN.test(protocolLeak.user_visible_text)
@@ -1312,6 +1843,9 @@ function runMainAgentWorkchainSelfTest() {
         workchainQualityFailureReplyShowsMissingItems: incompleteQualityReply.includes("还需补齐")
             && incompleteQualityReply.includes("交付证据")
             && incompleteQualityReply.includes("先补齐交付证据"),
+        workchainGenericCompletionFallbackAvoidsFalseDone: simple.user_visible_text === "回复已整理给你。"
+            && !simple.user_visible_text.includes("已完成本轮处理")
+            && !incompleteQualityReply.includes("我已完成本轮处理"),
         workchainWeakAcceptanceOnlyBlocksFalseCompletion: weakAcceptanceOnly.completion_summary.final_summary_quality?.passed === false
             && weakAcceptanceOnly.completion_summary.final_summary_quality?.checks?.some((item) => item.id === "verification" && item.passed === false)
             && weakAcceptanceOnly.completion_summary.verification_status?.includes("没有捕获到实际验证")
@@ -1327,6 +1861,6 @@ function runMainAgentWorkchainSelfTest() {
         progressCheckpointsVisible: group.progress_checkpoints?.schema === "ccm-main-agent-progress-checkpoints-v1" && group.progress_checkpoints.items.length > 0,
         progressCheckpointsHideRawProtocol: !INTERNAL_TEXT_PATTERN.test(JSON.stringify(group.progress_checkpoints.items)),
     };
-    return { pass: Object.values(checks).every(Boolean), checks, simple, group, reply, shapedReply, ordinaryReply, runningTodo, missingVerificationTodo, incompleteQuality, incompleteQualityReply, protocolLeak, protocolLeakReply, legacySummaryReply, rawLeakQuality };
+    return { pass: Object.values(checks).every(Boolean), checks, simple, group, failedTestAgentSummary, summaryOnlyTestAgentGap, weakTestAgentAcceptanceSummary, reply, shapedReply, ordinaryReply, runningTodo, missingVerificationTodo, incompleteQuality, incompleteQualityReply, protocolLeak, protocolLeakReply, legacySummaryReply, rawLeakQuality };
 }
 //# sourceMappingURL=workchain.js.map

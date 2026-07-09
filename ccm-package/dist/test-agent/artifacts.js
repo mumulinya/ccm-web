@@ -39,6 +39,10 @@ exports.writeTestAgentArtifacts = writeTestAgentArtifacts;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const crypto = __importStar(require("crypto"));
+const acceptance_summary_1 = require("./acceptance-summary");
+const required_check_summary_1 = require("./required-check-summary");
+const provider_gaps_1 = require("./browser/provider-gaps");
+const provider_summary_1 = require("./browser/provider-summary");
 const utils_1 = require("./utils");
 const verdict_1 = require("./verdict");
 function fileIntegrity(filePath, options = {}) {
@@ -89,9 +93,17 @@ function browserLine(result) {
     const finalUrl = result.finalUrl && result.finalUrl !== result.url ? `; final=${result.finalUrl}` : "";
     const viewport = result.viewport ? `; viewport=${result.viewport.width}x${result.viewport.height}${result.viewport.isMobile ? "; mobile" : ""}` : "";
     const browserContext = result.contextOptions ? `; context=${browserContextOptionsSummary(result.contextOptions)}` : "";
+    const source = browserSourceSummary(result.context);
     const artifacts = (result.browserArtifacts || []).length;
-    const detail = result.error || `${result.url}${finalUrl}${viewport}${browserContext}; steps=${result.steps.length}; screenshots=${result.screenshots.length}; artifacts=${artifacts}${result.probeType ? `; probe=${result.probeType}` : ""}`;
+    const detail = result.error || `${result.url}${finalUrl}${viewport}${browserContext}${source ? `; source=${source}` : ""}; steps=${result.steps.length}; screenshots=${result.screenshots.length}; artifacts=${artifacts}${result.probeType ? `; probe=${result.probeType}` : ""}`;
     return statusLine(`${result.project} ${result.adversarial ? "adversarial " : ""}browser ${result.name}`, result.status, detail);
+}
+function browserSourceSummary(context) {
+    if (!context)
+        return "";
+    const generatedBy = String(context.generatedBy || context.source || "").trim();
+    const criteria = Array.isArray(context.acceptanceCriteria) ? context.acceptanceCriteria.length : 0;
+    return [generatedBy, criteria ? `criteria=${criteria}` : ""].filter(Boolean).join("; ");
 }
 function browserContextOptionsSummary(contextOptions) {
     const parts = [
@@ -118,6 +130,32 @@ function browserInteractionSummaryLine(item) {
     const detail = `actions=${item.actionCount} passed=${item.passedActions} failed=${item.failedActions}; assertions=${item.assertionCount} passed=${item.passedAssertions} failed=${item.failedAssertions}; actionTypes=${typedCounts(item.actionTypes)}; assertionTypes=${typedCounts(item.assertionTypes)}${failed}`;
     return statusLine(`${item.project} browser interactions ${item.name}`, item.status, detail);
 }
+function browserProviderGapLine(item) {
+    return statusLine(`${item.provider} ${item.category}`, "gap", (0, provider_gaps_1.formatBrowserProviderGapLine)(item));
+}
+function browserProviderSummaryLines(report) {
+    const summary = report.browserProviderSummary;
+    if (!summary)
+        return ["- none"];
+    const lines = [`- ${(0, provider_summary_1.formatBrowserProviderSummaryLine)(summary)}`];
+    for (const item of summary.items || []) {
+        const detail = [
+            `preferred=${item.preferred ? "yes" : "no"}`,
+            `available=${item.available ? "yes" : "no"}`,
+            `selected=${item.selected ? "yes" : "no"}`,
+            `attempted=${item.attempted ? "yes" : "no"}`,
+            `results=${item.resultCount}`,
+            `passed=${item.passed}`,
+            `failed=${item.failed}`,
+            `blocked=${item.blocked}`,
+            `skipped=${item.skipped}`,
+            item.reason ? `reason=${item.reason}` : "",
+            item.tools?.length ? `tools=${item.tools.length}` : "",
+        ].filter(Boolean).join("; ");
+        lines.push(statusLine(`${item.label || item.provider}`, item.provider, detail));
+    }
+    return lines;
+}
 function evidenceLine(item) {
     const target = item.path || item.detail || "";
     return statusLine(item.title, item.status, target);
@@ -125,6 +163,12 @@ function evidenceLine(item) {
 function requiredCheckLine(item) {
     const detail = item.evidence.length ? item.evidence.join("; ") : item.missingReason || "";
     return statusLine(item.check, item.status, detail);
+}
+function failureSummaryLine(item) {
+    const evidence = item.evidence?.length ? `; evidence=${item.evidence.join("; ")}` : "";
+    const diagnostics = item.diagnostics?.length ? `; diagnostics=${item.diagnostics.join(" | ")}` : "";
+    const next = item.nextAction ? `; next=${item.nextAction}` : "";
+    return statusLine(`${item.type}${item.project ? ` ${item.project}` : ""} ${item.title}`, item.status, `${item.reason}${evidence}${diagnostics}${next}`);
 }
 function fence(value, max = 4000) {
     const text = (0, utils_1.compactText)(value ?? "", max).replace(/```/g, "`` `").trim();
@@ -209,6 +253,7 @@ function browserDetail(result, index) {
         `- Status: ${result.status}`,
         `- Adversarial: ${result.adversarial ? "yes" : "no"}`,
         ...(result.probeType ? [`- Probe type: ${result.probeType}`] : []),
+        ...(browserSourceSummary(result.context) ? [`- Source: ${browserSourceSummary(result.context)}`] : []),
         `- Provider: ${result.provider || "(unknown)"}`,
         `- URL: ${result.url}`,
         ...(result.finalUrl ? [`- Final URL: ${result.finalUrl}`] : []),
@@ -217,6 +262,13 @@ function browserDetail(result, index) {
         ...(result.title ? [`- Title: ${result.title}`] : []),
         `- Duration: ${result.durationMs}ms`,
         ...(result.error ? [`- Error: ${result.error}`] : []),
+        ...(result.context?.acceptanceCriteria ? [
+            "",
+            "**Acceptance source:**",
+            ...(Array.isArray(result.context.acceptanceCriteria) && result.context.acceptanceCriteria.length
+                ? result.context.acceptanceCriteria.map((criterion) => `- ${criterion}`)
+                : ["- none"]),
+        ] : []),
         "",
         "**Steps:**",
         ...steps,
@@ -315,6 +367,8 @@ function browserArtifactManifestType(artifact) {
         return "browser_har";
     if (artifact.type === "video")
         return "browser_video";
+    if (artifact.type === "accessibility_snapshot")
+        return "browser_accessibility_snapshot";
     return "browser_artifact";
 }
 function buildTestAgentArtifactManifest(report, manifestPath) {
@@ -436,6 +490,7 @@ function buildTestAgentArtifactManifest(report, manifestPath) {
             reports: files.filter(item => item.type === "report_json" || item.type === "report_markdown").length,
             screenshots: files.filter(item => item.type === "screenshot").length,
             browserSnapshots: files.filter(item => item.type === "browser_snapshot").length,
+            browserAccessibilitySnapshots: files.filter(item => item.type === "browser_accessibility_snapshot").length,
             browserConsoleLogs: files.filter(item => item.type === "browser_console_log").length,
             browserPopupLogs: files.filter(item => item.type === "browser_popup_log").length,
             browserNetworkLogs: files.filter(item => item.type === "browser_network_log").length,
@@ -452,6 +507,8 @@ function buildTestAgentArtifactManifest(report, manifestPath) {
     };
 }
 function buildTestAgentMarkdownReport(report) {
+    const requiredCheckSummary = (0, required_check_summary_1.buildRequiredCheckSummary)(report.requiredCheckCoverage, { evidenceLimit: 1, textLimit: 260 });
+    const acceptanceSummary = (0, acceptance_summary_1.buildAcceptanceSummary)(report.acceptanceCoverage, { evidenceLimit: 1, textLimit: 260 });
     const lines = [
         `# TestAgent Report`,
         "",
@@ -488,9 +545,29 @@ function buildTestAgentMarkdownReport(report) {
         "",
         ...((report.browserInteractionSummary || []).length ? (report.browserInteractionSummary || []).map(browserInteractionSummaryLine) : ["- none"]),
         "",
+        "## Browser Provider Summary",
+        "",
+        ...browserProviderSummaryLines(report),
+        "",
+        "## Browser Provider Gaps",
+        "",
+        ...((report.browserProviderGaps || []).length ? (report.browserProviderGaps || []).map(browserProviderGapLine) : ["- none"]),
+        "",
+        "## Failure Summary",
+        "",
+        ...((report.failureSummary || []).length ? (report.failureSummary || []).map(failureSummaryLine) : ["- none"]),
+        "",
+        "## Required Check Summary",
+        "",
+        ...(0, required_check_summary_1.formatRequiredCheckMarkdownSummaryLines)(requiredCheckSummary),
+        "",
         "## Required Check Coverage",
         "",
         ...(report.requiredCheckCoverage.length ? report.requiredCheckCoverage.map(requiredCheckLine) : ["- none"]),
+        "",
+        "## Acceptance Summary",
+        "",
+        ...(0, acceptance_summary_1.formatAcceptanceMarkdownSummaryLines)(acceptanceSummary),
         "",
         "## Acceptance Coverage",
         "",

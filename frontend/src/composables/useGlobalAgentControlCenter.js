@@ -127,9 +127,9 @@ export function useGlobalAgentControlCenter(options = {}) {
     try {
       await postJson('/api/global-agent/supervisors/control', { id: row.id, operation, reason: '全局 Agent 总控面板操作' })
       await loadGlobalControlCenter(intentPreviewText.value || chatInput.value || '')
-      toast.success('监工状态已更新')
+      toast.success('持续跟进状态已更新')
     } catch (error) {
-      toast.error(error?.message || '监工控制失败')
+      toast.error(error?.message || '持续跟进控制失败')
     }
   }
 

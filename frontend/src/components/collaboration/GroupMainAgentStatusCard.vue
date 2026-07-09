@@ -8,7 +8,7 @@ import {
   mainDecisionPlanSummary,
   mainDecisionTone,
 } from '../../composables/useMainAgentDisplay.js'
-import { sanitizeUserFacingPlanStructure } from '../../utils/agentDisplay.js'
+import { sanitizeUserFacingPlanStructure, sanitizeUserFacingPlanText } from '../../utils/agentDisplay.js'
 
 const props = defineProps({
   status: { type: Object, default: null },
@@ -18,6 +18,7 @@ const props = defineProps({
 
 const emit = defineEmits(['open-pipeline', 'locate-decision'])
 const displayStatusValue = (value, fallback = '状态已整理。', max = 260) => sanitizeUserFacingPlanStructure(value, { fallback, max })
+const displayStatusText = (value, fallback = '状态已整理。', max = 220) => sanitizeUserFacingPlanText(value, fallback, max)
 
 const openQaCount = computed(() => {
   const statusCount = Number(props.status?.open_qa_count || 0)
@@ -26,19 +27,20 @@ const openQaCount = computed(() => {
 })
 const runningAgents = computed(() => {
   const agents = props.status?.running_child_agents || []
-  return agents.length ? agents.join('、') : '无'
+  return agents.length ? agents.map(agent => displayStatusText(agent, '执行成员', 80)).join('、') : '无'
 })
 const blockerText = computed(() => {
   return [...(props.status?.blockers || []), ...(props.status?.needs || [])]
     .slice(0, 3)
-    .map(x => compactStatusText(x))
+    .map(x => displayStatusText(compactStatusText(x), '待处理事项已整理。', 120))
     .join('；')
 })
-const latestCheckpoint = computed(() => props.status?.latest_progress_checkpoint || props.status?.latestProgressCheckpoint || null)
+const latestCheckpoint = computed(() => displayStatusValue(props.status?.latest_progress_checkpoint || props.status?.latestProgressCheckpoint || null, '最近进展已整理。', 260))
 const recentCheckpoints = computed(() => {
   const items = props.status?.recent_progress_checkpoints || props.status?.recentProgressCheckpoints || props.status?.progress_checkpoints || props.status?.progressCheckpoints || []
   const latestKey = latestCheckpoint.value?.id || `${latestCheckpoint.value?.label || ''}:${latestCheckpoint.value?.detail || ''}`
   return (Array.isArray(items) ? items : [])
+    .map(item => displayStatusValue(item, '进展已整理。', 220))
     .filter(item => item?.label)
     .filter(item => (item.id || `${item.label || ''}:${item.detail || ''}`) !== latestKey)
     .slice(-2)
@@ -69,7 +71,11 @@ const currentTodoSummary = computed(() => {
   const hasVerificationReminder = Boolean(summary.verification_reminder || summary.verificationReminder)
   const allDone = total > 0 && completed >= total && ['completed', 'done', 'success', 'succeeded'].includes(status)
   if (archiveCompleted && allDone && !hasVerificationReminder) return null
-  return displayStatusValue(summary, '当前步骤已整理。', 260)
+  const normalized = displayStatusValue(summary, '当前步骤已整理。', 260)
+  ;['detail', 'recent_action', 'recentAction', 'needs_action', 'needsAction', 'next_action', 'nextAction'].forEach(key => {
+    if (!summary?.[key]) normalized[key] = ''
+  })
+  return normalized
 })
 const currentTodoTone = computed(() => {
   const status = String(currentTodoSummary.value?.status || '').toLowerCase()
@@ -133,7 +139,7 @@ const childAgentStatusMeta = computed(() => {
   if (running) bits.push(`处理中 ${running}`)
   if (waiting) bits.push(`等待 ${waiting}`)
   if (attention) bits.push(`待补齐 ${attention}`)
-  if (completed) bits.push(`完成 ${completed}`)
+  if (completed) bits.push(`已回传 ${completed}`)
   return bits.join(' · ')
 })
 const deliveryReport = computed(() => props.status?.latest_delivery_summary?.delivery_report || props.status?.latestDeliverySummary?.deliveryReport || null)
@@ -213,7 +219,7 @@ const failedGateText = computed(() => {
     <div class="main-agent-status-head">
       <div>
         <span class="main-agent-status-title" title="当前群聊内的计划、任务安排、结果验收和交付报告状态。">协作状态</span>
-        <span class="main-agent-phase">{{ status?.label || '空闲' }}</span>
+        <span class="main-agent-phase">{{ displayStatusText(status?.label || '空闲', '空闲', 80) }}</span>
       </div>
       <button v-if="status?.latest_delivery_summary" class="btn btn-outline btn-xs" @click="emit('open-pipeline')">协作看板</button>
     </div>
@@ -294,7 +300,7 @@ const failedGateText = computed(() => {
         <span class="item-value">{{ runningAgents }}</span>
       </div>
       <div class="main-agent-status-item">
-        <span class="item-label">开放问答</span>
+        <span class="item-label">待确认问答</span>
         <span class="item-value">{{ openQaCount }} 个</span>
       </div>
       <div class="main-agent-status-item" v-if="status?.latest_delivery_summary && !completionSummary">

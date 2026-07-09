@@ -84,6 +84,7 @@ export declare function runGlobalMissionSupervisorSelfTest(): {
         fixedVerificationSection: boolean;
         mergeTracked: boolean;
         noFalseCompletion: boolean;
+        globalMissionSupervisorWeakChildNotCompleted: boolean;
     };
     report: {
         status: string;

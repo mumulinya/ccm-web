@@ -10,6 +10,10 @@ export const GROUP_TYPED_MEMORY_MAX_INDEX_LINES = 200;
 export const GROUP_TYPED_MEMORY_MAX_INDEX_BYTES = 25_000;
 export const GROUP_TYPED_MEMORY_MAX_RECALL = 5;
 export const GROUP_TYPED_MEMORY_RECALL_LEDGER = ".recall-ledger.json";
+export const GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_LEDGER = ".pressure-recall-usage-ledger.json";
+export const GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_HALF_LIFE_DAYS = 21;
+export const GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_STALE_AFTER_DAYS = 60;
+export const GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_CROSS_GROUP_MAX_GROUPS = 24;
 export const GROUP_TYPED_MEMORY_LOAD_PLAN_VERSION = 1;
 export const GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_ENTRIES = 80;
 export const GROUP_TYPED_MEMORY_LOAD_PLAN_MAX_INCLUDE_DEPTH = 5;
@@ -26,14 +30,19 @@ export const GROUP_TYPED_MEMORY_DISTILLATION_FACT_LIMIT = 100;
 export const GROUP_TYPED_MEMORY_DISTILLATION_QUALITY_VERSION = 1;
 export const GROUP_PROVIDER_REPROOF_RECEIPT_CONSUMPTION_DISTILLATION_VERSION = 1;
 export const GROUP_IGNORE_MEMORY_RECEIPT_REPAIR_DISTILLATION_VERSION = 1;
+export const GROUP_PRESSURE_MEMORY_PROVENANCE_RECEIPT_REPAIR_DISTILLATION_VERSION = 1;
+export const GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION = 1;
+export const GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_DISTILLATION_VERSION = 1;
 export const GROUP_CONTEXT_USAGE_REPAIR_DISTILLATION_VERSION = 1;
 export const GROUP_COMPACT_STRATEGY_TYPED_MEMORY_DISTILLATION_VERSION = 1;
+export const GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION = 1;
 export const GROUP_CLAUDE_MEMORY_EXTERNAL_INCLUDE_APPROVAL_LEDGER = ".claude-external-include-approvals.json";
 export const GROUP_CLAUDE_INSTRUCTIONS_LOADED_HOOK_LEDGER = ".instructions-loaded-hooks.json";
 
 export type GroupTypedMemoryType = "user" | "feedback" | "project" | "reference";
 
 const GROUP_TYPED_MEMORY_DIR = path.join(CCM_DIR, "group-memory-md");
+const GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR = path.join(CCM_DIR, "group-memory-replay-repair-work-items");
 const VALID_TYPES = new Set<GroupTypedMemoryType>(["user", "feedback", "project", "reference"]);
 const CLAUDE_EDITABLE_SETTING_SOURCES = ["userSettings", "projectSettings", "localSettings"] as const;
 const CLAUDE_ALWAYS_ON_SETTING_SOURCES = ["policySettings", "flagSettings"] as const;
@@ -378,6 +387,1193 @@ function scorePostCompactCandidateUsageHint(corpus: string, hints: any[] = []) {
   return { adjustment, matched };
 }
 
+function firstFiniteNumber(...values: any[]) {
+  for (const value of values) {
+    if (value === undefined || value === null || value === "") continue;
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return 0;
+}
+
+function normalizeWorkerContextPressureStatus(rawStatus: any, pressure = 0, freeTokens = 0, compactRecommended = false) {
+  const status = String(rawStatus || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (["over_budget", "critical", "compact_recommended"].includes(status)) return status;
+  if (/over.*budget|budget.*exhaust|negative_free|blocked_by_budget/.test(status)) return "over_budget";
+  if (/critical|emergency/.test(status)) return "critical";
+  if (/compact|compress|crop|trim|pressure|warning/.test(status) && !/ok|pass|recovered|continue/.test(status)) return "compact_recommended";
+  if (freeTokens < 0 || pressure >= 100) return "over_budget";
+  if (pressure >= 90) return "critical";
+  if (compactRecommended || pressure >= 82) return "compact_recommended";
+  return "";
+}
+
+function normalizeWorkerContextPressureRecallSignals(options: any = {}) {
+  const sources: any[] = [];
+  const memory = options.groupMemory || options.group_memory || options.memory || options.workerMemory || options.worker_memory || null;
+  const addSource = (source: string, raw: any) => {
+    if (raw === undefined || raw === null || raw === "") return;
+    if (Array.isArray(raw)) {
+      raw.forEach((item, index) => addSource(`${source}[${index}]`, item));
+      return;
+    }
+    const value = typeof raw === "object" ? raw : { status: raw };
+    sources.push({ source, raw: value });
+  };
+  addSource("worker_context_packet_context_usage", options.workerContextPacketContextUsage || options.worker_context_packet_context_usage);
+  addSource("worker_context_usage", options.workerContextUsage || options.worker_context_usage || options.contextUsage || options.context_usage);
+  addSource("worker_context_pressure", options.workerContextPressure || options.worker_context_pressure || options.contextPressure || options.context_pressure);
+  addSource("pre_dispatch_gate", options.preDispatchGate || options.pre_dispatch_gate || options.workerContextPreDispatchGate || options.worker_context_pre_dispatch_gate);
+  addSource("context_compaction_retry", options.contextCompactionRetry || options.context_compaction_retry || options.workerContextCompactionRetry || options.worker_context_compaction_retry);
+  addSource("compact_strategy_pressure", options.compactStrategyPressure || options.compact_strategy_pressure || options.compactStrategyDecision || options.compact_strategy_decision);
+  addSource("ptl_emergency", options.ptlEmergency || options.ptl_emergency || options.ptlEmergencyHint || options.ptl_emergency_hint);
+  if (options.forceWorkerContextPressureRecall === true || options.force_worker_context_pressure_recall === true) {
+    addSource("forced", { status: "compact_recommended", reason: "force_worker_context_pressure_recall" });
+  }
+  if (memory && typeof memory === "object") {
+    const compaction = memory.compaction || {};
+    const boundary = memory.compactBoundary || memory.compact_boundary || {};
+    const postRestore = boundary.post_compact_restore || boundary.postCompactRestore || {};
+    const messageCompression = memory.messageCompression || memory.message_compression || {};
+    addSource("group_memory_context_pressure_warning", compaction.contextPressureWarning || compaction.context_pressure_warning || compaction.compactWarning || compaction.compact_warning || messageCompression.contextPressureWarning || messageCompression.context_pressure_warning);
+    addSource("group_memory_pre_compact_warning", compaction.preCompactWarning || compaction.pre_compact_warning);
+    addSource("group_memory_ptl_emergency", compaction.ptlEmergency || compaction.ptl_emergency || boundary.ptlEmergency || boundary.ptl_emergency || postRestore.ptlEmergency || postRestore.ptl_emergency);
+    addSource("group_memory_compact_strategy_decision", compaction.compactStrategyDecision || compaction.compact_strategy_decision || boundary.compactStrategyDecision || boundary.compact_strategy_decision || postRestore.strategyDecision || postRestore.strategy_decision || messageCompression.compactStrategyDecision || messageCompression.compact_strategy_decision);
+    addSource("group_memory_partial_compact", compaction.partialCompact || compaction.partial_compact || boundary.partialCompact || boundary.partial_compact);
+  }
+
+  const signals = sources.map(({ source, raw }) => {
+    const compactRecommended = raw.compact_recommended === true
+      || raw.compactRecommended === true
+      || raw.must_repair_before_dispatch === true
+      || raw.mustRepairBeforeDispatch === true
+      || raw.blocked === true
+      || raw.dispatch_ready === false
+      || raw.dispatchReady === false
+      || /compact|compress|crop|trim|budget|pressure/i.test(`${raw.recommendation || ""}\n${raw.next_step || raw.nextStep || ""}\n${raw.reason || ""}`);
+    const pressure = firstFiniteNumber(raw.pressure, raw.worker_context_packet_pressure, raw.context_pressure, raw.contextPressure);
+    const totalTokens = firstFiniteNumber(raw.total_tokens, raw.totalTokens, raw.worker_context_packet_total_tokens);
+    const maxTokens = firstFiniteNumber(raw.max_tokens, raw.maxTokens, raw.worker_context_packet_max_tokens);
+    const autocompactBufferTokens = firstFiniteNumber(raw.autocompact_buffer_tokens, raw.autocompactBufferTokens, raw.worker_context_packet_autocompact_buffer_tokens);
+    const computedFreeTokens = maxTokens > 0 ? maxTokens - totalTokens - autocompactBufferTokens : 0;
+    const freeTokens = firstFiniteNumber(raw.free_tokens, raw.freeTokens, raw.worker_context_packet_free_tokens, computedFreeTokens);
+    const rawStatus = raw.status
+      || raw.usage_status
+      || raw.usageStatus
+      || raw.pressure_status
+      || raw.pressureStatus
+      || raw.level
+      || raw.emergency_level
+      || raw.emergencyLevel
+      || raw.recommendation
+      || raw.next_step
+      || raw.nextStep
+      || "";
+    const pressureStatus = normalizeWorkerContextPressureStatus(rawStatus, pressure, freeTokens, compactRecommended);
+    const suppressed = raw.suppressed === true || raw.suppress === true || raw.is_suppressed === true || raw.isSuppressed === true;
+    const blockedOutcomeCount = firstFiniteNumber(raw.blocked_outcome_count, raw.blockedOutcomeCount, raw.blocked_count, raw.blockedCount);
+    const taskCompactedBlockedCount = firstFiniteNumber(raw.task_compacted_blocked_count, raw.taskCompactedBlockedCount);
+    const ptlEngaged = raw.engaged === true
+      || raw.ptl_emergency_engaged === true
+      || raw.ptlEmergencyEngaged === true
+      || /ptl.*emergency|emergency.*downgrade|repeated compact failure/i.test(`${raw.reason || ""}\n${raw.method || ""}\n${raw.status || ""}`);
+    const repeatedCompactFailure = raw.repeated_compact_failure === true
+      || raw.repeatedCompactFailure === true
+      || blockedOutcomeCount >= 2
+      || taskCompactedBlockedCount > 0
+      || (/blocked|fail/.test(String(raw.status || "").toLowerCase()) && /compact|retry|budget/i.test(`${raw.method || ""}\n${raw.reason || ""}`));
+    const active = !suppressed && (!!pressureStatus || ptlEngaged || repeatedCompactFailure);
+    return {
+      source,
+      active,
+      suppressed,
+      status: pressureStatus,
+      pressure,
+      total_tokens: totalTokens,
+      max_tokens: maxTokens,
+      free_tokens: freeTokens,
+      autocompact_buffer_tokens: autocompactBufferTokens,
+      ptl_emergency: ptlEngaged,
+      repeated_compact_failure: repeatedCompactFailure,
+      blocked_outcome_count: blockedOutcomeCount,
+      task_compacted_blocked_count: taskCompactedBlockedCount,
+      reason: compactText(raw.reason || raw.recommendation || raw.next_step || raw.nextStep || raw.method || "", 260),
+    };
+  }).filter(signal => signal.active || signal.suppressed || signal.status || signal.ptl_emergency || signal.repeated_compact_failure);
+
+  const rank: Record<string, number> = { compact_recommended: 1, critical: 2, over_budget: 3 };
+  const activeSignals = signals.filter(signal => signal.active);
+  const pressureStatus = activeSignals
+    .map(signal => signal.status)
+    .filter(Boolean)
+    .sort((a: string, b: string) => Number(rank[b] || 0) - Number(rank[a] || 0))[0] || "";
+  const finiteFreeTokens = activeSignals
+    .map(signal => Number(signal.free_tokens || 0))
+    .filter(value => Number.isFinite(value) && value !== 0);
+  return {
+    schema: "ccm-worker-context-pressure-recall-signals-v1",
+    active: activeSignals.length > 0,
+    signal_count: signals.length,
+    active_signal_count: activeSignals.length,
+    pressure_status: pressureStatus,
+    max_pressure: activeSignals.reduce((max, signal) => Math.max(max, Number(signal.pressure || 0)), 0),
+    min_free_tokens: finiteFreeTokens.length ? Math.min(...finiteFreeTokens) : 0,
+    ptl_emergency: activeSignals.some(signal => signal.ptl_emergency === true),
+    repeated_compact_failure: activeSignals.some(signal => signal.repeated_compact_failure === true),
+    signals: activeSignals.slice(-8),
+    suppressed_signal_count: signals.filter(signal => signal.suppressed).length,
+  };
+}
+
+function queryMentionsWorkerContextPressure(text: string, queryTokens: string[] = []) {
+  const haystack = `${text}\n${queryTokens.join("\n")}`.toLowerCase();
+  return /workercontextpacket|worker context|context_usage|context usage|context pressure|usage pressure|free_tokens|autocompact|over_budget|compact_recommended|metadata_partial_compact|task_hash_unchanged|ptl emergency|ptl|compact strategy|上下文|压力|预算|压缩/.test(haystack);
+}
+
+function classifyWorkerContextPressureRecallDoc(corpus: string, doc: any = {}) {
+  const haystack = `${doc.relPath || ""}\n${doc.file || ""}\n${doc.source || ""}\n${doc.name || ""}\n${doc.description || ""}\n${corpus}`.toLowerCase();
+  const kinds: string[] = [];
+  const matchedKeywords: string[] = [];
+  const addKind = (kind: string, patterns: Array<[string, RegExp]>) => {
+    for (const [keyword, pattern] of patterns) {
+      if (!pattern.test(haystack)) continue;
+      if (!kinds.includes(kind)) kinds.push(kind);
+      matchedKeywords.push(keyword);
+    }
+  };
+  addKind("context_usage", [
+    ["worker-context-usage-pressure-discipline", /worker-context-usage-pressure-discipline/],
+    ["worker_context_packet_context_usage_repair", /worker_context_packet_context_usage_repair|context usage repair/],
+    ["context_usage.status", /context_usage\.status|context usage budget/],
+    ["free_tokens", /free_tokens|free=/],
+    ["autocompact_buffer", /autocompact_buffer/],
+  ]);
+  addKind("compact_strategy", [
+    ["worker-context-compact-strategy", /worker-context-compact-strategy/],
+    ["compact_strategy_memory", /compact strategy memory|compact-strategy-memory|compact_strategy/],
+    ["metadata_partial_compact", /metadata_partial_compact|metadata partial compact/],
+    ["free_token_delta", /free_token_delta|avg_free_token_delta/],
+    ["task_hash_unchanged", /task_hash_unchanged/],
+  ]);
+  addKind("ptl_emergency", [
+    ["worker-context-ptl-emergency-downgrade", /worker-context-ptl-emergency-downgrade/],
+    ["ptl emergency", /ptl emergency|ptl-emergency|ptl_emergency/],
+    ["emergency downgrade", /emergency downgrade|emergency-downgrade/],
+    ["maxTaskChars", /maxtaskchars|max_task_chars/],
+    ["repeated compact failure", /repeated compact failure/],
+  ]);
+  return {
+    pressure_doc: kinds.length > 0,
+    kinds,
+    matched_keywords: uniqueStrings(matchedKeywords, 12),
+  };
+}
+
+function scoreWorkerContextPressureRecall(corpus: string, doc: any, signals: any = {}, queryText = "", queryTokens: string[] = []) {
+  const classification = classifyWorkerContextPressureRecallDoc(corpus, doc);
+  if (!classification.pressure_doc) {
+    return {
+      adjustment: 0,
+      matched: [],
+      pressure_doc: false,
+      kinds: [],
+      signal_count: signals.signal_count || 0,
+      active_signal_count: signals.active_signal_count || 0,
+    };
+  }
+  const matched: any[] = [];
+  let adjustment = 0;
+  const status = String(signals.pressure_status || "");
+  const pressureWeight = status === "over_budget" ? 8 : status === "critical" ? 6 : status === "compact_recommended" ? 4 : 0;
+  const addDelta = (kind: string, delta: number, reason: string) => {
+    if (!delta) return;
+    adjustment += delta;
+    matched.push({ kind, delta, reason });
+  };
+  if (signals.active) {
+    if (classification.kinds.includes("context_usage")) {
+      addDelta("context_usage", 8 + Math.min(6, pressureWeight), `${status || "pressure"} context_usage discipline`);
+    }
+    if (classification.kinds.includes("compact_strategy")) {
+      const delta = signals.repeated_compact_failure
+        ? 14
+        : status === "over_budget"
+          ? 12
+          : status === "critical"
+            ? 10
+            : status === "compact_recommended"
+              ? 7
+              : 5;
+      addDelta("compact_strategy", delta, signals.repeated_compact_failure ? "repeated compact failure strategy memory" : `${status || "pressure"} compact strategy memory`);
+    }
+    if (classification.kinds.includes("ptl_emergency")) {
+      const delta = signals.ptl_emergency || signals.repeated_compact_failure
+        ? 16
+        : status === "over_budget"
+          ? 5
+          : 0;
+      addDelta("ptl_emergency", delta, signals.ptl_emergency ? "ptl emergency engaged" : "over-budget emergency downgrade advisory");
+    }
+    adjustment = Math.min(28, adjustment);
+  } else if (!queryMentionsWorkerContextPressure(queryText, queryTokens)) {
+    const delta = classification.kinds.includes("ptl_emergency")
+      ? -7
+      : classification.kinds.includes("compact_strategy")
+        ? -5
+        : -4;
+    addDelta(classification.kinds[0] || "pressure_doc", delta, "no worker-context pressure signal");
+  }
+  return {
+    adjustment,
+    matched,
+    pressure_doc: true,
+    kinds: classification.kinds,
+    matched_keywords: classification.matched_keywords,
+    signal_count: signals.signal_count || 0,
+    active_signal_count: signals.active_signal_count || 0,
+    pressure_status: signals.pressure_status || "",
+    ptl_emergency: signals.ptl_emergency === true,
+    repeated_compact_failure: signals.repeated_compact_failure === true,
+  };
+}
+
+function normalizeWorkerContextPressureRecallUsageState(value: any) {
+  const state = String(value || "").toLowerCase().trim();
+  if (["used", "ignored", "verified", "mentioned"].includes(state)) return state;
+  if (["checked", "reviewed", "validated", "confirmed"].includes(state)) return "verified";
+  if (["skipped", "unused", "not_used", "not-used", "not used", "unreferenced"].includes(state)) return "ignored";
+  if (["applied", "referenced", "consumed"].includes(state)) return "used";
+  return "";
+}
+
+function roundPressureRecallUsageWeight(value: any, precision = 3) {
+  const number = Number(value || 0);
+  if (!Number.isFinite(number)) return 0;
+  const factor = Math.pow(10, precision);
+  return Math.round(number * factor) / factor;
+}
+
+function normalizeWorkerContextPressureRecallUsageAging(options: any = {}) {
+  const disabled = options.disableUsageAging === true
+    || options.disable_usage_aging === true
+    || options.usageAging === false
+    || options.usage_aging === false
+    || options.pressureRecallUsageAging === false
+    || options.pressure_recall_usage_aging === false;
+  const explicitNow = options.nowMs
+    ?? options.now_ms
+    ?? (options.now || options.generatedAt || options.generated_at ? Date.parse(String(options.now || options.generatedAt || options.generated_at)) : undefined);
+  const nowMs = Number.isFinite(Number(explicitNow)) && Number(explicitNow) > 0 ? Number(explicitNow) : Date.now();
+  const halfLifeDays = Math.max(1, Number(
+    options.usageHalfLifeDays
+    ?? options.usage_half_life_days
+    ?? options.pressureRecallUsageHalfLifeDays
+    ?? options.pressure_recall_usage_half_life_days
+    ?? GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_HALF_LIFE_DAYS
+  ));
+  const staleAfterDays = Math.max(halfLifeDays, Number(
+    options.usageStaleAfterDays
+    ?? options.usage_stale_after_days
+    ?? options.pressureRecallUsageStaleAfterDays
+    ?? options.pressure_recall_usage_stale_after_days
+    ?? GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_STALE_AFTER_DAYS
+  ));
+  const minWeight = Math.max(0, Math.min(1, Number(
+    options.usageMinDecayWeight
+    ?? options.usage_min_decay_weight
+    ?? options.pressureRecallUsageMinDecayWeight
+    ?? options.pressure_recall_usage_min_decay_weight
+    ?? 0
+  )));
+  return {
+    schema: "ccm-group-typed-memory-pressure-recall-usage-aging-v1",
+    enabled: !disabled,
+    now_ms: nowMs,
+    now: new Date(nowMs).toISOString(),
+    half_life_days: halfLifeDays,
+    stale_after_days: staleAfterDays,
+    min_decay_weight: minWeight,
+  };
+}
+
+function workerContextPressureRecallUsageEntryTimeMs(entry: any = {}, fallbackMs = Date.now()) {
+  const raw = entry.generated_at
+    || entry.generatedAt
+    || entry.at
+    || entry.updated_at
+    || entry.updatedAt
+    || entry.last_seen_at
+    || entry.lastSeenAt
+    || "";
+  const parsed = Date.parse(String(raw || ""));
+  return Number.isFinite(parsed) ? parsed : fallbackMs;
+}
+
+function workerContextPressureRecallUsageAgeDays(entry: any = {}, aging: any = {}) {
+  const nowMs = Number(aging.now_ms || Date.now());
+  const timeMs = workerContextPressureRecallUsageEntryTimeMs(entry, nowMs);
+  return Math.max(0, (nowMs - timeMs) / (24 * 60 * 60 * 1000));
+}
+
+function workerContextPressureRecallUsageDecayWeight(ageDays: any, aging: any = {}) {
+  if (aging.enabled === false) return 1;
+  const days = Math.max(0, Number(ageDays || 0));
+  const halfLifeDays = Math.max(1, Number(aging.half_life_days || GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_HALF_LIFE_DAYS));
+  const weight = Math.pow(0.5, days / halfLifeDays);
+  return roundPressureRecallUsageWeight(Math.max(Number(aging.min_decay_weight || 0), weight), 4);
+}
+
+function workerContextPressureRecallStatsKey(row: any = {}, targetProject = "") {
+  const relPath = String(row.rel_path || row.relPath || "").trim().toLowerCase();
+  const name = String(row.name || "").trim().toLowerCase();
+  return [
+    String(targetProject || row.target_project || row.targetProject || "").trim().toLowerCase(),
+    relPath || checksum(name || row.source || row.value || "pressure-memory", 18),
+  ].join("|");
+}
+
+function workerContextPressureRecallUsageRecommendation(stats: any = {}) {
+  const weightedTotal = Number(stats.weighted_total_count ?? stats.total_weighted_count ?? 0);
+  const rawTotal = Number(stats.total_count || 0);
+  const staleCount = Number(stats.stale_count || 0);
+  const freshCount = Number(stats.fresh_count || 0);
+  if (rawTotal > 0 && weightedTotal > 0 && weightedTotal < 0.5 && staleCount >= rawTotal && freshCount === 0) {
+    return "stale_pressure_recall_history";
+  }
+  const used = Number(stats.weighted_used_count ?? stats.used_weighted_count ?? stats.used_count ?? 0);
+  const verified = Number(stats.weighted_verified_count ?? stats.verified_weighted_count ?? stats.verified_count ?? 0);
+  const ignored = Number(stats.weighted_ignored_count ?? stats.ignored_weighted_count ?? stats.ignored_count ?? 0);
+  const mentioned = Number(stats.weighted_mentioned_count ?? stats.mentioned_weighted_count ?? stats.mentioned_count ?? 0);
+  if (used + verified >= ignored + mentioned + 2) return "promote_pressure_recall";
+  if (ignored >= used + verified + 2) return "deprioritize_pressure_recall";
+  if (mentioned > 0 && used + verified + ignored === 0) return "require_pressure_usage_receipt";
+  return "neutral_verify_current_pressure";
+}
+
+function buildWorkerContextPressureRecallUsageEntry(groupId: string, input: any = {}, row: any = {}) {
+  const usageState = normalizeWorkerContextPressureRecallUsageState(row.usage_state || row.usageState || row.status || row.state);
+  if (!usageState) return null;
+  const relPath = String(row.rel_path || row.relPath || "").trim();
+  const name = compactText(row.name || row.title || "", 180);
+  if (!relPath && !name) return null;
+  const targetProject = String(row.target_project || row.targetProject || input.targetProject || input.target_project || "").trim();
+  const agent = String(row.agent || input.agent || input.project || targetProject || "").trim();
+  const generatedAt = String(input.generatedAt || input.generated_at || row.generated_at || row.generatedAt || now());
+  const entryCore = {
+    group_id: groupId,
+    target_project: targetProject,
+    agent,
+    task_id: String(input.taskId || input.task_id || row.task_id || row.taskId || "").trim(),
+    execution_id: String(input.executionId || input.execution_id || row.execution_id || row.executionId || "").trim(),
+    worker_context_packet_id: String(row.worker_context_packet_id || row.workerContextPacketId || input.workerContextPacketId || input.worker_context_packet_id || "").trim(),
+    memory_context_snapshot_id: String(row.memory_context_snapshot_id || row.memoryContextSnapshotId || input.memoryContextSnapshotId || input.memory_context_snapshot_id || "").trim(),
+    rel_path: relPath,
+    name,
+    type: String(row.type || "").trim(),
+    source: String(row.source || "").trim(),
+    kinds: uniqueStrings(Array.isArray(row.kinds) ? row.kinds : [], 8),
+    pressure_status: String(row.pressure_status || row.pressureStatus || "").trim(),
+    pressure_adjustment: Number(row.pressure_adjustment ?? row.pressureAdjustment ?? row.adjustment ?? 0),
+    usage_state: usageState,
+    direct_reference: row.direct_reference === true || row.directReference === true,
+    referenced: row.referenced === true,
+    receipt_status: String(row.receipt_status || row.receiptStatus || "").trim(),
+    provenance_status: String(row.provenance_status || row.provenanceStatus || "").trim(),
+    repair_status: String(row.repair_status || row.repairStatus || "").trim(),
+    repair_work_item_id: String(row.repair_work_item_id || row.repairWorkItemId || row.work_item_id || row.workItemId || "").trim(),
+    repair_gap_type: String(row.repair_gap_type || row.repairGapType || row.gap_type || row.gapType || "").trim(),
+    current_source_verified: row.current_source_verified === true || row.currentSourceVerified === true,
+    reason: compactText(row.reason || row.note || "", 500),
+    generated_at: generatedAt,
+  };
+  return {
+    schema: "ccm-group-typed-memory-pressure-recall-usage-entry-v1",
+    entry_id: `tmpru_${checksum(entryCore, 18)}`,
+    ...entryCore,
+  };
+}
+
+export function readGroupTypedMemoryPressureRecallUsageLedger(groupId: string) {
+  const file = getGroupTypedMemoryPressureRecallUsageLedgerFile(groupId);
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
+    return {
+      ...parsed,
+      file,
+      stats: parsed?.stats && typeof parsed.stats === "object" ? parsed.stats : {},
+      entries: Array.isArray(parsed?.entries) ? parsed.entries : [],
+      totals: parsed?.totals && typeof parsed.totals === "object" ? parsed.totals : {},
+    };
+  } catch {
+    return {
+      schema: "ccm-group-typed-memory-pressure-recall-usage-ledger-v1",
+      version: 1,
+      groupId,
+      file,
+      stats: {},
+      entries: [],
+      totals: { used: 0, ignored: 0, verified: 0, mentioned: 0, total: 0 },
+      updatedAt: "",
+    };
+  }
+}
+
+function getGroupPressureRecallUsageRepairWorkItemsFile(groupId: string) {
+  return path.join(GROUP_MEMORY_REPLAY_REPAIR_WORK_ITEMS_DIR, `${safeSegment(groupId)}.json`);
+}
+
+function normalizePressureRecallUsageRepairStatus(value: any) {
+  const status = String(value || "").trim().toLowerCase();
+  if (["in_progress", "running", "claimed", "dispatching"].includes(status)) return "in_progress";
+  if (["blocked", "needs_info", "needs_user", "waiting"].includes(status)) return "blocked";
+  if (["completed", "done", "resolved", "ok"].includes(status)) return "completed";
+  if (["cancelled", "canceled", "superseded"].includes(status)) return "cancelled";
+  return "pending";
+}
+
+function pressureRecallUsageRepairOpen(status: any) {
+  return ["pending", "in_progress", "blocked"].includes(normalizePressureRecallUsageRepairStatus(status));
+}
+
+function normalizeWorkerContextPressureRecallUsageRepairHints(groupId: string, options: any = {}) {
+  if (options.disablePressureRecallUsageRepairHints === true
+    || options.disable_pressure_recall_usage_repair_hints === true
+    || options.disableCrossGroupPressureRecallUsageRepairHints === true
+    || options.disable_cross_group_pressure_recall_usage_repair_hints === true) return [];
+  const explicit = options.workerContextPressureRecallUsageRepairHints
+    || options.worker_context_pressure_recall_usage_repair_hints
+    || options.pressureRecallUsageRepairHints
+    || options.pressure_recall_usage_repair_hints
+    || null;
+  const rawItems = Array.isArray(explicit)
+    ? explicit
+    : Array.isArray(explicit?.items)
+      ? explicit.items
+      : (() => {
+        try {
+          const parsed = JSON.parse(fs.readFileSync(getGroupPressureRecallUsageRepairWorkItemsFile(groupId), "utf-8"));
+          return Array.isArray(parsed?.items) ? parsed.items : [];
+        } catch {
+          return [];
+        }
+      })();
+  const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
+  const includeClosed = options.includeClosedPressureRecallUsageRepairHints === true
+    || options.include_closed_pressure_recall_usage_repair_hints === true;
+  return (Array.isArray(rawItems) ? rawItems : [])
+    .map((item: any) => {
+      const source = String(item.source || "").trim();
+      const component = String(item.component || "").trim();
+      if (source !== "cross_group_pressure_recall_usage_repair" && component !== "cross_group_pressure_recall_usage") return null;
+      const status = normalizePressureRecallUsageRepairStatus(item.status);
+      if (!includeClosed && !pressureRecallUsageRepairOpen(status)) return null;
+      const itemProject = String(item.target_project || item.targetProject || item.target || "").trim();
+      if (targetProject && itemProject && itemProject.toLowerCase() !== targetProject) return null;
+      const relPath = String(item.cross_group_pressure_recall_usage_rel_path
+        || item.crossGroupPressureRecallUsageRelPath
+        || item.repair_target
+        || item.repairTarget
+        || "").trim();
+      return {
+        schema: "ccm-group-typed-memory-pressure-recall-usage-repair-hint-v1",
+        work_item_id: String(item.work_item_id || item.workItemId || item.id || "").trim(),
+        status,
+        open: pressureRecallUsageRepairOpen(status),
+        priority: String(item.priority || "").trim(),
+        gap_type: String(item.cross_group_pressure_recall_usage_gap_type || item.crossGroupPressureRecallUsageGapType || "").trim(),
+        rel_path: relPath,
+        target_project: itemProject,
+        local_recommendation: String(item.local_recommendation || item.localRecommendation || "").trim(),
+        cross_group_recommendation: String(item.cross_group_recommendation || item.crossGroupRecommendation || "").trim(),
+        reason: compactText(item.cross_group_pressure_recall_usage_reason || item.reason || item.description || "", 420),
+        source_group_count: Number(item.source_group_count || item.sourceGroupCount || 0),
+        source_groups: Array.isArray(item.source_groups || item.sourceGroups) ? (item.source_groups || item.sourceGroups).slice(0, 8) : [],
+        updated_at: String(item.updatedAt || item.updated_at || item.lastSeenAt || item.last_seen_at || "").trim(),
+      };
+    })
+    .filter(Boolean);
+}
+
+function matchWorkerContextPressureRecallUsageRepairHint(row: any = {}, repairHints: any[] = [], fallbackTargetProject = "") {
+  if (!Array.isArray(repairHints) || !repairHints.length) return null;
+  const relPath = String(row.rel_path || row.relPath || "").trim().toLowerCase();
+  const targetProject = String(row.target_project || row.targetProject || fallbackTargetProject || "").trim().toLowerCase();
+  return repairHints.find((hint: any) => {
+    const hintRelPath = String(hint.rel_path || hint.relPath || "").trim().toLowerCase();
+    const hintProject = String(hint.target_project || hint.targetProject || "").trim().toLowerCase();
+    if (hintProject && targetProject && hintProject !== targetProject) return false;
+    return !!hintRelPath && !!relPath && hintRelPath === relPath;
+  }) || null;
+}
+
+function writeGroupTypedMemoryPressureRecallUsageLedger(groupId: string, ledger: any) {
+  const file = getGroupTypedMemoryPressureRecallUsageLedgerFile(groupId);
+  const entries = (Array.isArray(ledger.entries) ? ledger.entries : []).slice(-260);
+  writeJsonAtomic(file, {
+    schema: "ccm-group-typed-memory-pressure-recall-usage-ledger-v1",
+    version: 1,
+    groupId,
+    stats: ledger.stats || {},
+    entries,
+    totals: ledger.totals || { used: 0, ignored: 0, verified: 0, mentioned: 0, total: 0 },
+    updatedAt: ledger.updatedAt || now(),
+  });
+}
+
+export function recordGroupTypedMemoryPressureRecallUsageLedger(groupId: string, input: any = {}) {
+  groupId = String(groupId || "").trim();
+  if (!groupId || input.disabled === true || input.disableLedger === true || input.disable_ledger === true) return null;
+  const rows = Array.isArray(input.rows)
+    ? input.rows
+    : Array.isArray(input.pressureRecallUsageRows || input.pressure_recall_usage_rows)
+      ? (input.pressureRecallUsageRows || input.pressure_recall_usage_rows)
+      : [];
+  const entries = rows
+    .map((row: any) => buildWorkerContextPressureRecallUsageEntry(groupId, input, row))
+    .filter(Boolean);
+  const file = getGroupTypedMemoryPressureRecallUsageLedgerFile(groupId);
+  if (!entries.length) {
+    const ledger = readGroupTypedMemoryPressureRecallUsageLedger(groupId);
+    return {
+      schema: "ccm-group-typed-memory-pressure-recall-usage-record-v1",
+      groupId,
+      file,
+      skipped: true,
+      reason: "no_pressure_recall_usage_rows",
+      recorded_count: 0,
+      totals: ledger.totals || {},
+    };
+  }
+  const ledger = readGroupTypedMemoryPressureRecallUsageLedger(groupId);
+  const seen = new Set((ledger.entries || []).map((entry: any) => entry.entry_id));
+  const newEntries = entries.filter((entry: any) => !seen.has(entry.entry_id));
+  const stats = ledger.stats || {};
+  for (const entry of newEntries) {
+    const key = workerContextPressureRecallStatsKey(entry, entry.target_project);
+    const current = stats[key] || {
+      rel_path: entry.rel_path,
+      name: entry.name,
+      type: entry.type,
+      source: entry.source,
+      target_project: entry.target_project,
+      kinds: entry.kinds || [],
+      used_count: 0,
+      ignored_count: 0,
+      verified_count: 0,
+      mentioned_count: 0,
+      total_count: 0,
+      agents: [],
+      task_ids: [],
+      packet_ids: [],
+      provenance_statuses: [],
+      repair_work_item_ids: [],
+      repair_statuses: [],
+      repair_gap_types: [],
+      first_seen_at: entry.generated_at,
+    };
+    current.rel_path = current.rel_path || entry.rel_path;
+    current.name = current.name || entry.name;
+    current.type = current.type || entry.type;
+    current.source = current.source || entry.source;
+    current.target_project = current.target_project || entry.target_project;
+    current.kinds = uniqueStrings([...(Array.isArray(current.kinds) ? current.kinds : []), ...(entry.kinds || [])], 12);
+    current[`${entry.usage_state}_count`] = Number(current[`${entry.usage_state}_count`] || 0) + 1;
+    current.total_count = Number(current.total_count || 0) + 1;
+    current.last_usage_state = entry.usage_state;
+    current.last_agent = entry.agent;
+    current.last_task_id = entry.task_id;
+    current.last_worker_context_packet_id = entry.worker_context_packet_id;
+    current.last_pressure_status = entry.pressure_status || current.last_pressure_status || "";
+    current.last_provenance_status = entry.provenance_status || current.last_provenance_status || "";
+    current.last_repair_status = entry.repair_status || current.last_repair_status || "";
+    current.last_repair_work_item_id = entry.repair_work_item_id || current.last_repair_work_item_id || "";
+    current.last_repair_gap_type = entry.repair_gap_type || current.last_repair_gap_type || "";
+    current.current_source_verified_count = Number(current.current_source_verified_count || 0) + (entry.current_source_verified === true ? 1 : 0);
+    current.last_seen_at = entry.generated_at;
+    current.agents = uniqueStrings([...(Array.isArray(current.agents) ? current.agents : []), entry.agent].filter(Boolean), 12);
+    current.task_ids = uniqueStrings([...(Array.isArray(current.task_ids) ? current.task_ids : []), entry.task_id].filter(Boolean), 12);
+    current.packet_ids = uniqueStrings([...(Array.isArray(current.packet_ids) ? current.packet_ids : []), entry.worker_context_packet_id].filter(Boolean), 12);
+    current.provenance_statuses = uniqueStrings([...(Array.isArray(current.provenance_statuses) ? current.provenance_statuses : []), entry.provenance_status].filter(Boolean), 12);
+    current.repair_work_item_ids = uniqueStrings([...(Array.isArray(current.repair_work_item_ids) ? current.repair_work_item_ids : []), entry.repair_work_item_id].filter(Boolean), 12);
+    current.repair_statuses = uniqueStrings([...(Array.isArray(current.repair_statuses) ? current.repair_statuses : []), entry.repair_status].filter(Boolean), 12);
+    current.repair_gap_types = uniqueStrings([...(Array.isArray(current.repair_gap_types) ? current.repair_gap_types : []), entry.repair_gap_type].filter(Boolean), 12);
+    current.recommendation = workerContextPressureRecallUsageRecommendation(current);
+    stats[key] = current;
+  }
+  const allEntries = [...(ledger.entries || []), ...newEntries].slice(-260);
+  const totals = allEntries.reduce((acc: any, entry: any) => {
+    const state = normalizeWorkerContextPressureRecallUsageState(entry.usage_state);
+    if (state) acc[state] = Number(acc[state] || 0) + 1;
+    acc.total += 1;
+    return acc;
+  }, { used: 0, ignored: 0, verified: 0, mentioned: 0, total: 0 });
+  const updatedAt = String(input.generatedAt || input.generated_at || now());
+  writeGroupTypedMemoryPressureRecallUsageLedger(groupId, {
+    stats,
+    entries: allEntries,
+    totals,
+    updatedAt,
+  });
+  return {
+    schema: "ccm-group-typed-memory-pressure-recall-usage-record-v1",
+    groupId,
+    file,
+    recorded_count: newEntries.length,
+    duplicate_count: entries.length - newEntries.length,
+    totals,
+    updatedAt,
+  };
+}
+
+function normalizeWorkerContextPressureRecallUsageStatsRow(row: any = {}, aging: any = {}) {
+  const clone: any = { ...row };
+  const ageDays = workerContextPressureRecallUsageAgeDays({
+    last_seen_at: clone.last_seen_at || clone.lastSeenAt || clone.generated_at || clone.generatedAt,
+  }, aging);
+  const weight = workerContextPressureRecallUsageDecayWeight(ageDays, aging);
+  for (const state of ["used", "verified", "ignored", "mentioned"]) {
+    const raw = Number(clone[`${state}_count`] || 0);
+    clone[`weighted_${state}_count`] = roundPressureRecallUsageWeight(raw * weight);
+  }
+  clone.weighted_total_count = roundPressureRecallUsageWeight(Number(clone.total_count || 0) * weight);
+  clone.decay_weight = weight;
+  clone.age_days = roundPressureRecallUsageWeight(ageDays, 2);
+  clone.stale_count = ageDays >= Number(aging.stale_after_days || GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_STALE_AFTER_DAYS) ? Number(clone.total_count || 0) : 0;
+  clone.fresh_count = Number(clone.total_count || 0) - Number(clone.stale_count || 0);
+  clone.recommendation = workerContextPressureRecallUsageRecommendation(clone);
+  return clone;
+}
+
+function buildWorkerContextPressureRecallUsageStatsRowsFromEntries(entries: any[] = [], aging: any = {}) {
+  const stats: Record<string, any> = {};
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const usageState = normalizeWorkerContextPressureRecallUsageState(entry?.usage_state || entry?.usageState);
+    if (!usageState) continue;
+    const key = workerContextPressureRecallStatsKey(entry, entry?.target_project || entry?.targetProject);
+    const current = stats[key] || {
+      rel_path: entry.rel_path || entry.relPath || "",
+      name: entry.name || "",
+      type: entry.type || "",
+      source: entry.source || "",
+      target_project: entry.target_project || entry.targetProject || "",
+      kinds: [],
+      used_count: 0,
+      ignored_count: 0,
+      verified_count: 0,
+      mentioned_count: 0,
+      weighted_used_count: 0,
+      weighted_ignored_count: 0,
+      weighted_verified_count: 0,
+      weighted_mentioned_count: 0,
+      total_count: 0,
+      weighted_total_count: 0,
+      stale_count: 0,
+      fresh_count: 0,
+      agents: [],
+      task_ids: [],
+      packet_ids: [],
+      group_ids: [],
+      provenance_statuses: [],
+      repair_work_item_ids: [],
+      repair_statuses: [],
+      repair_gap_types: [],
+      first_seen_at: entry.generated_at || entry.generatedAt || "",
+      max_age_days: 0,
+      min_age_days: null,
+    };
+    current.rel_path = current.rel_path || entry.rel_path || entry.relPath || "";
+    current.name = current.name || entry.name || "";
+    current.type = current.type || entry.type || "";
+    current.source = current.source || entry.source || "";
+    current.target_project = current.target_project || entry.target_project || entry.targetProject || "";
+    current.kinds = uniqueStrings([...(Array.isArray(current.kinds) ? current.kinds : []), ...(Array.isArray(entry.kinds) ? entry.kinds : [])], 12);
+    current[`${usageState}_count`] = Number(current[`${usageState}_count`] || 0) + 1;
+    current.total_count = Number(current.total_count || 0) + 1;
+    const ageDays = workerContextPressureRecallUsageAgeDays(entry, aging);
+    const decayWeight = workerContextPressureRecallUsageDecayWeight(ageDays, aging);
+    current[`weighted_${usageState}_count`] = Number(current[`weighted_${usageState}_count`] || 0) + decayWeight;
+    current.weighted_total_count = Number(current.weighted_total_count || 0) + decayWeight;
+    if (ageDays >= Number(aging.stale_after_days || GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_STALE_AFTER_DAYS)) current.stale_count = Number(current.stale_count || 0) + 1;
+    else current.fresh_count = Number(current.fresh_count || 0) + 1;
+    current.max_age_days = Math.max(Number(current.max_age_days || 0), ageDays);
+    current.min_age_days = current.min_age_days === null ? ageDays : Math.min(Number(current.min_age_days || ageDays), ageDays);
+    const generatedAt = entry.generated_at || entry.generatedAt || "";
+    current.first_seen_at = current.first_seen_at && generatedAt
+      ? String(current.first_seen_at).localeCompare(String(generatedAt)) <= 0 ? current.first_seen_at : generatedAt
+      : current.first_seen_at || generatedAt;
+    if (!current.last_seen_at || String(generatedAt || "").localeCompare(String(current.last_seen_at || "")) > 0) {
+      current.last_seen_at = generatedAt;
+      current.last_usage_state = usageState;
+      current.last_agent = entry.agent || "";
+      current.last_task_id = entry.task_id || entry.taskId || "";
+      current.last_worker_context_packet_id = entry.worker_context_packet_id || entry.workerContextPacketId || "";
+      current.last_pressure_status = entry.pressure_status || entry.pressureStatus || "";
+      current.last_provenance_status = entry.provenance_status || entry.provenanceStatus || "";
+      current.last_repair_status = entry.repair_status || entry.repairStatus || "";
+      current.last_repair_work_item_id = entry.repair_work_item_id || entry.repairWorkItemId || "";
+      current.last_repair_gap_type = entry.repair_gap_type || entry.repairGapType || "";
+    }
+    current.agents = uniqueStrings([...(Array.isArray(current.agents) ? current.agents : []), entry.agent].filter(Boolean), 12);
+    current.task_ids = uniqueStrings([...(Array.isArray(current.task_ids) ? current.task_ids : []), entry.task_id || entry.taskId].filter(Boolean), 12);
+    current.packet_ids = uniqueStrings([...(Array.isArray(current.packet_ids) ? current.packet_ids : []), entry.worker_context_packet_id || entry.workerContextPacketId].filter(Boolean), 12);
+    current.group_ids = uniqueStrings([...(Array.isArray(current.group_ids) ? current.group_ids : []), entry.group_id || entry.groupId].filter(Boolean), 24);
+    current.provenance_statuses = uniqueStrings([...(Array.isArray(current.provenance_statuses) ? current.provenance_statuses : []), entry.provenance_status || entry.provenanceStatus].filter(Boolean), 12);
+    current.repair_work_item_ids = uniqueStrings([...(Array.isArray(current.repair_work_item_ids) ? current.repair_work_item_ids : []), entry.repair_work_item_id || entry.repairWorkItemId].filter(Boolean), 12);
+    current.repair_statuses = uniqueStrings([...(Array.isArray(current.repair_statuses) ? current.repair_statuses : []), entry.repair_status || entry.repairStatus].filter(Boolean), 12);
+    current.repair_gap_types = uniqueStrings([...(Array.isArray(current.repair_gap_types) ? current.repair_gap_types : []), entry.repair_gap_type || entry.repairGapType].filter(Boolean), 12);
+    current.current_source_verified_count = Number(current.current_source_verified_count || 0) + (entry.current_source_verified === true || entry.currentSourceVerified === true ? 1 : 0);
+    stats[key] = current;
+  }
+  return Object.values(stats).map((row: any) => {
+    for (const state of ["used", "verified", "ignored", "mentioned"]) {
+      row[`weighted_${state}_count`] = roundPressureRecallUsageWeight(row[`weighted_${state}_count`] || 0);
+    }
+    row.weighted_total_count = roundPressureRecallUsageWeight(row.weighted_total_count || 0);
+    row.max_age_days = roundPressureRecallUsageWeight(row.max_age_days || 0, 2);
+    row.min_age_days = row.min_age_days === null ? 0 : roundPressureRecallUsageWeight(row.min_age_days || 0, 2);
+    row.avg_decay_weight = row.total_count ? roundPressureRecallUsageWeight(Number(row.weighted_total_count || 0) / Number(row.total_count || 1), 4) : 0;
+    row.recommendation = workerContextPressureRecallUsageRecommendation(row);
+    return row;
+  });
+}
+
+function summarizeWorkerContextPressureRecallUsageRows(statsRows: any[] = []) {
+  const totals = statsRows.reduce((acc: any, row: any) => {
+    acc.used += Number(row.used_count || 0);
+    acc.ignored += Number(row.ignored_count || 0);
+    acc.verified += Number(row.verified_count || 0);
+    acc.mentioned += Number(row.mentioned_count || 0);
+    acc.total += Number(row.total_count || 0);
+    return acc;
+  }, { used: 0, ignored: 0, verified: 0, mentioned: 0, total: 0 });
+  const weightedTotals = statsRows.reduce((acc: any, row: any) => {
+    acc.used += Number(row.weighted_used_count || 0);
+    acc.ignored += Number(row.weighted_ignored_count || 0);
+    acc.verified += Number(row.weighted_verified_count || 0);
+    acc.mentioned += Number(row.weighted_mentioned_count || 0);
+    acc.total += Number(row.weighted_total_count || 0);
+    return acc;
+  }, { used: 0, ignored: 0, verified: 0, mentioned: 0, total: 0 });
+  for (const key of Object.keys(weightedTotals)) weightedTotals[key] = roundPressureRecallUsageWeight(weightedTotals[key]);
+  return {
+    totals,
+    weightedTotals,
+    stale_memory_count: statsRows.filter((row: any) => row.recommendation === "stale_pressure_recall_history" || Number(row.stale_count || 0) > 0 && Number(row.fresh_count || 0) === 0).length,
+    stale_entry_count: statsRows.reduce((sum: number, row: any) => sum + Number(row.stale_count || 0), 0),
+    fresh_entry_count: statsRows.reduce((sum: number, row: any) => sum + Number(row.fresh_count || 0), 0),
+  };
+}
+
+function sortWorkerContextPressureRecallUsageRows(statsRows: any[] = []) {
+  return [...(Array.isArray(statsRows) ? statsRows : [])].sort((a: any, b: any) => {
+    const aScore = Number(a.weighted_used_count ?? a.used_count ?? 0) * 3
+      + Number(a.weighted_verified_count ?? a.verified_count ?? 0) * 2
+      - Number(a.weighted_ignored_count ?? a.ignored_count ?? 0)
+      - Number(a.weighted_mentioned_count ?? a.mentioned_count ?? 0);
+    const bScore = Number(b.weighted_used_count ?? b.used_count ?? 0) * 3
+      + Number(b.weighted_verified_count ?? b.verified_count ?? 0) * 2
+      - Number(b.weighted_ignored_count ?? b.ignored_count ?? 0)
+      - Number(b.weighted_mentioned_count ?? b.mentioned_count ?? 0);
+    return bScore - aScore || String(b.last_seen_at || "").localeCompare(String(a.last_seen_at || ""));
+  });
+}
+
+function filterWorkerContextPressureRecallUsageRows(statsRows: any[] = [], options: any = {}) {
+  const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
+  const docs = Array.isArray(options.docs || options.recalledDocs || options.recalled_docs) ? (options.docs || options.recalledDocs || options.recalled_docs) : [];
+  const relPaths = new Set(docs.map((doc: any) => String(doc.relPath || doc.rel_path || "").trim().toLowerCase()).filter(Boolean));
+  const names = new Set(docs.map((doc: any) => String(doc.name || "").trim().toLowerCase()).filter(Boolean));
+  return sortWorkerContextPressureRecallUsageRows((Array.isArray(statsRows) ? statsRows : [])
+    .filter((row: any) => !targetProject || String(row.target_project || "").toLowerCase() === targetProject)
+    .filter((row: any) => !relPaths.size && !names.size
+      || relPaths.has(String(row.rel_path || "").trim().toLowerCase())
+      || names.has(String(row.name || "").trim().toLowerCase())));
+}
+
+function buildWorkerContextPressureRecallUsageSummaryFromRows(groupId: string, statsRows: any[] = [], options: any = {}) {
+  const aging = options.aging?.schema ? options.aging : normalizeWorkerContextPressureRecallUsageAging(options);
+  const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
+  const summaryStats = summarizeWorkerContextPressureRecallUsageRows(statsRows);
+  return {
+    schema: String(options.schema || "ccm-group-typed-memory-pressure-recall-usage-summary-v1"),
+    version: 1,
+    groupId,
+    target_project: targetProject,
+    ledger_file: String(options.ledgerFile || options.ledger_file || ""),
+    has_history: statsRows.length > 0,
+    memory_count: statsRows.length,
+    totals: summaryStats.totals,
+    weighted_totals: summaryStats.weightedTotals,
+    aging: {
+      ...aging,
+      stale_memory_count: summaryStats.stale_memory_count,
+      stale_entry_count: summaryStats.stale_entry_count,
+      fresh_entry_count: summaryStats.fresh_entry_count,
+    },
+    useful_pressure_memories: statsRows.filter((row: any) => ["promote_pressure_recall", "neutral_verify_current_pressure"].includes(row.recommendation)).slice(0, 8),
+    ignored_pressure_memories: statsRows.filter((row: any) => row.recommendation === "deprioritize_pressure_recall").slice(0, 8),
+    missing_usage_pressure_memories: statsRows.filter((row: any) => row.recommendation === "require_pressure_usage_receipt").slice(0, 8),
+    stale_pressure_memories: statsRows.filter((row: any) => row.recommendation === "stale_pressure_recall_history").slice(0, 8),
+    rows: statsRows.slice(0, 16),
+    recent_entries: Array.isArray(options.recentEntries || options.recent_entries) ? (options.recentEntries || options.recent_entries).slice(-16) : [],
+    updatedAt: String(options.updatedAt || options.updated_at || ""),
+  };
+}
+
+export function buildGroupTypedMemoryPressureRecallUsageSummary(groupId: string, options: any = {}) {
+  groupId = String(groupId || "").trim();
+  const ledger = readGroupTypedMemoryPressureRecallUsageLedger(groupId);
+  const aging = normalizeWorkerContextPressureRecallUsageAging(options);
+  const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
+  const sourceRows = Array.isArray(ledger.entries) && ledger.entries.length
+    ? buildWorkerContextPressureRecallUsageStatsRowsFromEntries(ledger.entries, aging)
+    : Object.values(ledger.stats || {}).map((row: any) => normalizeWorkerContextPressureRecallUsageStatsRow(row, aging));
+  const statsRows = filterWorkerContextPressureRecallUsageRows(sourceRows, options);
+  return buildWorkerContextPressureRecallUsageSummaryFromRows(groupId, statsRows, {
+    ...options,
+    targetProject,
+    aging,
+    ledgerFile: ledger.file,
+    recentEntries: (ledger.entries || [])
+      .filter((entry: any) => !targetProject || String(entry.target_project || "").toLowerCase() === targetProject)
+      .slice(-16),
+    updatedAt: ledger.updatedAt || "",
+  });
+}
+
+function listGroupTypedMemoryPressureRecallUsageLedgers(options: any = {}) {
+  const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids || options.crossGroupIds || options.cross_group_ids)
+    ? (options.groupIds || options.group_ids || options.crossGroupIds || options.cross_group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : [];
+  const maxGroups = Math.max(1, Number(options.maxGroups || options.max_groups || options.maxCrossGroupPressureRecallUsageGroups || options.max_cross_group_pressure_recall_usage_groups || GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_CROSS_GROUP_MAX_GROUPS));
+  const exclude = new Set((Array.isArray(options.excludeGroupIds || options.exclude_group_ids) ? (options.excludeGroupIds || options.exclude_group_ids) : [])
+    .map((item: any) => String(item || "").trim().toLowerCase()).filter(Boolean));
+  const candidates = explicitGroupIds.length
+    ? explicitGroupIds.map((groupId: string) => ({
+      groupId,
+      file: getGroupTypedMemoryPressureRecallUsageLedgerFile(groupId),
+    }))
+    : (() => {
+      try {
+        return fs.readdirSync(GROUP_TYPED_MEMORY_DIR, { withFileTypes: true })
+          .filter(entry => entry.isDirectory())
+          .map(entry => ({
+            groupId: entry.name,
+            file: path.join(GROUP_TYPED_MEMORY_DIR, entry.name, GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_LEDGER),
+          }));
+      } catch {
+        return [];
+      }
+    })();
+  return candidates
+    .filter((item: any) => item.file && fs.existsSync(item.file))
+    .map((item: any) => {
+      try {
+        const stat = fs.statSync(item.file);
+        return { ...item, mtimeMs: stat.mtimeMs || 0 };
+      } catch {
+        return { ...item, mtimeMs: 0 };
+      }
+    })
+    .filter((item: any) => !exclude.has(String(item.groupId || "").toLowerCase()))
+    .sort((a: any, b: any) => Number(b.mtimeMs || 0) - Number(a.mtimeMs || 0))
+    .slice(0, maxGroups);
+}
+
+export function buildGroupTypedMemoryPressureRecallUsageProjectSummary(groupId: string, options: any = {}) {
+  groupId = String(groupId || "").trim();
+  const targetProject = String(options.targetProject || options.target_project || "").trim().toLowerCase();
+  const includeCurrent = options.includeCurrentGroup === true || options.include_current_group === true;
+  const currentIds = new Set([groupId, safeSegment(groupId)].map(item => String(item || "").trim().toLowerCase()).filter(Boolean));
+  const aging = normalizeWorkerContextPressureRecallUsageAging(options);
+  const ledgers = listGroupTypedMemoryPressureRecallUsageLedgers({
+    ...options,
+    excludeGroupIds: includeCurrent ? options.excludeGroupIds || options.exclude_group_ids || [] : [
+      ...(Array.isArray(options.excludeGroupIds || options.exclude_group_ids) ? (options.excludeGroupIds || options.exclude_group_ids) : []),
+      ...Array.from(currentIds),
+    ],
+  });
+  const entries: any[] = [];
+  const sourceGroups: any[] = [];
+  for (const item of ledgers) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(item.file, "utf-8"));
+      const ledgerGroupId = String(parsed.groupId || parsed.group_id || item.groupId || "").trim();
+      if (!includeCurrent && currentIds.has(ledgerGroupId.toLowerCase())) continue;
+      const ledgerEntries = (Array.isArray(parsed.entries) ? parsed.entries : [])
+        .filter((entry: any) => !targetProject || String(entry.target_project || entry.targetProject || "").trim().toLowerCase() === targetProject)
+        .map((entry: any) => ({ ...entry, group_id: entry.group_id || entry.groupId || ledgerGroupId || item.groupId }));
+      if (!ledgerEntries.length) continue;
+      entries.push(...ledgerEntries);
+      sourceGroups.push({
+        groupId: ledgerGroupId || item.groupId,
+        file: item.file,
+        entry_count: ledgerEntries.length,
+        updatedAt: parsed.updatedAt || parsed.updated_at || "",
+      });
+    } catch {}
+  }
+  const sourceRows = buildWorkerContextPressureRecallUsageStatsRowsFromEntries(entries, aging);
+  const statsRows = filterWorkerContextPressureRecallUsageRows(sourceRows, options);
+  const recentEntries = entries
+    .sort((a: any, b: any) => String(b.generated_at || b.generatedAt || "").localeCompare(String(a.generated_at || a.generatedAt || "")))
+    .slice(0, 16)
+    .reverse();
+  return {
+    ...buildWorkerContextPressureRecallUsageSummaryFromRows(groupId, statsRows, {
+      ...options,
+      schema: "ccm-group-typed-memory-pressure-recall-usage-project-summary-v1",
+      targetProject,
+      aging,
+      ledgerFile: "",
+      recentEntries,
+      updatedAt: sourceGroups.map((item: any) => item.updatedAt).filter(Boolean).sort().slice(-1)[0] || "",
+    }),
+    source: "cross_group_project_pressure_recall_usage",
+    include_current_group: includeCurrent,
+    source_group_count: sourceGroups.length,
+    source_groups: sourceGroups.slice(0, 24),
+    entry_count: entries.length,
+  };
+}
+
+function normalizeWorkerContextPressureRecallUsageHints(groupId: string, options: any = {}) {
+  const explicit = options.workerContextPressureRecallUsage
+    || options.worker_context_pressure_recall_usage
+    || options.pressureRecallUsage
+    || options.pressure_recall_usage
+    || null;
+  const summary = explicit?.schema ? explicit : buildGroupTypedMemoryPressureRecallUsageSummary(groupId, {
+    targetProject: options.targetProject || options.target_project,
+    nowMs: options.nowMs || options.now_ms,
+    now: options.now,
+    generatedAt: options.generatedAt || options.generated_at,
+    usageHalfLifeDays: options.usageHalfLifeDays || options.usage_half_life_days,
+    usageStaleAfterDays: options.usageStaleAfterDays || options.usage_stale_after_days,
+    disableUsageAging: options.disableUsageAging || options.disable_usage_aging,
+  });
+  const crossGroupDisabled = explicit?.schema
+    || options.disableCrossGroupPressureRecallUsage === true
+    || options.disable_cross_group_pressure_recall_usage === true
+    || options.crossGroupPressureRecallUsage === false
+    || options.cross_group_pressure_recall_usage === false;
+  const crossGroupSummary = crossGroupDisabled ? null : buildGroupTypedMemoryPressureRecallUsageProjectSummary(groupId, {
+    targetProject: options.targetProject || options.target_project,
+    nowMs: options.nowMs || options.now_ms,
+    now: options.now,
+    generatedAt: options.generatedAt || options.generated_at,
+    usageHalfLifeDays: options.usageHalfLifeDays || options.usage_half_life_days,
+    usageStaleAfterDays: options.usageStaleAfterDays || options.usage_stale_after_days,
+    disableUsageAging: options.disableUsageAging || options.disable_usage_aging,
+    groupIds: options.crossGroupPressureRecallUsageGroupIds
+      || options.cross_group_pressure_recall_usage_group_ids
+      || options.crossGroupIds
+      || options.cross_group_ids,
+    maxGroups: options.maxCrossGroupPressureRecallUsageGroups || options.max_cross_group_pressure_recall_usage_groups,
+  });
+  const rowsFromSummary = (value: any, scope: string) => [
+    ...(Array.isArray(value?.useful_pressure_memories || value?.usefulPressureMemories) ? (value.useful_pressure_memories || value.usefulPressureMemories) : []),
+    ...(Array.isArray(value?.ignored_pressure_memories || value?.ignoredPressureMemories) ? (value.ignored_pressure_memories || value.ignoredPressureMemories) : []),
+    ...(Array.isArray(value?.missing_usage_pressure_memories || value?.missingUsagePressureMemories) ? (value.missing_usage_pressure_memories || value.missingUsagePressureMemories) : []),
+    ...(Array.isArray(value?.stale_pressure_memories || value?.stalePressureMemories) ? (value.stale_pressure_memories || value.stalePressureMemories) : []),
+    ...(Array.isArray(value?.rows) ? value.rows : []),
+  ].map((row: any) => ({
+    ...row,
+    hint_scope: row.hint_scope || scope,
+    source_group_count: row.source_group_count || value?.source_group_count || 0,
+    source_groups: row.source_groups || value?.source_groups || [],
+  }));
+  const localRows = rowsFromSummary(summary, "local_group");
+  const localDocKeys = new Set(localRows.map((row: any) => `${String(row.rel_path || row.relPath || "").trim().toLowerCase()}|${String(row.name || "").trim().toLowerCase()}`));
+  const crossRows = rowsFromSummary(crossGroupSummary, "cross_group_project")
+    .filter((row: any) => !localDocKeys.has(`${String(row.rel_path || row.relPath || "").trim().toLowerCase()}|${String(row.name || "").trim().toLowerCase()}`));
+  const rows = [...localRows, ...crossRows];
+  const repairHints = normalizeWorkerContextPressureRecallUsageRepairHints(groupId, options);
+  const seen = new Set<string>();
+  return rows.map((row: any) => {
+    const targetProject = String(row.target_project || row.targetProject || summary?.target_project || (summary as any)?.targetProject || crossGroupSummary?.target_project || (crossGroupSummary as any)?.targetProject || options.targetProject || options.target_project || "").trim();
+    const repairHint = matchWorkerContextPressureRecallUsageRepairHint(row, repairHints, targetProject);
+    const normalized = {
+      rel_path: String(row.rel_path || row.relPath || "").trim(),
+      name: String(row.name || "").trim(),
+      target_project: targetProject,
+      hint_scope: String(row.hint_scope || row.hintScope || "").trim() || "local_group",
+      source_group_count: Number(row.source_group_count || row.sourceGroupCount || 0),
+      group_ids: uniqueStrings(Array.isArray(row.group_ids || row.groupIds) ? (row.group_ids || row.groupIds) : [], 24),
+      recommendation: String(row.recommendation || "").trim() || workerContextPressureRecallUsageRecommendation(row),
+      used_count: Number(row.used_count || row.usedCount || 0),
+      verified_count: Number(row.verified_count || row.verifiedCount || 0),
+      ignored_count: Number(row.ignored_count || row.ignoredCount || 0),
+      mentioned_count: Number(row.mentioned_count || row.mentionedCount || 0),
+      weighted_used_count: Number(row.weighted_used_count || row.used_weighted_count || row.weightedUsedCount || 0),
+      weighted_verified_count: Number(row.weighted_verified_count || row.verified_weighted_count || row.weightedVerifiedCount || 0),
+      weighted_ignored_count: Number(row.weighted_ignored_count || row.ignored_weighted_count || row.weightedIgnoredCount || 0),
+      weighted_mentioned_count: Number(row.weighted_mentioned_count || row.mentioned_weighted_count || row.weightedMentionedCount || 0),
+      weighted_total_count: Number(row.weighted_total_count || row.total_weighted_count || row.weightedTotalCount || 0),
+      stale_count: Number(row.stale_count || row.staleCount || 0),
+      fresh_count: Number(row.fresh_count || row.freshCount || 0),
+      avg_decay_weight: Number(row.avg_decay_weight || row.avgDecayWeight || row.decay_weight || row.decayWeight || 0),
+      max_age_days: Number(row.max_age_days || row.maxAgeDays || row.age_days || row.ageDays || 0),
+      repair_status: repairHint?.status || "",
+      repair_open: repairHint?.open === true,
+      repair_work_item_id: repairHint?.work_item_id || "",
+      repair_gap_type: repairHint?.gap_type || "",
+      repair_priority: repairHint?.priority || "",
+      repair_reason: repairHint?.reason || "",
+      repair_local_recommendation: repairHint?.local_recommendation || "",
+      repair_cross_group_recommendation: repairHint?.cross_group_recommendation || "",
+      repair_source_group_count: Number(repairHint?.source_group_count || 0),
+      provenance_status: repairHint?.open === true
+        ? (repairHint?.gap_type === "recommendation_conflict" ? "disputed_under_repair" : "stale_evidence_under_repair")
+        : String(row.hint_scope || row.hintScope || "").trim() === "cross_group_project"
+          ? "cross_group_project_assist"
+          : "local_group_evidence",
+    };
+    const key = `${normalized.rel_path.toLowerCase()}|${normalized.name.toLowerCase()}|${normalized.recommendation}|${normalized.hint_scope}`;
+    if (!normalized.rel_path && !normalized.name || seen.has(key)) return null;
+    seen.add(key);
+    return normalized;
+  }).filter(Boolean);
+}
+
+function scoreWorkerContextPressureRecallUsageHint(doc: any, hints: any[] = [], signals: any = {}) {
+  const matched: any[] = [];
+  let adjustment = 0;
+  if (signals.active !== true || !Array.isArray(hints) || !hints.length) return { adjustment, matched };
+  const relPath = String(doc.relPath || doc.rel_path || "").trim().toLowerCase();
+  const name = String(doc.name || "").trim().toLowerCase();
+  for (const hint of hints) {
+    const hintRelPath = String(hint.rel_path || hint.relPath || "").trim().toLowerCase();
+    const hintName = String(hint.name || "").trim().toLowerCase();
+    const matches = (!!hintRelPath && hintRelPath === relPath) || (!!hintName && hintName === name);
+    if (!matches) continue;
+    let delta = 0;
+    const weightedUsed = Number(hint.weighted_used_count || hint.used_count || 0);
+    const weightedVerified = Number(hint.weighted_verified_count || hint.verified_count || 0);
+    const weightedIgnored = Number(hint.weighted_ignored_count || hint.ignored_count || 0);
+    if (hint.recommendation === "promote_pressure_recall") delta = 5 + Math.min(5, Math.round(weightedUsed + weightedVerified));
+    else if (hint.recommendation === "deprioritize_pressure_recall") delta = -7 - Math.min(5, Math.round(weightedIgnored));
+    else if (hint.recommendation === "require_pressure_usage_receipt") delta = 1;
+    else if (hint.recommendation === "stale_pressure_recall_history") delta = 0;
+    else delta = 2;
+    adjustment += delta;
+    matched.push({
+      rel_path: hint.rel_path,
+      name: hint.name,
+      target_project: hint.target_project || "",
+      recommendation: hint.recommendation,
+      delta,
+      weighted_used_count: hint.weighted_used_count || 0,
+      weighted_verified_count: hint.weighted_verified_count || 0,
+      weighted_ignored_count: hint.weighted_ignored_count || 0,
+      stale_count: hint.stale_count || 0,
+      fresh_count: hint.fresh_count || 0,
+      avg_decay_weight: hint.avg_decay_weight || 0,
+      max_age_days: hint.max_age_days || 0,
+      hint_scope: hint.hint_scope || "",
+      source_group_count: hint.source_group_count || 0,
+      group_ids: hint.group_ids || [],
+      provenance_status: hint.provenance_status || "",
+      repair_status: hint.repair_status || "",
+      repair_open: hint.repair_open === true,
+      repair_work_item_id: hint.repair_work_item_id || "",
+      repair_gap_type: hint.repair_gap_type || "",
+      repair_priority: hint.repair_priority || "",
+      repair_reason: hint.repair_reason || "",
+      repair_local_recommendation: hint.repair_local_recommendation || "",
+      repair_cross_group_recommendation: hint.repair_cross_group_recommendation || "",
+      repair_source_group_count: hint.repair_source_group_count || 0,
+    });
+  }
+  return { adjustment, matched };
+}
+
+function normalizePressureProvenanceDispatchFeedbackPolicyForRecall(options: any = {}) {
+  const candidate = options.pressureProvenanceDispatchFeedbackPolicy
+    || options.pressure_provenance_dispatch_feedback_policy
+    || options.pressureProvenancePreDispatchComplianceDispatchPolicy
+    || options.pressure_provenance_pre_dispatch_compliance_dispatch_policy
+    || null;
+  if (!candidate || typeof candidate !== "object") {
+    return {
+      schema: "ccm-pressure-provenance-feedback-recall-risk-policy-v1",
+      active: false,
+      disabled: false,
+      policyRows: [],
+    };
+  }
+  const policyRows = Array.isArray(candidate.policyRows || candidate.policy_rows)
+    ? (candidate.policyRows || candidate.policy_rows)
+    : [];
+  const disabled = candidate.disabled === true || candidate.disable === true;
+  return {
+    ...candidate,
+    schema: candidate.schema || "ccm-pressure-provenance-feedback-recall-risk-policy-v1",
+    active: candidate.active === true && !disabled,
+    disabled,
+    policyRows,
+    targetProject: candidate.targetProject || candidate.target_project || "",
+    agentType: candidate.agentType || candidate.agent_type || "unknown",
+    severity: candidate.severity || "",
+    action: candidate.action || "",
+  };
+}
+
+function pressureProvenanceFeedbackRecallRepairQuery(text: string, queryTokens: string[] = []) {
+  const haystack = `${text}\n${queryTokens.join("\n")}`.toLowerCase();
+  return /memoryprovenanceusage|current_source_verified|currentsourceverified|repairworkitem|repair_work_item|provenance_status|disputed_under_repair|stale_evidence_under_repair|pressure provenance|provenance repair|repair provenance|压力.*来源|来源.*修复|来源核验|记忆.*回执|回执.*核验|回执.*修复/.test(haystack);
+}
+
+function pressureProvenanceFeedbackRecallUnderRepair(value: any = {}) {
+  const provenance = String(value.provenance_status || value.provenanceStatus || "").trim().toLowerCase();
+  return provenance === "disputed_under_repair"
+    || provenance === "stale_evidence_under_repair"
+    || !!String(value.repair_work_item_id || value.repairWorkItemId || value.work_item_id || value.workItemId || "").trim()
+    || value.repair_open === true
+    || value.repairOpen === true;
+}
+
+function scoreWorkerContextPressureFeedbackPolicyRecallRisk(doc: any, corpus: string, pressureUsage: any = {}, policy: any = {}, queryText = "", queryTokens: string[] = []) {
+  const active = policy?.active === true && policy?.disabled !== true;
+  const matched = Array.isArray(pressureUsage?.matched)
+    ? pressureUsage.matched.filter((match: any) => pressureProvenanceFeedbackRecallUnderRepair(match))
+    : [];
+  const haystack = `${doc.relPath || ""}\n${doc.name || ""}\n${doc.description || ""}\n${corpus}`.toLowerCase();
+  const textRisk = /disputed_under_repair|stale_evidence_under_repair|repair_open\s*[:=]\s*true/.test(haystack);
+  const riskDoc = matched.length > 0 || pressureProvenanceFeedbackRecallUnderRepair(doc) || textRisk;
+  if (!active || !riskDoc) {
+    return {
+      schema: "ccm-worker-context-pressure-provenance-feedback-recall-risk-v1",
+      active,
+      adjustment: 0,
+      matched,
+      risk_doc: riskDoc,
+      repair_first: false,
+      action: active ? "no_risk_detected" : "policy_inactive",
+    };
+  }
+  const repairFirst = pressureProvenanceFeedbackRecallRepairQuery(queryText, queryTokens);
+  const severity = String(policy.severity || "").toLowerCase();
+  const delta = repairFirst ? 0 : severity === "high" ? -16 : -12;
+  return {
+    schema: "ccm-worker-context-pressure-provenance-feedback-recall-risk-v1",
+    active: true,
+    adjustment: delta,
+    matched,
+    risk_doc: true,
+    text_risk: textRisk,
+    repair_first: repairFirst,
+    action: repairFirst ? "repair_first_preserve_risky_pressure_memory" : "deprioritize_risky_pressure_memory",
+    reason: repairFirst
+      ? "feedback policy active; task asks for provenance/repair work, so keep risky pressure memory visible but require repair-first current-source verification"
+      : "feedback policy active for this agent/project; risky under-repair pressure memory is downranked unless the task explicitly asks for provenance repair",
+    policy_action: policy.action || "",
+    policy_severity: policy.severity || "",
+    target_project: policy.targetProject || policy.target_project || "",
+    agent_type: policy.agentType || policy.agent_type || "unknown",
+  };
+}
+
 function truncateIndexContent(content: string) {
   let lines = content.split("\n").slice(0, GROUP_TYPED_MEMORY_MAX_INDEX_LINES);
   let text = lines.join("\n");
@@ -420,6 +1616,10 @@ export function getGroupTypedMemoryIndexFile(groupId: string) {
 
 export function getGroupTypedMemoryRecallLedgerFile(groupId: string) {
   return path.join(getGroupTypedMemoryDir(groupId), GROUP_TYPED_MEMORY_RECALL_LEDGER);
+}
+
+export function getGroupTypedMemoryPressureRecallUsageLedgerFile(groupId: string) {
+  return path.join(getGroupTypedMemoryDir(groupId), GROUP_TYPED_MEMORY_PRESSURE_RECALL_USAGE_LEDGER);
 }
 
 export function getGroupTypedMemoryDistillationLedgerFile(groupId: string) {
@@ -1758,6 +2958,26 @@ function buildPostCompactCandidateUsageArchive(input: any = {}, options: any = {
   };
 }
 
+function preservedGroupTypedMemoryDistillationArchives(...ledgers: any[]) {
+  const keys = [
+    "providerReproofReceiptConsumptionArchive",
+    "ignoreMemoryReceiptRepairArchive",
+    "pressureMemoryProvenanceReceiptRepairArchive",
+    "pressureProvenancePreDispatchComplianceArchive",
+    "pressureProvenancePreDispatchComplianceRecoveryArchive",
+    "pressureProvenanceProviderDispatchOverrideFollowupArchive",
+    "contextUsageRepairArchive",
+    "compactStrategyTypedArchive",
+    "ptlEmergencyTypedArchive",
+  ];
+  const out: any = {};
+  for (const key of keys) {
+    const value = ledgers.map((ledger: any) => ledger?.[key]).find((candidate: any) => candidate?.schema);
+    if (value?.schema) out[key] = value;
+  }
+  return out;
+}
+
 function normalizeProviderReproofReceiptConsumptionStatus(value: any) {
   const status = String(value || "").trim().toLowerCase();
   if (["strong", "native_strong", "provider_strong"].includes(status)) return "strong";
@@ -2014,6 +3234,339 @@ export function distillProviderReproofReceiptConsumptionToTypedMemory(groupId: s
   };
 }
 
+function providerDispatchOverrideFollowupInputRows(input: any = {}) {
+  if (Array.isArray(input)) return input;
+  const rows = [
+    ...(Array.isArray(input.rows) ? input.rows : []),
+    ...(Array.isArray(input.entries) ? input.entries : []),
+    ...(Array.isArray(input.bindings) ? input.bindings : []),
+    ...(Array.isArray(input.bindingLedger?.entries) ? input.bindingLedger.entries : []),
+    ...(Array.isArray(input.binding_ledger?.entries) ? input.binding_ledger.entries : []),
+  ];
+  if (rows.length) return rows;
+  const groups = Array.isArray(input.report?.groups) ? input.report.groups : Array.isArray(input.groups) ? input.groups : [];
+  return groups.flatMap((group: any) => [
+    ...(Array.isArray(group.entries) ? group.entries : []),
+    ...(Array.isArray(group.bindings) ? group.bindings : []),
+    ...(Array.isArray(group.checks) ? group.checks : []),
+  ].map((row: any) => ({ ...row, groupId: row.groupId || row.group_id || group.groupId || group.group_id || "" })));
+}
+
+function providerDispatchOverrideFollowupDecision(entry: any = {}, raw: any = {}) {
+  return entry.worker_context_provider_dispatch_decision
+    || entry.workerContextProviderDispatchDecision
+    || entry.provider_dispatch_decision
+    || entry.providerDispatchDecision
+    || raw.decision
+    || {};
+}
+
+function providerDispatchOverrideFollowupReceipt(entry: any = {}, decision: any = {}, raw: any = {}) {
+  return entry.worker_context_provider_dispatch_override_receipt
+    || entry.workerContextProviderDispatchOverrideReceipt
+    || entry.provider_dispatch_override_receipt
+    || entry.providerDispatchOverrideReceipt
+    || decision.provider_dispatch_override_receipt
+    || decision.providerDispatchOverrideReceipt
+    || decision.override
+    || raw.override
+    || raw.overrideReceipt
+    || raw.override_receipt
+    || {};
+}
+
+function providerDispatchOverrideFollowupCompletion(entry: any = {}, raw: any = {}) {
+  return entry.worker_context_provider_dispatch_override_completion
+    || entry.workerContextProviderDispatchOverrideCompletion
+    || entry.provider_dispatch_override_completion
+    || entry.providerDispatchOverrideCompletion
+    || raw.completion
+    || {};
+}
+
+function providerDispatchOverrideFollowupRepair(entry: any = {}, completion: any = {}, raw: any = {}) {
+  return entry.worker_context_provider_dispatch_override_followup_repair
+    || entry.workerContextProviderDispatchOverrideFollowupRepair
+    || entry.provider_dispatch_override_followup_repair_work_item
+    || entry.providerDispatchOverrideFollowupRepairWorkItem
+    || raw.followup
+    || raw.followupRepair
+    || raw.followup_repair
+    || (completion.followup_work_item_id ? { work_item_id: completion.followup_work_item_id } : {})
+    || {};
+}
+
+function providerDispatchOverrideFollowupUsageRows(receipt: any = {}) {
+  return [
+    ...(Array.isArray(receipt.memoryProvenanceUsage) ? receipt.memoryProvenanceUsage : []),
+    ...(Array.isArray(receipt.memory_provenance_usage) ? receipt.memory_provenance_usage : []),
+    ...(Array.isArray(receipt.pressureMemoryProvenanceUsage) ? receipt.pressureMemoryProvenanceUsage : []),
+    ...(Array.isArray(receipt.pressure_memory_provenance_usage) ? receipt.pressure_memory_provenance_usage : []),
+  ].filter((row: any) => row && typeof row === "object");
+}
+
+function providerDispatchOverrideFollowupRowId(row: any = {}) {
+  return `provider-dispatch-override-followup:${checksum([
+    row.groupId,
+    row.binding_id,
+    row.assignment_id,
+    row.worker_context_packet_id,
+    row.override_id,
+    row.completion_id,
+    row.followup_work_item_id,
+  ], 24)}`;
+}
+
+function normalizeProviderDispatchOverrideFollowupRows(input: any = {}, options: any = {}) {
+  const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+  return providerDispatchOverrideFollowupInputRows(input).map((raw: any, index: number) => {
+    const entry = raw?.entry || raw?.binding || raw || {};
+    const decision = providerDispatchOverrideFollowupDecision(entry, raw);
+    const overrideReceipt = providerDispatchOverrideFollowupReceipt(entry, decision, raw);
+    const completion = providerDispatchOverrideFollowupCompletion(entry, raw);
+    const followup = providerDispatchOverrideFollowupRepair(entry, completion, raw);
+    const receipt = completion.receipt || raw.receipt || {};
+    const usageRows = providerDispatchOverrideFollowupUsageRows(receipt);
+    const verifiedRows = usageRows.filter((row: any) => row.currentSourceVerified === true || row.current_source_verified === true);
+    const completionOk = completion.completion_ok === true
+      || (String(completion.status || "").toLowerCase() === "completed"
+        && usageRows.length > 0
+        && verifiedRows.length === usageRows.length);
+    const memoryUsageCount = Number(completion.memory_provenance_usage_count || completion.memoryProvenanceUsageCount || usageRows.length || 0);
+    const verifiedCount = Number(completion.current_source_verified_count || completion.currentSourceVerifiedCount || verifiedRows.length || 0);
+    const row = {
+      schema: "ccm-pressure-provenance-provider-dispatch-override-followup-distilled-row-v1",
+      version: GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_DISTILLATION_VERSION,
+      groupId: String(entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+      project: String(entry.project || decision.project || completion.project || raw?.project || "").trim(),
+      agent_type: String(entry.agent_type || entry.agentType || decision.agent_type || decision.agentType || completion.agent_type || completion.agentType || "unknown").trim() || "unknown",
+      binding_id: String(entry.binding_id || entry.bindingId || completion.binding_id || completion.bindingId || raw?.binding_id || raw?.bindingId || "").trim(),
+      assignment_id: String(entry.assignment_id || entry.assignmentId || completion.assignment_id || completion.assignmentId || raw?.assignment_id || raw?.assignmentId || "").trim(),
+      dispatch_key: String(entry.dispatch_key || entry.dispatchKey || completion.dispatch_key || completion.dispatchKey || raw?.dispatch_key || raw?.dispatchKey || "").trim(),
+      worker_context_packet_id: String(entry.worker_context_packet_id || entry.workerContextPacketId || completion.worker_context_packet_id || completion.workerContextPacketId || raw?.worker_context_packet_id || raw?.workerContextPacketId || "").trim(),
+      decision_id: String(decision.decision_id || decision.decisionId || completion.decision_id || completion.decisionId || raw?.decision_id || raw?.decisionId || "").trim(),
+      override_id: String(overrideReceipt.override_id || overrideReceipt.overrideId || completion.override_id || completion.overrideId || raw?.override_id || raw?.overrideId || "").trim(),
+      followup_work_item_id: String(followup.work_item_id || followup.workItemId || completion.followup_work_item_id || completion.followupWorkItemId || raw?.followup_work_item_id || raw?.followupWorkItemId || "").trim(),
+      completion_id: String(completion.completion_id || completion.completionId || raw?.completion_id || raw?.completionId || "").trim(),
+      task_id: String(completion.task_id || completion.taskId || raw?.task_id || raw?.taskId || "").trim(),
+      worker_handoff_id: String(completion.worker_handoff_id || completion.workerHandoffId || raw?.worker_handoff_id || raw?.workerHandoffId || "").trim(),
+      task_agent_session_id: String(completion.task_agent_session_id || completion.taskAgentSessionId || raw?.task_agent_session_id || raw?.taskAgentSessionId || "").trim(),
+      native_session_id: String(completion.native_session_id || completion.nativeSessionId || raw?.native_session_id || raw?.nativeSessionId || "").trim(),
+      execution_id: String(completion.execution_id || completion.executionId || raw?.execution_id || raw?.executionId || "").trim(),
+      memory_context_snapshot_id: String(completion.memory_context_snapshot_id || completion.memoryContextSnapshotId || raw?.memory_context_snapshot_id || raw?.memoryContextSnapshotId || "").trim(),
+      receipt_status: String(completion.receipt_status || completion.receiptStatus || receipt.status || raw?.receipt_status || raw?.receiptStatus || "").trim().toLowerCase(),
+      completion_status: completionOk ? "completed" : String(completion.status || "needs_repair").trim().toLowerCase(),
+      completion_ok: completionOk,
+      memory_provenance_usage_count: memoryUsageCount,
+      current_source_verified_count: verifiedCount,
+      all_current_source_verified: memoryUsageCount > 0 && verifiedCount === memoryUsageCount,
+      approved_by: String(overrideReceipt.approved_by || overrideReceipt.approvedBy || raw?.approved_by || raw?.approvedBy || "").trim(),
+      override_reason: compactText(overrideReceipt.reason || overrideReceipt.override_reason || overrideReceipt.overrideReason || raw?.override_reason || "", 700),
+      completion_reason: compactText(completion.reason || raw?.reason || "", 700),
+      rel_paths: uniqueStrings(usageRows.map((usage: any) => usage.relPath || usage.rel_path || usage.path || usage.file).filter(Boolean), 16),
+      repair_statuses: uniqueStrings(usageRows.map((usage: any) => usage.repairStatus || usage.repair_status).filter(Boolean), 8),
+      repair_gap_types: uniqueStrings(usageRows.map((usage: any) => usage.repairGapType || usage.repair_gap_type).filter(Boolean), 8),
+      usage_states: uniqueStrings(usageRows.map((usage: any) => usage.usageState || usage.usage_state).filter(Boolean), 8),
+      usage_reasons: uniqueStrings(usageRows.map((usage: any) => usage.reason || usage.summary || usage.note).filter(Boolean), 8),
+      dispatch_policy: String(decision.dispatch_policy || decision.dispatchPolicy || decision.action || "").trim(),
+      health_status: String(decision.advisory_health_status || decision.health_status || decision.healthStatus || entry.worker_context_packet_pressure_provenance_provider_dispatch_advisory?.health_status || "").trim(),
+      first_seen_at: String(entry.first_seen_at || entry.firstSeenAt || entry.at || raw?.first_seen_at || raw?.at || completion.at || options.updatedAt || now()),
+      last_seen_at: String(completion.at || entry.updated_at || entry.updatedAt || entry.at || raw?.updated_at || raw?.at || options.updatedAt || now()),
+      source_index: Number(raw?.source_index || raw?.sourceIndex || index),
+    };
+    return { ...row, row_id: providerDispatchOverrideFollowupRowId(row) };
+  }).filter((row: any) => row.completion_ok === true)
+    .filter((row: any) => row.memory_provenance_usage_count > 0 && row.all_current_source_verified === true);
+}
+
+function mergeProviderDispatchOverrideFollowupRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+  const updatedAt = String(options.updatedAt || now());
+  const merged = new Map<string, any>();
+  for (const row of existing || []) {
+    const id = String(row.row_id || providerDispatchOverrideFollowupRowId(row));
+    merged.set(id, { ...row, row_id: id });
+  }
+  const previousIds = new Set(merged.keys());
+  const incomingIds = new Set<string>();
+  for (const row of incoming || []) {
+    const id = String(row.row_id || providerDispatchOverrideFollowupRowId(row));
+    incomingIds.add(id);
+    const previous = merged.get(id);
+    merged.set(id, {
+      ...(previous || {}),
+      ...row,
+      row_id: id,
+      first_seen_at: previous?.first_seen_at || row.first_seen_at || updatedAt,
+      last_seen_at: updatedAt,
+      seen_count: Number(previous?.seen_count || 0) + 1,
+    });
+  }
+  const limit = Math.max(1, Math.min(300, Number(options.limit || options.maxRows || options.max_rows || 120)));
+  const rows = [...merged.values()]
+    .sort((a: any, b: any) => String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || "")) || Number(a.source_index || 0) - Number(b.source_index || 0))
+    .slice(-limit);
+  const currentIds = new Set(rows.map((row: any) => row.row_id));
+  return {
+    rows,
+    newRowCount: rows.filter((row: any) => !previousIds.has(row.row_id)).length,
+    updatedRowCount: rows.filter((row: any) => previousIds.has(row.row_id) && incomingIds.has(row.row_id)).length,
+    prunedRowCount: Math.max(0, merged.size - currentIds.size),
+  };
+}
+
+function pressureProvenanceProviderDispatchOverrideFollowupArchive(rows: any[] = [], options: any = {}) {
+  const updatedAt = String(options.updatedAt || now());
+  const attributionMap = new Map<string, any>();
+  for (const row of rows || []) {
+    const key = `${String(row.agent_type || "unknown").toLowerCase()}|${String(row.project || "unknown").toLowerCase()}`;
+    const current = attributionMap.get(key) || {
+      agent_type: row.agent_type || "unknown",
+      project: row.project || "unknown",
+      completed_count: 0,
+      memory_provenance_usage_count: 0,
+      current_source_verified_count: 0,
+      rel_paths: [],
+      followup_work_item_ids: [],
+      override_ids: [],
+      first_completed_at: "",
+      last_completed_at: "",
+    };
+    current.completed_count += 1;
+    current.memory_provenance_usage_count += Number(row.memory_provenance_usage_count || 0);
+    current.current_source_verified_count += Number(row.current_source_verified_count || 0);
+    current.rel_paths = uniqueStrings([...(current.rel_paths || []), ...(Array.isArray(row.rel_paths) ? row.rel_paths : [])], 20);
+    current.followup_work_item_ids = uniqueStrings([...(current.followup_work_item_ids || []), row.followup_work_item_id].filter(Boolean), 20);
+    current.override_ids = uniqueStrings([...(current.override_ids || []), row.override_id].filter(Boolean), 20);
+    const completedAt = String(row.last_seen_at || row.first_seen_at || "");
+    current.first_completed_at = current.first_completed_at
+      ? [current.first_completed_at, completedAt].filter(Boolean).sort()[0]
+      : completedAt;
+    current.last_completed_at = [current.last_completed_at, completedAt].filter(Boolean).sort().slice(-1)[0] || "";
+    attributionMap.set(key, current);
+  }
+  const attributions = [...attributionMap.values()]
+    .sort((a: any, b: any) => Number(b.completed_count || 0) - Number(a.completed_count || 0) || String(a.agent_type || "").localeCompare(String(b.agent_type || "")));
+  const relPaths = uniqueStrings(rows.flatMap((row: any) => Array.isArray(row.rel_paths) ? row.rel_paths : []), 80);
+  return {
+    schema: "ccm-pressure-provenance-provider-dispatch-override-followup-distillation-v1",
+    version: GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_DISTILLATION_VERSION,
+    archived_count: rows.length,
+    completed_count: rows.length,
+    attribution_count: attributions.length,
+    rel_path_count: relPaths.length,
+    all_current_source_verified_count: rows.filter((row: any) => row.all_current_source_verified === true).length,
+    rel_paths: relPaths,
+    attributions,
+    rows,
+    updatedAt,
+  };
+}
+
+function renderPressureProvenanceProviderDispatchOverrideFollowupBody(archive: any = {}, options: any = {}) {
+  const rows = Array.isArray(archive.rows) ? archive.rows : [];
+  const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
+  const lines = [
+    "# Provider Dispatch Override Follow-up Repair History",
+    "",
+    `Generated by CCM provider dispatch override follow-up distillation at ${options.updatedAt || now()}.`,
+    "This feedback memory records cases where pressure provenance provider dispatch was temporarily overridden, then repaired by a child Agent completion receipt with verified memoryProvenanceUsage rows.",
+    "Stable rule: a completed override follow-up proves the specific repair loop was closed; it does not make future provider holds safe by default. Future dispatch should still prefer the normal provider gate, sample receipts, and re-check current source evidence.",
+    "",
+    "## Executor / Project Repair Attributions",
+  ];
+  for (const row of attributions.slice(0, 20)) {
+    lines.push(`- agentType=${row.agent_type || "unknown"}; project=${row.project || "unknown"}; completed=${row.completed_count || 0}; receiptRows=${row.memory_provenance_usage_count || 0}; verifiedRows=${row.current_source_verified_count || 0}; lastCompletedAt=${row.last_completed_at || ""}.`);
+    if (row.rel_paths?.length) lines.push(`  Evidence docs: ${row.rel_paths.slice(0, 8).join(", ")}.`);
+    if (row.followup_work_item_ids?.length) lines.push(`  Follow-up work items: ${row.followup_work_item_ids.slice(0, 8).join(", ")}.`);
+  }
+  lines.push("");
+  lines.push("## Completed Override Follow-ups");
+  for (const row of rows.slice(-40).reverse()) {
+    const ids = [
+      row.project ? `project=${row.project}` : "",
+      row.agent_type ? `agentType=${row.agent_type}` : "",
+      row.task_id ? `task=${row.task_id}` : "",
+      row.override_id ? `override=${row.override_id}` : "",
+      row.completion_id ? `completion=${row.completion_id}` : "",
+      row.followup_work_item_id ? `work_item=${row.followup_work_item_id}` : "",
+    ].filter(Boolean).join("; ");
+    lines.push(`- [repaired] ${ids || row.row_id}; memoryProvenanceUsage=${row.memory_provenance_usage_count || 0}; currentSourceVerified=${row.current_source_verified_count || 0}; session=${row.task_agent_session_id || "unknown"}; execution=${row.execution_id || "unknown"}.`);
+    if (row.rel_paths?.length) lines.push(`  relPath=${row.rel_paths.slice(0, 8).join(", ")}.`);
+    if (row.usage_reasons?.length) lines.push(`  Usage evidence: ${row.usage_reasons.slice(0, 4).map((item: any) => compactText(item, 500).replace(/\n/g, " ")).join(" | ")}`);
+    if (row.override_reason) lines.push(`  Override reason: ${compactText(row.override_reason, 500).replace(/\n/g, " ")}`);
+    if (row.completion_reason) lines.push(`  Completion reason: ${compactText(row.completion_reason, 500).replace(/\n/g, " ")}`);
+  }
+  lines.push("");
+  lines.push("## Dispatch Reminder");
+  lines.push("- Treat these rows as repaired history and cautionary context for the same agentType/project. If a new provider advisory says hold_until_repair, do not bypass it just because an older override was later repaired.");
+  return lines.join("\n").trim() + "\n";
+}
+
+export function distillProviderDispatchOverrideFollowupToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+    return {
+      schema: "ccm-pressure-provenance-provider-dispatch-override-followup-distillation-v1",
+      version: GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_DISTILLATION_VERSION,
+      groupId,
+      skipped: true,
+      reason: "disabled",
+    };
+  }
+  const updatedAt = String(options.updatedAt || options.updated_at || now());
+  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+  const incomingRows = normalizeProviderDispatchOverrideFollowupRows(input, { ...options, groupId, updatedAt });
+  const previousArchive = ledger.pressureProvenanceProviderDispatchOverrideFollowupArchive || {};
+  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
+  const merged = mergeProviderDispatchOverrideFollowupRows(previousRows, incomingRows, { ...options, updatedAt });
+  const archive = pressureProvenanceProviderDispatchOverrideFollowupArchive(merged.rows, { ...options, updatedAt });
+  const writes: any[] = [];
+  if (archive.rows.length) {
+    writes.push(upsertGroupTypedMemoryDocument(groupId, {
+      type: "feedback",
+      slug: "provider-dispatch-override-followup-recall",
+      name: "Provider dispatch override follow-up repair history",
+      description: "Completed pressure provenance provider dispatch overrides whose follow-up repair was verified by child Agent memoryProvenanceUsage receipts.",
+      source: "auto:pressure-provenance-provider-dispatch-override-followup-distillation",
+      updatedAt,
+      body: renderPressureProvenanceProviderDispatchOverrideFollowupBody(archive, { updatedAt }),
+      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
+    }));
+  }
+  const ledgerState = { ...ledger };
+  delete ledgerState.file;
+  writeJsonAtomic(ledger.file, {
+    ...ledgerState,
+    schema: "ccm-group-typed-memory-distillation-ledger-v1",
+    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+    groupId,
+    facts: ledger.facts || {},
+    pressureProvenanceProviderDispatchOverrideFollowupArchive: archive,
+    updatedAt,
+  });
+  const index = buildGroupTypedMemoryIndex(groupId);
+  return {
+    schema: "ccm-pressure-provenance-provider-dispatch-override-followup-distillation-v1",
+    version: GROUP_PRESSURE_PROVENANCE_PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_DISTILLATION_VERSION,
+    groupId,
+    skipped: false,
+    reason: compactText(options.reason || "", 220),
+    ledgerFile: ledger.file,
+    incomingRowCount: incomingRows.length,
+    archivedCount: archive.archived_count,
+    completedCount: archive.completed_count,
+    attributionCount: archive.attribution_count,
+    relPathCount: archive.rel_path_count,
+    newRowCount: merged.newRowCount,
+    updatedRowCount: merged.updatedRowCount,
+    prunedRowCount: merged.prunedRowCount,
+    writeCount: writes.length,
+    writes,
+    index,
+    archive,
+    distilledAt: updatedAt,
+  };
+}
+
 function ignoreMemoryReceiptRepairInputRows(input: any = {}) {
   if (Array.isArray(input)) return input;
   const rows = [
@@ -2230,6 +3783,1059 @@ export function distillIgnoreMemoryReceiptRepairToTypedMemory(groupId: string, i
     index,
     archive,
     distilledAt: updatedAt,
+  };
+}
+
+function pressureMemoryProvenanceReceiptRepairInputRows(input: any = {}) {
+  if (Array.isArray(input)) return input;
+  const rows = [
+    ...(Array.isArray(input.rows) ? input.rows : []),
+    ...(Array.isArray(input.items) ? input.items : []),
+    ...(Array.isArray(input.candidates) ? input.candidates : []),
+    ...(Array.isArray(input.briefs) ? input.briefs : []),
+  ];
+  if (rows.length) return rows;
+  const groups = Array.isArray(input.report?.groups) ? input.report.groups : Array.isArray(input.groups) ? input.groups : [];
+  return groups.flatMap((group: any) => [
+    ...(Array.isArray(group.items) ? group.items : []),
+    ...(Array.isArray(group.candidates) ? group.candidates : []),
+    ...(Array.isArray(group.briefs) ? group.briefs : []),
+    ...(Array.isArray(group.gaps) ? group.gaps : []),
+  ].map((row: any) => ({ ...row, groupId: row.groupId || group.groupId || group.group_id || "" })));
+}
+
+function pressureMemoryProvenanceStringList(...values: any[]) {
+  return uniqueStrings(values.flatMap(value => {
+    if (Array.isArray(value)) return value;
+    if (value === undefined || value === null || value === "") return [];
+    return [value];
+  }).map((item: any) => String(item || "").trim()).filter(Boolean), 24);
+}
+
+function pressureMemoryProvenanceRowsFromRawRecovery(entry: any = {}) {
+  const recovery = entry.raw_recovery || entry.rawRecovery || {};
+  const docs = Array.isArray(recovery.requiredDocs || recovery.required_docs) ? (recovery.requiredDocs || recovery.required_docs) : [];
+  return docs.map((doc: any) => ({
+    rel_path: doc.rel_path || doc.relPath || "",
+    name: doc.name || "",
+    provenance_status: doc.provenance_status || doc.provenanceStatus || "",
+    repair_work_item_id: doc.repair_work_item_id || doc.repairWorkItemId || "",
+    repair_status: doc.repair_status || doc.repairStatus || "",
+    repair_gap_type: doc.repair_gap_type || doc.repairGapType || "",
+  }));
+}
+
+function pressureMemoryProvenanceReceiptRepairRowId(row: any = {}) {
+  return `pressure-memory-provenance-receipt-repair:${checksum([
+    row.groupId,
+    row.work_item_id,
+    row.worker_context_packet_id,
+    row.binding_id,
+    row.assignment_id,
+    row.project,
+    row.status,
+    row.rel_paths,
+    row.repair_work_item_ids,
+    row.gap_signature,
+  ], 24)}`;
+}
+
+function normalizePressureMemoryProvenanceReceiptRepairRows(input: any = {}, options: any = {}) {
+  const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+  return pressureMemoryProvenanceReceiptRepairInputRows(input).map((raw: any, index: number) => {
+    const entry = raw?.entry || raw?.item || raw?.candidate || raw?.brief || raw || {};
+    const source = String(entry.source || raw?.source || "").trim();
+    const recoveryDocs = pressureMemoryProvenanceRowsFromRawRecovery(entry);
+    const gapCodes = pressureMemoryProvenanceStringList(
+      entry.pressure_memory_provenance_gap_codes,
+      entry.pressureMemoryProvenanceGapCodes,
+      recoveryDocs.map((doc: any) => doc.repair_gap_type).filter(Boolean),
+      Array.isArray(entry.gaps) ? entry.gaps.map((gap: any) => typeof gap === "string" ? gap : gap?.code || gap?.reason || gap?.type || JSON.stringify(gap)) : [],
+      Array.isArray(raw?.gaps) ? raw.gaps.map((gap: any) => typeof gap === "string" ? gap : gap?.code || gap?.reason || gap?.type || JSON.stringify(gap)) : []
+    );
+    const relPaths = pressureMemoryProvenanceStringList(
+      entry.pressure_memory_provenance_rel_paths,
+      entry.pressureMemoryProvenanceRelPaths,
+      recoveryDocs.map((doc: any) => doc.rel_path || doc.relPath).filter(Boolean),
+      entry.repair_target && String(entry.repair_target).endsWith(".md") ? entry.repair_target : ""
+    );
+    const repairIds = pressureMemoryProvenanceStringList(
+      entry.pressure_memory_provenance_repair_work_item_ids,
+      entry.pressureMemoryProvenanceRepairWorkItemIds,
+      recoveryDocs.map((doc: any) => doc.repair_work_item_id || doc.repairWorkItemId).filter(Boolean)
+    );
+    const provenanceStatuses = pressureMemoryProvenanceStringList(
+      entry.provenance_status,
+      entry.provenanceStatus,
+      recoveryDocs.map((doc: any) => doc.provenance_status || doc.provenanceStatus).filter(Boolean)
+    );
+    const reason = compactText(
+      entry.reason
+      || entry.source_reason
+      || entry.description
+      || entry.instruction
+      || raw?.reason
+      || gapCodes.join("; ")
+      || "pressure memory provenance receipt repair required",
+      1000
+    );
+    const row = {
+      schema: "ccm-pressure-memory-provenance-receipt-repair-distilled-row-v1",
+      version: GROUP_PRESSURE_MEMORY_PROVENANCE_RECEIPT_REPAIR_DISTILLATION_VERSION,
+      groupId: String(entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+      work_item_id: String(entry.work_item_id || entry.workItemId || entry.id || raw?.work_item_id || raw?.id || "").trim(),
+      brief_id: String(entry.brief_id || entry.briefId || raw?.brief_id || raw?.briefId || "").trim(),
+      candidate_id: String(entry.candidate_id || entry.candidateId || raw?.candidate_id || raw?.candidateId || "").trim(),
+      worker_context_packet_id: String(entry.worker_context_packet_id || entry.workerContextPacketId || entry.packet_id || raw?.worker_context_packet_id || "").trim(),
+      binding_id: String(entry.worker_context_packet_binding_id || entry.binding_id || entry.bindingId || raw?.binding_id || "").trim(),
+      assignment_id: String(entry.assignment_id || entry.assignmentId || raw?.assignment_id || "").trim(),
+      dispatch_key: String(entry.dispatch_key || entry.dispatchKey || raw?.dispatch_key || "").trim(),
+      project: String(entry.project || entry.target_project || entry.targetProject || raw?.project || "").trim(),
+      source,
+      status: String(entry.status || raw?.status || "pending").trim().toLowerCase(),
+      priority: String(entry.priority || raw?.priority || "").trim(),
+      component: String(entry.component || raw?.component || "worker_context_pressure_memory_provenance_receipt_contract").trim(),
+      rel_paths: relPaths,
+      repair_work_item_ids: repairIds,
+      provenance_statuses: provenanceStatuses,
+      gap_codes: gapCodes,
+      gap_signature: gapCodes.join("|"),
+      reason,
+      expected: compactText(entry.expected || raw?.expected || "CCM_AGENT_RECEIPT.memoryProvenanceUsage covers pressure repair memory and marks currentSourceVerified=true when disputed/stale memory is used", 850),
+      prompt_patch: compactText(entry.prompt_patch || entry.promptPatch || raw?.prompt_patch || "", 1400),
+      first_seen_at: String(entry.first_seen_at || entry.createdAt || entry.created_at || entry.at || raw?.first_seen_at || raw?.at || options.updatedAt || now()),
+      last_seen_at: String(entry.updated_at || entry.updatedAt || entry.lastSeenAt || entry.at || raw?.updated_at || raw?.at || options.updatedAt || now()),
+      source_index: Number(raw?.source_index || raw?.sourceIndex || index),
+    };
+    return { ...row, row_id: pressureMemoryProvenanceReceiptRepairRowId(row) };
+  })
+    .filter((row: any) => row.groupId || fallbackGroupId)
+    .filter((row: any) => row.source === "worker_context_pressure_memory_provenance_receipt_repair"
+      || row.component === "worker_context_pressure_memory_provenance_receipt_contract"
+      || /memoryProvenanceUsage|provenanceStatus|repairWorkItemId|currentSourceVerified|pressure memory provenance/i.test(`${row.reason}\n${row.expected}\n${row.prompt_patch}`));
+}
+
+function mergePressureMemoryProvenanceReceiptRepairRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+  const updatedAt = String(options.updatedAt || now());
+  const merged = new Map<string, any>();
+  for (const row of existing || []) {
+    const id = String(row.row_id || pressureMemoryProvenanceReceiptRepairRowId(row));
+    merged.set(id, { ...row, row_id: id });
+  }
+  const previousIds = new Set(merged.keys());
+  for (const row of incoming || []) {
+    const id = String(row.row_id || pressureMemoryProvenanceReceiptRepairRowId(row));
+    const previous = merged.get(id);
+    merged.set(id, {
+      ...(previous || {}),
+      ...row,
+      row_id: id,
+      first_seen_at: previous?.first_seen_at || row.first_seen_at || updatedAt,
+      last_seen_at: updatedAt,
+      seen_count: Number(previous?.seen_count || 0) + 1,
+    });
+  }
+  const limit = Math.max(1, Math.min(260, Number(options.limit || options.maxRows || options.max_rows || 100)));
+  const rows = [...merged.values()]
+    .sort((a: any, b: any) => String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || "")) || Number(a.source_index || 0) - Number(b.source_index || 0))
+    .slice(-limit);
+  return {
+    rows,
+    newRowCount: rows.filter((row: any) => !previousIds.has(row.row_id)).length,
+    updatedRowCount: rows.filter((row: any) => previousIds.has(row.row_id) && incoming.some((item: any) => String(item.row_id || "") === row.row_id)).length,
+    prunedRowCount: Math.max(0, merged.size - rows.length),
+  };
+}
+
+function pressureMemoryProvenanceReceiptRepairArchive(rows: any[] = [], options: any = {}) {
+  const updatedAt = String(options.updatedAt || now());
+  const relPaths = uniqueStrings(rows.flatMap((row: any) => Array.isArray(row.rel_paths) ? row.rel_paths : []), 80);
+  const repairIds = uniqueStrings(rows.flatMap((row: any) => Array.isArray(row.repair_work_item_ids) ? row.repair_work_item_ids : []), 80);
+  const provenanceStatuses = uniqueStrings(rows.flatMap((row: any) => Array.isArray(row.provenance_statuses) ? row.provenance_statuses : []), 20);
+  return {
+    schema: "ccm-pressure-memory-provenance-receipt-repair-distillation-v1",
+    version: GROUP_PRESSURE_MEMORY_PROVENANCE_RECEIPT_REPAIR_DISTILLATION_VERSION,
+    archived_count: rows.length,
+    open_count: rows.filter((row: any) => ["pending", "in_progress", "blocked", "warn", "fail"].includes(String(row.status || ""))).length,
+    completed_count: rows.filter((row: any) => ["completed", "done", "ok"].includes(String(row.status || ""))).length,
+    packet_bound_count: rows.filter((row: any) => row.worker_context_packet_id).length,
+    rel_path_count: relPaths.length,
+    repair_work_item_count: repairIds.length,
+    disputed_count: rows.filter((row: any) => (row.provenance_statuses || []).includes("disputed_under_repair")).length,
+    stale_under_repair_count: rows.filter((row: any) => (row.provenance_statuses || []).includes("stale_evidence_under_repair")).length,
+    corrected_prompt_count: rows.filter((row: any) => /memoryProvenanceUsage/i.test(`${row.expected}\n${row.prompt_patch}\n${row.reason}`)).length,
+    current_source_verified_prompt_count: rows.filter((row: any) => /currentSourceVerified|current_source_verified/i.test(`${row.expected}\n${row.prompt_patch}\n${row.reason}`)).length,
+    rel_paths: relPaths,
+    repair_work_item_ids: repairIds,
+    provenance_statuses: provenanceStatuses,
+    rows,
+    updatedAt,
+  };
+}
+
+function renderPressureMemoryProvenanceReceiptRepairBody(rows: any[] = [], options: any = {}) {
+  const lines = [
+    "# Pressure Memory Provenance Receipt Discipline",
+    "",
+    `Generated by CCM pressure memory provenance receipt repair distillation at ${options.updatedAt || now()}.`,
+    "This feedback memory records repeated child-Agent receipt failures when WorkerContextPacket surfaced pressure MEMORY.md that was disputed_under_repair or stale_evidence_under_repair.",
+    "When a current task sees pressure repair provenance, the final CCM_AGENT_RECEIPT must include memoryProvenanceUsage rows. Each row must include relPath, usageState, provenanceStatus, repairWorkItemId, repairStatus, repairGapType. If usageState is used or verified for disputed/stale-under-repair memory, currentSourceVerified must be true.",
+    "",
+    "## Receipt Discipline Rows",
+  ];
+  for (const row of rows) {
+    const ids = [
+      row.project ? `project=${row.project}` : "",
+      row.worker_context_packet_id ? `packet=${row.worker_context_packet_id}` : "",
+      row.binding_id ? `binding=${row.binding_id}` : "",
+      row.work_item_id ? `work_item=${row.work_item_id}` : "",
+      row.brief_id ? `brief=${row.brief_id}` : "",
+    ].filter(Boolean).join("; ");
+    const relPaths = Array.isArray(row.rel_paths) && row.rel_paths.length ? `relPath=${row.rel_paths.slice(0, 6).join(",")}` : "relPath=unknown";
+    const repairIds = Array.isArray(row.repair_work_item_ids) && row.repair_work_item_ids.length ? `repairWorkItemId=${row.repair_work_item_ids.slice(0, 6).join(",")}` : "repairWorkItemId=unknown";
+    const provenance = Array.isArray(row.provenance_statuses) && row.provenance_statuses.length ? `provenanceStatus=${row.provenance_statuses.slice(0, 4).join(",")}` : "provenanceStatus=under_repair";
+    lines.push(`- [${row.status || "pending"}] ${ids || row.row_id}; ${relPaths}; ${repairIds}; ${provenance}.`);
+    lines.push("  Rule: memoryProvenanceUsage is mandatory for pressure repair memory; used/verified disputed_under_repair or stale_evidence_under_repair rows require currentSourceVerified=true.");
+    if (row.gap_codes?.length) lines.push(`  Gaps: ${row.gap_codes.slice(0, 8).join(", ")}.`);
+    if (row.reason) lines.push(`  Evidence: ${compactText(row.reason, 700).replace(/\n/g, " ")}`);
+  }
+  return lines.join("\n").trim() + "\n";
+}
+
+export function distillPressureMemoryProvenanceReceiptRepairToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+    return {
+      schema: "ccm-pressure-memory-provenance-receipt-repair-distillation-v1",
+      version: GROUP_PRESSURE_MEMORY_PROVENANCE_RECEIPT_REPAIR_DISTILLATION_VERSION,
+      groupId,
+      skipped: true,
+      reason: "disabled",
+    };
+  }
+  const updatedAt = String(options.updatedAt || options.updated_at || now());
+  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+  const incomingRows = normalizePressureMemoryProvenanceReceiptRepairRows(input, { ...options, groupId, updatedAt });
+  const previousArchive = ledger.pressureMemoryProvenanceReceiptRepairArchive || {};
+  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
+  const merged = mergePressureMemoryProvenanceReceiptRepairRows(previousRows, incomingRows, { ...options, updatedAt });
+  const archive = pressureMemoryProvenanceReceiptRepairArchive(merged.rows, { updatedAt });
+  const writes: any[] = [];
+  if (archive.rows.length) {
+    writes.push(upsertGroupTypedMemoryDocument(groupId, {
+      type: "feedback",
+      slug: "pressure-memory-provenance-receipt-discipline",
+      name: "Pressure memory provenance receipt discipline",
+      description: "Child Agent receipt discipline for WorkerContextPacket pressure repair MEMORY.md provenance.",
+      source: "auto:pressure-memory-provenance-receipt-repair-distillation",
+      updatedAt,
+      body: renderPressureMemoryProvenanceReceiptRepairBody(archive.rows, { updatedAt }),
+      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
+    }));
+  }
+  const ledgerState = { ...ledger };
+  delete ledgerState.file;
+  writeJsonAtomic(ledger.file, {
+    ...ledgerState,
+    schema: "ccm-group-typed-memory-distillation-ledger-v1",
+    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+    groupId,
+    facts: ledger.facts || {},
+    pressureMemoryProvenanceReceiptRepairArchive: archive,
+    updatedAt,
+  });
+  const index = buildGroupTypedMemoryIndex(groupId);
+  return {
+    schema: "ccm-pressure-memory-provenance-receipt-repair-distillation-v1",
+    version: GROUP_PRESSURE_MEMORY_PROVENANCE_RECEIPT_REPAIR_DISTILLATION_VERSION,
+    groupId,
+    skipped: false,
+    reason: compactText(options.reason || "", 220),
+    ledgerFile: ledger.file,
+    incomingRowCount: incomingRows.length,
+    archivedCount: archive.archived_count,
+    openCount: archive.open_count,
+    completedCount: archive.completed_count,
+    packetBoundCount: archive.packet_bound_count,
+    relPathCount: archive.rel_path_count,
+    repairWorkItemCount: archive.repair_work_item_count,
+    correctedPromptCount: archive.corrected_prompt_count,
+    currentSourceVerifiedPromptCount: archive.current_source_verified_prompt_count,
+    newRowCount: merged.newRowCount,
+    updatedRowCount: merged.updatedRowCount,
+    prunedRowCount: merged.prunedRowCount,
+    writeCount: writes.length,
+    writes,
+    index,
+    archive,
+    distilledAt: updatedAt,
+  };
+}
+
+function pressureProvenancePreDispatchComplianceInputRows(input: any = {}) {
+  if (Array.isArray(input)) return input;
+  const rows = [
+    ...(Array.isArray(input.rows) ? input.rows : []),
+    ...(Array.isArray(input.packets) ? input.packets : []),
+    ...(Array.isArray(input.violations) ? input.violations : []),
+    ...(Array.isArray(input.failures) ? input.failures : []),
+    ...(Array.isArray(input.gaps) ? input.gaps : []),
+  ];
+  if (rows.length) return rows;
+  const groups = Array.isArray(input.report?.groups) ? input.report.groups : Array.isArray(input.groups) ? input.groups : [];
+  return groups.flatMap((group: any) => [
+    ...(Array.isArray(group.packets) ? group.packets : []),
+    ...(Array.isArray(group.violations) ? group.violations : []),
+    ...(Array.isArray(group.failures) ? group.failures : []),
+    ...(Array.isArray(group.gaps) ? group.gaps : []),
+  ].map((row: any) => ({ ...row, groupId: row.groupId || row.group_id || group.groupId || group.group_id || "" })));
+}
+
+function pressureProvenancePreDispatchComplianceRowId(row: any = {}) {
+  return `pressure-provenance-pre-dispatch-compliance:${checksum([
+    row.groupId,
+    row.packet_id,
+    row.binding_id,
+    row.project,
+    row.agent_type,
+    row.status,
+    row.gap_signature,
+    row.rel_paths,
+    row.repair_work_item_ids,
+  ], 24)}`;
+}
+
+function normalizePressureProvenancePreDispatchComplianceRows(input: any = {}, options: any = {}) {
+  const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+  return pressureProvenancePreDispatchComplianceInputRows(input).map((raw: any, index: number) => {
+    const entry = raw?.entry || raw?.packet || raw?.violation || raw || {};
+    const gaps = [
+      ...(Array.isArray(entry.gaps) ? entry.gaps : []),
+      ...(Array.isArray(raw?.gaps) ? raw.gaps : []),
+    ];
+    const gapCodes = uniqueStrings(gaps.map((gap: any) => typeof gap === "string" ? gap : gap?.code || gap?.reason || gap?.type || gap?.severity || "").filter(Boolean), 24);
+    const docs = [
+      ...(Array.isArray(entry.docs) ? entry.docs : []),
+      ...(Array.isArray(entry.requiredDocs) ? entry.requiredDocs : []),
+      ...(Array.isArray(entry.required_docs) ? entry.required_docs : []),
+    ];
+    const relPaths = uniqueStrings([
+      ...(Array.isArray(entry.rel_paths) ? entry.rel_paths : []),
+      ...(Array.isArray(entry.relPaths) ? entry.relPaths : []),
+      ...docs.map((doc: any) => doc.rel_path || doc.relPath || doc.relPath || doc.name || ""),
+    ], 40);
+    const repairIds = uniqueStrings([
+      ...(Array.isArray(entry.repair_work_item_ids) ? entry.repair_work_item_ids : []),
+      ...(Array.isArray(entry.repairWorkItemIds) ? entry.repairWorkItemIds : []),
+      ...docs.map((doc: any) => doc.repair_work_item_id || doc.repairWorkItemId || ""),
+    ], 40);
+    const status = String(entry.status || raw?.status || (gapCodes.length ? "non_compliant" : "compliant")).trim().toLowerCase();
+    const row = {
+      schema: "ccm-pressure-provenance-pre-dispatch-compliance-distilled-row-v1",
+      version: GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION,
+      groupId: String(entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+      packet_id: String(entry.packet_id || entry.packetId || entry.worker_context_packet_id || entry.workerContextPacketId || raw?.packet_id || "").trim(),
+      binding_id: String(entry.binding_id || entry.bindingId || entry.worker_context_packet_binding_id || raw?.binding_id || "").trim(),
+      assignment_id: String(entry.assignment_id || entry.assignmentId || raw?.assignment_id || "").trim(),
+      dispatch_key: String(entry.dispatch_key || entry.dispatchKey || raw?.dispatch_key || "").trim(),
+      project: String(entry.project || entry.target_project || entry.targetProject || raw?.project || "").trim(),
+      agent_type: String(entry.agent_type || entry.agentType || entry.executor || raw?.agent_type || raw?.agentType || options.agentType || options.agent_type || "unknown").trim() || "unknown",
+      status,
+      pre_dispatch_prompted: entry.pre_dispatch_prompted !== false && entry.preDispatchPrompted !== false,
+      required_doc_count: Number(entry.required_doc_count || entry.requiredDocCount || docs.length || 0),
+      discipline_doc_count: Number(entry.discipline_doc_count || entry.disciplineDocCount || 0),
+      receipt_row_count: Number(entry.receipt_row_count || entry.receiptRowCount || 0),
+      missing_receipt: entry.missing_receipt === true || gapCodes.some((code: string) => /child_agent_receipt|missing.*receipt/i.test(code)),
+      missing_memory_provenance_usage: entry.missing_memory_provenance_usage === true || gapCodes.some((code: string) => /memoryProvenanceUsage|receipt_memoryProvenanceUsage/i.test(code)),
+      current_source_verified_gap: entry.current_source_verified_gap === true || gapCodes.some((code: string) => /currentSourceVerified|current_source_verified/i.test(code)),
+      rel_paths: relPaths,
+      repair_work_item_ids: repairIds,
+      gap_codes: gapCodes,
+      gap_signature: gapCodes.join("|"),
+      reason: compactText(entry.reason || raw?.reason || gapCodes.join("; ") || "pressure provenance pre-dispatch compliance gap", 1000),
+      first_seen_at: String(entry.first_seen_at || entry.createdAt || entry.created_at || entry.at || raw?.first_seen_at || raw?.at || options.updatedAt || now()),
+      last_seen_at: String(entry.updated_at || entry.updatedAt || entry.lastSeenAt || entry.at || raw?.updated_at || raw?.at || options.updatedAt || now()),
+      source_index: Number(raw?.source_index || raw?.sourceIndex || index),
+    };
+    return { ...row, row_id: pressureProvenancePreDispatchComplianceRowId(row) };
+  })
+    .filter((row: any) => row.groupId || fallbackGroupId)
+    .filter((row: any) => row.pre_dispatch_prompted === true && (row.status !== "compliant" || row.gap_codes.length || row.missing_receipt || row.missing_memory_provenance_usage || row.current_source_verified_gap));
+}
+
+function mergePressureProvenancePreDispatchComplianceRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+  const updatedAt = String(options.updatedAt || now());
+  const merged = new Map<string, any>();
+  for (const row of existing || []) {
+    const id = String(row.row_id || pressureProvenancePreDispatchComplianceRowId(row));
+    merged.set(id, { ...row, row_id: id });
+  }
+  const previousIds = new Set(merged.keys());
+  for (const row of incoming || []) {
+    const id = String(row.row_id || pressureProvenancePreDispatchComplianceRowId(row));
+    const previous = merged.get(id);
+    merged.set(id, {
+      ...(previous || {}),
+      ...row,
+      row_id: id,
+      first_seen_at: previous?.first_seen_at || row.first_seen_at || updatedAt,
+      last_seen_at: updatedAt,
+      seen_count: Number(previous?.seen_count || 0) + 1,
+    });
+  }
+  const limit = Math.max(1, Math.min(300, Number(options.limit || options.maxRows || options.max_rows || 120)));
+  const rows = [...merged.values()]
+    .sort((a: any, b: any) => String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || "")) || Number(a.source_index || 0) - Number(b.source_index || 0))
+    .slice(-limit);
+  return {
+    rows,
+    newRowCount: rows.filter((row: any) => !previousIds.has(row.row_id)).length,
+    updatedRowCount: rows.filter((row: any) => previousIds.has(row.row_id) && incoming.some((item: any) => String(item.row_id || "") === row.row_id)).length,
+    prunedRowCount: Math.max(0, merged.size - rows.length),
+  };
+}
+
+function pressureProvenancePreDispatchComplianceArchive(rows: any[] = [], options: any = {}) {
+  const updatedAt = String(options.updatedAt || now());
+  const threshold = Math.max(1, Number(options.frequentThreshold || options.frequent_threshold || 2));
+  const attributionMap = new Map<string, any>();
+  for (const row of rows) {
+    const key = `${row.agent_type || "unknown"}|${row.project || "unknown"}`;
+    const current = attributionMap.get(key) || {
+      agent_type: row.agent_type || "unknown",
+      project: row.project || "unknown",
+      violation_count: 0,
+      packet_count: 0,
+      missing_receipt_count: 0,
+      missing_memory_provenance_usage_count: 0,
+      current_source_verified_gap_count: 0,
+      rel_paths: new Set<string>(),
+      repair_work_item_ids: new Set<string>(),
+      gap_codes: new Set<string>(),
+      first_violation_at: "",
+      last_violation_at: "",
+    };
+    current.violation_count += Number(row.seen_count || 1);
+    current.packet_count += row.packet_id ? 1 : 0;
+    if (row.missing_receipt) current.missing_receipt_count += 1;
+    if (row.missing_memory_provenance_usage) current.missing_memory_provenance_usage_count += 1;
+    if (row.current_source_verified_gap) current.current_source_verified_gap_count += 1;
+    for (const item of row.rel_paths || []) current.rel_paths.add(String(item));
+    for (const item of row.repair_work_item_ids || []) current.repair_work_item_ids.add(String(item));
+    for (const item of row.gap_codes || []) current.gap_codes.add(String(item));
+    current.first_violation_at = current.first_violation_at
+      ? [current.first_violation_at, row.first_seen_at || row.last_seen_at || updatedAt].filter(Boolean).sort()[0]
+      : String(row.first_seen_at || row.last_seen_at || updatedAt);
+    current.last_violation_at = [current.last_violation_at, row.last_seen_at || row.first_seen_at || updatedAt].filter(Boolean).sort().slice(-1)[0] || "";
+    attributionMap.set(key, current);
+  }
+  const attributions = [...attributionMap.values()].map((row: any) => ({
+    ...row,
+    frequent: Number(row.violation_count || 0) >= threshold,
+    rel_paths: [...row.rel_paths].slice(0, 24),
+    repair_work_item_ids: [...row.repair_work_item_ids].slice(0, 24),
+    gap_codes: [...row.gap_codes].slice(0, 24),
+  })).sort((a: any, b: any) => Number(b.violation_count || 0) - Number(a.violation_count || 0) || String(a.agent_type || "").localeCompare(String(b.agent_type || "")));
+  return {
+    schema: "ccm-pressure-provenance-pre-dispatch-compliance-distillation-v1",
+    version: GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION,
+    archived_count: rows.length,
+    frequent_threshold: threshold,
+    attribution_count: attributions.length,
+    frequent_attribution_count: attributions.filter((row: any) => row.frequent).length,
+    missing_receipt_count: rows.filter((row: any) => row.missing_receipt).length,
+    missing_memory_provenance_usage_count: rows.filter((row: any) => row.missing_memory_provenance_usage).length,
+    current_source_verified_gap_count: rows.filter((row: any) => row.current_source_verified_gap).length,
+    attributions,
+    rows,
+    updatedAt,
+  };
+}
+
+function renderPressureProvenancePreDispatchComplianceBody(archive: any = {}, options: any = {}) {
+  const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
+  const frequent = attributions.filter((row: any) => row.frequent).length ? attributions.filter((row: any) => row.frequent) : attributions;
+  const lines = [
+    "# Pressure Provenance Pre-Dispatch Compliance",
+    "",
+    `Generated by CCM pressure provenance pre-dispatch compliance distillation at ${options.updatedAt || now()}.`,
+    "This feedback memory records child Agent executors/projects that received pre-dispatch pressure provenance discipline but still failed the final CCM_AGENT_RECEIPT.memoryProvenanceUsage contract.",
+    "Dispatch policy: when these executor/project pairs receive disputed_under_repair or stale_evidence_under_repair pressure MEMORY.md, keep the memoryProvenanceUsage example in the worker prompt, require ACK of the receipt contract, and verify final receipts before closing the task.",
+    "",
+    "## Executor / Project Attribution",
+  ];
+  for (const row of frequent.slice(0, 20)) {
+    lines.push(`- agentType=${row.agent_type || "unknown"}; project=${row.project || "unknown"}; violations=${row.violation_count || 0}; missingReceipt=${row.missing_receipt_count || 0}; missingMemoryProvenanceUsage=${row.missing_memory_provenance_usage_count || 0}; currentSourceVerifiedGap=${row.current_source_verified_gap_count || 0}.`);
+    if (row.gap_codes?.length) lines.push(`  Gaps: ${row.gap_codes.slice(0, 8).join(", ")}.`);
+    if (row.rel_paths?.length) lines.push(`  Pressure docs: ${row.rel_paths.slice(0, 8).join(", ")}.`);
+    if (row.repair_work_item_ids?.length) lines.push(`  Repair work items: ${row.repair_work_item_ids.slice(0, 8).join(", ")}.`);
+  }
+  lines.push("");
+  lines.push("## Stable Rule");
+  lines.push("- Pre-dispatch prompting is not sufficient evidence. A task can close only after the child Agent receipt includes memoryProvenanceUsage rows covering every pressure repair memory, including repairStatus, repairGapType, and currentSourceVerified=true for used/verified disputed or stale-under-repair memory.");
+  return lines.join("\n").trim() + "\n";
+}
+
+export function distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+    return {
+      schema: "ccm-pressure-provenance-pre-dispatch-compliance-distillation-v1",
+      version: GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION,
+      groupId,
+      skipped: true,
+      reason: "disabled",
+    };
+  }
+  const updatedAt = String(options.updatedAt || options.updated_at || now());
+  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+  const incomingRows = normalizePressureProvenancePreDispatchComplianceRows(input, { ...options, groupId, updatedAt });
+  const previousArchive = ledger.pressureProvenancePreDispatchComplianceArchive || {};
+  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
+  const merged = mergePressureProvenancePreDispatchComplianceRows(previousRows, incomingRows, { ...options, updatedAt });
+  const archive = pressureProvenancePreDispatchComplianceArchive(merged.rows, { ...options, updatedAt });
+  const writes: any[] = [];
+  if (archive.rows.length) {
+    writes.push(upsertGroupTypedMemoryDocument(groupId, {
+      type: "feedback",
+      slug: "pressure-provenance-pre-dispatch-compliance",
+      name: "Pressure provenance pre-dispatch compliance",
+      description: "Executor/project attribution for pressure provenance receipt failures after pre-dispatch discipline was shown.",
+      source: "auto:pressure-provenance-pre-dispatch-compliance-distillation",
+      updatedAt,
+      body: renderPressureProvenancePreDispatchComplianceBody(archive, { updatedAt }),
+      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
+    }));
+  }
+  const ledgerState = { ...ledger };
+  delete ledgerState.file;
+  writeJsonAtomic(ledger.file, {
+    ...ledgerState,
+    schema: "ccm-group-typed-memory-distillation-ledger-v1",
+    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+    groupId,
+    facts: ledger.facts || {},
+    pressureProvenancePreDispatchComplianceArchive: archive,
+    updatedAt,
+  });
+  const index = buildGroupTypedMemoryIndex(groupId);
+  return {
+    schema: "ccm-pressure-provenance-pre-dispatch-compliance-distillation-v1",
+    version: GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION,
+    groupId,
+    skipped: false,
+    reason: compactText(options.reason || "", 220),
+    ledgerFile: ledger.file,
+    incomingRowCount: incomingRows.length,
+    archivedCount: archive.archived_count,
+    attributionCount: archive.attribution_count,
+    frequentAttributionCount: archive.frequent_attribution_count,
+    newRowCount: merged.newRowCount,
+    updatedRowCount: merged.updatedRowCount,
+    prunedRowCount: merged.prunedRowCount,
+    writeCount: writes.length,
+    writes,
+    index,
+    archive,
+    distilledAt: updatedAt,
+  };
+}
+
+function pressureProvenancePreDispatchComplianceRecoveryRowId(row: any = {}) {
+  return `pressure-provenance-compliance-recovery:${checksum([
+    row.groupId,
+    row.packet_id,
+    row.binding_id,
+    row.project,
+    row.agent_type,
+    row.rel_paths,
+    row.repair_work_item_ids,
+  ], 24)}`;
+}
+
+function normalizePressureProvenancePreDispatchComplianceRecoveryRows(input: any = {}, options: any = {}) {
+  const fallbackGroupId = String(options.groupId || options.group_id || input.groupId || input.group_id || "").trim();
+  return pressureProvenancePreDispatchComplianceInputRows(input).map((raw: any, index: number) => {
+    const entry = raw?.entry || raw?.packet || raw?.recovery || raw || {};
+    const docs = [
+      ...(Array.isArray(entry.docs) ? entry.docs : []),
+      ...(Array.isArray(entry.requiredDocs) ? entry.requiredDocs : []),
+      ...(Array.isArray(entry.required_docs) ? entry.required_docs : []),
+    ];
+    const relPaths = uniqueStrings([
+      ...(Array.isArray(entry.rel_paths) ? entry.rel_paths : []),
+      ...(Array.isArray(entry.relPaths) ? entry.relPaths : []),
+      ...docs.map((doc: any) => doc.rel_path || doc.relPath || doc.name || ""),
+    ], 40);
+    const repairIds = uniqueStrings([
+      ...(Array.isArray(entry.repair_work_item_ids) ? entry.repair_work_item_ids : []),
+      ...(Array.isArray(entry.repairWorkItemIds) ? entry.repairWorkItemIds : []),
+      ...docs.map((doc: any) => doc.repair_work_item_id || doc.repairWorkItemId || ""),
+    ], 40);
+    const status = String(entry.status || raw?.status || "compliant").trim().toLowerCase();
+    const row = {
+      schema: "ccm-pressure-provenance-pre-dispatch-compliance-recovery-row-v1",
+      version: GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION,
+      groupId: String(entry.groupId || entry.group_id || raw?.groupId || raw?.group_id || fallbackGroupId || "").trim(),
+      packet_id: String(entry.packet_id || entry.packetId || entry.worker_context_packet_id || entry.workerContextPacketId || raw?.packet_id || "").trim(),
+      binding_id: String(entry.binding_id || entry.bindingId || entry.worker_context_packet_binding_id || raw?.binding_id || "").trim(),
+      assignment_id: String(entry.assignment_id || entry.assignmentId || raw?.assignment_id || "").trim(),
+      dispatch_key: String(entry.dispatch_key || entry.dispatchKey || raw?.dispatch_key || "").trim(),
+      project: String(entry.project || entry.target_project || entry.targetProject || raw?.project || "").trim(),
+      agent_type: String(entry.agent_type || entry.agentType || entry.executor || raw?.agent_type || raw?.agentType || options.agentType || options.agent_type || "unknown").trim() || "unknown",
+      status,
+      pre_dispatch_prompted: entry.pre_dispatch_prompted !== false && entry.preDispatchPrompted !== false,
+      required_doc_count: Number(entry.required_doc_count || entry.requiredDocCount || docs.length || 0),
+      receipt_row_count: Number(entry.receipt_row_count || entry.receiptRowCount || entry.receipt_count || entry.receiptCount || 0),
+      compliant_doc_count: Number(entry.compliant_doc_count || entry.compliantDocCount || docs.length || 0),
+      current_source_verified_count: Number(entry.current_source_verified_count || entry.currentSourceVerifiedCount || 0),
+      rel_paths: relPaths,
+      repair_work_item_ids: repairIds,
+      reason: compactText(entry.reason || raw?.reason || "pressure provenance receipt compliant after prior feedback policy", 1000),
+      first_seen_at: String(entry.first_seen_at || entry.createdAt || entry.created_at || entry.at || raw?.first_seen_at || raw?.at || options.updatedAt || now()),
+      last_seen_at: String(entry.updated_at || entry.updatedAt || entry.lastSeenAt || entry.at || raw?.updated_at || raw?.at || options.updatedAt || now()),
+      source_index: Number(raw?.source_index || raw?.sourceIndex || index),
+    };
+    return { ...row, row_id: pressureProvenancePreDispatchComplianceRecoveryRowId(row) };
+  })
+    .filter((row: any) => row.groupId || fallbackGroupId)
+    .filter((row: any) => row.pre_dispatch_prompted === true && row.status === "compliant" && Number(row.required_doc_count || 0) > 0);
+}
+
+function mergePressureProvenancePreDispatchComplianceRecoveryRows(existing: any[] = [], incoming: any[] = [], options: any = {}) {
+  const updatedAt = String(options.updatedAt || now());
+  const merged = new Map<string, any>();
+  for (const row of existing || []) {
+    const id = String(row.row_id || pressureProvenancePreDispatchComplianceRecoveryRowId(row));
+    merged.set(id, { ...row, row_id: id });
+  }
+  const previousIds = new Set(merged.keys());
+  for (const row of incoming || []) {
+    const id = String(row.row_id || pressureProvenancePreDispatchComplianceRecoveryRowId(row));
+    const previous = merged.get(id);
+    merged.set(id, {
+      ...(previous || {}),
+      ...row,
+      row_id: id,
+      first_seen_at: previous?.first_seen_at || row.first_seen_at || updatedAt,
+      last_seen_at: updatedAt,
+      seen_count: Number(previous?.seen_count || 0) + 1,
+    });
+  }
+  const limit = Math.max(1, Math.min(300, Number(options.limit || options.maxRows || options.max_rows || 120)));
+  const rows = [...merged.values()]
+    .sort((a: any, b: any) => String(a.last_seen_at || "").localeCompare(String(b.last_seen_at || "")) || Number(a.source_index || 0) - Number(b.source_index || 0))
+    .slice(-limit);
+  return {
+    rows,
+    newRowCount: rows.filter((row: any) => !previousIds.has(row.row_id)).length,
+    updatedRowCount: rows.filter((row: any) => previousIds.has(row.row_id) && incoming.some((item: any) => String(item.row_id || "") === row.row_id)).length,
+    prunedRowCount: Math.max(0, merged.size - rows.length),
+  };
+}
+
+function pressureProvenancePreDispatchComplianceRecoveryArchive(rows: any[] = [], options: any = {}) {
+  const updatedAt = String(options.updatedAt || now());
+  const attributionMap = new Map<string, any>();
+  for (const row of rows) {
+    const key = `${row.agent_type || "unknown"}|${row.project || "unknown"}`;
+    const current = attributionMap.get(key) || {
+      agent_type: row.agent_type || "unknown",
+      project: row.project || "unknown",
+      compliant_count: 0,
+      packet_count: 0,
+      receipt_row_count: 0,
+      compliant_doc_count: 0,
+      current_source_verified_count: 0,
+      rel_paths: new Set<string>(),
+      repair_work_item_ids: new Set<string>(),
+      first_compliant_at: "",
+      last_compliant_at: "",
+    };
+    const seenCount = Number(row.seen_count || 1);
+    current.compliant_count += seenCount;
+    current.packet_count += row.packet_id ? 1 : 0;
+    current.receipt_row_count += Number(row.receipt_row_count || 0);
+    current.compliant_doc_count += Number(row.compliant_doc_count || 0);
+    current.current_source_verified_count += Number(row.current_source_verified_count || 0);
+    current.first_compliant_at = current.first_compliant_at
+      ? [current.first_compliant_at, row.first_seen_at || row.last_seen_at || updatedAt].filter(Boolean).sort()[0]
+      : String(row.first_seen_at || row.last_seen_at || updatedAt);
+    current.last_compliant_at = [current.last_compliant_at, row.last_seen_at || row.first_seen_at || updatedAt].filter(Boolean).sort().slice(-1)[0] || "";
+    for (const item of row.rel_paths || []) current.rel_paths.add(String(item));
+    for (const item of row.repair_work_item_ids || []) current.repair_work_item_ids.add(String(item));
+    attributionMap.set(key, current);
+  }
+  const attributions = [...attributionMap.values()].map((row: any) => ({
+    ...row,
+    rel_paths: [...row.rel_paths].slice(0, 24),
+    repair_work_item_ids: [...row.repair_work_item_ids].slice(0, 24),
+  })).sort((a: any, b: any) => Number(b.compliant_count || 0) - Number(a.compliant_count || 0) || String(a.agent_type || "").localeCompare(String(b.agent_type || "")));
+  return {
+    schema: "ccm-pressure-provenance-pre-dispatch-compliance-recovery-distillation-v1",
+    version: GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION,
+    archived_count: rows.length,
+    attribution_count: attributions.length,
+    compliant_count: rows.reduce((sum: number, row: any) => sum + Number(row.seen_count || 1), 0),
+    receipt_row_count: rows.reduce((sum: number, row: any) => sum + Number(row.receipt_row_count || 0), 0),
+    compliant_doc_count: rows.reduce((sum: number, row: any) => sum + Number(row.compliant_doc_count || 0), 0),
+    attributions,
+    rows,
+    updatedAt,
+  };
+}
+
+function renderPressureProvenancePreDispatchComplianceRecoveryBody(archive: any = {}, options: any = {}) {
+  const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
+  const lines = [
+    "# Pressure Provenance Compliance Recovery",
+    "",
+    `Generated by CCM pressure provenance compliance recovery distillation at ${options.updatedAt || now()}.`,
+    "This feedback memory records executor/project pairs that later produced compliant memoryProvenanceUsage receipts after receiving pressure provenance discipline.",
+    "Recovery policy: compliant receipts do not delete historical violations, but they reduce effective violation pressure so old executor/project mistakes can recover after sustained correct behavior.",
+    "",
+    "## Executor / Project Recovery",
+  ];
+  for (const row of attributions.slice(0, 20)) {
+    lines.push(`- agentType=${row.agent_type || "unknown"}; project=${row.project || "unknown"}; compliant=${row.compliant_count || 0}; packets=${row.packet_count || 0}; receiptRows=${row.receipt_row_count || 0}; lastCompliantAt=${row.last_compliant_at || ""}.`);
+    if (row.rel_paths?.length) lines.push(`  Pressure docs: ${row.rel_paths.slice(0, 8).join(", ")}.`);
+    if (row.repair_work_item_ids?.length) lines.push(`  Repair work items: ${row.repair_work_item_ids.slice(0, 8).join(", ")}.`);
+  }
+  lines.push("");
+  lines.push("## Stable Rule");
+  lines.push("- Recovery evidence can reduce dispatch feedback policy severity only when it comes from compliant pressure provenance receipts. Historical violation rows remain archived for audit and can become active again if new violations outnumber recovery credits.");
+  return lines.join("\n").trim() + "\n";
+}
+
+export function distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+    return {
+      schema: "ccm-pressure-provenance-pre-dispatch-compliance-recovery-distillation-v1",
+      version: GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION,
+      groupId,
+      skipped: true,
+      reason: "disabled",
+    };
+  }
+  const updatedAt = String(options.updatedAt || options.updated_at || now());
+  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+  const incomingRows = normalizePressureProvenancePreDispatchComplianceRecoveryRows(input, { ...options, groupId, updatedAt });
+  const previousArchive = ledger.pressureProvenancePreDispatchComplianceRecoveryArchive || {};
+  const previousRows = Array.isArray(previousArchive.rows) ? previousArchive.rows : [];
+  const merged = mergePressureProvenancePreDispatchComplianceRecoveryRows(previousRows, incomingRows, { ...options, updatedAt });
+  const archive = pressureProvenancePreDispatchComplianceRecoveryArchive(merged.rows, { ...options, updatedAt });
+  const writes: any[] = [];
+  if (archive.rows.length) {
+    writes.push(upsertGroupTypedMemoryDocument(groupId, {
+      type: "feedback",
+      slug: "pressure-provenance-compliance-recovery",
+      name: "Pressure provenance compliance recovery",
+      description: "Executor/project recovery evidence for compliant pressure provenance receipts after feedback policy.",
+      source: "auto:pressure-provenance-compliance-recovery-distillation",
+      updatedAt,
+      body: renderPressureProvenancePreDispatchComplianceRecoveryBody(archive, { updatedAt }),
+      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 18_000),
+    }));
+  }
+  const ledgerState = { ...ledger };
+  delete ledgerState.file;
+  writeJsonAtomic(ledger.file, {
+    ...ledgerState,
+    schema: "ccm-group-typed-memory-distillation-ledger-v1",
+    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+    groupId,
+    facts: ledger.facts || {},
+    pressureProvenancePreDispatchComplianceRecoveryArchive: archive,
+    updatedAt,
+  });
+  const index = buildGroupTypedMemoryIndex(groupId);
+  return {
+    schema: "ccm-pressure-provenance-pre-dispatch-compliance-recovery-distillation-v1",
+    version: GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION,
+    groupId,
+    skipped: false,
+    reason: compactText(options.reason || "", 220),
+    ledgerFile: ledger.file,
+    incomingRowCount: incomingRows.length,
+    archivedCount: archive.archived_count,
+    attributionCount: archive.attribution_count,
+    compliantCount: archive.compliant_count,
+    newRowCount: merged.newRowCount,
+    updatedRowCount: merged.updatedRowCount,
+    prunedRowCount: merged.prunedRowCount,
+    writeCount: writes.length,
+    writes,
+    index,
+    archive,
+    distilledAt: updatedAt,
+  };
+}
+
+function normalizePressureProvenanceDispatchPolicyKey(value: any) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function pressureProvenanceDispatchPolicyAttributionMatches(row: any = {}, options: any = {}) {
+  const targetProject = normalizePressureProvenanceDispatchPolicyKey(options.targetProject || options.target_project || options.project);
+  const agentType = normalizePressureProvenanceDispatchPolicyKey(options.agentType || options.agent_type || options.executor || options.runner);
+  const rowProject = normalizePressureProvenanceDispatchPolicyKey(row.project || row.target_project || row.targetProject);
+  const rowAgentType = normalizePressureProvenanceDispatchPolicyKey(row.agent_type || row.agentType || row.executor || row.runner);
+  const projectMatches = !targetProject || !rowProject || rowProject === targetProject || rowProject === "unknown" || rowProject === "*";
+  const agentMatches = !agentType || !rowAgentType || rowAgentType === agentType || rowAgentType === "unknown" || rowAgentType === "*";
+  return projectMatches && agentMatches;
+}
+
+function pressureProvenanceDispatchPolicyAttributionKey(row: any = {}) {
+  return `${normalizePressureProvenanceDispatchPolicyKey(row.agent_type || row.agentType || row.executor || row.runner || "unknown")}|${normalizePressureProvenanceDispatchPolicyKey(row.project || row.target_project || row.targetProject || "unknown")}`;
+}
+
+function summarizeProviderDispatchOverrideFollowupPolicyAttributions(attributions: any[] = []) {
+  const completedCount = attributions.reduce((sum: number, row: any) => sum + Number(row.completed_count || row.completedCount || 0), 0);
+  const memoryUsageCount = attributions.reduce((sum: number, row: any) => sum + Number(row.memory_provenance_usage_count || row.memoryProvenanceUsageCount || 0), 0);
+  const verifiedCount = attributions.reduce((sum: number, row: any) => sum + Number(row.current_source_verified_count || row.currentSourceVerifiedCount || 0), 0);
+  const lastCompletedAt = attributions
+    .map((row: any) => row.last_completed_at || row.lastCompletedAt || "")
+    .filter(Boolean)
+    .sort()
+    .slice(-1)[0] || "";
+  return {
+    completedCount,
+    memoryUsageCount,
+    verifiedCount,
+    lastCompletedAt,
+    relPaths: uniqueStrings(attributions.flatMap((row: any) => Array.isArray(row.rel_paths || row.relPaths) ? (row.rel_paths || row.relPaths) : []), 16),
+    followupWorkItemIds: uniqueStrings(attributions.flatMap((row: any) => Array.isArray(row.followup_work_item_ids || row.followupWorkItemIds) ? (row.followup_work_item_ids || row.followupWorkItemIds) : []), 16),
+    overrideIds: uniqueStrings(attributions.flatMap((row: any) => Array.isArray(row.override_ids || row.overrideIds) ? (row.override_ids || row.overrideIds) : []), 16),
+  };
+}
+
+export function buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId: string, options: any = {}) {
+  const disabled = options.disabled === true
+    || options.disablePolicy === true
+    || options.disable_policy === true
+    || options.disablePressureProvenanceFeedbackDispatchPolicy === true
+    || options.disable_pressure_provenance_feedback_dispatch_policy === true;
+  const targetProject = String(options.targetProject || options.target_project || options.project || "").trim();
+  const agentType = String(options.agentType || options.agent_type || options.executor || options.runner || "unknown").trim() || "unknown";
+  const generatedAt = String(options.generatedAt || options.generated_at || now());
+  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+  const archive = ledger.pressureProvenancePreDispatchComplianceArchive || {};
+  const recoveryArchive = ledger.pressureProvenancePreDispatchComplianceRecoveryArchive || {};
+  const providerOverrideFollowupArchive = ledger.pressureProvenanceProviderDispatchOverrideFollowupArchive || {};
+  const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
+  const violationRows = Array.isArray(archive.rows) ? archive.rows : [];
+  const recoveryAttributions = Array.isArray(recoveryArchive.attributions) ? recoveryArchive.attributions : [];
+  const providerOverrideFollowupDisabled = options.disableProviderDispatchOverrideFollowupHistory === true
+    || options.disable_provider_dispatch_override_followup_history === true
+    || options.disableProviderOverrideFollowupHistory === true
+    || options.disable_provider_override_followup_history === true;
+  const providerOverrideFollowupAttributions = providerOverrideFollowupDisabled
+    ? []
+    : Array.isArray(providerOverrideFollowupArchive.attributions)
+      ? providerOverrideFollowupArchive.attributions
+      : [];
+  const matchingProviderOverrideFollowupAttributions = providerOverrideFollowupAttributions
+    .filter((row: any) => pressureProvenanceDispatchPolicyAttributionMatches(row, { targetProject, agentType }));
+  const threshold = Math.max(1, Number(options.frequentThreshold || options.frequent_threshold || archive.frequent_threshold || 2));
+  const recoveryDisabled = options.disablePressureProvenanceFeedbackRecovery === true
+    || options.disable_pressure_provenance_feedback_recovery === true
+    || options.disableRecovery === true
+    || options.disable_recovery === true;
+  const recoveryCreditPerCompliant = Math.max(0, Number(options.recoveryCreditPerCompliant || options.recovery_credit_per_compliant || 1));
+  const violationPolicyRows = attributions
+    .filter((row: any) => pressureProvenanceDispatchPolicyAttributionMatches(row, { targetProject, agentType }))
+    .map((row: any) => {
+      const recoveryMatches = recoveryDisabled ? [] : recoveryAttributions
+        .filter((candidate: any) => pressureProvenanceDispatchPolicyAttributionMatches(candidate, {
+          targetProject: row.project || row.target_project || row.targetProject || targetProject,
+          agentType: row.agent_type || row.agentType || agentType,
+        }));
+      const recoveryCount = recoveryMatches.reduce((sum: number, candidate: any) => sum + Number(candidate.compliant_count || 0), 0);
+      const recoveryCredit = Math.floor(recoveryCount * recoveryCreditPerCompliant);
+      const violationCount = Number(row.violation_count || 0);
+      const recoveryLastCompliantAt = recoveryMatches.map((candidate: any) => candidate.last_compliant_at || "").filter(Boolean).sort().slice(-1)[0] || "";
+      const matchingViolationRows = violationRows.filter((candidate: any) => pressureProvenanceDispatchPolicyAttributionMatches(candidate, {
+        targetProject: row.project || row.target_project || row.targetProject || targetProject,
+        agentType: row.agent_type || row.agentType || agentType,
+      }));
+      const postRecoveryViolations = recoveryLastCompliantAt
+        ? matchingViolationRows.filter((candidate: any) => String(candidate.last_seen_at || candidate.first_seen_at || "").localeCompare(recoveryLastCompliantAt) > 0)
+        : [];
+      const postRecoveryViolationCount = postRecoveryViolations.reduce((sum: number, candidate: any) => sum + Number(candidate.seen_count || 1), 0);
+      const relapsed = !recoveryDisabled && recoveryCredit > 0 && postRecoveryViolationCount > 0;
+      const effectiveViolationCount = Math.max(
+        0,
+        relapsed ? Math.max(postRecoveryViolationCount, violationCount - recoveryCredit) : violationCount - recoveryCredit
+      );
+      const providerOverrideFollowupMatches = matchingProviderOverrideFollowupAttributions
+        .filter((candidate: any) => pressureProvenanceDispatchPolicyAttributionMatches(candidate, {
+          targetProject: row.project || row.target_project || row.targetProject || targetProject,
+          agentType: row.agent_type || row.agentType || agentType,
+        }));
+      const providerOverrideFollowup = summarizeProviderDispatchOverrideFollowupPolicyAttributions(providerOverrideFollowupMatches);
+      const providerOverrideFollowupFreshAfterLastViolation = !!providerOverrideFollowup.lastCompletedAt
+        && !!String(row.last_violation_at || "")
+        && providerOverrideFollowup.lastCompletedAt.localeCompare(String(row.last_violation_at || "")) >= 0;
+      return {
+        agent_type: row.agent_type || "unknown",
+        project: row.project || "unknown",
+        violation_count: violationCount,
+        effective_violation_count: effectiveViolationCount,
+        recovered_violation_count: Math.min(violationCount, recoveryCredit),
+        recovery_compliant_count: recoveryCount,
+        recovery_credit: recoveryCredit,
+        recovery_last_compliant_at: recoveryLastCompliantAt,
+        recovery_disabled: recoveryDisabled,
+        post_recovery_violation_count: postRecoveryViolationCount,
+        recovery_streak_broken_at: postRecoveryViolations.map((candidate: any) => candidate.last_seen_at || candidate.first_seen_at || "").filter(Boolean).sort().slice(-1)[0] || "",
+        relapsed,
+        recovered: !relapsed && violationCount >= threshold && effectiveViolationCount < threshold && recoveryCredit > 0,
+        packet_count: Number(row.packet_count || 0),
+        missing_receipt_count: Number(row.missing_receipt_count || 0),
+        missing_memory_provenance_usage_count: Number(row.missing_memory_provenance_usage_count || 0),
+        current_source_verified_gap_count: Number(row.current_source_verified_gap_count || 0),
+        frequent: effectiveViolationCount >= threshold || relapsed,
+        raw_frequent: row.frequent === true || violationCount >= threshold,
+        first_violation_at: row.first_violation_at || "",
+        last_violation_at: row.last_violation_at || "",
+        rel_paths: uniqueStrings(Array.isArray(row.rel_paths) ? row.rel_paths : [], 12),
+        repair_work_item_ids: uniqueStrings(Array.isArray(row.repair_work_item_ids) ? row.repair_work_item_ids : [], 12),
+        gap_codes: uniqueStrings(Array.isArray(row.gap_codes) ? row.gap_codes : [], 12),
+        provider_override_followup_repaired: providerOverrideFollowup.completedCount > 0,
+        provider_override_followup_repaired_count: providerOverrideFollowup.completedCount,
+        provider_override_followup_memory_provenance_usage_count: providerOverrideFollowup.memoryUsageCount,
+        provider_override_followup_current_source_verified_count: providerOverrideFollowup.verifiedCount,
+        provider_override_followup_last_completed_at: providerOverrideFollowup.lastCompletedAt,
+        provider_override_followup_fresh_after_last_violation: providerOverrideFollowupFreshAfterLastViolation,
+        provider_override_followup_rel_paths: providerOverrideFollowup.relPaths,
+        provider_override_followup_work_item_ids: providerOverrideFollowup.followupWorkItemIds,
+        provider_override_followup_override_ids: providerOverrideFollowup.overrideIds,
+      };
+    });
+  const violationKeys = new Set(violationPolicyRows.map((row: any) => pressureProvenanceDispatchPolicyAttributionKey(row)));
+  const providerOverrideFollowupOnlyRows = matchingProviderOverrideFollowupAttributions
+    .filter((row: any) => !violationKeys.has(pressureProvenanceDispatchPolicyAttributionKey(row)))
+    .map((row: any) => {
+      const providerOverrideFollowup = summarizeProviderDispatchOverrideFollowupPolicyAttributions([row]);
+      return {
+        agent_type: row.agent_type || row.agentType || "unknown",
+        project: row.project || row.target_project || row.targetProject || "unknown",
+        violation_count: 0,
+        effective_violation_count: 0,
+        recovered_violation_count: 0,
+        recovery_compliant_count: 0,
+        recovery_credit: 0,
+        recovery_last_compliant_at: "",
+        recovery_disabled: recoveryDisabled,
+        post_recovery_violation_count: 0,
+        recovery_streak_broken_at: "",
+        relapsed: false,
+        recovered: true,
+        provider_override_followup_only: true,
+        provider_override_followup_repaired: providerOverrideFollowup.completedCount > 0,
+        provider_override_followup_repaired_count: providerOverrideFollowup.completedCount,
+        provider_override_followup_memory_provenance_usage_count: providerOverrideFollowup.memoryUsageCount,
+        provider_override_followup_current_source_verified_count: providerOverrideFollowup.verifiedCount,
+        provider_override_followup_last_completed_at: providerOverrideFollowup.lastCompletedAt,
+        provider_override_followup_fresh_after_last_violation: true,
+        provider_override_followup_rel_paths: providerOverrideFollowup.relPaths,
+        provider_override_followup_work_item_ids: providerOverrideFollowup.followupWorkItemIds,
+        provider_override_followup_override_ids: providerOverrideFollowup.overrideIds,
+        packet_count: 0,
+        missing_receipt_count: 0,
+        missing_memory_provenance_usage_count: 0,
+        current_source_verified_gap_count: 0,
+        frequent: false,
+        raw_frequent: false,
+        first_violation_at: "",
+        last_violation_at: "",
+        rel_paths: providerOverrideFollowup.relPaths,
+        repair_work_item_ids: providerOverrideFollowup.followupWorkItemIds,
+        gap_codes: ["provider_dispatch_override_followup_repaired"],
+      };
+    });
+  const matching = [...violationPolicyRows, ...providerOverrideFollowupOnlyRows]
+    .sort((a: any, b: any) => Number(b.effective_violation_count || 0) - Number(a.effective_violation_count || 0) || Number(b.violation_count || 0) - Number(a.violation_count || 0));
+  const frequent = matching.filter((row: any) => row.frequent);
+  const recovered = matching.filter((row: any) => row.recovered);
+  const relapsed = matching.filter((row: any) => row.relapsed);
+  const active = !disabled && frequent.length > 0;
+  const pressureDiscipline = options.pressureMemoryProvenanceReceiptDiscipline
+    || options.pressure_memory_provenance_receipt_discipline
+    || null;
+  const pressureDisciplineActive = pressureDiscipline?.active === true
+    || Number(pressureDiscipline?.docCount || pressureDiscipline?.doc_count || 0) > 0
+    || (Array.isArray(pressureDiscipline?.rows) && pressureDiscipline.rows.length > 0);
+  const top = frequent[0] || matching[0] || {};
+  const policyRows = (active ? frequent : matching).slice(0, Math.max(1, Number(options.maxRows || options.max_rows || 6)));
+  return {
+    schema: "ccm-pressure-provenance-pre-dispatch-compliance-dispatch-policy-v1",
+    version: GROUP_PRESSURE_PROVENANCE_PRE_DISPATCH_COMPLIANCE_DISTILLATION_VERSION,
+    groupId,
+    targetProject,
+    agentType,
+    active,
+    disabled,
+    generatedAt,
+    source: "typed-feedback:pressure-provenance-pre-dispatch-compliance",
+    sourceArchiveSchema: archive.schema || "",
+    sourceArchiveUpdatedAt: archive.updatedAt || "",
+    recoveryArchiveSchema: recoveryArchive.schema || "",
+    recoveryArchiveUpdatedAt: recoveryArchive.updatedAt || "",
+    providerOverrideFollowupArchiveSchema: providerOverrideFollowupArchive.schema || "",
+    providerOverrideFollowupArchiveUpdatedAt: providerOverrideFollowupArchive.updatedAt || "",
+    sourceLedgerFile: ledger.file || getGroupTypedMemoryDistillationLedgerFile(groupId),
+    frequentThreshold: threshold,
+    recoveryEnabled: !recoveryDisabled,
+    recoveryCreditPerCompliant,
+    attributionCount: attributions.length,
+    matchingAttributionCount: matching.length,
+    rawFrequentViolationAttributionCount: matching.filter((row: any) => row.raw_frequent).length,
+    frequentViolationAttributionCount: frequent.length,
+    recoveredAttributionCount: recovered.length,
+    relapsedAttributionCount: relapsed.length,
+    recoveryAttributionCount: recoveryAttributions.length,
+    providerOverrideFollowupHistoryEnabled: !providerOverrideFollowupDisabled,
+    providerOverrideFollowupAttributionCount: providerOverrideFollowupAttributions.length,
+    matchingProviderOverrideFollowupAttributionCount: matchingProviderOverrideFollowupAttributions.length,
+    providerOverrideFollowupRepairedAttributionCount: matching.filter((row: any) => row.provider_override_followup_repaired === true).length,
+    pressureMemoryProvenanceDisciplineActive: pressureDisciplineActive,
+    action: active
+      ? relapsed.length
+        ? "reactivate_pressure_memory_provenance_receipt_contract_after_recovery_relapse"
+        : "strengthen_pressure_memory_provenance_receipt_contract"
+      : recovered.length
+        ? "monitor_recovered_pressure_memory_provenance_receipt_contract"
+        : "monitor_pressure_memory_provenance_receipt_contract",
+    severity: active && Number(top.effective_violation_count || top.violation_count || 0) >= threshold * 2 ? "high" : active ? "medium" : "none",
+    receiptContractMode: pressureDisciplineActive ? "strict_required_for_pressure_memory" : active ? "preemptive_ack_and_empty_usage_allowed" : "default",
+    ackRequired: active,
+    finalReceiptVerificationRequired: active,
+    memoryProvenanceUsageRequiredWhenPressureMemoryPresent: active,
+    currentSourceVerificationRequiredWhenUsed: active,
+    closeGate: active ? "do_not_close_until_memoryProvenanceUsage_is_present_or_explicitly_empty_with_reason" : "default_receipt_review",
+    requiredReceiptFields: active
+      ? ["memoryProvenanceUsage", "relPath", "usageState", "provenanceStatus", "repairWorkItemId", "repairStatus", "repairGapType", "currentSourceVerified"]
+      : [],
+    policyRows,
+    relPaths: uniqueStrings(policyRows.flatMap((row: any) => [
+      ...(Array.isArray(row.rel_paths) ? row.rel_paths : []),
+      ...(Array.isArray(row.provider_override_followup_rel_paths) ? row.provider_override_followup_rel_paths : []),
+    ]), 16),
+    repairWorkItemIds: uniqueStrings(policyRows.flatMap((row: any) => [
+      ...(Array.isArray(row.repair_work_item_ids) ? row.repair_work_item_ids : []),
+      ...(Array.isArray(row.provider_override_followup_work_item_ids) ? row.provider_override_followup_work_item_ids : []),
+    ]), 16),
+    gapCodes: uniqueStrings(policyRows.flatMap((row: any) => row.gap_codes || []), 16),
+    reason: active
+      ? compactText(`Phase 137 feedback memory found repeated pressure provenance receipt violations for agentType=${agentType} project=${targetProject || "unknown"}; effective violations=${top.effective_violation_count ?? top.violation_count ?? 0} after recovery credits${top.relapsed ? `; recovered attribution relapsed with ${top.post_recovery_violation_count || 0} post-recovery violation(s)` : ""}; require stricter ACK and final receipt verification before child Agent closure.`, 700)
+      : disabled
+        ? "pressure provenance feedback dispatch policy disabled"
+        : recovered.length
+          ? matching.some((row: any) => row.provider_override_followup_repaired === true)
+            ? "matching attribution has verified provider dispatch override follow-up repair history; allow only with receipt sampling and current evidence checks"
+            : "matching attribution recovered below frequent violation threshold after compliant pressure provenance receipts"
+        : matching.length
+          ? "matching attribution exists but has not reached frequent violation threshold"
+          : "no matching pressure provenance pre-dispatch compliance feedback attribution",
   };
 }
 
@@ -2734,6 +5340,206 @@ export function distillCompactStrategyToTypedMemory(groupId: string, input: any 
   };
 }
 
+function normalizePtlEmergencyHintForTypedMemory(input: any = {}, options: any = {}) {
+  const raw = input.hint || input.ptlEmergencyHint || input.ptl_emergency_hint || input || {};
+  const retryOptions = raw.recommended_retry_options || raw.recommendedRetryOptions || {};
+  return {
+    schema: "ccm-ptl-emergency-typed-memory-hint-v1",
+    version: GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION,
+    groupId: String(raw.groupId || raw.group_id || options.groupId || options.group_id || "").trim(),
+    hint_id: String(raw.hint_id || raw.hintId || "").trim(),
+    engaged: raw.engaged === true,
+    emergency_level: String(raw.emergency_level || raw.emergencyLevel || (raw.engaged ? "warning" : "none")).trim(),
+    reason: compactText(raw.reason || "", 900),
+    blocked_outcome_count: Number(raw.blocked_outcome_count || raw.blockedOutcomeCount || 0),
+    task_compacted_blocked_count: Number(raw.task_compacted_blocked_count || raw.taskCompactedBlockedCount || 0),
+    repeated_failed_categories: uniqueStrings((Array.isArray(raw.repeated_failed_categories || raw.repeatedFailedCategories)
+      ? (raw.repeated_failed_categories || raw.repeatedFailedCategories)
+      : []).map((item: any) => String(item || "").trim()).filter(Boolean), 30),
+    recommended_retry_options: {
+      memory: retryOptions.memory || retryOptions.memoryOptions || {},
+      replayRepairDispatchBriefs: retryOptions.replayRepairDispatchBriefs || retryOptions.replay_repair_dispatch_briefs || {},
+      metadata: retryOptions.metadata || retryOptions.metadataPartialCompact || {},
+      maxTaskChars: Number(retryOptions.maxTaskChars || retryOptions.max_task_chars || 0),
+    },
+    source_ledger_file: String(raw.source_ledger_file || raw.sourceLedgerFile || "").trim(),
+    source_strategy_file: String(raw.source_strategy_file || raw.sourceStrategyFile || "").trim(),
+    generated_at: String(raw.generated_at || raw.generatedAt || options.updatedAt || now()),
+  };
+}
+
+function normalizePtlEmergencyOutcomeRows(rows: any[] = [], options: any = {}) {
+  const fallbackGroupId = String(options.groupId || options.group_id || "").trim();
+  return rows.map((entry: any, index: number) => {
+    const categories = [
+      ...(Array.isArray(entry.partial_compact_policy?.selected_categories) ? entry.partial_compact_policy.selected_categories : []),
+      ...(Array.isArray(entry.partial_compaction_categories) ? entry.partial_compaction_categories : []),
+    ].map((item: any) => String(item || "").trim()).filter(Boolean);
+    const row = {
+      schema: "ccm-ptl-emergency-typed-memory-outcome-row-v1",
+      version: GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION,
+      groupId: String(entry.groupId || entry.group_id || entry.group || fallbackGroupId || "").trim(),
+      outcome_id: String(entry.outcome_id || entry.outcomeId || "").trim(),
+      assignment_id: String(entry.assignment_id || entry.assignmentId || "").trim(),
+      project: String(entry.project || entry.target_project || entry.targetProject || "").trim(),
+      method: String(entry.method || "metadata_partial_compact_then_deterministic_head_tail_critical_lines").trim(),
+      status: String(entry.status || (entry.dispatch_ready === false ? "blocked" : entry.dispatch_ready === true ? "recovered" : "")).trim().toLowerCase(),
+      dispatch_ready: entry.dispatch_ready === true || entry.dispatchReady === true,
+      task_compacted: entry.task_compacted === true || entry.taskCompacted === true,
+      task_hash_unchanged: entry.task_hash_unchanged === true || entry.taskHashUnchanged === true,
+      token_delta: Number(entry.token_delta || entry.tokenDelta || 0),
+      free_token_delta: Number(entry.free_token_delta || entry.freeTokenDelta || 0),
+      from_total_tokens: Number(entry.from_total_tokens || entry.fromTotalTokens || 0),
+      retry_total_tokens: Number(entry.retry_total_tokens || entry.retryTotalTokens || 0),
+      from_free_tokens: Number(entry.from_free_tokens || entry.fromFreeTokens || 0),
+      retry_free_tokens: Number(entry.retry_free_tokens || entry.retryFreeTokens || 0),
+      selected_categories: uniqueStrings(categories, 20),
+      partial_omitted_chars: Number(entry.partial_omitted_chars || entry.partialOmittedChars || entry.omitted_chars || 0),
+      distillation_candidate: entry.distillation_candidate !== false,
+      at: String(entry.at || entry.updatedAt || entry.updated_at || options.updatedAt || now()),
+      source_index: Number(entry.source_index || entry.sourceIndex || index),
+    };
+    return {
+      ...row,
+      row_id: `ptl-emergency-outcome:${checksum([
+        row.groupId,
+        row.outcome_id,
+        row.assignment_id,
+        row.selected_categories.join(","),
+        row.status,
+        row.task_compacted,
+      ], 24)}`,
+    };
+  }).filter((row: any) => row.distillation_candidate !== false && (row.status === "blocked" || row.dispatch_ready === false || row.task_compacted === true));
+}
+
+function ptlEmergencyTypedArchive(groupId: string, input: any = {}, options: any = {}) {
+  const hint = normalizePtlEmergencyHintForTypedMemory(input, { ...options, groupId });
+  const outcomeRows = normalizePtlEmergencyOutcomeRows(
+    Array.isArray(input.outcomes) ? input.outcomes
+      : Array.isArray(input.entries) ? input.entries
+        : Array.isArray(input.outcomeLedger?.entries) ? input.outcomeLedger.entries
+          : [],
+    { ...options, groupId }
+  );
+  const failedCategories = uniqueStrings([
+    ...(hint.repeated_failed_categories || []),
+    ...outcomeRows.flatMap((row: any) => row.selected_categories || []),
+  ], 40);
+  return {
+    schema: "ccm-ptl-emergency-typed-memory-distillation-v1",
+    version: GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION,
+    groupId,
+    hint,
+    engaged: hint.engaged === true,
+    emergency_level: hint.emergency_level || "",
+    blocked_outcome_count: Math.max(Number(hint.blocked_outcome_count || 0), outcomeRows.filter((row: any) => row.status === "blocked" || row.dispatch_ready === false).length),
+    task_compacted_blocked_count: Math.max(Number(hint.task_compacted_blocked_count || 0), outcomeRows.filter((row: any) => row.task_compacted === true && (row.status === "blocked" || row.dispatch_ready === false)).length),
+    failed_category_count: failedCategories.length,
+    failed_categories: failedCategories,
+    outcome_count: outcomeRows.length,
+    rows: outcomeRows,
+    source_ledger_file: hint.source_ledger_file || "",
+    source_strategy_file: hint.source_strategy_file || "",
+    updatedAt: String(options.updatedAt || now()),
+  };
+}
+
+function renderPtlEmergencyTypedBody(archive: any = {}, options: any = {}) {
+  const retry = archive.hint?.recommended_retry_options || {};
+  const memory = retry.memory || {};
+  const replay = retry.replayRepairDispatchBriefs || {};
+  const metadata = retry.metadata || {};
+  const lines = [
+    "# WorkerContextPacket PTL Emergency Downgrade Discipline",
+    "",
+    `Generated by CCM PTL emergency typed-memory distillation at ${options.updatedAt || now()}.`,
+    "This feedback memory records repeated compact failures where normal WorkerContextPacket retry was not enough before child-Agent dispatch.",
+    "When similar pressure appears, switch to PTL emergency downgrade: shrink memory, replay repair briefs, metadata, and task body budgets before creating another child Agent session.",
+    "",
+    `Emergency level: ${archive.emergency_level || "unknown"}.`,
+    `Reason: ${archive.hint?.reason || "repeated compact failure"}`,
+    `Blocked outcomes: ${archive.blocked_outcome_count || 0}; task_compacted_blocked: ${archive.task_compacted_blocked_count || 0}.`,
+    archive.failed_categories?.length ? `Repeated failed categories: ${archive.failed_categories.join(", ")}.` : "",
+    "",
+    "## Recommended Retry Budgets",
+    `- memory.maxRenderedChars=${Number(memory.maxRenderedChars || memory.max_rendered_chars || 0)}; memory.maxJsonChars=${Number(memory.maxJsonChars || memory.max_json_chars || 0)}; memory.maxRecallItems=${Number(memory.maxRecallItems || memory.max_recall_items || 0)}.`,
+    `- replayRepairDispatchBriefs.maxBriefs=${Number(replay.maxBriefs || replay.max_briefs || 0)}; maxStringChars=${Number(replay.maxStringChars || replay.max_string_chars || 0)}; maxIdChars=${Number(replay.maxIdChars || replay.max_id_chars || 0)}.`,
+    `- metadata.maxCategories=${Number(metadata.maxCategories || metadata.max_categories || 0)}; maxItems=${Number(metadata.maxItems || metadata.max_items || 0)}; maxStringChars=${Number(metadata.maxStringChars || metadata.max_string_chars || 0)}.`,
+    `- maxTaskChars=${Number(retry.maxTaskChars || retry.max_task_chars || 0)}.`,
+    "",
+    "## Blocked Outcome Samples",
+  ];
+  for (const row of archive.rows || []) {
+    const ids = [
+      row.project ? `project=${row.project}` : "",
+      row.assignment_id ? `assignment=${row.assignment_id}` : "",
+      row.outcome_id ? `outcome=${row.outcome_id}` : "",
+    ].filter(Boolean).join("; ");
+    lines.push(`- [${row.status || "blocked"}] ${ids || row.row_id}; method=${row.method}; categories=${(row.selected_categories || []).join(",")}; retry_total=${row.retry_total_tokens || 0}; retry_free=${row.retry_free_tokens || 0}; task_compacted=${row.task_compacted === true}; task_hash_unchanged=${row.task_hash_unchanged === true}.`);
+  }
+  return lines.join("\n").trim() + "\n";
+}
+
+export function distillPtlEmergencyDowngradeToTypedMemory(groupId: string, input: any = {}, options: any = {}) {
+  if (options.disabled === true || options.disableDistillation === true || options.disable_distillation === true) {
+    return {
+      schema: "ccm-ptl-emergency-typed-memory-distillation-v1",
+      version: GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION,
+      groupId,
+      skipped: true,
+      reason: "disabled",
+    };
+  }
+  const updatedAt = String(options.updatedAt || options.updated_at || now());
+  const archive = ptlEmergencyTypedArchive(groupId, input, { ...options, updatedAt });
+  const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+  const writes: any[] = [];
+  if (archive.engaged || archive.outcome_count > 0 || archive.blocked_outcome_count > 0) {
+    writes.push(upsertGroupTypedMemoryDocument(groupId, {
+      type: "feedback",
+      slug: "worker-context-ptl-emergency-downgrade",
+      name: "WorkerContextPacket PTL emergency downgrade discipline",
+      description: "Emergency downgrade budgets and cautions for repeated WorkerContextPacket compact failures.",
+      source: "auto:ptl-emergency-downgrade-distillation",
+      updatedAt,
+      body: renderPtlEmergencyTypedBody(archive, { updatedAt }),
+      maxBodyChars: Number(options.maxBodyChars || options.max_body_chars || 16_000),
+    }));
+  }
+  const ledgerState = { ...ledger };
+  delete ledgerState.file;
+  writeJsonAtomic(ledger.file, {
+    ...ledgerState,
+    schema: "ccm-group-typed-memory-distillation-ledger-v1",
+    version: GROUP_TYPED_MEMORY_DISTILLATION_VERSION,
+    groupId,
+    facts: ledger.facts || {},
+    ptlEmergencyArchive: archive,
+    updatedAt,
+  });
+  const index = buildGroupTypedMemoryIndex(groupId);
+  return {
+    schema: "ccm-ptl-emergency-typed-memory-distillation-v1",
+    version: GROUP_PTL_EMERGENCY_TYPED_MEMORY_DISTILLATION_VERSION,
+    groupId,
+    skipped: false,
+    reason: compactText(options.reason || "", 220),
+    ledgerFile: ledger.file,
+    engaged: archive.engaged,
+    emergencyLevel: archive.emergency_level,
+    blockedOutcomeCount: archive.blocked_outcome_count,
+    taskCompactedBlockedCount: archive.task_compacted_blocked_count,
+    failedCategoryCount: archive.failed_category_count,
+    outcomeCount: archive.outcome_count,
+    writeCount: writes.length,
+    writes,
+    index,
+    archive,
+    distilledAt: updatedAt,
+  };
+}
+
 function extractPathClaims(value: any) {
   const text = String(value || "");
   const matched = text.match(/(?:[A-Za-z]:\\[^\s，。；]+|(?:[\w.-]+\/)+[\w.-]+\.[A-Za-z0-9]+|[\w.-]+\.(?:ts|tsx|js|jsx|vue|java|py|go|rs|md|json|toml|yaml|yml|xml|sql))/g) || [];
@@ -2949,7 +5755,7 @@ export function distillGroupMessagesToTypedMemory(groupId: string, messages: any
       rows: postCompactUsageArchive.rows,
       updatedAt,
     },
-    providerReproofReceiptConsumptionArchive: ledger.providerReproofReceiptConsumptionArchive || undefined,
+    ...preservedGroupTypedMemoryDistillationArchives(ledger),
     updatedAt,
   });
 
@@ -3033,7 +5839,7 @@ export function distillGroupMessagesToTypedMemory(groupId: string, messages: any
       rows: postCompactUsageArchive.rows,
       updatedAt,
     },
-    providerReproofReceiptConsumptionArchive: persistedLedger.providerReproofReceiptConsumptionArchive || ledger.providerReproofReceiptConsumptionArchive || undefined,
+    ...preservedGroupTypedMemoryDistillationArchives(persistedLedger, ledger),
     quality,
     updatedAt,
   });
@@ -3218,6 +6024,9 @@ export function buildGroupTypedMemoryRecall(groupId: string, query: string, opti
   const already = new Set<string>((options.alreadySurfaced || options.already_surfaced || []).map((item: any) => String(item || "").toLowerCase()));
   const recentTools = new Set<string>((options.recentTools || options.recent_tools || []).map((item: any) => String(item || "").toLowerCase()).filter(Boolean));
   const postCompactUsageHints = normalizePostCompactCandidateUsageHints(options);
+  const workerContextPressureSignals = normalizeWorkerContextPressureRecallSignals(options);
+  const workerContextPressureUsageHints = normalizeWorkerContextPressureRecallUsageHints(groupId, options);
+  const pressureProvenanceDispatchFeedbackPolicy = normalizePressureProvenanceDispatchFeedbackPolicyForRecall(options);
   const diagnostics: any[] = [];
   const scored = index.docs.map(doc => {
     if (already.has(doc.relPath.toLowerCase()) || already.has(doc.file.toLowerCase())) {
@@ -3247,16 +6056,30 @@ export function buildGroupTypedMemoryRecall(groupId: string, query: string, opti
     }
     const postCompactUsage = scorePostCompactCandidateUsageHint(corpus, postCompactUsageHints);
     if (postCompactUsage.adjustment) score += postCompactUsage.adjustment;
+    const workerContextPressureRecall = scoreWorkerContextPressureRecall(corpus, doc, workerContextPressureSignals, text, queryTokens);
+    if (workerContextPressureRecall.adjustment) score += workerContextPressureRecall.adjustment;
+    const workerContextPressureUsage = scoreWorkerContextPressureRecallUsageHint(doc, workerContextPressureUsageHints, workerContextPressureSignals);
+    if (workerContextPressureUsage.adjustment) score += workerContextPressureUsage.adjustment;
+    const workerContextPressureFeedbackPolicy = scoreWorkerContextPressureFeedbackPolicyRecallRisk(doc, corpus, workerContextPressureUsage, pressureProvenanceDispatchFeedbackPolicy, text, queryTokens);
+    if (workerContextPressureFeedbackPolicy.adjustment) score += workerContextPressureFeedbackPolicy.adjustment;
     if (score <= 0 && queryTokens.length && !(pathCondition.conditional && pathCondition.matched)) {
-      diagnostics.push({ relPath: doc.relPath, skipped: true, reason: "low_score", score, postCompactUsage });
+      const reason = workerContextPressureFeedbackPolicy.active === true
+        && workerContextPressureFeedbackPolicy.risk_doc === true
+        && Number(workerContextPressureFeedbackPolicy.adjustment || 0) < 0
+        ? "pressure_feedback_policy_risk_gated"
+        : "low_score";
+      diagnostics.push({ relPath: doc.relPath, skipped: true, reason, score, postCompactUsage, workerContextPressureRecall, workerContextPressureUsage, workerContextPressureFeedbackPolicy });
       return null;
     }
-    diagnostics.push({ relPath: doc.relPath, skipped: false, score, pathCondition, postCompactUsage });
+    diagnostics.push({ relPath: doc.relPath, skipped: false, score, pathCondition, postCompactUsage, workerContextPressureRecall, workerContextPressureUsage, workerContextPressureFeedbackPolicy });
     return {
       ...doc,
       pathCondition,
       score,
       postCompactUsage,
+      workerContextPressureRecall,
+      workerContextPressureUsage,
+      workerContextPressureFeedbackPolicy,
       snippet: extractSnippet(doc.body, queryTokens, Number(options.snippetChars || options.snippet_chars || 800)),
     };
   }).filter(Boolean).sort((a: any, b: any) => b.score - a.score || b.mtimeMs - a.mtimeMs);
@@ -3280,6 +6103,50 @@ export function buildGroupTypedMemoryRecall(groupId: string, query: string, opti
       boosted_count: diagnostics.filter((item: any) => Number(item.postCompactUsage?.adjustment || 0) > 0).length,
       deprioritized_count: diagnostics.filter((item: any) => Number(item.postCompactUsage?.adjustment || 0) < 0).length,
     },
+    workerContextPressureScoring: {
+      schema: "ccm-group-typed-memory-worker-context-pressure-scoring-v1",
+      active: workerContextPressureSignals.active === true,
+      signal_count: workerContextPressureSignals.signal_count || 0,
+      active_signal_count: workerContextPressureSignals.active_signal_count || 0,
+      suppressed_signal_count: workerContextPressureSignals.suppressed_signal_count || 0,
+      pressure_status: workerContextPressureSignals.pressure_status || "",
+      max_pressure: workerContextPressureSignals.max_pressure || 0,
+      min_free_tokens: workerContextPressureSignals.min_free_tokens || 0,
+      ptl_emergency: workerContextPressureSignals.ptl_emergency === true,
+      repeated_compact_failure: workerContextPressureSignals.repeated_compact_failure === true,
+      pressure_doc_count: diagnostics.filter((item: any) => item.workerContextPressureRecall?.pressure_doc).length,
+      boosted_count: diagnostics.filter((item: any) => Number(item.workerContextPressureRecall?.adjustment || 0) > 0).length,
+      deprioritized_count: diagnostics.filter((item: any) => Number(item.workerContextPressureRecall?.adjustment || 0) < 0).length,
+      signals: workerContextPressureSignals.signals || [],
+    },
+    workerContextPressureUsageScoring: {
+      schema: "ccm-group-typed-memory-worker-context-pressure-usage-scoring-v1",
+      hint_count: workerContextPressureUsageHints.length,
+      stale_hint_count: workerContextPressureUsageHints.filter((item: any) => item.recommendation === "stale_pressure_recall_history").length,
+      cross_group_hint_count: workerContextPressureUsageHints.filter((item: any) => item.hint_scope === "cross_group_project").length,
+      matched_count: diagnostics.filter((item: any) => Array.isArray(item.workerContextPressureUsage?.matched) && item.workerContextPressureUsage.matched.length).length,
+      stale_matched_count: diagnostics.filter((item: any) => Array.isArray(item.workerContextPressureUsage?.matched) && item.workerContextPressureUsage.matched.some((match: any) => match.recommendation === "stale_pressure_recall_history")).length,
+      cross_group_matched_count: diagnostics.filter((item: any) => Array.isArray(item.workerContextPressureUsage?.matched) && item.workerContextPressureUsage.matched.some((match: any) => match.hint_scope === "cross_group_project")).length,
+      repair_hint_count: workerContextPressureUsageHints.filter((item: any) => item.repair_open === true).length,
+      repair_matched_count: diagnostics.filter((item: any) => Array.isArray(item.workerContextPressureUsage?.matched) && item.workerContextPressureUsage.matched.some((match: any) => match.repair_open === true)).length,
+      disputed_matched_count: diagnostics.filter((item: any) => Array.isArray(item.workerContextPressureUsage?.matched) && item.workerContextPressureUsage.matched.some((match: any) => match.provenance_status === "disputed_under_repair")).length,
+      boosted_count: diagnostics.filter((item: any) => Number(item.workerContextPressureUsage?.adjustment || 0) > 0).length,
+      deprioritized_count: diagnostics.filter((item: any) => Number(item.workerContextPressureUsage?.adjustment || 0) < 0).length,
+    },
+    workerContextPressureFeedbackPolicyScoring: {
+      schema: "ccm-group-typed-memory-worker-context-pressure-provenance-feedback-recall-risk-scoring-v1",
+      active: pressureProvenanceDispatchFeedbackPolicy.active === true,
+      disabled: pressureProvenanceDispatchFeedbackPolicy.disabled === true,
+      agent_type: pressureProvenanceDispatchFeedbackPolicy.agentType || pressureProvenanceDispatchFeedbackPolicy.agent_type || "unknown",
+      target_project: pressureProvenanceDispatchFeedbackPolicy.targetProject || pressureProvenanceDispatchFeedbackPolicy.target_project || "",
+      action: pressureProvenanceDispatchFeedbackPolicy.action || "",
+      severity: pressureProvenanceDispatchFeedbackPolicy.severity || "",
+      policy_row_count: Array.isArray(pressureProvenanceDispatchFeedbackPolicy.policyRows) ? pressureProvenanceDispatchFeedbackPolicy.policyRows.length : 0,
+      risk_doc_count: diagnostics.filter((item: any) => item.workerContextPressureFeedbackPolicy?.risk_doc === true).length,
+      repair_first_count: diagnostics.filter((item: any) => item.workerContextPressureFeedbackPolicy?.repair_first === true).length,
+      deprioritized_count: diagnostics.filter((item: any) => Number(item.workerContextPressureFeedbackPolicy?.adjustment || 0) < 0).length,
+      risk_gated_count: diagnostics.filter((item: any) => item.reason === "pressure_feedback_policy_risk_gated").length,
+    },
     diagnostics: diagnostics.slice(-40),
   };
 }
@@ -3289,15 +6156,39 @@ export function renderGroupTypedMemoryRecall(recall: any) {
   if (recall.ignored) return "类型化长期记忆：用户要求本轮忽略记忆，按空 MEMORY.md 处理。";
   const docs = Array.isArray(recall.recalled) ? recall.recalled : [];
   if (!docs.length) return "";
+  const feedbackScoring = recall.workerContextPressureFeedbackPolicyScoring || recall.worker_context_pressure_feedback_policy_scoring || {};
+  const feedbackHint = feedbackScoring.active
+    ? `；pressure feedback policy gating risk ${feedbackScoring.risk_doc_count || 0}/gated ${feedbackScoring.risk_gated_count || 0}/repair-first ${feedbackScoring.repair_first_count || 0}`
+    : "";
   const lines = [
-    `类型化长期记忆（MEMORY.md 索引召回，路径条件匹配 ${recall.conditionalMatched || 0}、跳过 ${recall.conditionalSkipped || 0}；使用前如涉及文件/函数/flag 必须再核验当前仓库）：`,
+    `类型化长期记忆（MEMORY.md 索引召回，路径条件匹配 ${recall.conditionalMatched || 0}、跳过 ${recall.conditionalSkipped || 0}${recall.workerContextPressureScoring?.active ? `；上下文压力召回 ${recall.workerContextPressureScoring.boosted_count || 0}` : ""}${feedbackHint}；使用前如涉及文件/函数/flag 必须再核验当前仓库）：`,
   ];
   for (const doc of docs) {
     const pathHint = doc.pathCondition?.conditional ? `；paths ${doc.pathCondition.matchedPaths?.join(",") || "matched"}` : "";
     const usageHint = Array.isArray(doc.postCompactUsage?.matched) && doc.postCompactUsage.matched.length
       ? `；post-compact usage ${doc.postCompactUsage.adjustment > 0 ? "+" : ""}${doc.postCompactUsage.adjustment}`
       : "";
-    lines.push(`- [${doc.type}] ${doc.name}（score ${doc.score}，${doc.relPath}${pathHint}${usageHint}）：${doc.description || ""}`);
+    const pressureHint = Array.isArray(doc.workerContextPressureRecall?.matched) && doc.workerContextPressureRecall.matched.length && Number(doc.workerContextPressureRecall.adjustment || 0) > 0
+      ? `；pressure recall +${doc.workerContextPressureRecall.adjustment}`
+      : "";
+    const pressureUsageHint = Array.isArray(doc.workerContextPressureUsage?.matched) && doc.workerContextPressureUsage.matched.length
+      ? `；pressure usage ${doc.workerContextPressureUsage.adjustment > 0 ? "+" : ""}${doc.workerContextPressureUsage.adjustment}`
+      : "";
+    const pressureRepair = Array.isArray(doc.workerContextPressureUsage?.matched)
+      ? doc.workerContextPressureUsage.matched.find((match: any) => match.repair_open === true)
+      : null;
+    const pressureRepairHint = pressureRepair
+      ? `；pressure repair ${pressureRepair.repair_gap_type || "gap"}:${pressureRepair.repair_status || "pending"}`
+      : "";
+    const feedbackPolicy = doc.workerContextPressureFeedbackPolicy || doc.worker_context_pressure_feedback_policy || {};
+    const feedbackPolicyHint = feedbackPolicy.active && feedbackPolicy.risk_doc
+      ? `；pressure feedback policy ${feedbackPolicy.repair_first ? "repair-first" : `${feedbackPolicy.adjustment > 0 ? "+" : ""}${feedbackPolicy.adjustment}`}`
+      : "";
+    const crossGroupProvenance = !pressureRepair && Array.isArray(doc.workerContextPressureUsage?.matched)
+      ? doc.workerContextPressureUsage.matched.find((match: any) => match.provenance_status === "cross_group_project_assist")
+      : null;
+    const provenanceHint = crossGroupProvenance ? "；provenance cross_group_project_assist" : "";
+    lines.push(`- [${doc.type}] ${doc.name}（score ${doc.score}，${doc.relPath}${pathHint}${usageHint}${pressureHint}${pressureUsageHint}${pressureRepairHint}${feedbackPolicyHint}${provenanceHint}）：${doc.description || ""}`);
     if (doc.snippet) lines.push(`  ${compactText(doc.snippet, 700).replace(/\n/g, "\n  ")}`);
   }
   return lines.join("\n");
@@ -3414,6 +6305,483 @@ export function runGroupTypedMemoryPostCompactUsageScoringSelfTest() {
     };
   } finally {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runGroupTypedMemoryWorkerContextPressureRecallSelfTest() {
+  const groupId = `typed-memory-worker-context-pressure-recall-selftest-${process.pid}-${Date.now().toString(36)}`;
+  const dir = getGroupTypedMemoryDir(groupId);
+  try {
+    upsertGroupTypedMemoryDocument(groupId, {
+      type: "feedback",
+      slug: "worker-context-usage-pressure-discipline",
+      name: "WorkerContextPacket context usage pressure discipline",
+      description: "Recall only when WorkerContextPacket context pressure is active.",
+      source: "auto:context-usage-repair-distillation",
+      body: [
+        "PRESSURE_CONTEXT_USAGE_SENTINEL",
+        "When context_usage.status is compact_recommended, critical, or over_budget, keep Context usage budget visible.",
+        "Target free_tokens>=autocompact_buffer_tokens before child-Agent dispatch.",
+      ].join("\n"),
+    });
+    upsertGroupTypedMemoryDocument(groupId, {
+      type: "reference",
+      slug: "worker-context-compact-strategy-memory",
+      name: "WorkerContextPacket compact strategy memory",
+      description: "Recall compact strategy only under pressure.",
+      source: "auto:compact-strategy-memory-distillation",
+      body: [
+        "PRESSURE_COMPACT_STRATEGY_SENTINEL",
+        "Prefer metadata_partial_compact categories with positive free_token_delta and task_hash_unchanged=true.",
+      ].join("\n"),
+    });
+    upsertGroupTypedMemoryDocument(groupId, {
+      type: "feedback",
+      slug: "worker-context-ptl-emergency-downgrade",
+      name: "WorkerContextPacket PTL emergency downgrade discipline",
+      description: "Recall PTL emergency budgets only for repeated compact failure.",
+      source: "auto:ptl-emergency-downgrade-distillation",
+      body: [
+        "PRESSURE_PTL_EMERGENCY_SENTINEL",
+        "PTL emergency downgrade uses maxTaskChars and maxRenderedChars when repeated compact failure blocks dispatch.",
+      ].join("\n"),
+    });
+    upsertGroupTypedMemoryDocument(groupId, {
+      type: "reference",
+      slug: "worker-context-old-ignore-memory",
+      name: "WorkerContextPacket stale pressure recall memory",
+      description: "Old ignored pressure recall feedback should decay before future scoring.",
+      source: "selftest",
+      body: [
+        "PRESSURE_STALE_USAGE_SENTINEL",
+        "worker-context-compact-strategy stale pressure recall feedback should not permanently suppress future typed memory recall.",
+        "metadata_partial_compact guidance can become stale when child Agent receipts stop referencing it.",
+      ].join("\n"),
+    });
+    upsertGroupTypedMemoryDocument(groupId, {
+      type: "project",
+      slug: "normal-payment-memory",
+      name: "Normal payment memory",
+      description: "Ordinary task memory should win when no WorkerContextPacket pressure exists.",
+      source: "selftest",
+      body: "NORMAL_PRESSURE_RECALL_SENTINEL：普通支付回调任务背景，不需要上下文预算修复。",
+    });
+    const query = "继续 NORMAL_PRESSURE_RECALL_SENTINEL 普通支付回调";
+    const noPressure = buildGroupTypedMemoryRecall(groupId, query, { max: 6 });
+    const pressure = buildGroupTypedMemoryRecall(groupId, query, {
+      max: 6,
+      workerContextPacketContextUsage: {
+        schema: "ccm-worker-context-usage-v1",
+        status: "over_budget",
+        pressure: 104,
+        total_tokens: 93_800,
+        max_tokens: 90_000,
+        free_tokens: -16_800,
+        autocompact_buffer_tokens: 13_000,
+        top_categories: [{ id: "typed_memory_recall", tokens: 18_000 }],
+      },
+    });
+    const ptl = buildGroupTypedMemoryRecall(groupId, query, {
+      max: 6,
+      ptlEmergency: {
+        engaged: true,
+        emergency_level: "critical",
+        blocked_outcome_count: 3,
+        task_compacted_blocked_count: 1,
+        reason: "WorkerContextPacket repeated compact failure requires PTL emergency downgrade.",
+      },
+    });
+    const usageRecord = recordGroupTypedMemoryPressureRecallUsageLedger(groupId, {
+      targetProject: "api",
+      taskId: "pressure-recall-usage-task",
+      executionId: "pressure-recall-usage-exec",
+      rows: [
+        { target_project: "api", agent: "api", rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "used", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-usage-1" },
+        { target_project: "api", agent: "api", rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "verified", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-usage-2" },
+        { target_project: "api", agent: "api", rel_path: "worker-context-compact-strategy-memory.md", name: "WorkerContextPacket compact strategy memory", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-usage-3" },
+        { target_project: "api", agent: "api", rel_path: "worker-context-compact-strategy-memory.md", name: "WorkerContextPacket compact strategy memory", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-usage-4" },
+      ],
+      generatedAt: "2026-07-09T00:00:00.000Z",
+    });
+    const usageSummary: any = buildGroupTypedMemoryPressureRecallUsageSummary(groupId, { targetProject: "api" });
+    const staleUsageRecord = recordGroupTypedMemoryPressureRecallUsageLedger(groupId, {
+      targetProject: "api",
+      taskId: "pressure-recall-stale-usage-task",
+      executionId: "pressure-recall-stale-usage-exec",
+      rows: [
+        { target_project: "api", agent: "api", rel_path: "worker-context-old-ignore-memory.md", name: "WorkerContextPacket stale pressure recall memory", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-stale-1" },
+        { target_project: "api", agent: "api", rel_path: "worker-context-old-ignore-memory.md", name: "WorkerContextPacket stale pressure recall memory", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-stale-2" },
+      ],
+      generatedAt: "2026-03-01T00:00:00.000Z",
+    });
+    const staleUsageSummary: any = buildGroupTypedMemoryPressureRecallUsageSummary(groupId, {
+      targetProject: "api",
+      nowMs: Date.parse("2026-07-09T00:00:00.000Z"),
+    });
+    const pressureAfterUsage = buildGroupTypedMemoryRecall(groupId, query, {
+      max: 6,
+      targetProject: "api",
+      nowMs: Date.parse("2026-07-09T00:00:00.000Z"),
+      workerContextPacketContextUsage: {
+        schema: "ccm-worker-context-usage-v1",
+        status: "over_budget",
+        pressure: 104,
+        total_tokens: 93_800,
+        max_tokens: 90_000,
+        free_tokens: -16_800,
+        autocompact_buffer_tokens: 13_000,
+      },
+    });
+    const pressureAfterStaleUsage = buildGroupTypedMemoryRecall(groupId, "PRESSURE_STALE_USAGE_SENTINEL worker context over_budget", {
+      max: 8,
+      targetProject: "api",
+      nowMs: Date.parse("2026-07-09T00:00:00.000Z"),
+      workerContextPacketContextUsage: {
+        schema: "ccm-worker-context-usage-v1",
+        status: "over_budget",
+        pressure: 104,
+        total_tokens: 93_800,
+        max_tokens: 90_000,
+        free_tokens: -16_800,
+        autocompact_buffer_tokens: 13_000,
+      },
+    });
+    const rendered = renderGroupTypedMemoryRecall(pressure);
+    const relsNoPressure = (noPressure.recalled || []).map((item: any) => item.relPath);
+    const pressureUsage: any = pressure.recalled.find((item: any) => item.relPath === "worker-context-usage-pressure-discipline.md");
+    const pressureStrategy: any = pressure.recalled.find((item: any) => item.relPath === "worker-context-compact-strategy-memory.md");
+    const pressurePtl: any = ptl.recalled.find((item: any) => item.relPath === "worker-context-ptl-emergency-downgrade.md");
+    const afterUsageDoc: any = pressureAfterUsage.recalled.find((item: any) => item.relPath === "worker-context-usage-pressure-discipline.md");
+    const afterIgnoredStrategy: any = pressureAfterUsage.recalled.find((item: any) => item.relPath === "worker-context-compact-strategy-memory.md")
+      || pressureAfterUsage.diagnostics.find((item: any) => item.relPath === "worker-context-compact-strategy-memory.md");
+    const staleIgnoredDoc: any = pressureAfterStaleUsage.diagnostics.find((item: any) => item.relPath === "worker-context-old-ignore-memory.md")
+      || pressureAfterStaleUsage.recalled.find((item: any) => item.relPath === "worker-context-old-ignore-memory.md");
+    const checks = {
+      noPressureDoesNotPolluteNormalRecall: relsNoPressure.includes("normal-payment-memory.md")
+        && !relsNoPressure.includes("worker-context-usage-pressure-discipline.md")
+        && !relsNoPressure.includes("worker-context-compact-strategy-memory.md")
+        && !relsNoPressure.includes("worker-context-ptl-emergency-downgrade.md")
+        && Number(noPressure.workerContextPressureScoring?.deprioritized_count || 0) >= 3,
+      overBudgetBoostsUsagePressureMemory: !!pressureUsage
+        && Number(pressureUsage.workerContextPressureRecall?.adjustment || 0) > 0
+        && JSON.stringify(pressureUsage).includes("PRESSURE_CONTEXT_USAGE_SENTINEL"),
+      overBudgetBoostsCompactStrategyMemory: !!pressureStrategy
+        && Number(pressureStrategy.workerContextPressureRecall?.adjustment || 0) > 0
+        && JSON.stringify(pressureStrategy).includes("PRESSURE_COMPACT_STRATEGY_SENTINEL"),
+      ptlEmergencyBoostsDowngradeMemory: !!pressurePtl
+        && Number(pressurePtl.workerContextPressureRecall?.adjustment || 0) > 0
+        && pressurePtl.workerContextPressureRecall?.ptl_emergency === true,
+      pressureScoringSummarized: pressure.workerContextPressureScoring?.active === true
+        && pressure.workerContextPressureScoring?.pressure_status === "over_budget"
+        && pressure.workerContextPressureScoring?.boosted_count >= 2,
+      usageLedgerFeedsFuturePressureRecall: usageRecord?.recorded_count === 4
+        && usageSummary.totals?.used === 1
+        && usageSummary.totals?.verified === 1
+        && usageSummary.totals?.ignored === 2
+        && Number(afterUsageDoc?.workerContextPressureUsage?.adjustment || 0) > 0
+        && Number(afterIgnoredStrategy?.workerContextPressureUsage?.adjustment || 0) < 0
+        && pressureAfterUsage.workerContextPressureUsageScoring?.boosted_count >= 1
+        && pressureAfterUsage.workerContextPressureUsageScoring?.deprioritized_count >= 1,
+      staleUsageFeedbackDecaysBeforeScoring: staleUsageRecord?.recorded_count === 2
+        && staleUsageSummary.totals?.ignored === 4
+        && Number(staleUsageSummary.weighted_totals?.ignored || 0) < Number(staleUsageSummary.totals?.ignored || 0)
+        && Number(staleUsageSummary.aging?.stale_entry_count || 0) >= 2
+        && (staleUsageSummary.stale_pressure_memories || []).some((item: any) => item.rel_path === "worker-context-old-ignore-memory.md")
+        && staleIgnoredDoc?.workerContextPressureUsage?.matched?.some((match: any) => match.recommendation === "stale_pressure_recall_history" && Number(match.delta || 0) === 0)
+        && Number(staleIgnoredDoc?.workerContextPressureUsage?.adjustment || 0) === 0
+        && Number(pressureAfterStaleUsage.workerContextPressureUsageScoring?.stale_hint_count || 0) >= 1
+        && Number(pressureAfterStaleUsage.workerContextPressureUsageScoring?.stale_matched_count || 0) >= 1,
+      renderedShowsPressureRecall: rendered.includes("上下文压力召回")
+        && rendered.includes("pressure recall +")
+        && rendered.includes("PRESSURE_CONTEXT_USAGE_SENTINEL"),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      noPressure: {
+        scoring: noPressure.workerContextPressureScoring,
+        recalled: relsNoPressure,
+      },
+      pressure: {
+        scoring: pressure.workerContextPressureScoring,
+        recalled: pressure.recalled.map((item: any) => ({ relPath: item.relPath, score: item.score, workerContextPressureRecall: item.workerContextPressureRecall })),
+      },
+      ptl: {
+        scoring: ptl.workerContextPressureScoring,
+        recalled: ptl.recalled.map((item: any) => ({ relPath: item.relPath, score: item.score, workerContextPressureRecall: item.workerContextPressureRecall })),
+      },
+      usage: {
+        record: usageRecord,
+        summary: usageSummary,
+        staleRecord: staleUsageRecord,
+        staleSummary: staleUsageSummary,
+        scoring: pressureAfterUsage.workerContextPressureUsageScoring,
+        staleScoring: pressureAfterStaleUsage.workerContextPressureUsageScoring,
+      },
+    };
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runGroupTypedMemoryCrossGroupPressureRecallUsageSelfTest() {
+  const sourceGroupId = `typed-memory-cross-group-pressure-source-${process.pid}-${Date.now().toString(36)}`;
+  const targetGroupId = `typed-memory-cross-group-pressure-target-${process.pid}-${Date.now().toString(36)}`;
+  const dirs = [getGroupTypedMemoryDir(sourceGroupId), getGroupTypedMemoryDir(targetGroupId)];
+  const nowMs = Date.parse("2026-07-09T23:10:00.000Z");
+  const pressureUsage = {
+    schema: "ccm-worker-context-usage-v1",
+    status: "over_budget",
+    pressure: 105,
+    total_tokens: 94_500,
+    max_tokens: 90_000,
+    free_tokens: -17_500,
+    autocompact_buffer_tokens: 13_000,
+  };
+  const findDoc = (recall: any, relPath: string) => (recall.recalled || []).find((item: any) => item.relPath === relPath)
+    || (recall.diagnostics || []).find((item: any) => item.relPath === relPath)
+    || {};
+  try {
+    upsertGroupTypedMemoryDocument(targetGroupId, {
+      type: "feedback",
+      slug: "worker-context-usage-pressure-discipline",
+      name: "WorkerContextPacket context usage pressure discipline",
+      description: "Cross-group pressure usage should promote this pressure memory only for the same project.",
+      source: "selftest:cross-group-pressure-usage",
+      body: [
+        "CROSS_GROUP_PRESSURE_USAGE_SENTINEL",
+        "When WorkerContextPacket context_usage is over_budget, keep free_tokens and autocompact_buffer_tokens visible before dispatch.",
+      ].join("\n"),
+    });
+    upsertGroupTypedMemoryDocument(targetGroupId, {
+      type: "reference",
+      slug: "worker-context-compact-strategy-memory",
+      name: "WorkerContextPacket compact strategy memory",
+      description: "Cross-group ignored pressure usage should deprioritize this memory.",
+      source: "selftest:cross-group-pressure-usage",
+      body: [
+        "CROSS_GROUP_PRESSURE_IGNORED_SENTINEL",
+        "metadata_partial_compact strategy memory can be deprioritized when child receipts repeatedly ignored it.",
+      ].join("\n"),
+    });
+    upsertGroupTypedMemoryDocument(targetGroupId, {
+      type: "project",
+      slug: "normal-cross-project-memory",
+      name: "Normal cross project memory",
+      description: "Ordinary target project task memory.",
+      source: "selftest:cross-group-pressure-usage",
+      body: "NORMAL_CROSS_GROUP_PRESSURE_SENTINEL：普通项目记忆，用来确认跨群聊压力提示只在压力路径补强。",
+    });
+    const sourceRecord = recordGroupTypedMemoryPressureRecallUsageLedger(sourceGroupId, {
+      targetProject: "api",
+      taskId: "cross-group-pressure-usage-source-task",
+      executionId: "cross-group-pressure-usage-source-exec",
+      agent: "api",
+      generatedAt: "2026-07-09T23:09:00.000Z",
+      rows: [
+        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "used", pressure_status: "over_budget", worker_context_packet_id: "wcp-cross-pressure-used" },
+        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "verified", pressure_status: "over_budget", worker_context_packet_id: "wcp-cross-pressure-verified" },
+        { rel_path: "worker-context-compact-strategy-memory.md", name: "WorkerContextPacket compact strategy memory", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-cross-pressure-ignored-1" },
+        { rel_path: "worker-context-compact-strategy-memory.md", name: "WorkerContextPacket compact strategy memory", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-cross-pressure-ignored-2" },
+      ],
+    });
+    const crossSummary = buildGroupTypedMemoryPressureRecallUsageProjectSummary(targetGroupId, {
+      targetProject: "api",
+      groupIds: [sourceGroupId],
+      nowMs,
+    });
+    const crossRecall = buildGroupTypedMemoryRecall(targetGroupId, "继续普通项目任务 NORMAL_CROSS_GROUP_PRESSURE_SENTINEL", {
+      max: 8,
+      targetProject: "api",
+      nowMs,
+      workerContextPacketContextUsage: pressureUsage,
+      crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
+    });
+    const wrongProjectRecall = buildGroupTypedMemoryRecall(targetGroupId, "继续普通项目任务 NORMAL_CROSS_GROUP_PRESSURE_SENTINEL", {
+      max: 8,
+      targetProject: "web",
+      nowMs,
+      workerContextPacketContextUsage: pressureUsage,
+      crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
+    });
+    const promotedDoc: any = findDoc(crossRecall, "worker-context-usage-pressure-discipline.md");
+    const ignoredDoc: any = findDoc(crossRecall, "worker-context-compact-strategy-memory.md");
+    const localRecord = recordGroupTypedMemoryPressureRecallUsageLedger(targetGroupId, {
+      targetProject: "api",
+      taskId: "cross-group-pressure-usage-local-task",
+      executionId: "cross-group-pressure-usage-local-exec",
+      agent: "api",
+      generatedAt: "2026-07-09T23:09:30.000Z",
+      rows: [
+        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-local-pressure-ignored-1" },
+        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-local-pressure-ignored-2" },
+        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-local-pressure-ignored-3" },
+      ],
+    });
+    const localOverrideRecall = buildGroupTypedMemoryRecall(targetGroupId, "继续普通项目任务 NORMAL_CROSS_GROUP_PRESSURE_SENTINEL", {
+      max: 8,
+      targetProject: "api",
+      nowMs,
+      workerContextPacketContextUsage: pressureUsage,
+      crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
+    });
+    const localOverrideDoc: any = findDoc(localOverrideRecall, "worker-context-usage-pressure-discipline.md");
+    const localOverrideMatches = localOverrideDoc.workerContextPressureUsage?.matched || [];
+    const checks = {
+      sourceLedgerRecorded: sourceRecord?.recorded_count === 4,
+      projectSummaryReadsOnlySourceGroup: crossSummary.source === "cross_group_project_pressure_recall_usage"
+        && crossSummary.source_group_count === 1
+        && crossSummary.entry_count === 4
+        && crossSummary.target_project === "api"
+        && (crossSummary.source_groups || []).some((item: any) => item.groupId === sourceGroupId),
+      crossGroupHintsPromoteSameProjectPressureMemory: Number(crossRecall.workerContextPressureUsageScoring?.cross_group_hint_count || 0) >= 2
+        && Number(crossRecall.workerContextPressureUsageScoring?.cross_group_matched_count || 0) >= 2
+        && promotedDoc.workerContextPressureUsage?.matched?.some((match: any) => match.hint_scope === "cross_group_project"
+          && match.recommendation === "promote_pressure_recall"
+          && Number(match.delta || 0) > 0
+          && match.group_ids?.includes(sourceGroupId)),
+      crossGroupHintsCanDeprioritizeIgnoredPressureMemory: ignoredDoc.workerContextPressureUsage?.matched?.some((match: any) => match.hint_scope === "cross_group_project"
+        && match.recommendation === "deprioritize_pressure_recall"
+        && Number(match.delta || 0) < 0),
+      targetProjectIsolationBlocksWrongProjectHints: Number(wrongProjectRecall.workerContextPressureUsageScoring?.cross_group_hint_count || 0) === 0
+        && Number(wrongProjectRecall.workerContextPressureUsageScoring?.cross_group_matched_count || 0) === 0,
+      localGroupUsageOverridesSameDocCrossGroupHint: localRecord?.recorded_count === 3
+        && localOverrideMatches.some((match: any) => match.hint_scope === "local_group" && match.recommendation === "deprioritize_pressure_recall")
+        && !localOverrideMatches.some((match: any) => match.hint_scope === "cross_group_project"),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      crossSummary: {
+        source_group_count: crossSummary.source_group_count || 0,
+        entry_count: crossSummary.entry_count || 0,
+        weighted_totals: crossSummary.weighted_totals || {},
+        rows: crossSummary.rows || [],
+      },
+      crossRecall: {
+        scoring: crossRecall.workerContextPressureUsageScoring,
+        promotedDoc: promotedDoc.workerContextPressureUsage || null,
+        ignoredDoc: ignoredDoc.workerContextPressureUsage || null,
+      },
+      localOverride: {
+        scoring: localOverrideRecall.workerContextPressureUsageScoring,
+        usageDocMatches: localOverrideMatches,
+      },
+    };
+  } finally {
+    for (const dir of dirs) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runGroupTypedMemoryPressureRecallUsageRepairProvenanceSelfTest() {
+  const groupId = `typed-memory-pressure-repair-provenance-${process.pid}-${Date.now().toString(36)}`;
+  const typedDir = getGroupTypedMemoryDir(groupId);
+  const repairFile = getGroupPressureRecallUsageRepairWorkItemsFile(groupId);
+  const nowMs = Date.parse("2026-07-09T23:58:00.000Z");
+  const targetProject = "phase131-pressure-project";
+  try {
+    upsertGroupTypedMemoryDocument(groupId, {
+      type: "feedback",
+      slug: "worker-context-usage-pressure-discipline",
+      name: "WorkerContextPacket context usage pressure discipline",
+      description: "Repair provenance must be visible when pressure usage recommendations are disputed.",
+      source: "selftest:pressure-repair-provenance",
+      body: [
+        "PRESSURE_REPAIR_PROVENANCE_SENTINEL",
+        "When WorkerContextPacket context_usage is over_budget, check whether the pressure memory is trusted or under repair before following it.",
+      ].join("\n"),
+    });
+    const usageRecord = recordGroupTypedMemoryPressureRecallUsageLedger(groupId, {
+      targetProject,
+      taskId: "pressure-repair-provenance-task",
+      executionId: "pressure-repair-provenance-execution",
+      agent: "api",
+      generatedAt: "2026-07-09T23:57:00.000Z",
+      rows: [
+        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-repair-ignored-1" },
+        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-pressure-repair-ignored-2" },
+      ],
+    });
+    writeJsonAtomic(repairFile, {
+      schema: "ccm-compact-boundary-replay-repair-work-items-v1",
+      version: 1,
+      groupId,
+      file: repairFile,
+      items: [{
+        id: "cgpru-repair-provenance-selftest",
+        work_item_id: "cgpru-repair-provenance-selftest",
+        source: "cross_group_pressure_recall_usage_repair",
+        component: "cross_group_pressure_recall_usage",
+        status: "pending",
+        priority: "high",
+        target_project: targetProject,
+        repair_target: "worker-context-usage-pressure-discipline.md",
+        cross_group_pressure_recall_usage_gap_type: "recommendation_conflict",
+        cross_group_pressure_recall_usage_rel_path: "worker-context-usage-pressure-discipline.md",
+        cross_group_pressure_recall_usage_reason: "selftest: local deprioritize_pressure_recall but cross-group promote_pressure_recall",
+        local_recommendation: "deprioritize_pressure_recall",
+        cross_group_recommendation: "promote_pressure_recall",
+        source_group_count: 1,
+        source_groups: [{ groupId: "source-pressure-repair-provenance", entry_count: 2 }],
+        shouldCreateRealTask: false,
+        updatedAt: "2026-07-09T23:57:30.000Z",
+      }],
+      stats: { total: 1, openItemCount: 1, pendingCount: 1 },
+      updatedAt: "2026-07-09T23:57:30.000Z",
+    });
+    const recall = buildGroupTypedMemoryRecall(groupId, "继续 WorkerContextPacket over_budget PRESSURE_REPAIR_PROVENANCE_SENTINEL", {
+      max: 6,
+      targetProject,
+      nowMs,
+      workerContextPacketContextUsage: {
+        schema: "ccm-worker-context-usage-v1",
+        packet_id: "wcp-pressure-repair-provenance",
+        project: targetProject,
+        status: "over_budget",
+        pressure: 112,
+        total_tokens: 101_000,
+        max_tokens: 90_000,
+        free_tokens: -24_000,
+        autocompact_buffer_tokens: 13_000,
+      },
+    });
+    const doc: any = (recall.recalled || []).find((item: any) => item.relPath === "worker-context-usage-pressure-discipline.md")
+      || (recall.diagnostics || []).find((item: any) => item.relPath === "worker-context-usage-pressure-discipline.md")
+      || {};
+    const matches = doc.workerContextPressureUsage?.matched || [];
+    const rendered = renderGroupTypedMemoryRecall(recall);
+    const repairMatch = matches.find((match: any) => match.repair_open === true);
+    const checks = {
+      usageLedgerRecorded: usageRecord?.recorded_count === 2,
+      repairHintMatchedDoc: repairMatch?.repair_work_item_id === "cgpru-repair-provenance-selftest"
+        && repairMatch.provenance_status === "disputed_under_repair"
+        && repairMatch.repair_gap_type === "recommendation_conflict"
+        && repairMatch.repair_local_recommendation === "deprioritize_pressure_recall"
+        && repairMatch.repair_cross_group_recommendation === "promote_pressure_recall",
+      scoringCountsRepair: Number(recall.workerContextPressureUsageScoring?.repair_hint_count || 0) >= 1
+        && Number(recall.workerContextPressureUsageScoring?.repair_matched_count || 0) >= 1
+        && Number(recall.workerContextPressureUsageScoring?.disputed_matched_count || 0) >= 1,
+      renderedCarriesRepairProvenance: rendered.includes("pressure repair recommendation_conflict:pending")
+        && rendered.includes("PRESSURE_REPAIR_PROVENANCE_SENTINEL"),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      scoring: recall.workerContextPressureUsageScoring,
+      doc: {
+        relPath: doc.relPath || doc.rel_path || "",
+        score: doc.score || 0,
+        workerContextPressureUsage: doc.workerContextPressureUsage || null,
+      },
+      rendered,
+    };
+  } finally {
+    try { fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+    for (const file of [repairFile, `${repairFile}.bak`]) {
+      try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
   }
 }
 

@@ -1,3 +1,4 @@
+import { BrowserProviderPlanWarning } from "./browser/provider-gaps";
 import { TestAgentWorkOrderContractValidation } from "./contract";
 import { TestAgentOptions, TestAgentWorkOrder } from "./types";
 export interface TestAgentExecutionPlanIssue {
@@ -28,6 +29,7 @@ export interface TestAgentExecutionPlan {
         browserChecks: number;
         autoBrowserChecks: number;
         adversarialBrowserChecks: number;
+        browserProviderWarnings: number;
         expectedArtifactTypes: string[];
     };
     projects: Array<{
@@ -72,6 +74,7 @@ export interface TestAgentExecutionPlan {
             probeType?: string;
         }>;
     }>;
+    browserProviderWarnings: BrowserProviderPlanWarning[];
     issues: TestAgentExecutionPlanIssue[];
     metadata: Record<string, any>;
 }

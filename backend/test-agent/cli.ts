@@ -4,6 +4,18 @@ import { TestAgentArtifactVerification, verifyTestAgentArtifactManifest } from "
 import { cliOverrides, parseTestAgentCliArgs, testAgentCliUsage } from "./cli-options";
 import { TestAgentWorkOrderContractValidation, validateTestAgentHandoffContract, validateTestAgentWorkOrderContract } from "./contract";
 import { buildTestAgentExecutionPlan, TestAgentExecutionPlan } from "./execution-plan";
+import { formatBrowserProviderGapLine, formatBrowserProviderPlanWarningLine } from "./browser/provider-gaps";
+import { formatBrowserProviderSummaryLine } from "./browser/provider-summary";
+import {
+  buildAcceptanceSummary,
+  formatAcceptanceAttentionLines,
+  formatAcceptanceEvidenceSourceCounts,
+  formatAcceptanceMatchStrengthCounts,
+  formatAcceptanceStatusCounts,
+  formatAcceptanceVerifiedEvidenceLines,
+} from "./acceptance-summary";
+import { buildRequiredCheckSummary, formatRequiredCheckAttentionLines, formatRequiredCheckStatusCounts, formatRequiredCheckVerifiedEvidenceLines } from "./required-check-summary";
+import { formatTestAgentSelfTestMatrixSummary, runTestAgentSelfTestMatrix, TestAgentSelfTestMatrixOptions, TestAgentSelfTestMatrixReport } from "./self-test-matrix";
 import { TestAgentArtifactManifest, TestAgentReport, TestAgentRuntimeOptions, TestAgentWorkOrder } from "./types";
 
 interface TestAgentCliWriter {
@@ -15,6 +27,7 @@ export interface TestAgentCliIo {
   stderr?: TestAgentCliWriter;
   readFile?: (file: string) => string;
   runAgent?: (input: TestAgentWorkOrder, options: TestAgentRuntimeOptions) => Promise<TestAgentReport>;
+  runSelfTestMatrix?: (options: TestAgentSelfTestMatrixOptions) => Promise<TestAgentSelfTestMatrixReport>;
 }
 
 interface ParsedJsonFile {
@@ -65,10 +78,11 @@ export function formatTestAgentCliValidationSummary(validation: TestAgentWorkOrd
 }
 
 export function formatTestAgentCliReportSummary(report: TestAgentReport) {
-  const coverage = report.requiredCheckCoverage.map(item => `${item.check}:${item.status}`).join(", ") || "none";
-  const acceptance = statusCounts(report.acceptanceCoverage);
+  const requiredCheckSummary = buildRequiredCheckSummary(report.requiredCheckCoverage, { evidenceLimit: 1, textLimit: 220 });
+  const acceptanceSummary = buildAcceptanceSummary(report.acceptanceCoverage, { evidenceLimit: 1, textLimit: 220 });
   const networkErrors = (report.browserNetworkSummary || []).reduce((sum, item) => sum + Number(item.errorCount || 0), 0);
   const failedNetworkUrls = (report.browserNetworkSummary || []).flatMap(item => item.failedUrls || []).slice(0, 3);
+  const browserProviderGaps = report.browserProviderGaps || [];
   const lines = [
     `TestAgent report: ${report.status} (${report.recommendation})`,
     `Summary: ${report.summary}`,
@@ -77,8 +91,17 @@ export function formatTestAgentCliReportSummary(report: TestAgentReport) {
     `HTTP checks: ${statusCounts(report.httpResults)}`,
     `Browser checks: ${statusCounts(report.browserResults)}`,
     `Browser network: errors:${networkErrors}${failedNetworkUrls.length ? ` failed:${failedNetworkUrls.join(", ")}` : ""}`,
-    `Required checks: ${coverage}`,
-    `Acceptance coverage: ${acceptance}`,
+    `Browser providers: ${formatBrowserProviderSummaryLine(report.browserProviderSummary)}`,
+    `Browser provider gaps: ${browserProviderGaps.length}`,
+    ...browserProviderGaps.slice(0, 5).map(item => `- ${formatBrowserProviderGapLine(item)}`),
+    `Required checks: ${formatRequiredCheckStatusCounts(requiredCheckSummary)}`,
+    ...formatRequiredCheckAttentionLines(requiredCheckSummary, 5),
+    ...formatRequiredCheckVerifiedEvidenceLines(requiredCheckSummary, 3),
+    `Acceptance coverage: ${formatAcceptanceStatusCounts(acceptanceSummary)}`,
+    `Acceptance match strength: ${formatAcceptanceMatchStrengthCounts(acceptanceSummary)}`,
+    `Acceptance evidence source: ${formatAcceptanceEvidenceSourceCounts(acceptanceSummary)}`,
+    ...formatAcceptanceAttentionLines(acceptanceSummary, 5),
+    ...formatAcceptanceVerifiedEvidenceLines(acceptanceSummary, 3),
     `Artifacts: ${report.artifactDir}`,
   ];
   if (report.risks.length) lines.push(`Risks: ${report.risks.slice(0, 5).join("; ")}`);
@@ -109,6 +132,8 @@ export function formatTestAgentCliExecutionPlanSummary(plan: TestAgentExecutionP
     `HTTP checks: ${plan.summary.httpChecks} (adversarial ${plan.summary.adversarialHttpChecks})`,
     `Browser checks: ${plan.summary.browserChecks} (auto ${plan.summary.autoBrowserChecks}, adversarial ${plan.summary.adversarialBrowserChecks})`,
     `Browser provider: ${plan.browserProvider}`,
+    `Browser provider warnings: ${plan.browserProviderWarnings?.length || 0}`,
+    ...(plan.browserProviderWarnings || []).slice(0, 5).map(item => `- ${formatBrowserProviderPlanWarningLine(item)}`),
     `Expected artifacts: ${plan.summary.expectedArtifactTypes.join(", ") || "none"}`,
     `Artifact dir: ${plan.artifactDir}`,
     ...formatIssues("Issues", plan.issues),
@@ -151,6 +176,7 @@ export async function runTestAgentCli(args = process.argv.slice(2), io: TestAgen
   const stderr = io.stderr || process.stderr;
   const readFile = io.readFile || ((file: string) => fs.readFileSync(file, "utf-8"));
   const runAgent = io.runAgent || runTestAgent;
+  const runSelfTestMatrix = io.runSelfTestMatrix || runTestAgentSelfTestMatrix;
   const parsed = parseTestAgentCliArgs(args);
   const { options, errors } = parsed;
 
@@ -162,6 +188,20 @@ export async function runTestAgentCli(args = process.argv.slice(2), io: TestAgen
   if (errors.length) {
     stderr.write(`${testAgentCliUsage()}\n\n${errors.map(error => `Error: ${error}`).join("\n")}\n`);
     return { exitCode: 2 };
+  }
+
+  if (options.selfTestMatrix) {
+    const report = await runSelfTestMatrix({
+      ...(options.selfTestModulePath ? { selfTestModulePath: options.selfTestModulePath } : {}),
+      ...(options.selfTestNames.length ? { names: options.selfTestNames } : {}),
+      ...(options.selfTestPattern ? { pattern: options.selfTestPattern } : {}),
+      ...(options.selfTestTimeoutMs ? { timeoutMs: options.selfTestTimeoutMs } : {}),
+      ...(options.selfTestStopOnFailure ? { stopOnFailure: true } : {}),
+    });
+    stdout.write(options.summary
+      ? `${formatTestAgentSelfTestMatrixSummary(report)}\n`
+      : `${JSON.stringify(report, null, 2)}\n`);
+    return { exitCode: report.pass ? 0 : 1 };
   }
 
   if (options.verifyArtifactsPath) {

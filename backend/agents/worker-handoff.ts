@@ -325,6 +325,7 @@ export function buildSelfContainedWorkerHandoff(input: SelfContainedWorkerHandof
     group: input.group,
     project,
     task,
+    agentType: input.agentType,
     analysis: {
       ...analysis,
       summary: userGoal,
@@ -447,6 +448,17 @@ export function renderReceiptSchemaForWorker(handoff: any) {
       consumedInjectionIds: ["消费的 injection_id；没有填空数组"],
       memoryUsed: ["实际使用的记忆/文档/知识库；未使用填空数组"],
       memoryIgnored: ["没有使用或无法使用记忆的原因；没有填空数组"],
+      memoryProvenanceUsage: [{
+        relPath: "typed MEMORY.md relPath；没有填空字符串",
+        name: "typed memory name；没有填空字符串",
+        usageState: "used | verified | ignored | mentioned",
+        provenanceStatus: "local_group_evidence | cross_group_project_assist | disputed_under_repair | stale_evidence_under_repair",
+        repairWorkItemId: "pressure repair work_item_id；没有填空字符串",
+        repairStatus: "pending | in_progress | blocked | completed | cancelled | empty",
+        repairGapType: "recommendation_conflict | stale_cross_group_only | empty",
+        currentSourceVerified: false,
+        reason: "说明如何使用/忽略该记忆，以及是否因 repair provenance 降权",
+      }],
       replayRepairDispatchBriefUsage: [{
         briefId: "Replay repair brief id；没有此 brief 填空字符串",
         workItemId: "Replay repair work_item_id；没有此 brief 填空字符串",
@@ -518,6 +530,7 @@ export function renderReceiptSchemaForWorker(handoff: any) {
     fields.length ? `必须包含字段：${fields.join("、")}` : "",
     "如果工作包包含 global_memory_id、semantic_risk 或 cross_group_suppression，回执 globalMemoryUsage 必须逐条声明该全局记忆是 used / ignored / verified / background / advisory；风险记忆若被使用必须声明 currentSourceVerified=true。",
     "如果工作包包含 global_memory_health_gate，回执 memoryUsed/memoryIgnored 必须引用 gate_id；当 gate status=fail 或 action=block_global_agent_memory_recall 时，必须在 memoryIgnored 说明未使用全局记忆，且不得在 globalMemoryUsage 声明 used。",
+    "如果工作包或平台记忆出现 pressure repair / provenance / disputed_under_repair / stale_evidence_under_repair，回执 memoryProvenanceUsage 必须逐条声明 relPath、usageState、provenanceStatus、repairWorkItemId；若使用 disputed 记忆，必须 currentSourceVerified=true。",
     "如果工作包包含 Replay repair dispatch brief，回执 replayRepairDispatchBriefUsage 必须逐条引用 briefId/workItemId，并声明 used/verified/ignored/blocked/strong；provider re-proof 不能只靠口头 strong，仍需 native provider proof ledger 证明。",
     "如果存在 read_plan_revalidation_gate，memoryUsed/memoryIgnored 或 readPlanRevalidationUsage 必须同时引用 gateId、readPlanId，并声明 currentSourceVerified=true；回执 session id 必须匹配工作包 session_binding。",
     "如果存在 API microcompact edit plan，回执 apiMicrocompactUsage 或 memoryUsed/memoryIgnored 必须引用 planChecksum，并声明 usageState=native_applied/advisory/ignored/not_supported；apiMicrocompactUsage 应绑定本轮 taskAgentSessionId/nativeSessionId/memoryContextSnapshotId；第三方 CLI 未实际调用 native API context-management 时不得声明 native_applied。",

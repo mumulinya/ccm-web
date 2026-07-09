@@ -31,7 +31,7 @@ import { useMessageNavigation } from '../../composables/useMessageNavigation.js'
 import { usePinnedScroll } from '../../composables/usePinnedScroll.js'
 import { downloadCommandJson } from '../../utils/commandExport.js'
 import { buildGroupConversationKnowledgePayload, postKnowledgeCapture } from '../../utils/knowledgeCapture.js'
-import { normalizeTestAgentExecutionPlanSummary, sanitizeUserFacingAgentText, sanitizeUserFacingLegacyTerminology, sanitizeUserFacingPlanText } from '../../utils/agentDisplay.js'
+import { normalizeTestAgentExecutionPlanSummary, sanitizeUserFacingAgentText, sanitizeUserFacingLegacyTerminology, sanitizeUserFacingPlanText, sanitizeUserFacingStructure } from '../../utils/agentDisplay.js'
 
 const props = defineProps({ navigateTo: { type: Object, default: null } })
 const emit = defineEmits(['navigated'])
@@ -377,6 +377,92 @@ const applyTransientTaskRuntime = (taskId, updater) => {
     msg.task_card = next?.task_card || next?.taskCard || msg.task_card || msg.taskCard || null
   })
 }
+let latestTestAgentFallbackTaskId = ''
+const resolveTestAgentFallbackTaskId = (data = {}, source = {}, prefix = 'test-agent-review') => {
+  const explicit = data.taskId
+    || data.task_id
+    || data.workOrderId
+    || data.work_order_id
+    || source?.workOrderId
+    || source?.work_order_id
+    || ''
+  if (explicit) {
+    latestTestAgentFallbackTaskId = explicit
+    return explicit
+  }
+  if (latestTestAgentFallbackTaskId && prefix === 'test-agent-review') return latestTestAgentFallbackTaskId
+  const generated = `${prefix}-${data.trace_id || data.traceId || Date.now()}`
+  latestTestAgentFallbackTaskId = generated
+  return generated
+}
+const createTestAgentExecutionPlanFallbackMessage = (data = {}, summary = {}, plan = null) => {
+  const taskId = resolveTestAgentFallbackTaskId(data, plan, 'test-agent-plan')
+  const blocked = summary.status === 'blocked'
+  const headline = sanitizeGroupVisibleText(summary.headline || data.detail, 'TestAgent 复核计划已整理。', 360)
+  const nextAction = sanitizeGroupVisibleText(summary.next_action || summary.nextAction || (blocked ? '先修复复核计划里的阻塞项。' : '按计划启动 TestAgent 独立复核。'), blocked ? '先修复复核计划里的阻塞项。' : '按计划启动 TestAgent 独立复核。', 260)
+  const taskCard = {
+    version: 1,
+    visible: true,
+    task_id: taskId,
+    title: data.title || 'TestAgent 复核计划',
+    goal: data.goal || '展示 TestAgent 复核计划，并跟进后续独立复核结果。',
+    phase: blocked ? 'blocked' : 'reviewing',
+    phase_label: blocked ? '需修复' : '复核准备中',
+    progress: blocked ? 38 : 58,
+    active_agents: [blocked ? '等待修复复核计划' : '等待 TestAgent 复核'],
+    agents: [{ name: 'TestAgent', status: blocked ? 'blocked' : 'reviewing', summary: headline }],
+    completed: ['已生成 TestAgent 复核计划'],
+    blockers: blocked ? [...(Array.isArray(summary.issues) ? summary.issues : [])].slice(0, 4) : [],
+    next_action: nextAction,
+    test_agent_execution_plan: plan,
+    testAgentExecutionPlan: plan,
+    test_agent_execution_plan_summary: summary,
+    testAgentExecutionPlanSummary: summary,
+    test_agent_execution_plan_detail: data.detail || '',
+    testAgentExecutionPlanDetail: data.detail || '',
+    display_stream: {
+      schema: 'ccm-streamlined-display-v2',
+      user_visible_text: headline,
+      tool_use_summary: { type: 'streamlined_tool_use_summary', tool_summary: 'TestAgent 复核计划已返回' },
+    },
+    technical: {
+      trace_id: data.trace_id || data.traceId || '',
+      test_agent_execution_plan: plan,
+      raw_event_type: 'test_agent_execution_plan_ready',
+    },
+  }
+  const taskRuntime = {
+    taskId,
+    status: blocked ? 'blocked' : 'in_progress',
+    statusText: headline,
+    taskCard,
+    task_card: taskCard,
+    testAgentExecutionPlan: plan,
+    test_agent_execution_plan: plan,
+    testAgentExecutionPlanSummary: summary,
+    test_agent_execution_plan_summary: summary,
+  }
+  return {
+    id: `test-agent-plan-${taskId}`,
+    role: 'assistant',
+    agent: 'coordinator',
+    type: 'project_task_intake',
+    content: headline,
+    timestamp: new Date().toISOString(),
+    task_id: taskId,
+    task: {
+      id: taskId,
+      title: taskCard.title,
+      status: taskRuntime.status,
+      status_detail: headline,
+      workflow_type: 'test_agent_review',
+    },
+    taskCard,
+    task_card: taskCard,
+    taskRuntime,
+    task_runtime: taskRuntime,
+  }
+}
 const applyTestAgentExecutionPlanReady = (data = {}) => {
   const plan = data.test_agent_execution_plan || data.testAgentExecutionPlan || data.technical?.test_agent_execution_plan || null
   const summary = normalizeTestAgentExecutionPlanSummary(plan, data.test_agent_execution_plan_summary || data.testAgentExecutionPlanSummary || data.detail || null, data.detail || '')
@@ -409,12 +495,172 @@ const applyTestAgentExecutionPlanReady = (data = {}) => {
     }
   })
   if (!applied) {
-    appendAgentWorkEvent(data.agent || 'test-agent', {
-      id: `test-agent-plan-${Date.now()}`,
-      time: new Date().toISOString(),
-      kind: summary.status === 'blocked' ? 'error' : 'status',
-      text: `${summary.title}：${summary.headline}`,
-    })
+    mergeIncomingMessage(createTestAgentExecutionPlanFallbackMessage(data, summary, plan))
+    applied = true
+  }
+  return applied
+}
+const getTestAgentReviewPayload = (data = {}) => {
+  const summary = data.test_agent_review_summary
+    || data.testAgentReviewSummary
+    || data.independent_review_summary
+    || data.independentReviewSummary
+    || null
+  const rows = Array.isArray(data.independent_review)
+    ? data.independent_review
+    : Array.isArray(data.independentReview)
+      ? data.independentReview
+      : []
+  if (!summary && !rows.length) return null
+  return {
+    summary: summary ? sanitizeUserFacingStructure(summary, { fallback: 'TestAgent 独立复核结论已整理。', max: 420 }) : null,
+    rows: sanitizeUserFacingStructure(rows, { fallback: 'TestAgent 独立复核证据已整理。', max: 240 }),
+    report: data.test_agent_report || data.testAgentReport || data.technical?.test_agent_report || null,
+    detail: data.detail || data.message || data.text || '',
+  }
+}
+
+const testAgentReviewPhase = (status) => {
+  const value = String(status || '').toLowerCase()
+  if (value === 'needs_rework') return { phase: 'failed', phaseLabel: '需返工', runtimeStatus: 'blocked', agentStatus: 'failed' }
+  if (value === 'needs_user') return { phase: 'needs_user', phaseLabel: '等你确认', runtimeStatus: 'blocked', agentStatus: 'blocked' }
+  if (value === 'passed') return { phase: 'reviewing', phaseLabel: '复核已返回', runtimeStatus: 'in_progress', agentStatus: 'done' }
+  return { phase: 'reviewing', phaseLabel: '复核已记录', runtimeStatus: 'in_progress', agentStatus: 'reviewing' }
+}
+
+const createTestAgentReviewFallbackMessage = (data = {}, summary = {}, payload = {}) => {
+  const taskId = resolveTestAgentFallbackTaskId(data, payload.report, 'test-agent-review')
+  const phase = testAgentReviewPhase(summary.status)
+  const rows = Array.isArray(payload.rows) && payload.rows.length ? payload.rows : Array.isArray(summary.rows) ? summary.rows : []
+  const headline = sanitizeGroupVisibleText(summary.headline || payload.detail, 'TestAgent 独立复核结论已整理。', 360)
+  const nextAction = sanitizeGroupVisibleText(summary.next_action || summary.nextAction || '继续等待完整复核证据或最终总结。', '继续等待完整复核证据或最终总结。', 260)
+  const taskCard = {
+    version: 1,
+    visible: true,
+    task_id: taskId,
+    title: data.title || 'TestAgent 独立复核',
+    goal: data.goal || '展示 TestAgent 返回的独立复核结论，并等待后续验收或返工。',
+    phase: phase.phase,
+    phase_label: phase.phaseLabel,
+    progress: phase.phase === 'failed' || phase.phase === 'needs_user' ? 72 : 84,
+    active_agents: phase.phase === 'failed'
+      ? ['正在安排返工']
+      : phase.phase === 'needs_user'
+        ? ['等待你确认复核问题']
+        : ['正在纳入复核结论'],
+    agents: [{ name: 'TestAgent', status: phase.agentStatus, summary: headline }],
+    completed: ['已收到 TestAgent 独立复核结论'],
+    blockers: phase.phase === 'failed' || phase.phase === 'needs_user' ? rows.slice(0, 4) : [],
+    next_action: nextAction,
+    independent_review_summary: summary,
+    independentReviewSummary: summary,
+    test_agent_review_summary: summary,
+    testAgentReviewSummary: summary,
+    independent_review: rows,
+    independentReview: rows,
+    test_agent_report: payload.report || null,
+    testAgentReport: payload.report || null,
+    display_stream: {
+      schema: 'ccm-streamlined-display-v2',
+      user_visible_text: headline,
+      tool_use_summary: { type: 'streamlined_tool_use_summary', tool_summary: 'TestAgent 独立复核结论已返回' },
+    },
+    technical: {
+      trace_id: data.trace_id || data.traceId || '',
+      test_agent_report: payload.report || data.test_agent_report || data.testAgentReport || null,
+      raw_event_type: 'test_agent_review_ready',
+    },
+  }
+  const taskRuntime = {
+    taskId,
+    status: phase.runtimeStatus,
+    statusText: headline,
+    taskCard,
+    task_card: taskCard,
+    independent_review_summary: summary,
+    independentReviewSummary: summary,
+    test_agent_review_summary: summary,
+    testAgentReviewSummary: summary,
+  }
+  return {
+    id: `test-agent-review-${taskId}`,
+    role: 'assistant',
+    agent: 'coordinator',
+    type: 'project_task_intake',
+    content: headline,
+    timestamp: new Date().toISOString(),
+    task_id: taskId,
+    task: {
+      id: taskId,
+      title: taskCard.title,
+      status: phase.runtimeStatus,
+      status_detail: headline,
+      workflow_type: 'test_agent_review',
+    },
+    taskCard,
+    task_card: taskCard,
+    taskRuntime,
+    task_runtime: taskRuntime,
+  }
+}
+
+const applyTestAgentReviewReady = (data = {}) => {
+  const payload = getTestAgentReviewPayload(data)
+  if (!payload) return false
+  const summary = payload.summary || {
+    schema: 'ccm-main-agent-independent-review-summary-v1',
+    title: '独立复核',
+    status: 'recorded',
+    status_label: '已记录',
+    headline: sanitizeGroupVisibleText(payload.detail, 'TestAgent 独立复核结论已整理。', 360),
+    rows: payload.rows,
+    next_action: '继续等待完整复核证据或最终总结。',
+    display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+  }
+  const taskId = data.taskId || data.task_id || ''
+  const runtimeStatus = summary.status === 'needs_rework'
+    ? 'blocked'
+    : summary.status === 'needs_user'
+      ? 'blocked'
+      : summary.status === 'passed'
+        ? 'in_progress'
+        : 'in_progress'
+  let applied = false
+  applyTransientTaskRuntime(taskId, (runtime) => {
+    const currentCard = runtime.taskCard || runtime.task_card || {}
+    const existingRows = Array.isArray(currentCard.independent_review)
+      ? currentCard.independent_review
+      : Array.isArray(currentCard.independentReview)
+        ? currentCard.independentReview
+        : []
+    const nextRows = payload.rows.length ? payload.rows : existingRows
+    const nextCard = {
+      ...currentCard,
+      independent_review_summary: summary,
+      independentReviewSummary: summary,
+      test_agent_review_summary: summary,
+      testAgentReviewSummary: summary,
+      independent_review: nextRows,
+      independentReview: nextRows,
+      test_agent_report: payload.report || currentCard.test_agent_report || currentCard.testAgentReport || null,
+      testAgentReport: payload.report || currentCard.testAgentReport || currentCard.test_agent_report || null,
+    }
+    applied = true
+    return {
+      ...runtime,
+      status: runtimeStatus,
+      statusText: summary.headline,
+      taskCard: nextCard,
+      task_card: nextCard,
+      independent_review_summary: summary,
+      independentReviewSummary: summary,
+      test_agent_review_summary: summary,
+      testAgentReviewSummary: summary,
+    }
+  })
+  if (!applied) {
+    mergeIncomingMessage(createTestAgentReviewFallbackMessage(data, summary, payload))
+    applied = true
   }
   return applied
 }
@@ -455,7 +701,7 @@ const runAgentQaAction = async (msg, action) => {
     if (!confirmed) return
   }
   if (action === 'manual') {
-    const confirmed = await confirmDialog('确定将这条 Agent 问答标记为人工接管？')
+    const confirmed = await confirmDialog('确定将这条协作问答标记为人工接手？')
     if (!confirmed) return
   }
   const key = `${qa.id}:${action}`
@@ -473,7 +719,7 @@ const runAgentQaAction = async (msg, action) => {
     })
     const data = await res.json()
     if (!res.ok || data.success === false) throw new Error(data.error || '操作失败')
-    toast.success(action === 'retry' ? '已重试 Agent 问答' : action === 'manual' ? '已标记人工接管' : action === 'accept' ? '已采纳回答' : '已拒绝回答')
+    toast.success(action === 'retry' ? '已重试协作问答' : action === 'manual' ? '已标记人工接手' : action === 'accept' ? '已采纳回答' : '已拒绝回答')
     await loadMessages()
   } catch (err) {
     toast.error((action === 'retry' ? '重试失败：' : '接管失败：') + (err?.message || err))
@@ -1154,6 +1400,13 @@ ${filesToSend.map(f => `- ${f.name}（${formatFileSize(f.size)}）`).join('\n')}
         thinkingMsg.content = sanitizeGroupVisibleText(data.detail || 'TestAgent 复核计划已生成。', 'TestAgent 复核计划已整理。', 600)
         waitingCrossReply.value = true
         scrollToBottom()
+      } else if (data.type === 'test_agent_review_ready') {
+        const applied = applyTestAgentReviewReady(data)
+        const payload = getTestAgentReviewPayload(data)
+        const headline = payload?.summary?.headline || data.detail || 'TestAgent 独立复核结论已整理。'
+        thinkingMsg.content = sanitizeGroupVisibleText(headline, 'TestAgent 独立复核结论已整理。', 600)
+        waitingCrossReply.value = applied || waitingCrossReply.value
+        scrollToBottom()
       } else if (data.type === 'task_created') {
         applyMainAgentProgressCheckpoint(data)
         const taskMessage = {
@@ -1831,7 +2084,7 @@ if (activeSelectedTemplate) {
                 <AgentQaMessage
                   v-else-if="isAgentQaMessage(msg)"
                   :msg="msg"
-                  :display-content="getVisibleGroupMessageContent(msg, 'Agent 回复已整理，技术细节已放入技术详情。')"
+                  :display-content="getVisibleGroupMessageContent(msg, '回复已整理，技术细节已放入技术详情。')"
                   :accent-style="getAgentAccentStyle(msg.agent)"
                   :action-loading="agentQaActionLoading"
                   :highlight-mentions="highlightMentions"

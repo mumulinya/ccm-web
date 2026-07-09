@@ -9,6 +9,9 @@ const props = defineProps({
 
 const emit = defineEmits(['step-action'])
 
+const displayPlanText = (value, fallback = '计划信息已整理。', max = 260) => sanitizeUserFacingPlanText(value, fallback, max)
+const displayPlanStructure = (value, fallback = '计划信息已整理。', max = 260) => sanitizeUserFacingPlanStructure(value, { fallback, max })
+
 const actionLabels = {
   read_group_context: '读取群聊上下文',
   read_project_code_snapshot: '读取项目代码快照',
@@ -80,7 +83,7 @@ const rawPlanSteps = computed(() => {
     : Array.isArray(todoPlan.value?.steps)
       ? todoPlan.value.steps
       : []
-  return raw
+  return Array.isArray(raw) ? displayPlanStructure(raw, '计划步骤已整理。', 260) : []
 })
 const todoPlanPolicy = computed(() => ({
   ...(todoPlan.value?.display || {}),
@@ -115,7 +118,7 @@ const shouldHideSimpleConversationPlan = computed(() => {
   return display.user_visible === false || display.hide_for_simple_conversation === true || !hasBlockingOrAction
 })
 const hasExplicitPlan = computed(() => planSteps.value.length > 0 && !shouldHideSimpleConversationPlan.value)
-const planTitle = computed(() => todoPlan.value?.title || (hasExplicitPlan.value ? '我准备这样处理' : '处理步骤'))
+const planTitle = computed(() => todoPlan.value?.title ? displayPlanText(todoPlan.value.title, '我准备这样处理', 90) : (hasExplicitPlan.value ? '我准备这样处理' : '处理步骤'))
 const visiblePlanSteps = computed(() => {
   if (shouldHideSimpleConversationPlan.value) return []
   if (hasExplicitPlan.value) return planSteps.value
@@ -207,8 +210,14 @@ const planFocusLabel = (status) => ({
   in_progress: '正在处理',
   pending: '下一步',
 }[status] || '当前步骤')
-const stepActiveText = (step) => step?.activeForm || step?.active_form || ''
-const stepContentText = (step) => step?.content || step?.title || step?.subject || stepActiveText(step) || '待处理'
+const stepActiveText = (step) => {
+  const text = step?.activeForm || step?.active_form || ''
+  return text ? displayPlanText(text, '当前动作已整理。', 180) : ''
+}
+const stepContentText = (step) => {
+  const text = step?.content || step?.title || step?.subject || stepActiveText(step) || ''
+  return text ? displayPlanText(text, '待处理', 220) : '待处理'
+}
 const stepDisplayText = (step) => {
   const activeText = stepActiveText(step)
   if (activeText && ['in_progress', 'reviewing', 'reworking'].includes(step?.status)) return activeText
@@ -247,12 +256,12 @@ const contextLabels = computed(() => {
   return labels
 })
 
-const nextStep = computed(() => dispatchPolicy.value?.nextStep || (verify.value?.passed ? '已完成本轮回复' : '等待用户确认或补充信息'))
+const nextStep = computed(() => displayPlanText(dispatchPolicy.value?.nextStep || (verify.value?.passed ? '已完成本轮回复' : '等待用户确认或补充信息'), '等待下一步。', 180))
 const reason = computed(() => dispatchPolicy.value?.reason || props.decision?.decision?.reason || modeInfo.value.summary)
 const publicHeaderNote = computed(() => modeInfo.value.summary)
 const rawJson = computed(() => JSON.stringify(props.decision || {}, null, 2))
 const displayStream = computed(() => getDisplayStream(props.decision))
-const workchain = computed(() => displayStream.value?.workchain || props.decision?.workchain || null)
+const workchain = computed(() => displayPlanStructure(displayStream.value?.workchain || props.decision?.workchain || null, '处理链路已整理。', 260))
 const workchainStages = computed(() => Array.isArray(workchain.value?.stages) ? workchain.value.stages : [])
 const streamlinedText = computed(() => getStreamlinedUserText(props.decision, modeInfo.value.summary))
 const streamlinedToolSummary = computed(() => getStreamlinedToolSummary(props.decision, visibleActions.value.join('、')))
@@ -277,7 +286,7 @@ const technicalSections = computed(() => getTechnicalDetailSections(props.decisi
   blockers: blockedPermissions.value.map(item => item.reason || item.action_id),
 }))
 const decisionExplanation = computed(() => {
-  if (blockedPermissions.value.length) return `需要确认：${blockedPermissions.value.map(p => p.reason || actionLabels[p.action_id] || p.action_id).join('；')}`
+  if (blockedPermissions.value.length) return `需要确认：${blockedPermissions.value.map(p => displayPlanText(p.reason || actionLabels[p.action_id] || p.action_id, '确认项已整理。', 120)).join('；')}`
   if (!selectedActions.value.includes('dispatch_child_agent') && props.decision?.mode === 'conversation') return '没有安排：这轮是普通对话，我只回复用户，不创建任务。'
   if (!selectedActions.value.includes('dispatch_child_agent') && props.decision?.mode === 'project_analysis') return '没有派发：这轮是只读项目分析，只读取上下文和代码快照，不修改项目。'
   if (selectedActions.value.includes('create_project_task')) return '已创建任务：当前消息包含明确执行意图，允许进入项目任务流程。'

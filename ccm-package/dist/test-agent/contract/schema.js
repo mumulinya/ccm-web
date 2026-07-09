@@ -563,10 +563,60 @@ const requiredCheckCoverageSchema = zod_1.z.object({
     evidence: stringList,
     missingReason: optionalString,
 }).passthrough();
+const requiredCheckSummaryItemSchema = zod_1.z.object({
+    check: zod_1.z.string(),
+    status: zod_1.z.enum(["verified", "not_verified", "unknown"]),
+    evidence: stringList,
+    missingReason: optionalString,
+}).passthrough();
+const requiredCheckSummarySchema = zod_1.z.object({
+    total: zod_1.z.number().int().nonnegative(),
+    statusCounts: zod_1.z.object({
+        verified: zod_1.z.number().int().nonnegative(),
+        not_verified: zod_1.z.number().int().nonnegative(),
+        unknown: zod_1.z.number().int().nonnegative(),
+    }).passthrough(),
+    verified: zod_1.z.array(requiredCheckSummaryItemSchema),
+    notVerified: zod_1.z.array(requiredCheckSummaryItemSchema),
+    unknown: zod_1.z.array(requiredCheckSummaryItemSchema),
+}).passthrough();
 const acceptanceCoverageSchema = zod_1.z.object({
     criterion: zod_1.z.string(),
     status: zod_1.z.enum(["verified", "not_verified", "unknown"]),
     evidence: stringList,
+    matchStrength: zod_1.z.enum(["direct", "token", "fallback", "none"]).optional(),
+    matchScore: zod_1.z.number().optional(),
+    evidenceSource: zod_1.z.enum(["matched_evidence", "single_criterion_report_status", "none"]).optional(),
+}).passthrough();
+const acceptanceSummaryItemSchema = zod_1.z.object({
+    criterion: zod_1.z.string(),
+    status: zod_1.z.enum(["verified", "not_verified", "unknown"]),
+    evidence: stringList,
+    matchStrength: zod_1.z.enum(["direct", "token", "fallback", "none"]).optional(),
+    matchScore: zod_1.z.number().optional(),
+    evidenceSource: zod_1.z.enum(["matched_evidence", "single_criterion_report_status", "none"]).optional(),
+}).passthrough();
+const acceptanceSummarySchema = zod_1.z.object({
+    total: zod_1.z.number().int().nonnegative(),
+    statusCounts: zod_1.z.object({
+        verified: zod_1.z.number().int().nonnegative(),
+        not_verified: zod_1.z.number().int().nonnegative(),
+        unknown: zod_1.z.number().int().nonnegative(),
+    }).passthrough(),
+    matchStrengthCounts: zod_1.z.object({
+        direct: zod_1.z.number().int().nonnegative(),
+        token: zod_1.z.number().int().nonnegative(),
+        fallback: zod_1.z.number().int().nonnegative(),
+        none: zod_1.z.number().int().nonnegative(),
+    }).passthrough(),
+    evidenceSourceCounts: zod_1.z.object({
+        matched_evidence: zod_1.z.number().int().nonnegative(),
+        single_criterion_report_status: zod_1.z.number().int().nonnegative(),
+        none: zod_1.z.number().int().nonnegative(),
+    }).passthrough(),
+    verified: zod_1.z.array(acceptanceSummaryItemSchema),
+    notVerified: zod_1.z.array(acceptanceSummaryItemSchema),
+    unknown: zod_1.z.array(acceptanceSummaryItemSchema),
 }).passthrough();
 const browserNetworkSummarySchema = zod_1.z.object({
     project: zod_1.z.string(),
@@ -613,6 +663,51 @@ const browserInteractionSummarySchema = zod_1.z.object({
     actionSteps: zod_1.z.array(browserInteractionSummaryStepSchema),
     failedSteps: zod_1.z.array(browserInteractionSummaryStepSchema),
 }).passthrough();
+const browserProviderGapSchema = zod_1.z.object({
+    provider: zod_1.z.string(),
+    project: optionalString,
+    check: zod_1.z.string(),
+    kind: zod_1.z.enum(["action", "assertion", "provider"]),
+    step: optionalString,
+    category: zod_1.z.enum(["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]),
+    reason: zod_1.z.string(),
+    recommendation: zod_1.z.string(),
+}).passthrough();
+const browserProviderSummaryItemSchema = zod_1.z.object({
+    provider: zod_1.z.string(),
+    label: optionalString,
+    preferred: zod_1.z.boolean(),
+    available: zod_1.z.boolean(),
+    selected: zod_1.z.boolean(),
+    attempted: zod_1.z.boolean(),
+    resultCount: zod_1.z.number().int().nonnegative(),
+    passed: zod_1.z.number().int().nonnegative(),
+    failed: zod_1.z.number().int().nonnegative(),
+    blocked: zod_1.z.number().int().nonnegative(),
+    skipped: zod_1.z.number().int().nonnegative(),
+    reason: optionalString,
+    tools: stringList.optional(),
+    diagnostics: zod_1.z.record(zod_1.z.any()).optional(),
+}).passthrough();
+const browserProviderSummarySchema = zod_1.z.object({
+    preferred: zod_1.z.string(),
+    status: zod_1.z.enum(["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]),
+    selectedProvider: optionalString,
+    availableProviders: stringList,
+    attemptedProviders: stringList,
+    fallbackUsed: zod_1.z.boolean(),
+    items: zod_1.z.array(browserProviderSummaryItemSchema),
+}).passthrough();
+const failureSummarySchema = zod_1.z.object({
+    type: zod_1.z.enum(["issue", "server", "command", "http", "browser", "required_check", "acceptance"]),
+    project: optionalString,
+    title: zod_1.z.string(),
+    status: zod_1.z.enum(["failed", "blocked", "not_verified", "unknown"]),
+    reason: zod_1.z.string(),
+    evidence: stringList.optional(),
+    nextAction: optionalString,
+    diagnostics: stringList.optional(),
+}).passthrough();
 exports.TestAgentReportContractSchema = zod_1.z.object({
     schema: zod_1.z.literal(exports.TEST_AGENT_CONTRACT_IDS.report),
     agent: zod_1.z.literal("test-agent"),
@@ -635,6 +730,9 @@ exports.TestAgentReportContractSchema = zod_1.z.object({
     browserToolCalls: zod_1.z.array(zod_1.z.object({ status: zod_1.z.enum(["passed", "failed"]) }).passthrough()),
     browserNetworkSummary: zod_1.z.array(browserNetworkSummarySchema).optional(),
     browserInteractionSummary: zod_1.z.array(browserInteractionSummarySchema).optional(),
+    browserProviderSummary: browserProviderSummarySchema.optional(),
+    browserProviderGaps: zod_1.z.array(browserProviderGapSchema).optional(),
+    failureSummary: zod_1.z.array(failureSummarySchema).optional(),
     requiredCheckCoverage: zod_1.z.array(requiredCheckCoverageSchema),
     acceptanceCoverage: zod_1.z.array(acceptanceCoverageSchema),
     evidence: zod_1.z.array(evidenceSchema),
@@ -665,6 +763,8 @@ exports.TestAgentVerdictContractSchema = zod_1.z.object({
     unknownRequiredChecks: zod_1.z.array(requiredCheckCoverageSchema),
     failedAcceptanceCriteria: zod_1.z.array(acceptanceCoverageSchema),
     unknownAcceptanceCriteria: zod_1.z.array(acceptanceCoverageSchema),
+    requiredCheckSummary: requiredCheckSummarySchema,
+    acceptanceSummary: acceptanceSummarySchema,
     blockedReasons: stringList,
     risks: stringList,
     nextActions: stringList,
@@ -679,10 +779,14 @@ exports.TestAgentVerdictContractSchema = zod_1.z.object({
         browserFailedActions: zod_1.z.number().optional(),
         browserAssertions: zod_1.z.number().optional(),
         browserFailedAssertions: zod_1.z.number().optional(),
+        browserProviderGaps: zod_1.z.number().optional(),
         artifacts: zod_1.z.number(),
     }).passthrough(),
     browserNetworkSummary: zod_1.z.array(browserNetworkSummarySchema).optional(),
     browserInteractionSummary: zod_1.z.array(browserInteractionSummarySchema).optional(),
+    browserProviderSummary: browserProviderSummarySchema.optional(),
+    browserProviderGaps: zod_1.z.array(browserProviderGapSchema).optional(),
+    failureSummary: zod_1.z.array(failureSummarySchema).optional(),
     keyEvidence: zod_1.z.array(evidenceSchema),
     artifacts: zod_1.z.object({
         artifactDir: zod_1.z.string(),

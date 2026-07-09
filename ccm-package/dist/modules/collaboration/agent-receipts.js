@@ -59,6 +59,30 @@ function normalizeGlobalMemoryUsageEntries(value) {
         };
     }).filter((item) => item && (item.globalMemoryId || item.usageState || item.reason)).slice(0, 80);
 }
+function normalizeMemoryProvenanceUsageEntries(value) {
+    const rawItems = Array.isArray(value) ? value : (value ? [value] : []);
+    return rawItems.map((raw) => {
+        const item = typeof raw === "string" ? { value: raw } : raw;
+        if (!item || typeof item !== "object")
+            return null;
+        return {
+            relPath: String(item.relPath || item.rel_path || item.memoryRelPath || item.memory_rel_path || item.path || "").trim(),
+            name: String(item.name || item.memoryName || item.memory_name || item.title || "").trim(),
+            usageState: String(item.usageState || item.usage_state || item.status || item.state || "").trim().toLowerCase(),
+            provenanceStatus: String(item.provenanceStatus || item.provenance_status || item.trustState || item.trust_state || "").trim().toLowerCase(),
+            repairWorkItemId: String(item.repairWorkItemId || item.repair_work_item_id || item.workItemId || item.work_item_id || "").trim(),
+            repairStatus: String(item.repairStatus || item.repair_status || "").trim().toLowerCase(),
+            repairGapType: String(item.repairGapType || item.repair_gap_type || item.gapType || item.gap_type || "").trim(),
+            currentSourceVerified: item.currentSourceVerified === true || item.current_source_verified === true || item.verified === true,
+            providerDispatchOverrideId: String(item.providerDispatchOverrideId || item.provider_dispatch_override_id || item.overrideId || item.override_id || "").trim(),
+            providerDispatchOverrideFollowupHistoryReverified: item.providerDispatchOverrideFollowupHistoryReverified === true
+                || item.provider_dispatch_override_followup_history_reverified === true
+                || item.providerOverrideFollowupHistoryReverified === true
+                || item.provider_override_followup_history_reverified === true,
+            reason: (0, memory_1.compactMemoryText)(item.reason || item.note || item.evidence || item.value || item.text || "", 600),
+        };
+    }).filter((item) => item && (item.relPath || item.name || item.usageState || item.provenanceStatus || item.repairWorkItemId || item.reason)).slice(0, 80);
+}
 function uniqueReceiptStrings(...lists) {
     const seen = new Set();
     const result = [];
@@ -149,6 +173,12 @@ function normalizeAgentReceipt(raw, agent) {
         || raw.global_agent_memory_usage
         || raw.globalMemoryReceipt
         || raw.global_memory_receipt);
+    const memoryProvenanceUsage = normalizeMemoryProvenanceUsageEntries(raw.memoryProvenanceUsage
+        || raw.memory_provenance_usage
+        || raw.typedMemoryProvenanceUsage
+        || raw.typed_memory_provenance_usage
+        || raw.pressureMemoryUsage
+        || raw.pressure_memory_usage);
     const ackRaw = raw.ack || raw.ACK || raw.acknowledgement || raw.acknowledgment || null;
     const ack = ackRaw && typeof ackRaw === "object" ? {
         understoodGoal: String(ackRaw.understoodGoal || ackRaw.goal || ackRaw.summary || "").trim(),
@@ -197,6 +227,7 @@ function normalizeAgentReceipt(raw, agent) {
         memoryIgnored,
         postCompactCandidateUsage,
         globalMemoryUsage,
+        memoryProvenanceUsage,
     };
 }
 function extractAgentReceipt(response, agent) {

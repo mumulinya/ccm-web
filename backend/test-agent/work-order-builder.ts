@@ -121,6 +121,7 @@ function inferRequiredChecks(projects: TestAgentProjectTarget[], options: TestAg
       add("screenshots");
       add("console_errors");
       add("browser_snapshots");
+      add("browser_accessibility_snapshot");
       add("browser_console_logs");
       add("browser_network_logs");
       if (options?.collectBrowserArtifacts !== false && options?.browserProvider !== "none") {

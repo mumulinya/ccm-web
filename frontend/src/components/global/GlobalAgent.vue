@@ -318,7 +318,10 @@ const formatMissionDeliveryReport = (report, fallback) => {
     + section('遗留项', report.remaining_items, '无')
 }
 
-const formatGlobalRunVisibleReply = (run = {}, fallback = '已处理。') => {
+const GLOBAL_RESULT_VISIBLE_FALLBACK = '我已整理这次处理结果，是否已经交付以任务卡验收和最终总结为准。'
+const GLOBAL_STREAM_COMPLETED_FALLBACK = '这轮处理结果已整理，最终是否交付以总结和验收结果为准。'
+
+const formatGlobalRunVisibleReply = (run = {}, fallback = GLOBAL_RESULT_VISIBLE_FALLBACK) => {
   const deliveryReport = getDeliveryReport(run)
   if (deliveryReport?.markdown || deliveryReport?.user_text) return deliveryReport.markdown || deliveryReport.user_text
   return sanitizeGlobalVisibleStreamText(run.final_reply || run.finalReply || fallback, fallback, 8000)
@@ -354,7 +357,7 @@ const trackGlobalMission = (missionId, sessionId) => {
           if (runRes.ok && runData.run) {
             message.agenticRun = runData.run
             if (runData.run.status === 'completed' && runData.run.final_reply) {
-              message.content = formatGlobalRunVisibleReply(runData.run, '全局任务已完成，交付总结已整理。')
+              message.content = formatGlobalRunVisibleReply(runData.run, GLOBAL_RESULT_VISIBLE_FALLBACK)
             }
           }
         } catch {}
@@ -387,7 +390,7 @@ const missionStatusLabel = (mission) => {
   if (mission?.status === 'done') return '全部通过'
   const summary = mission?.mission_summary || {}
   if (summary.failed > 0) return '存在失败'
-  if (summary.blocked > 0) return '需要处理'
+  if (summary.blocked > 0) return '待补齐'
   return '执行中'
 }
 
@@ -429,6 +432,29 @@ const compactStreamText = (value, max = 220) => {
 }
 
 const compactVisibleStreamText = (value, fallback = '状态已更新。', max = 220) => visibleGlobalText(value, fallback, max)
+
+const visibleGlobalStreamEventTitle = (value, fallback = '状态更新') => {
+  const title = visibleGlobalPlanText(value, fallback, 120)
+    .replace(/执行\s*工具/g, '执行动作')
+    .replace(/工具\s*完成/g, '动作已返回')
+    .replace(/完成\s*工具/g, '动作已返回')
+    .replace(/工具\s*执行\s*完成/g, '动作已返回')
+    .replace(/工具\s*失败/g, '执行遇到问题')
+    .trim()
+  return title || fallback
+}
+
+const visibleGlobalStreamEventText = (value, fallback = '状态已更新。', max = 220) => {
+  const text = compactVisibleStreamText(value, fallback, max + 80)
+    .replace(/执行\s*工具/g, '执行动作')
+    .replace(/工具\s*执行\s*完成/g, '动作已返回')
+    .replace(/工具\s*完成/g, '动作已返回')
+    .replace(/完成\s*工具/g, '动作已返回')
+    .replace(/已完成[，,]\s*正在检查结果/g, '已返回结果，我正在检查')
+    .replace(/执行完成[，,]\s*正在检查结果/g, '已返回结果，我正在检查')
+    .trim()
+  return text.length > max ? `${text.slice(0, max)}...` : (text || fallback)
+}
 
 const globalDispatchLaunchSummary = (msg = {}) => {
   const displayStream = msg.display_stream
@@ -496,7 +522,8 @@ const GLOBAL_TODO_ACTIVE_STATUSES = new Set([
 const globalTodoStatusLabel = (status) => {
   const normalized = String(status || '').toLowerCase()
   if (['failed', 'error'].includes(normalized)) return '失败'
-  if (['blocked', 'needs_user', 'waiting_clarification'].includes(normalized)) return '需处理'
+  if (normalized === 'blocked') return '待补齐'
+  if (['needs_user', 'waiting_user', 'waiting_clarification'].includes(normalized)) return '等待补充'
   if (['needs_confirmation', 'waiting_confirmation'].includes(normalized)) return '等待确认'
   if (normalized === 'reviewing') return '验收中'
   if (normalized === 'reworking') return '返工中'
@@ -572,8 +599,19 @@ const normalizeGlobalTodoStep = (step = {}, index = 0) => {
     label,
     active_form: activeForm,
     detail: detailSource ? visibleGlobalPlanText(detailSource, '当前步骤详情已整理。', 260) : '',
+    needs_action: step.needs_action || step.needsAction ? visibleGlobalPlanText(step.needs_action || step.needsAction, '', 220) : '',
+    needsAction: step.needs_action || step.needsAction ? visibleGlobalPlanText(step.needs_action || step.needsAction, '', 220) : '',
     status: String(step.status || step.state || (index === 0 ? 'in_progress' : 'pending')).toLowerCase(),
   }
+}
+
+const globalTodoTextNeedsUserAction = (value = '', status = '') => {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  if (!text) return false
+  const normalizedStatus = String(status || '').toLowerCase()
+  if (/需要你|等你|等待你|请你|请确认|确认(?:是否|计划|范围|授权|影响|执行|操作)|补充(?:目标|范围|信息|材料|上下文|账号|环境变量|验收标准|需求)|提供(?:目标|信息|材料|凭证|截图|账号|环境变量)|选择|授权|回复|上传|输入|填写|处理\s*\d+\s*个待确认问答|人工确认|待确认问答|用户确认|是否允许|是否继续|允许继续|确认并继续/i.test(text)) return true
+  if (['needs_user', 'waiting_user', 'needs_confirmation', 'waiting_confirmation'].includes(normalizedStatus) && /确认(?:计划|范围|授权|执行|操作)|补充(?:目标|范围|信息|材料|上下文|账号|环境变量|验收标准|需求)|提供(?:目标|信息|材料|凭证|截图|账号|环境变量)|回复|授权|选择|上传|输入|填写|处理\s*\d+\s*个待确认问答/.test(text)) return true
+  return false
 }
 
 const buildGlobalDispatchTodoSteps = (msg = {}) => {
@@ -757,11 +795,13 @@ const buildGlobalStreamCurrentTodoSummary = (msg = {}) => {
     '',
     180,
   )
-  const needsAction = visibleGlobalPlanText(
-    activeStep.needs_action || activeStep.needsAction || source.needs_action || source.needsAction || nextAction || activeStep.detail || '',
-    '',
-    220,
-  )
+  const rawNeedsAction = activeStep.needs_action || activeStep.needsAction || source.needs_action || source.needsAction || ''
+  const needsActionCandidate = globalTodoTextNeedsUserAction(rawNeedsAction, activeStep.status)
+    ? rawNeedsAction
+    : globalTodoTextNeedsUserAction(nextAction, activeStep.status)
+      ? nextAction
+      : ''
+  const needsAction = visibleGlobalPlanText(needsActionCandidate, '', 220)
   return {
     schema: 'ccm-global-main-agent-current-todo-v1',
     title: visibleGlobalPlanText(source.title || '当前步骤', '当前步骤', 120),
@@ -835,9 +875,9 @@ const globalToolLabels = {
   query_global_memory: '查询全局记忆',
   manage_global_memory: '管理全局记忆',
   inspect_mission: '查询全局任务',
-  inspect_supervision: '查询监工状态',
+  inspect_supervision: '查询持续跟进状态',
   orchestrate_development: '创建跨项目开发任务',
-  manage_supervision: '管理异步监工',
+  manage_supervision: '管理持续跟进',
   create_task: '创建开发任务',
   send_project_cmd: '发送项目执行指令',
   send_group_cmd: '发送协作群指令',
@@ -858,15 +898,16 @@ const getGlobalToolLabel = (name) => globalToolLabels[String(name || '').trim()]
 
 const globalToolStatusLabel = (status) => {
   const normalized = String(status || '').toLowerCase()
-  if (['done', 'completed', 'ok', 'success'].includes(normalized)) return '已完成'
-  if (['failed', 'error', 'blocked'].includes(normalized)) return '需处理'
+  if (['done', 'completed', 'ok', 'success'].includes(normalized)) return '已返回'
+  if (['failed', 'error', 'blocked'].includes(normalized)) return '待排查'
   return '进行中'
 }
 
-const compactGlobalToolLabel = (value, fallback = '工具动作') => {
+const compactGlobalToolLabel = (value, fallback = '执行动作') => {
   const text = visibleGlobalPlanText(value, fallback, 120)
     .replace(/^正在/, '')
     .replace(/已完成.*$/, '')
+    .replace(/已返回.*$/, '')
     .replace(/执行遇到问题.*$/, '')
     .replace(/[。.]$/, '')
     .trim()
@@ -878,9 +919,9 @@ const buildGlobalStreamToolUseSummary = (rows = []) => {
     .filter(row => row && typeof row === 'object')
     .map((row, index) => ({
       id: row.id || `global-tool-row-${index}`,
-      label: compactGlobalToolLabel(row.label || row.text || row.detail || '', '工具动作'),
+      label: compactGlobalToolLabel(row.label || row.text || row.detail || '', '执行动作'),
       status: String(row.status || 'running').toLowerCase(),
-      detail: row.detail ? visibleGlobalPlanText(row.detail, '工具动作已更新。', 180) : '',
+      detail: row.detail ? visibleGlobalPlanText(row.detail, '执行动作已更新。', 180) : '',
     }))
     .filter(row => row.label)
   const visibleRows = [...normalizedRows.reduce((map, row) => map.set(row.label, row), new Map()).values()]
@@ -890,14 +931,14 @@ const buildGlobalStreamToolUseSummary = (rows = []) => {
   const failedCount = visibleRows.filter(row => ['failed', 'error', 'blocked'].includes(row.status)).length
   const latest = visibleRows[visibleRows.length - 1]
   const headline = failedCount
-    ? `${failedCount} 项动作需要处理`
+    ? `${failedCount} 项动作待排查`
     : runningCount
       ? `正在执行 ${runningCount} 项动作`
-      : `已完成 ${completedCount || visibleRows.length} 项动作`
+      : `已返回 ${completedCount || visibleRows.length} 项动作，正在检查结果`
   const latestLabel = latest.status === 'done' || latest.status === 'completed'
-    ? `${latest.label}已完成`
+    ? `${latest.label}已返回，等待检查`
     : ['failed', 'error', 'blocked'].includes(latest.status)
-      ? `${latest.label}需要处理`
+      ? `${latest.label}待排查`
       : `正在${latest.label}`
   return {
     schema: 'ccm-global-main-agent-tool-summary-v1',
@@ -923,18 +964,20 @@ const buildGlobalStreamToolUseSummary = (rows = []) => {
 
 const globalToolSummaryRowsFromEvents = (streamEvents = []) => {
   const rows = []
+  const legacyToolStartedTitle = `执行${'工具'}`
+  const legacyToolCompletedTitle = `${'工具'}完成`
   for (const event of Array.isArray(streamEvents) ? streamEvents : []) {
-    const title = String(event?.title || '')
-    if (!/执行工具|工具完成|执行遇到问题/.test(title)) continue
-    const text = visibleGlobalPlanText(event.text || '', '工具动作已更新。', 180)
-    const status = title.includes('完成')
+    const title = visibleGlobalStreamEventTitle(event?.title || '', '')
+    if (!title.includes('执行动作') && !title.includes('动作已返回') && title !== legacyToolStartedTitle && title !== legacyToolCompletedTitle && !title.includes('执行遇到问题')) continue
+    const text = visibleGlobalStreamEventText(event.text || '', '执行动作已更新。', 180)
+    const status = title.includes('返回')
       ? 'done'
       : title.includes('问题')
         ? 'failed'
         : 'running'
     rows.push({
       id: `${title}:${text}`,
-      label: compactGlobalToolLabel(text, title.includes('完成') ? '已完成动作' : '工具动作'),
+      label: compactGlobalToolLabel(text, title.includes('返回') ? '已返回动作' : '执行动作'),
       status,
       detail: text,
     })
@@ -989,7 +1032,7 @@ const updateGlobalStreamToolUseSummary = (agentMsg, event = {}) => {
       label,
       status,
       detail: type === 'tool_completed'
-        ? `${label}已完成，正在检查结果。`
+        ? `${label}已返回结果，我正在检查。`
         : status === 'failed'
           ? `${label}执行遇到问题，我正在重新判断下一步。`
           : `正在${label}。`,
@@ -1182,7 +1225,7 @@ const globalEventToVisibleLine = (event = {}) => {
     const targets = rows.map(row => [visibleGlobalPlanText(row.role || '执行成员', '执行成员', 80), row.agent].filter(Boolean).join(' · ')).filter(Boolean).slice(0, 4).join('、')
     const text = visibleGlobalPlanText(
       [summary.headline || (targets ? `我已把这次需求交给：${targets}。` : ''), summary.next_action ? `下一步：${summary.next_action}` : ''].filter(Boolean).join(' '),
-      '已完成安排，正在等待下游执行成员更新结果。',
+      '安排已发出，正在等待下游执行成员更新结果。',
       220
     )
     return { tone: 'ok', icon: '📨', title: summary.title || '已派发的工作', text }
@@ -1205,16 +1248,16 @@ const globalEventToVisibleLine = (event = {}) => {
     if (state === 'needs_confirmation') return { tone: 'waiting', icon: '⏳', title: '需要确认', text: message || '需要你确认目标或授权范围。' }
     return { tone: 'running', icon: '🧭', title: '规划下一步', text: message || '正在规划下一步。' }
   }
-  if (type === 'tool_started') return { tone: 'running', icon: '🛠️', title: '执行工具', text: `正在${toolLabel}。` }
-  if (type === 'tool_completed') return { tone: 'ok', icon: '✅', title: '工具完成', text: `${toolLabel}已完成，正在检查结果。` }
+  if (type === 'tool_started') return { tone: 'running', icon: '🛠️', title: '执行动作', text: `正在${toolLabel}。` }
+  if (type === 'tool_completed') return { tone: 'ok', icon: '✅', title: '动作已返回', text: `${toolLabel}已返回结果，我正在检查。` }
   if (type === 'tool_failed' || type === 'tool_validation_failed') {
     return { tone: 'error', icon: '⚠️', title: '执行遇到问题', text: compactVisibleStreamText(event.reply || event.step?.message, `${toolLabel}执行遇到问题，我正在重新判断下一步。`) }
   }
   if (type === 'clarification_required') return { tone: 'waiting', icon: '❓', title: '需要补充信息', text: compactVisibleStreamText(event.reply, '需要你补充目标、范围或验收标准。') }
   if (type === 'confirmation_required') return { tone: 'waiting', icon: '🔐', title: '等待授权确认', text: compactVisibleStreamText(event.reply, '这个操作需要你确认后才会继续。') }
   if (type === 'paused') return { tone: 'waiting', icon: '⏸️', title: '已暂停', text: compactVisibleStreamText(event.reply, '全局 Agent 已暂停。') }
-  if (type === 'supervising') return { tone: 'running', icon: '📡', title: '监工中', text: compactVisibleStreamText(event.reply, '已经创建长期任务，正在监督协作群和项目执行成员交付。') }
-  if (type === 'completed') return { tone: 'ok', icon: '✨', title: '完成', text: compactVisibleStreamText(event.reply, '本轮处理完成。') }
+  if (type === 'supervising') return { tone: 'running', icon: '📡', title: '持续跟进中', text: compactVisibleStreamText(event.reply, '已经创建长期任务，正在跟进协作群和项目执行成员交付。') }
+  if (type === 'completed') return { tone: 'ok', icon: '✨', title: '处理结果', text: compactVisibleStreamText(event.reply, GLOBAL_STREAM_COMPLETED_FALLBACK) }
   if (type === 'failed') return { tone: 'error', icon: '❌', title: '失败', text: compactVisibleStreamText(event.reply, '任务没有完成，我已整理未完成原因和下一步。') }
   if (type === 'cancelled') return { tone: 'waiting', icon: '🛑', title: '已取消', text: compactVisibleStreamText(event.reply, '本轮处理已取消。') }
   return null
@@ -1433,7 +1476,7 @@ const sendMessage = async () => {
           const confirmationHint = run.status === 'waiting_confirmation'
             ? `\n\n⚠️ 等待确认：${pendingToolName}。请使用下方按钮决定是否继续。`
             : ''
-          agentMsg.content = sanitizeGlobalVisibleStreamText(run.final_reply || '已处理。', '我已整理处理结果，技术细节已放入技术详情。', 8000) + confirmationHint
+          agentMsg.content = sanitizeGlobalVisibleStreamText(run.final_reply || GLOBAL_RESULT_VISIBLE_FALLBACK, GLOBAL_RESULT_VISIBLE_FALLBACK, 8000) + confirmationHint
           agentMsg.files = data.files || []
           agentMsg.agenticRun = run
           agentMsg.streaming = false
@@ -1521,7 +1564,7 @@ const processBridgeRequest = async (request) => {
     const run = data.run || {}
     currentSession.value.messages.push({
       role: 'assistant',
-      content: formatGlobalRunVisibleReply(run, '已处理。'),
+      content: formatGlobalRunVisibleReply(run, GLOBAL_RESULT_VISIBLE_FALLBACK),
       timestamp: new Date().toISOString(),
       files: data.files || [],
       source: 'feishu-control-bot',
@@ -1532,7 +1575,7 @@ const processBridgeRequest = async (request) => {
     await postJson('/api/global-agent/bridge/result', {
       id: request.id,
       success: true,
-      reply: sanitizeGlobalVisibleStreamText(assistantReplies.join('\n\n') || run.final_reply || '已完成', '已完成。', 8000)
+      reply: sanitizeGlobalVisibleStreamText(assistantReplies.join('\n\n') || run.final_reply || GLOBAL_RESULT_VISIBLE_FALLBACK, GLOBAL_RESULT_VISIBLE_FALLBACK, 8000)
     })
   } catch (err) {
     const message = sanitizeGlobalVisibleStreamText(err?.message, '全局 Agent 控制台处理飞书消息失败', 1200)
@@ -1606,7 +1649,7 @@ const controlAgenticRun = async (msg, operation, approved = true, feedback = '',
     const data = await postJson(endpoint, { id: runId, approved, accept_feedback: String(feedback || '').trim(), source: String(source || '').trim() })
     const run = data.run || {}
     msg.agenticRun = run
-    msg.content = formatGlobalRunVisibleReply(run, run.status === 'paused' ? '全局 Agent 运行已暂停。' : '全局 Agent 运行状态已更新。')
+    msg.content = formatGlobalRunVisibleReply(run, run.status === 'paused' ? '我已暂停这次运行。' : '运行状态已更新。')
     if (run.status === 'waiting_confirmation') {
       const pendingToolName = sanitizeGlobalVisibleStreamText(run.pending_tool?.name || '写入操作', '写入操作', 80)
       msg.content += `\n\n⚠️ 等待确认：${pendingToolName}。请使用下方按钮决定是否继续。`
@@ -1646,8 +1689,8 @@ const applyGlobalMissionPayload = (msg, payload = {}) => {
   if (Array.isArray(children)) msg.globalMissionChildren = children.map(task => task?.task ? task : ({ task, target: task?.mission_target || null }))
   if (payload.supervisor) msg.globalMissionSupervisor = payload.supervisor
   if (mission?.status === 'cancelled') msg.content = '全局任务已取消。'
-  else if (payload.supervisor?.status === 'paused') msg.content = '全局任务监工已暂停。'
-  else if (payload.supervisor?.status === 'monitoring') msg.content = '全局任务监工已恢复，会继续跟踪执行与验收。'
+  else if (payload.supervisor?.status === 'paused') msg.content = '全局任务跟进已暂停。'
+  else if (payload.supervisor?.status === 'monitoring') msg.content = '全局任务跟进已恢复，会继续跟踪执行与验收。'
 }
 
 const getGlobalTaskCard = (msg) => {
@@ -2553,7 +2596,7 @@ const handleGitCommitCardSubmit = async (msg) => {
               <small>{{ Math.round((controlCenter.intent?.confidence || 0) * 100) }}%</small>
             </div>
             <div>
-              <span>监工队列</span>
+              <span>跟进队列</span>
               <strong>{{ controlCenter.supervision?.total || 0 }}</strong>
               <small>全局任务</small>
             </div>
@@ -2629,7 +2672,7 @@ const handleGitCommitCardSubmit = async (msg) => {
             </section>
           </div>
           <section class="supervision-console">
-            <div class="control-section-head"><strong>任务监督控制台</strong><span>{{ controlCenter.supervision?.total || 0 }} 个监工</span></div>
+            <div class="control-section-head"><strong>任务跟进控制台</strong><span>{{ controlCenter.supervision?.total || 0 }} 个跟进任务</span></div>
             <div class="supervision-list">
               <div v-for="row in controlCenter.supervision?.rows || []" :key="row.id" :class="['supervision-row', { waiting: row.waiting, failed: row.failed }]">
                 <div>
@@ -2732,8 +2775,8 @@ const handleGitCommitCardSubmit = async (msg) => {
                     <small v-if="toolSummary.latest_label">最近：{{ toolSummary.latest_label }}</small>
                     <div class="stream-tool-counts">
                       <span v-if="toolSummary.running_count">进行中 {{ toolSummary.running_count }}</span>
-                      <span v-if="toolSummary.completed_count">完成 {{ toolSummary.completed_count }}</span>
-                      <span v-if="toolSummary.failed_count" class="failed">需处理 {{ toolSummary.failed_count }}</span>
+                      <span v-if="toolSummary.completed_count">已返回 {{ toolSummary.completed_count }}</span>
+                      <span v-if="toolSummary.failed_count" class="failed">待排查 {{ toolSummary.failed_count }}</span>
                     </div>
                   </div>
                   <details v-if="globalDispatchLaunchRows(msg).length" class="global-stream-dispatch" open>
@@ -2771,8 +2814,8 @@ const handleGitCommitCardSubmit = async (msg) => {
                     >
                       <span class="event-icon">{{ event.icon }}</span>
                       <div>
-                        <strong>{{ event.title }}</strong>
-                        <p>{{ event.text }}</p>
+                        <strong>{{ visibleGlobalStreamEventTitle(event.title) }}</strong>
+                        <p>{{ visibleGlobalStreamEventText(event.text) }}</p>
                       </div>
                     </div>
                     <div v-if="!(msg.streamEvents || []).length" class="global-stream-event running">

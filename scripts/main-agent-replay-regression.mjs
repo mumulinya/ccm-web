@@ -102,7 +102,7 @@ async function run() {
     await textDoesNotLeak(child, [/trace_id/i, /session_secret/i, /CCM_AGENT_RECEIPT/i], 'child summary before expand')
     await childDetails.locator('summary').click()
     await expectVisible(child.locator('.work-events-list'), 'replayed child event list after expand')
-    await expectVisible(child.getByText('执行成员已提交结构化完成信息，我正在汇总验收。'), 'replayed sanitized child internal output')
+    await expectVisible(child.getByText('执行成员已提交结构化结果说明，我正在汇总验收。'), 'replayed sanitized child internal output')
     await textDoesNotLeak(child, [/trace_id/i, /session_secret/i, /CCM_AGENT_RECEIPT/i], 'child expanded output')
     await child.screenshot({ path: path.join(outputDir, '04-replay-child-expanded-sanitized.png') })
 

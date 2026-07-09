@@ -6,6 +6,7 @@ import GroupMainAgentStatusCard from '../src/components/collaboration/GroupMainA
 import ProjectTaskIntakeMessage from '../src/components/collaboration/ProjectTaskIntakeMessage.vue'
 import TaskCollaborationCard from '../src/components/collaboration/TaskCollaborationCard.vue'
 import AgentCodeChangeDrawer from '../src/components/agents/AgentCodeChangeDrawer.vue'
+import AgentQaMessage from '../src/components/agents/AgentQaMessage.vue'
 import GlobalAgent from '../src/components/global/GlobalAgent.vue'
 import { summarizeWorkEvents, sanitizeUserFacingAgentText } from '../src/utils/agentDisplay.js'
 import { globalAgentRunTaskCard } from '../src/utils/taskExperience.js'
@@ -961,6 +962,24 @@ const testAgentFailedReviewSummary = {
   display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
 }
 
+const groupLiveTestAgentReviewSummary = {
+  schema: 'ccm-main-agent-independent-review-summary-v1',
+  title: '独立复核',
+  status: 'passed',
+  status_label: '已通过',
+  headline: 'TestAgent 已检查交付证据，我会继续核对最终总结。',
+  rows: [
+    'TestAgent：已通过',
+    '验证证据：npm run test:login-state',
+    '文件上传：已验证 2 个上传文件（notes.txt、meta.json）',
+    '文件下载：已验证 1 个下载文件（tasks.csv）',
+    '浏览器交互：已执行 2 个操作、3 个断言，未发现失败步骤',
+    '浏览器网络：记录 4 个请求、4 个响应，未发现网络错误',
+  ],
+  next_action: '继续核对交付总结、改动和验证结果。',
+  display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+}
+
 const testAgentFailedReviewCard = {
   version: 1,
   visible: true,
@@ -1017,6 +1036,48 @@ const testAgentFailedReviewCard = {
       verdict_json: 'C:/tmp/test-agent-artifacts/failed/verdict.json',
       artifact_manifest: 'C:/tmp/test-agent-artifacts/failed/artifact-manifest.json',
       browser_artifacts: 'C:/tmp/test-agent-artifacts/failed/browser-artifacts',
+    },
+  },
+}
+
+const groupLiveTestAgentReviewMergedCard = {
+  version: 1,
+  visible: true,
+  task_id: 'task-group-live-test-agent-review-merged',
+  title: '群聊 TestAgent 复核已返回',
+  goal: '在群聊流式处理中，把 TestAgent 独立复核结论合并进当前任务卡。',
+  phase: 'reviewing',
+  phase_label: '复核已返回',
+  progress: 84,
+  active_agents: ['正在纳入复核结论'],
+  agents: [{ name: 'TestAgent', status: 'done', summary: '独立复核已返回，当前没有发现阻塞风险。' }],
+  completed: ['已生成 TestAgent 复核计划', '已收到 TestAgent 独立复核结论'],
+  blockers: [],
+  next_action: '继续核对交付总结、改动和验证结果。',
+  test_agent_execution_plan_summary: testAgentExecutionPlanTextSummary,
+  testAgentExecutionPlanSummary: testAgentExecutionPlanTextSummary,
+  test_agent_execution_plan: testAgentExecutionPlanFixture,
+  testAgentExecutionPlan: testAgentExecutionPlanFixture,
+  independent_review_summary: groupLiveTestAgentReviewSummary,
+  independentReviewSummary: groupLiveTestAgentReviewSummary,
+  test_agent_review_summary: groupLiveTestAgentReviewSummary,
+  testAgentReviewSummary: groupLiveTestAgentReviewSummary,
+  independent_review: groupLiveTestAgentReviewSummary.rows,
+  independentReview: groupLiveTestAgentReviewSummary.rows,
+  display_stream: {
+    schema: 'ccm-streamlined-display-v2',
+    user_visible_text: 'TestAgent 已提交独立复核结论，我会纳入最终验收。',
+    tool_use_summary: { type: 'streamlined_tool_use_summary', tool_summary: '独立复核 1 次，当前没有发现阻塞风险' },
+  },
+  technical: {
+    trace_id: 'trace-group-live-test-agent-review-merged',
+    test_agent_report: {
+      schema: 'ccm-test-agent-report-v1',
+      verdict: 'passed',
+      report_json: 'C:/tmp/test-agent-artifacts/live/report.json',
+      verdict_json: 'C:/tmp/test-agent-artifacts/live/verdict.json',
+      artifact_manifest: 'C:/tmp/test-agent-artifacts/live/artifact-manifest.json',
+      browser_artifacts: 'C:/tmp/test-agent-artifacts/live/browser-artifacts',
     },
   },
 }
@@ -1104,6 +1165,125 @@ const taskCard = {
     user_handoff: renderedUserHandoff,
     test_agent_execution_plan: testAgentExecutionPlanFixture,
   },
+}
+
+const internalUserRequestSummaryCard = {
+  version: 1,
+  visible: true,
+  task_id: 'task-internal-user-request-guard',
+  title: '内部推进状态',
+  goal: '执行成员提交结果后再统一验收。',
+  phase: 'executing',
+  phase_label: '执行中',
+  progress: 46,
+  active_agents: ['web'],
+  agents: [{ name: '前端 · web', status: 'running', summary: '正在实现筛选 UI', blockers: [] }],
+  user_request_summary: {
+    schema: 'ccm-main-agent-internal-progress-summary-v1',
+    title: '需要你处理',
+    status: 'in_progress',
+    status_label: '处理中',
+    headline: '等待执行成员提交结果说明，然后我会验收并总结。',
+    next_action: '等待执行成员提交结果说明，然后我会验收并总结。',
+    display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true },
+  },
+  next_action: '等待执行成员提交结果说明，然后我会验收并总结。',
+  technical: {
+    user_request_summary: {
+      schema: 'ccm-main-agent-internal-progress-summary-v1',
+      headline: '等待执行成员提交结果说明，然后我会验收并总结。',
+    },
+  },
+}
+
+const explicitUserRequestSummaryCard = {
+  version: 1,
+  visible: true,
+  task_id: 'task-explicit-user-request-visible',
+  title: '等待你确认验收方式',
+  goal: '确认后继续做真实验收。',
+  phase: 'needs_user',
+  phase_label: '需要你确认',
+  progress: 72,
+  active_agents: [],
+  agents: [],
+  user_request_summary: {
+    schema: 'ccm-main-agent-user-request-summary-v1',
+    title: '需要你处理',
+    status: 'waiting_user',
+    status_label: '等待你回复',
+    headline: '需要你确认是否允许继续使用测试环境变量做验收。',
+    question: '是否允许我使用你提供的测试环境变量继续验收？',
+    next_action: '请回复确认或取消；确认后我会继续验收并总结结果。',
+    answer_suggestions: ['确认继续', '先取消'],
+    display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true },
+  },
+  next_action: '等待你确认验收方式。',
+}
+
+const taskStatusFallbackCard = {
+  version: 1,
+  visible: true,
+  task_id: 'task-status-fallback-copy',
+  title: '共享任务卡状态文案',
+  goal: '验证内部缺口不会显示成用户待办。',
+  phase: 'executing',
+  phase_label: '执行中',
+  progress: 38,
+  display_stream: {
+    schema: 'ccm-streamlined-display-v2',
+    user_visible_text: '我正在补齐验收证据并排查失败动作。',
+    tool_use_summary: { type: 'streamlined_tool_use_summary', tool_summary: '执行队列 2 项，1 项待补齐，1 项待排查' },
+  },
+  work_items: [
+    { id: 'wi-fallback-blocked', subject: '补齐验收证据', owner: 'qa', target: 'qa', status: 'blocked', evidence: [], blockers: ['缺少真实浏览器验收证据'], blockedBy: [], attempt: 1 },
+    { id: 'wi-fallback-failed', subject: '复核失败动作', owner: 'web', target: 'web', status: 'failed', evidence: [], blockers: ['命令执行失败'], blockedBy: [], attempt: 1 },
+  ],
+  work_item_summary: {
+    total: 2,
+    counts: { blocked: 1, failed: 1 },
+    next_claimable: [],
+    all_completed: false,
+  },
+  agent_progress_summary: {
+    schema: 'ccm-child-agent-progress-summary-v1',
+    title: '执行成员进展',
+    status: 'needs_attention',
+    headline: '1 个执行成员还缺验收证据，我会继续补齐。',
+    rows: [
+      { agent: 'qa', role: '测试', status: 'blocked', summary: '缺少真实浏览器验收证据', current_focus: '补齐真实浏览器验收证据', evidence: [], blockers: ['缺少真实浏览器验收证据'], next_action: '我会继续补齐验收证据' },
+    ],
+    next_action: '补齐验收证据后再进入最终总结。',
+    display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true },
+  },
+  agent_questions: [
+    {
+      id: 'qa-status-fallback',
+      from: '前端',
+      to: '测试',
+      status: 'waiting',
+      label: '等待确认',
+      summary: '测试成员需要确认真实浏览器验收证据。',
+      question: '是否已经有真实浏览器验收记录？',
+      answer: '还没有，正在补齐。',
+      next_action: '补齐后再进入最终总结。',
+      badges: ['验收证据'],
+    },
+  ],
+  recovery_summary: {
+    schema: 'ccm-main-agent-recovery-summary-v1',
+    title: '恢复接续',
+    status: 'active',
+    headline: '我已恢复这轮任务上下文，会先补齐缺口再继续总结。',
+    revalidated: { goal: true, state: true, acceptance: false },
+    preserved: ['已恢复计划和当前执行队列'],
+    remaining_gaps: ['真实浏览器验收证据'],
+    next_action: '继续补齐验收证据。',
+  },
+  completed: ['已恢复任务上下文'],
+  blockers: ['真实浏览器验收证据待补齐'],
+  next_action: '补齐验收证据并排查失败动作后再总结。',
+  technical: { trace_id: 'trace-status-fallback-copy' },
 }
 
 const workQueueCard = {
@@ -1533,17 +1713,17 @@ const mainAgentStatus = {
 
 const groupChildAgentActiveSummary = {
   schema: 'ccm-group-child-agent-status-summary-v1',
-  title: '子 Agent 等待情况',
+  title: '执行成员等待情况',
   status: 'needs_attention',
   status_label: '需补齐',
   completed_agents: ['api'],
   running_agents: ['web'],
   waiting_agents: [],
   attention_agents: ['qa'],
-  summary_text: '已完成：api；处理中：web；待补齐：qa',
+  summary_text: '已回传：api；处理中：web；待补齐：qa',
   next_action: '主 Agent 会先处理待补齐的验证证据，再汇总验收和最终总结。',
   rows: [
-    { agent: 'api', status: 'completed', status_label: '已完成', detail: '接口筛选参数已补齐。' },
+    { agent: 'api', status: 'completed', status_label: '已回传结果', detail: '接口筛选参数已补齐。' },
     { agent: 'web', status: 'running', status_label: '处理中', detail: '正在接入 owner 筛选 UI。' },
     { agent: 'qa', status: 'blocked', status_label: '待补齐', detail: '等待补充筛选场景验证证据。' },
   ],
@@ -1569,7 +1749,8 @@ const mainAgentActiveStatus = {
     active_form: '子 Agent 正在执行',
     detail: 'web 正在接入 owner 筛选 UI。',
     recent_action: '已派发给子 Agent',
-    needs_action: '等待子 Agent 提交结果说明，然后主 Agent 会验收并总结。',
+    needs_action: '',
+    needsAction: '',
     status: 'in_progress',
     status_label: '进行中',
     progress_label: '4/7',
@@ -1601,7 +1782,7 @@ const mainAgentActiveStatus = {
     next_action: '先刷新任务卡；如果仍没有新结果，就重新派发或定向补充。',
     display_policy: { user_visible: true, show_for_ordinary_conversation: false, technical_details_default_collapsed: true, hide_internal_protocols: true },
   },
-  open_qa_count: 0,
+  open_qa_count: 1,
   blockers: [],
   needs: [],
   updated_at: now,
@@ -1814,6 +1995,114 @@ const globalHistoryMessage = {
 }
 const globalHistoryCard = globalAgentRunTaskCard(globalHistoryMessage)
 
+const globalTestAgentUnknownCoverageSummary = {
+  schema: 'ccm-main-agent-independent-review-summary-v1',
+  title: '独立复核',
+  status: 'needs_user',
+  status_label: '等你确认',
+  headline: '独立复核需要人工确认，我会先暂停最终验收。',
+  rows: [
+    'TestAgent：等你确认',
+    '待处理：验收条件待确认：登录恢复验收需要真实浏览器证据',
+  ],
+  next_action: '等待你确认复核标记的问题。',
+  display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+}
+
+const globalTestAgentUnknownCoverageMessage = {
+  role: 'assistant',
+  content: '独立复核需要人工确认，我会先暂停最终验收。',
+  timestamp: now,
+  type: 'global_agent_result',
+  agenticRun: {
+    id: 'global-run-test-agent-unknown-coverage',
+    status: 'waiting_user',
+    phase: 'needs_user',
+    user_message: '让 TestAgent 复核登录恢复交付',
+    tool_calls: 1,
+    final_reply: '独立复核需要人工确认，我会先暂停最终验收。',
+    independent_review_summary: globalTestAgentUnknownCoverageSummary,
+    independentReviewSummary: globalTestAgentUnknownCoverageSummary,
+    test_agent_review_summary: globalTestAgentUnknownCoverageSummary,
+    testAgentReviewSummary: globalTestAgentUnknownCoverageSummary,
+    independent_review: globalTestAgentUnknownCoverageSummary.rows,
+    independentReview: globalTestAgentUnknownCoverageSummary.rows,
+    final_report: {
+      summary: 'TestAgent 报告还有待确认的验收条件，本轮不能直接验收完成。',
+      risks: ['验收条件待确认：登录恢复验收需要真实浏览器证据'],
+      independent_review_summary: globalTestAgentUnknownCoverageSummary,
+      independentReviewSummary: globalTestAgentUnknownCoverageSummary,
+      independent_review: globalTestAgentUnknownCoverageSummary.rows,
+      independentReview: globalTestAgentUnknownCoverageSummary.rows,
+      acceptance_gate_passed: false,
+      technical: {
+        schema: 'ccm-test-agent-report-v1',
+        status: 'passed',
+        recommendation: 'accept',
+        acceptanceCoverage: [{ criterion: '登录恢复验收需要真实浏览器证据', status: 'unknown', evidence: [] }],
+        report_json: 'C:/tmp/test-agent-artifacts/global-unknown/report.json',
+        artifact_manifest: 'C:/tmp/test-agent-artifacts/global-unknown/artifact-manifest.json',
+      },
+    },
+  },
+}
+const globalTestAgentUnknownCoverageCard = globalAgentRunTaskCard(globalTestAgentUnknownCoverageMessage)
+
+const globalTestAgentNotVerifiedCoverageSummary = {
+  schema: 'ccm-main-agent-independent-review-summary-v1',
+  title: '独立复核',
+  status: 'needs_rework',
+  status_label: '需返工',
+  headline: '独立复核发现待处理缺口，我会先安排返工，再重新验收。',
+  rows: [
+    'TestAgent：需返工',
+    '待处理：必检项：浏览器流程未覆盖：浏览器流程没有实际执行证据',
+    '待处理：验收条件未通过：登录恢复验证必须通过',
+  ],
+  next_action: '先处理复核指出的缺口，再重新执行验收。',
+  display_policy: { user_text_first: true, technical_default_collapsed: true, hide_internal_protocols: true, show_for_ordinary_conversation: false },
+}
+
+const globalTestAgentNotVerifiedCoverageMessage = {
+  role: 'assistant',
+  content: '独立复核发现待处理缺口，我会先安排返工，再重新验收。',
+  timestamp: now,
+  type: 'global_agent_result',
+  agenticRun: {
+    id: 'global-run-test-agent-not-verified-coverage',
+    status: 'failed',
+    phase: 'failed',
+    user_message: '让 TestAgent 复核登录恢复交付',
+    tool_calls: 1,
+    final_reply: 'TestAgent 复核指出仍有未覆盖项，我会先安排返工，再重新验收。',
+    independent_review_summary: globalTestAgentNotVerifiedCoverageSummary,
+    independentReviewSummary: globalTestAgentNotVerifiedCoverageSummary,
+    test_agent_review_summary: globalTestAgentNotVerifiedCoverageSummary,
+    testAgentReviewSummary: globalTestAgentNotVerifiedCoverageSummary,
+    independent_review: globalTestAgentNotVerifiedCoverageSummary.rows,
+    independentReview: globalTestAgentNotVerifiedCoverageSummary.rows,
+    final_report: {
+      summary: 'TestAgent 复核指出仍有未覆盖项，需要先返工。',
+      risks: ['必检项：浏览器流程未覆盖', '验收条件未通过：登录恢复验证必须通过'],
+      independent_review_summary: globalTestAgentNotVerifiedCoverageSummary,
+      independentReviewSummary: globalTestAgentNotVerifiedCoverageSummary,
+      independent_review: globalTestAgentNotVerifiedCoverageSummary.rows,
+      independentReview: globalTestAgentNotVerifiedCoverageSummary.rows,
+      acceptance_gate_passed: false,
+      technical: {
+        schema: 'ccm-test-agent-report-v1',
+        status: 'passed',
+        recommendation: 'accept',
+        requiredCheckCoverage: [{ check: 'browser_e2e', status: 'not_verified', missingReason: '浏览器流程没有实际执行证据', evidence: [] }],
+        acceptanceCoverage: [{ criterion: '登录恢复验证必须通过', status: 'not_verified', evidence: [] }],
+        report_json: 'C:/tmp/test-agent-artifacts/global-not-verified/report.json',
+        artifact_manifest: 'C:/tmp/test-agent-artifacts/global-not-verified/artifact-manifest.json',
+      },
+    },
+  },
+}
+const globalTestAgentNotVerifiedCoverageCard = globalAgentRunTaskCard(globalTestAgentNotVerifiedCoverageMessage)
+
 const globalDirectDispatchSummary = {
   schema: 'ccm-main-agent-dispatch-launch-summary-v1',
   source: 'global-agent-direct-dispatch',
@@ -1872,10 +2161,34 @@ const setupGlobalAgentFixtureState = () => {
     risk: { level: 'medium', summary: '已在当前授权范围内继续执行。', reasons: ['用户已明确授权', '仍会在完成后总结结果'] },
     steps: [
       { id: 'global-plan-step-1', label: '确认目标和授权范围', detail: '用户已明确授权发送群聊指令。', status: 'completed' },
-      { id: 'global-plan-step-2', label: '派发群聊主 Agent', detail: '正在把任务交给 dev-group。', status: 'in_progress' },
+      { id: 'global-plan-step-2', label: '派发群聊主 Agent', detail: '正在把任务交给 dev-group。', needs_action: '等待执行成员提交结果说明，然后我会验收并总结。', status: 'in_progress' },
       { id: 'global-plan-step-3', label: '检查结果并总结', detail: '完成后说明派发目标、验收标准和下一步。', status: 'pending' },
     ],
     next_step: '继续执行计划，并在完成后给出总结。',
+  }
+  const blockedStreamTodoPlan = {
+    schema: 'ccm-main-agent-workchain-todo-v1',
+    source: 'global-stream',
+    title: '全局主 Agent 当前计划',
+    steps: [
+      { id: 'scope', label: '确认验收范围', active_form: '已确认验收范围', status: 'completed' },
+      {
+        id: 'evidence-gap',
+        label: '补齐验收证据',
+        active_form: '正在补齐验收证据',
+        detail: '缺少真实浏览器验收记录，我会继续补齐证据。',
+        needs_action: '等待执行成员提交结果说明，然后我会验收并总结。',
+        status: 'blocked',
+      },
+      { id: 'summary', label: '整理最终总结', active_form: '等待整理最终总结', status: 'pending' },
+    ],
+    next_action: '补齐真实验证或复核证据后再总结。',
+    display_policy: {
+      user_visible: true,
+      technical_default_collapsed: true,
+      hide_internal_protocols: true,
+      show_for_ordinary_conversation: false,
+    },
   }
   const globalCompletedArchivedTodoPlan = {
     schema: 'ccm-main-agent-workchain-todo-v1',
@@ -1975,7 +2288,8 @@ const setupGlobalAgentFixtureState = () => {
           timestamp: now,
           streamEvents: [
             { tone: 'running', icon: '🧭', title: '执行前计划已整理', text: '继续执行计划，并在完成后给出总结。' },
-            { tone: 'running', icon: '🛠️', title: '执行工具', text: '正在发送群聊主 Agent 指令。' },
+            { tone: 'running', icon: '🛠️', title: '执行动作', text: '正在发送协作群指令。' },
+            { tone: 'ok', icon: '✅', title: '动作已返回', text: '发送协作群指令已返回结果，我正在检查。' },
           ],
           agenticRun: {
             id: 'global-auto-plan-stream-run',
@@ -1988,6 +2302,50 @@ const setupGlobalAgentFixtureState = () => {
             plan_mode: autoStreamPlanMode,
             planMode: autoStreamPlanMode,
           },
+        },
+        {
+          role: 'assistant',
+          type: 'global_stream',
+          streaming: true,
+          content: '🧪 当前步骤：正在补齐验收证据。',
+          timestamp: now,
+          streamEvents: [
+            { tone: 'waiting', icon: '🧪', title: '补齐验收证据', text: '缺少真实浏览器验收记录，我会继续补齐证据。' },
+          ],
+          todo_plan: blockedStreamTodoPlan,
+          todoPlan: blockedStreamTodoPlan,
+          agenticRun: {
+            id: 'global-blocked-current-todo-run',
+            status: 'running',
+            phase: 'execute',
+            user_message: '继续补齐真实验收证据后再总结',
+            original_user_message: '继续补齐真实验收证据后再总结',
+            final_reply: '',
+            todo_plan: blockedStreamTodoPlan,
+            todoPlan: blockedStreamTodoPlan,
+          },
+        },
+        {
+          role: 'assistant',
+          type: 'global_stream',
+          streaming: false,
+          content: '✅ 动作已返回：发送历史协作群指令已返回结果，我正在检查。',
+          timestamp: now,
+          streamEvents: [
+            { tone: 'running', icon: '🛠️', title: '执行工具', text: '正在发送历史协作群指令。' },
+            { tone: 'ok', icon: '✅', title: '工具完成', text: '发送历史协作群指令已完成，正在检查结果。' },
+          ],
+        },
+        {
+          role: 'assistant',
+          type: 'global_stream',
+          streaming: false,
+          content: '⚠️ 执行动作遇到问题：发送协作群指令执行遇到问题，我正在重新判断下一步。',
+          timestamp: now,
+          streamEvents: [
+            { tone: 'running', icon: '🛠️', title: '执行动作', text: '正在发送协作群指令。' },
+            { tone: 'error', icon: '⚠️', title: '执行遇到问题', text: '发送协作群指令执行遇到问题，我正在重新判断下一步。' },
+          ],
         },
         {
           role: 'user',
@@ -2325,6 +2683,31 @@ const globalCancelledHistoryMessage = {
 }
 const globalCancelledHistoryCard = globalAgentRunTaskCard(globalCancelledHistoryMessage)
 
+const agentQaVisibleMessage = {
+  id: 'qa-visible-message',
+  role: 'assistant',
+  type: 'agent_qa',
+  agent: 'web',
+  content: '',
+  qa: {
+    id: 'qa-visible-message',
+    kind: 'question',
+    from_agent: 'web',
+    to_agent: 'qa',
+    target: 'qa',
+    status: 'waiting',
+    type: 'request_review',
+    blocking: true,
+    question: '是否已经有真实浏览器验收记录？',
+    answer: '',
+    content: '',
+    execution_id: 'exec-hidden-qa',
+    routing: { strategy: 'ask_agent' },
+    permission_contract: { mode: 'advisory_read_only' },
+    answer_evidence: ['trace_id=hidden-agent-qa'],
+  },
+}
+
 const childEvents = [
   { kind: 'status', time: now, text: '准备读取相关文件' },
   { kind: 'tool', time: now, text: 'Read LoginStore.vue' },
@@ -2333,12 +2716,13 @@ const childEvents = [
 ]
 
 const FixtureApp = {
-  components: { MainAgentDecisionCard, TaskExperienceCard, GroupMainAgentStatusCard, ProjectTaskIntakeMessage, TaskCollaborationCard, AgentCodeChangeDrawer, GlobalAgent },
+  components: { MainAgentDecisionCard, TaskExperienceCard, GroupMainAgentStatusCard, ProjectTaskIntakeMessage, TaskCollaborationCard, AgentCodeChangeDrawer, AgentQaMessage, GlobalAgent },
   setup() {
     setupGlobalAgentFixtureState()
     window.__ccmLastTaskAction = null
     const childSummary = computed(() => summarizeWorkEvents(childEvents))
     const compactWorkText = (text) => sanitizeUserFacingAgentText(text, '执行成员正在执行。', 220)
+    const agentDisplayName = (agent) => ({ web: '前端', qa: '测试' }[agent] || agent || '执行成员')
     const codeDrawer = ref({
       visible: false,
       title: '',
@@ -2365,7 +2749,7 @@ const FixtureApp = {
     const closeCodeDrawer = () => {
       codeDrawer.value = { ...codeDrawer.value, visible: false }
     }
-    return { conversationDecision, taskDecision, taskCompletedDecision, taskMissingVerificationDecision, taskCard, planGapDeliveryCard, groupIntakeMessage, workQueueCard, workchainTodoCard, workchainCompletedArchivedCard, workchainQualityFollowupCard, ordinaryWorkchainTodoCard, testAgentBlockedPlanCard, testAgentFailedReviewCard, workItemVerificationReminderCard, receiptResolvedCard, goalRevisionContinuationCard, planRevisionCard, confirmedPlanFollowupCard, mainAgentStatus, mainAgentActiveStatus, mainAgentArchivedTodoStatus, globalHistoryCard, globalDirectDispatchCard, globalFailedHistoryCard, globalCancelledHistoryCard, childEvents, childSummary, compactWorkText, codeDrawer, handleTaskAction, closeCodeDrawer }
+    return { conversationDecision, taskDecision, taskCompletedDecision, taskMissingVerificationDecision, taskCard, internalUserRequestSummaryCard, explicitUserRequestSummaryCard, taskStatusFallbackCard, planGapDeliveryCard, groupIntakeMessage, workQueueCard, workchainTodoCard, workchainCompletedArchivedCard, workchainQualityFollowupCard, ordinaryWorkchainTodoCard, testAgentBlockedPlanCard, testAgentFailedReviewCard, groupLiveTestAgentReviewMergedCard, workItemVerificationReminderCard, receiptResolvedCard, goalRevisionContinuationCard, planRevisionCard, confirmedPlanFollowupCard, mainAgentStatus, mainAgentActiveStatus, mainAgentArchivedTodoStatus, globalHistoryCard, globalTestAgentUnknownCoverageCard, globalTestAgentNotVerifiedCoverageCard, globalDirectDispatchCard, globalFailedHistoryCard, globalCancelledHistoryCard, agentQaVisibleMessage, agentDisplayName, childEvents, childSummary, compactWorkText, codeDrawer, handleTaskAction, closeCodeDrawer }
   },
   template: `
     <main class="visual-fixture">
@@ -2408,6 +2792,15 @@ const FixtureApp = {
           <h2>普通问话 Workchain Todo 隐藏</h2>
           <TaskExperienceCard :card="ordinaryWorkchainTodoCard" @action="handleTaskAction" />
         </div>
+        <div id="case-user-request-summary-guard" style="margin-top:14px">
+          <h2>用户待办摘要守门</h2>
+          <TaskExperienceCard :card="internalUserRequestSummaryCard" @action="handleTaskAction" />
+          <TaskExperienceCard :card="explicitUserRequestSummaryCard" @action="handleTaskAction" />
+        </div>
+        <div id="case-task-status-fallback-copy" style="margin-top:14px">
+          <h2>共享任务卡状态文案</h2>
+          <TaskExperienceCard :card="taskStatusFallbackCard" @action="handleTaskAction" />
+        </div>
         <div id="case-test-agent-plan-blocked" style="margin-top:14px">
           <h2>TestAgent 计划预检受阻</h2>
           <TaskExperienceCard :card="testAgentBlockedPlanCard" @action="handleTaskAction" />
@@ -2415,6 +2808,10 @@ const FixtureApp = {
         <div id="case-test-agent-review-failed" style="margin-top:14px">
           <h2>TestAgent 复核返工</h2>
           <TaskExperienceCard :card="testAgentFailedReviewCard" @action="handleTaskAction" />
+        </div>
+        <div id="case-group-live-test-agent-review-merged" style="margin-top:14px">
+          <h2>群聊流式 TestAgent 复核合并</h2>
+          <TaskExperienceCard :card="groupLiveTestAgentReviewMergedCard" @action="handleTaskAction" />
         </div>
         <div id="case-work-item-next" style="margin-top:14px">
           <h2>执行队列后续派发</h2>
@@ -2444,6 +2841,11 @@ const FixtureApp = {
           <h2>全局历史完成态</h2>
           <TaskExperienceCard :card="globalHistoryCard" context="global" @action="handleTaskAction" />
         </div>
+        <div id="case-global-test-agent-coverage-relay" style="margin-top:14px">
+          <h2>全局 TestAgent 复核覆盖提醒</h2>
+          <TaskExperienceCard :card="globalTestAgentUnknownCoverageCard" context="global" @action="handleTaskAction" />
+          <TaskExperienceCard :card="globalTestAgentNotVerifiedCoverageCard" context="global" @action="handleTaskAction" />
+        </div>
         <div id="case-global-direct-dispatch" style="margin-top:14px">
           <h2>全局直派已接管</h2>
           <TaskExperienceCard :card="globalDirectDispatchCard" context="global" @action="handleTaskAction" />
@@ -2469,6 +2871,15 @@ const FixtureApp = {
         <ProjectTaskIntakeMessage :msg="groupIntakeMessage" :display-content="groupIntakeMessage.content" :accent-style="{ '--agent-accent': '#2563eb' }">
           <TaskCollaborationCard :card="groupIntakeMessage.taskCard" :runtime="groupIntakeMessage.taskRuntime" @action="handleTaskAction" />
         </ProjectTaskIntakeMessage>
+      </section>
+
+      <section id="case-agent-qa-message" class="fixture-case">
+        <h2>协作问答消息</h2>
+        <AgentQaMessage
+          :msg="agentQaVisibleMessage"
+          :accent-style="{ '--agent-accent': '#2563eb' }"
+          :get-agent-display-name="agentDisplayName"
+        />
       </section>
 
       <section id="case-child-agent" class="fixture-case">

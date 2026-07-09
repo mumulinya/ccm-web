@@ -13,6 +13,11 @@ function compactUserFacingText(value, max = 260) {
 }
 function sanitizeMainAgentRoleLanguage(value) {
     return String(value || "")
+        .replace(/全局\s*监工/g, "全局任务跟进")
+        .replace(/监工中/g, "持续跟进中")
+        .replace(/监工状态/g, "持续跟进状态")
+        .replace(/异步监工/g, "持续跟进")
+        .replace(/持久监工/g, "持续跟进")
         .replace(/全局主\s*Agent/g, "我")
         .replace(/全局\s*Agent/g, "我")
         .replace(/群聊主\s*Agent/g, "协作群")

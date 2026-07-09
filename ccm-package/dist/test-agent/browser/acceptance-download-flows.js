@@ -40,8 +40,11 @@ function explicitUrlPath(criterion) {
     return clean(match?.[2] || "").replace(/[),.;:!?，。；：！？]+$/g, "");
 }
 function looksLikeDownloadCriterion(criterion) {
-    return /\b(?:download|downloads|downloaded|export|exports|exported)\b/i.test(criterion)
-        && /\b(?:click|clicking|press|tap)\b/i.test(criterion);
+    const hasDownload = /\b(?:download|downloads|downloaded|export|exports|exported)\b/i.test(criterion)
+        || /(?:下载|导出)/.test(criterion);
+    const hasClick = /\b(?:click|clicking|press|tap)\b/i.test(criterion)
+        || /(?:点击|点按|轻触|按下)/.test(criterion);
+    return hasDownload && hasClick;
 }
 function looksLikeFileName(value) {
     return /^[^\\/:*?"<>|\r\n]+\.[a-z0-9]{1,12}$/i.test(value.trim());
@@ -54,14 +57,14 @@ function fileNameFromCriterion(criterion) {
     return clean(match?.[1] || "");
 }
 function buttonNameFromCriterion(criterion, fileName) {
-    const quoted = firstQuotedAfter(criterion, /\b(?:click|clicking|press|tap)\b[^"'`“‘「『]{0,80}["'`“‘「『]/i);
+    const quoted = firstQuotedAfter(criterion, /(?:\b(?:click|clicking|press|tap)\b|点击|点按|轻触|按下)[^"'`“‘「『]{0,80}["'`“‘「『]/i);
     if (quoted && quoted !== fileName)
         return quoted;
     const match = /\b(?:click|clicking|press|tap)\s+(?:the\s+)?(?:button\s+)?([a-zA-Z][^,.;]{1,80}?)(?:\s+(?:then|and)\b|\s+(?:to\s+)?(?:download|export)s?\b|$)/i.exec(criterion);
     return clean(match?.[1] || "").replace(/^["'`“‘「『]+|["'`”’」』]+$/g, "");
 }
 function contentIncludesFromCriterion(criterion, fileName, buttonName) {
-    const quoted = firstQuotedAfter(criterion, /\b(?:contain|contains|containing|include|includes|including|with)\b[^"'`“‘「『]{0,80}["'`“‘「『]/i);
+    const quoted = firstQuotedAfter(criterion, /(?:\b(?:contain|contains|containing|include|includes|including|with)\b|内容包含|包含|包括|含有)[^"'`“‘「『]{0,80}["'`“‘「『]/i);
     if (quoted && quoted !== fileName && quoted !== buttonName)
         return quoted;
     const candidates = quotedText(criterion).filter(item => item !== fileName && item !== buttonName);
@@ -132,6 +135,14 @@ function buildAcceptanceDownloadFlowBrowserChecks(project, acceptanceCriteria = 
         name: flowName(project, flow),
         url: flow.url,
         probeType: exports.ACCEPTANCE_DOWNLOAD_FLOW_PROBE_TYPE,
+        context: {
+            source: "acceptance_criteria",
+            generatedBy: exports.ACCEPTANCE_DOWNLOAD_FLOW_PROBE_TYPE,
+            acceptanceCriteria: [flow.criterion],
+            buttonName: flow.buttonName,
+            fileName: flow.fileName,
+            contentIncludes: flow.contentIncludes,
+        },
         actions: flowActions(flow),
         assertions: flowAssertions(flow),
         screenshot: true,

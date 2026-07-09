@@ -3,6 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import {
   BrowserEvidenceArtifact,
+  BrowserProviderGapItem,
   BrowserCheckResult,
   BrowserToolCallRecord,
   CommandRunResult,
@@ -13,6 +14,10 @@ import {
   TestAgentArtifactManifestItem,
   TestAgentReport,
 } from "./types";
+import { buildAcceptanceSummary, formatAcceptanceMarkdownSummaryLines } from "./acceptance-summary";
+import { buildRequiredCheckSummary, formatRequiredCheckMarkdownSummaryLines } from "./required-check-summary";
+import { formatBrowserProviderGapLine } from "./browser/provider-gaps";
+import { formatBrowserProviderSummaryLine } from "./browser/provider-summary";
 import { compactText, ensureDir, nowIso } from "./utils";
 import { buildTestAgentVerdict } from "./verdict";
 
@@ -67,9 +72,17 @@ function browserLine(result: BrowserCheckResult) {
   const finalUrl = result.finalUrl && result.finalUrl !== result.url ? `; final=${result.finalUrl}` : "";
   const viewport = result.viewport ? `; viewport=${result.viewport.width}x${result.viewport.height}${result.viewport.isMobile ? "; mobile" : ""}` : "";
   const browserContext = result.contextOptions ? `; context=${browserContextOptionsSummary(result.contextOptions)}` : "";
+  const source = browserSourceSummary(result.context);
   const artifacts = (result.browserArtifacts || []).length;
-  const detail = result.error || `${result.url}${finalUrl}${viewport}${browserContext}; steps=${result.steps.length}; screenshots=${result.screenshots.length}; artifacts=${artifacts}${result.probeType ? `; probe=${result.probeType}` : ""}`;
+  const detail = result.error || `${result.url}${finalUrl}${viewport}${browserContext}${source ? `; source=${source}` : ""}; steps=${result.steps.length}; screenshots=${result.screenshots.length}; artifacts=${artifacts}${result.probeType ? `; probe=${result.probeType}` : ""}`;
   return statusLine(`${result.project} ${result.adversarial ? "adversarial " : ""}browser ${result.name}`, result.status, detail);
+}
+
+function browserSourceSummary(context: BrowserCheckResult["context"]) {
+  if (!context) return "";
+  const generatedBy = String(context.generatedBy || context.source || "").trim();
+  const criteria = Array.isArray(context.acceptanceCriteria) ? context.acceptanceCriteria.length : 0;
+  return [generatedBy, criteria ? `criteria=${criteria}` : ""].filter(Boolean).join("; ");
 }
 
 function browserContextOptionsSummary(contextOptions: NonNullable<BrowserCheckResult["contextOptions"]>) {
@@ -101,6 +114,33 @@ function browserInteractionSummaryLine(item: TestAgentReport["browserInteraction
   return statusLine(`${item.project} browser interactions ${item.name}`, item.status, detail);
 }
 
+function browserProviderGapLine(item: BrowserProviderGapItem) {
+  return statusLine(`${item.provider} ${item.category}`, "gap", formatBrowserProviderGapLine(item));
+}
+
+function browserProviderSummaryLines(report: TestAgentReport) {
+  const summary = report.browserProviderSummary;
+  if (!summary) return ["- none"];
+  const lines = [`- ${formatBrowserProviderSummaryLine(summary)}`];
+  for (const item of summary.items || []) {
+    const detail = [
+      `preferred=${item.preferred ? "yes" : "no"}`,
+      `available=${item.available ? "yes" : "no"}`,
+      `selected=${item.selected ? "yes" : "no"}`,
+      `attempted=${item.attempted ? "yes" : "no"}`,
+      `results=${item.resultCount}`,
+      `passed=${item.passed}`,
+      `failed=${item.failed}`,
+      `blocked=${item.blocked}`,
+      `skipped=${item.skipped}`,
+      item.reason ? `reason=${item.reason}` : "",
+      item.tools?.length ? `tools=${item.tools.length}` : "",
+    ].filter(Boolean).join("; ");
+    lines.push(statusLine(`${item.label || item.provider}`, item.provider, detail));
+  }
+  return lines;
+}
+
 function evidenceLine(item: EvidenceItem) {
   const target = item.path || item.detail || "";
   return statusLine(item.title, item.status, target);
@@ -109,6 +149,13 @@ function evidenceLine(item: EvidenceItem) {
 function requiredCheckLine(item: TestAgentReport["requiredCheckCoverage"][number]) {
   const detail = item.evidence.length ? item.evidence.join("; ") : item.missingReason || "";
   return statusLine(item.check, item.status, detail);
+}
+
+function failureSummaryLine(item: TestAgentReport["failureSummary"][number]) {
+  const evidence = item.evidence?.length ? `; evidence=${item.evidence.join("; ")}` : "";
+  const diagnostics = item.diagnostics?.length ? `; diagnostics=${item.diagnostics.join(" | ")}` : "";
+  const next = item.nextAction ? `; next=${item.nextAction}` : "";
+  return statusLine(`${item.type}${item.project ? ` ${item.project}` : ""} ${item.title}`, item.status, `${item.reason}${evidence}${diagnostics}${next}`);
 }
 
 function fence(value: any, max = 4000) {
@@ -200,6 +247,7 @@ function browserDetail(result: BrowserCheckResult, index: number) {
     `- Status: ${result.status}`,
     `- Adversarial: ${result.adversarial ? "yes" : "no"}`,
     ...(result.probeType ? [`- Probe type: ${result.probeType}`] : []),
+    ...(browserSourceSummary(result.context) ? [`- Source: ${browserSourceSummary(result.context)}`] : []),
     `- Provider: ${result.provider || "(unknown)"}`,
     `- URL: ${result.url}`,
     ...(result.finalUrl ? [`- Final URL: ${result.finalUrl}`] : []),
@@ -208,6 +256,13 @@ function browserDetail(result: BrowserCheckResult, index: number) {
     ...(result.title ? [`- Title: ${result.title}`] : []),
     `- Duration: ${result.durationMs}ms`,
     ...(result.error ? [`- Error: ${result.error}`] : []),
+    ...(result.context?.acceptanceCriteria ? [
+      "",
+      "**Acceptance source:**",
+      ...(Array.isArray(result.context.acceptanceCriteria) && result.context.acceptanceCriteria.length
+        ? result.context.acceptanceCriteria.map((criterion: string) => `- ${criterion}`)
+        : ["- none"]),
+    ] : []),
     "",
     "**Steps:**",
     ...steps,
@@ -305,6 +360,7 @@ function browserArtifactManifestType(artifact: BrowserEvidenceArtifact): TestAge
   if (artifact.type === "trace") return "browser_trace";
   if (artifact.type === "har") return "browser_har";
   if (artifact.type === "video") return "browser_video";
+  if (artifact.type === "accessibility_snapshot") return "browser_accessibility_snapshot";
   return "browser_artifact";
 }
 
@@ -428,6 +484,7 @@ export function buildTestAgentArtifactManifest(report: TestAgentReport, manifest
       reports: files.filter(item => item.type === "report_json" || item.type === "report_markdown").length,
       screenshots: files.filter(item => item.type === "screenshot").length,
       browserSnapshots: files.filter(item => item.type === "browser_snapshot").length,
+      browserAccessibilitySnapshots: files.filter(item => item.type === "browser_accessibility_snapshot").length,
       browserConsoleLogs: files.filter(item => item.type === "browser_console_log").length,
       browserPopupLogs: files.filter(item => item.type === "browser_popup_log").length,
       browserNetworkLogs: files.filter(item => item.type === "browser_network_log").length,
@@ -445,6 +502,8 @@ export function buildTestAgentArtifactManifest(report: TestAgentReport, manifest
 }
 
 export function buildTestAgentMarkdownReport(report: TestAgentReport) {
+  const requiredCheckSummary = buildRequiredCheckSummary(report.requiredCheckCoverage, { evidenceLimit: 1, textLimit: 260 });
+  const acceptanceSummary = buildAcceptanceSummary(report.acceptanceCoverage, { evidenceLimit: 1, textLimit: 260 });
   const lines = [
     `# TestAgent Report`,
     "",
@@ -481,9 +540,29 @@ export function buildTestAgentMarkdownReport(report: TestAgentReport) {
     "",
     ...((report.browserInteractionSummary || []).length ? (report.browserInteractionSummary || []).map(browserInteractionSummaryLine) : ["- none"]),
     "",
+    "## Browser Provider Summary",
+    "",
+    ...browserProviderSummaryLines(report),
+    "",
+    "## Browser Provider Gaps",
+    "",
+    ...((report.browserProviderGaps || []).length ? (report.browserProviderGaps || []).map(browserProviderGapLine) : ["- none"]),
+    "",
+    "## Failure Summary",
+    "",
+    ...((report.failureSummary || []).length ? (report.failureSummary || []).map(failureSummaryLine) : ["- none"]),
+    "",
+    "## Required Check Summary",
+    "",
+    ...formatRequiredCheckMarkdownSummaryLines(requiredCheckSummary),
+    "",
     "## Required Check Coverage",
     "",
     ...(report.requiredCheckCoverage.length ? report.requiredCheckCoverage.map(requiredCheckLine) : ["- none"]),
+    "",
+    "## Acceptance Summary",
+    "",
+    ...formatAcceptanceMarkdownSummaryLines(acceptanceSummary),
     "",
     "## Acceptance Coverage",
     "",

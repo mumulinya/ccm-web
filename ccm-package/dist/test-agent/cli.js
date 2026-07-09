@@ -44,6 +44,11 @@ const artifact_verifier_1 = require("./artifact-verifier");
 const cli_options_1 = require("./cli-options");
 const contract_1 = require("./contract");
 const execution_plan_1 = require("./execution-plan");
+const provider_gaps_1 = require("./browser/provider-gaps");
+const provider_summary_1 = require("./browser/provider-summary");
+const acceptance_summary_1 = require("./acceptance-summary");
+const required_check_summary_1 = require("./required-check-summary");
+const self_test_matrix_1 = require("./self-test-matrix");
 function exitCodeForReport(report) {
     if (report.status === "passed")
         return 0;
@@ -87,10 +92,11 @@ function formatTestAgentCliValidationSummary(validation) {
     return `${lines.join("\n")}\n`;
 }
 function formatTestAgentCliReportSummary(report) {
-    const coverage = report.requiredCheckCoverage.map(item => `${item.check}:${item.status}`).join(", ") || "none";
-    const acceptance = statusCounts(report.acceptanceCoverage);
+    const requiredCheckSummary = (0, required_check_summary_1.buildRequiredCheckSummary)(report.requiredCheckCoverage, { evidenceLimit: 1, textLimit: 220 });
+    const acceptanceSummary = (0, acceptance_summary_1.buildAcceptanceSummary)(report.acceptanceCoverage, { evidenceLimit: 1, textLimit: 220 });
     const networkErrors = (report.browserNetworkSummary || []).reduce((sum, item) => sum + Number(item.errorCount || 0), 0);
     const failedNetworkUrls = (report.browserNetworkSummary || []).flatMap(item => item.failedUrls || []).slice(0, 3);
+    const browserProviderGaps = report.browserProviderGaps || [];
     const lines = [
         `TestAgent report: ${report.status} (${report.recommendation})`,
         `Summary: ${report.summary}`,
@@ -99,8 +105,17 @@ function formatTestAgentCliReportSummary(report) {
         `HTTP checks: ${statusCounts(report.httpResults)}`,
         `Browser checks: ${statusCounts(report.browserResults)}`,
         `Browser network: errors:${networkErrors}${failedNetworkUrls.length ? ` failed:${failedNetworkUrls.join(", ")}` : ""}`,
-        `Required checks: ${coverage}`,
-        `Acceptance coverage: ${acceptance}`,
+        `Browser providers: ${(0, provider_summary_1.formatBrowserProviderSummaryLine)(report.browserProviderSummary)}`,
+        `Browser provider gaps: ${browserProviderGaps.length}`,
+        ...browserProviderGaps.slice(0, 5).map(item => `- ${(0, provider_gaps_1.formatBrowserProviderGapLine)(item)}`),
+        `Required checks: ${(0, required_check_summary_1.formatRequiredCheckStatusCounts)(requiredCheckSummary)}`,
+        ...(0, required_check_summary_1.formatRequiredCheckAttentionLines)(requiredCheckSummary, 5),
+        ...(0, required_check_summary_1.formatRequiredCheckVerifiedEvidenceLines)(requiredCheckSummary, 3),
+        `Acceptance coverage: ${(0, acceptance_summary_1.formatAcceptanceStatusCounts)(acceptanceSummary)}`,
+        `Acceptance match strength: ${(0, acceptance_summary_1.formatAcceptanceMatchStrengthCounts)(acceptanceSummary)}`,
+        `Acceptance evidence source: ${(0, acceptance_summary_1.formatAcceptanceEvidenceSourceCounts)(acceptanceSummary)}`,
+        ...(0, acceptance_summary_1.formatAcceptanceAttentionLines)(acceptanceSummary, 5),
+        ...(0, acceptance_summary_1.formatAcceptanceVerifiedEvidenceLines)(acceptanceSummary, 3),
         `Artifacts: ${report.artifactDir}`,
     ];
     if (report.risks.length)
@@ -132,6 +147,8 @@ function formatTestAgentCliExecutionPlanSummary(plan) {
         `HTTP checks: ${plan.summary.httpChecks} (adversarial ${plan.summary.adversarialHttpChecks})`,
         `Browser checks: ${plan.summary.browserChecks} (auto ${plan.summary.autoBrowserChecks}, adversarial ${plan.summary.adversarialBrowserChecks})`,
         `Browser provider: ${plan.browserProvider}`,
+        `Browser provider warnings: ${plan.browserProviderWarnings?.length || 0}`,
+        ...(plan.browserProviderWarnings || []).slice(0, 5).map(item => `- ${(0, provider_gaps_1.formatBrowserProviderPlanWarningLine)(item)}`),
         `Expected artifacts: ${plan.summary.expectedArtifactTypes.join(", ") || "none"}`,
         `Artifact dir: ${plan.artifactDir}`,
         ...formatIssues("Issues", plan.issues),
@@ -172,6 +189,7 @@ async function runTestAgentCli(args = process.argv.slice(2), io = {}) {
     const stderr = io.stderr || process.stderr;
     const readFile = io.readFile || ((file) => fs.readFileSync(file, "utf-8"));
     const runAgent = io.runAgent || agent_1.runTestAgent;
+    const runSelfTestMatrix = io.runSelfTestMatrix || self_test_matrix_1.runTestAgentSelfTestMatrix;
     const parsed = (0, cli_options_1.parseTestAgentCliArgs)(args);
     const { options, errors } = parsed;
     if (options.help) {
@@ -181,6 +199,19 @@ async function runTestAgentCli(args = process.argv.slice(2), io = {}) {
     if (errors.length) {
         stderr.write(`${(0, cli_options_1.testAgentCliUsage)()}\n\n${errors.map(error => `Error: ${error}`).join("\n")}\n`);
         return { exitCode: 2 };
+    }
+    if (options.selfTestMatrix) {
+        const report = await runSelfTestMatrix({
+            ...(options.selfTestModulePath ? { selfTestModulePath: options.selfTestModulePath } : {}),
+            ...(options.selfTestNames.length ? { names: options.selfTestNames } : {}),
+            ...(options.selfTestPattern ? { pattern: options.selfTestPattern } : {}),
+            ...(options.selfTestTimeoutMs ? { timeoutMs: options.selfTestTimeoutMs } : {}),
+            ...(options.selfTestStopOnFailure ? { stopOnFailure: true } : {}),
+        });
+        stdout.write(options.summary
+            ? `${(0, self_test_matrix_1.formatTestAgentSelfTestMatrixSummary)(report)}\n`
+            : `${JSON.stringify(report, null, 2)}\n`);
+        return { exitCode: report.pass ? 0 : 1 };
     }
     if (options.verifyArtifactsPath) {
         const manifestJson = parseWorkOrderJson(options.verifyArtifactsPath, readFile, "artifact manifest");

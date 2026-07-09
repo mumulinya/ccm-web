@@ -41,10 +41,13 @@ const zlib = __importStar(require("zlib"));
 const utils_1 = require("../utils");
 const provider_types_1 = require("./provider-types");
 const semantic_locator_1 = require("./semantic-locator");
+const accessibility_snapshot_artifacts_1 = require("./accessibility-snapshot-artifacts");
+const failure_screenshots_1 = require("./failure-screenshots");
 const shared_1 = require("./shared");
 const network_assertions_1 = require("./network-assertions");
 const console_assertions_1 = require("./console-assertions");
 const accessibility_assertions_1 = require("./accessibility-assertions");
+const aria_state_assertions_1 = require("./aria-state-assertions");
 const PLAYWRIGHT_LAUNCH_ATTEMPTS = [
     { label: "bundled-chromium", options: {} },
     { label: "msedge-channel", options: { channel: "msedge" } },
@@ -143,8 +146,9 @@ function cookieName(assertion) {
 }
 function cookieAssertionDetail(assertion) {
     const name = cookieName(assertion);
-    const expected = assertion.type === "cookieValueIncludes" ? String(assertion.value ?? assertion.text ?? "") : "";
-    return `cookie=${name || "(missing)"}${expected ? `; expected substring length=${expected.length}` : ""}`;
+    const expected = assertion.type === "cookieValueIncludes" || assertion.type === "cookieValueEquals" ? String(assertion.value ?? assertion.text ?? "") : "";
+    const expectation = assertion.type === "cookieValueEquals" ? "expected length" : "expected substring length";
+    return `cookie=${name || "(missing)"}${expected ? `; ${expectation}=${expected.length}` : ""}`;
 }
 function inputValueAssertionDetail(assertion) {
     const expected = String(assertion.value ?? assertion.text ?? "");
@@ -426,6 +430,8 @@ function stateAssertionDetail(assertion) {
         return "document has no horizontal overflow";
     if (assertion.type === "inViewport")
         return `${(0, semantic_locator_1.browserTargetDetail)(assertion)} within viewport`;
+    if (assertion.type === "present" || assertion.type === "notPresent")
+        return `${(0, semantic_locator_1.browserTargetDetail)(assertion)} DOM ${assertion.type === "present" ? "present" : "absent"}`;
     if (assertion.type === "urlEquals" || assertion.type === "urlIncludes" || assertion.type === "urlNotIncludes" || assertion.type === "titleEquals" || assertion.type === "titleIncludes" || assertion.type === "titleNotIncludes")
         return urlTitleAssertionDetail(assertion);
     if (assertion.type === "onlineState" || assertion.type === "browserOnline" || assertion.type === "browserOffline")
@@ -436,6 +442,8 @@ function stateAssertionDetail(assertion) {
         || assertion.type === "accessibleDescriptionIncludes"
         || assertion.type === "ariaSnapshotIncludes")
         return (0, accessibility_assertions_1.browserAccessibilityAssertionDetail)(assertion);
+    if ((0, aria_state_assertions_1.isBrowserAriaStateAssertion)(assertion))
+        return (0, aria_state_assertions_1.browserAriaStateAssertionDetail)(assertion);
     if (assertion.type === "focused" || assertion.type === "notFocused")
         return (0, semantic_locator_1.browserTargetDetail)(assertion);
     if (assertion.type === "enabled" || assertion.type === "disabled")
@@ -2038,6 +2046,15 @@ async function runAssertion(page, assertion, signals, defaultTimeout) {
             if (visible)
                 throw new Error(`Expected target to be hidden: ${(0, semantic_locator_1.browserTargetDetail)(assertion)}`);
         }
+        else if (assertion.type === "present") {
+            await (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first().waitFor({ state: "attached", timeout });
+        }
+        else if (assertion.type === "notPresent") {
+            const locator = (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion);
+            const result = await waitForElementCount(locator, { ...assertion, type: "elementCountEquals", count: 0 }, timeout);
+            if (result.actual !== 0)
+                throw new Error(`Expected target to be absent from DOM, got actual count=${result.actual}: ${(0, semantic_locator_1.browserTargetDetail)(assertion)}.`);
+        }
         else if (assertion.type === "focused" || assertion.type === "notFocused") {
             const locator = (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first();
             const expectedFocused = assertion.type === "focused";
@@ -2233,6 +2250,13 @@ async function runAssertion(page, assertion, signals, defaultTimeout) {
                 throw new Error(`Expected accessibility assertion to pass: ${(0, accessibility_assertions_1.browserAccessibilityAssertionDetail)(assertion)}; actual length=${result.actualLength}.`);
             }
         }
+        else if ((0, aria_state_assertions_1.isBrowserAriaStateAssertion)(assertion)) {
+            const locator = (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first();
+            const result = await (0, aria_state_assertions_1.waitForBrowserAriaStateAssertion)(locator, assertion, timeout);
+            if (!result.passed) {
+                throw new Error(`Expected ARIA state assertion to pass: ${(0, aria_state_assertions_1.browserAriaStateAssertionDetail)(assertion)}; actual ${result.attribute}=${result.actual}.`);
+            }
+        }
         else if (assertion.type === "inViewport") {
             const locator = (0, semantic_locator_1.resolvePlaywrightLocator)(page, assertion).first();
             await locator.waitFor({ state: "visible", timeout });
@@ -2264,15 +2288,17 @@ async function runAssertion(page, assertion, signals, defaultTimeout) {
             if (!cookie)
                 throw new Error(`Expected browser cookie to exist: ${cookieAssertionDetail(assertion)}.`);
         }
-        else if (assertion.type === "cookieValueIncludes") {
+        else if (assertion.type === "cookieValueEquals" || assertion.type === "cookieValueIncludes") {
             const expected = String(assertion.value ?? assertion.text ?? "");
             if (!expected)
-                throw new Error("cookieValueIncludes requires value/text as the expected substring.");
+                throw new Error(`${assertion.type} requires value/text as the expected ${assertion.type === "cookieValueEquals" ? "value" : "substring"}.`);
             const cookie = await readBrowserCookie(page, assertion);
             if (!cookie)
                 throw new Error(`Expected browser cookie to exist: ${cookieAssertionDetail(assertion)}.`);
-            if (!String(cookie.value || "").includes(expected))
-                throw new Error(`Expected browser cookie value to include requested substring: ${cookieAssertionDetail(assertion)}.`);
+            const actual = String(cookie.value || "");
+            const passed = assertion.type === "cookieValueEquals" ? actual === expected : actual.includes(expected);
+            if (!passed)
+                throw new Error(`Expected browser cookie value to ${assertion.type === "cookieValueEquals" ? "equal requested value" : "include requested substring"}: ${cookieAssertionDetail(assertion)}.`);
         }
         else if (assertion.type === "consoleIncludes" || assertion.type === "consoleNotIncludes" || assertion.type === "consoleNoWarnings") {
             if (!(0, console_assertions_1.browserConsoleAssertionHasExpectation)(assertion))
@@ -2386,6 +2412,7 @@ async function runBrowserCheck(browser, context, project, check, index) {
     let traceStarted = false;
     const collectBrowserArtifacts = workOrder.options.collectBrowserArtifacts;
     const collectBrowserVideo = workOrder.options.collectBrowserVideo;
+    const normalScreenshotRequested = check.screenshot !== false || (0, utils_1.hasRequiredCheck)(workOrder.requiredChecks, /screenshot/i);
     const evidenceDir = collectBrowserArtifacts ? (0, utils_1.ensureDir)(path.join(workOrder.options.artifactDir, "browser-artifacts")) : "";
     const downloadDir = (0, utils_1.ensureDir)(path.join(workOrder.options.artifactDir, "browser-artifacts", "downloads"));
     const artifactBase = browserArtifactBase(project.name, name, index);
@@ -2536,7 +2563,18 @@ async function runBrowserCheck(browser, context, project, check, index) {
         if (pageErrors.length) {
             steps.push({ kind: "assertion", name: "assert:pageErrors", status: "failed", error: pageErrors.slice(0, 3).join(" | ") });
         }
-        if (check.screenshot !== false || (0, utils_1.hasRequiredCheck)(workOrder.requiredChecks, /screenshot/i)) {
+        const failedStep = steps.find(step => step.status === "failed");
+        if (failedStep && !normalScreenshotRequested) {
+            screenshots.push(...await (0, failure_screenshots_1.writePlaywrightFailureScreenshot)({
+                page,
+                artifactDir: workOrder.options.artifactDir,
+                projectName: project.name,
+                checkName: name,
+                index,
+                failedStep,
+            }));
+        }
+        if (normalScreenshotRequested) {
             const screenshotDir = (0, utils_1.ensureDir)(path.join(workOrder.options.artifactDir, "screenshots"));
             const screenshotPath = path.join(screenshotDir, `${(0, utils_1.safeSegment)(project.name)}-${(0, utils_1.safeSegment)(name)}-${index + 1}.png`);
             await page.screenshot({ path: screenshotPath, fullPage: true });
@@ -2545,6 +2583,7 @@ async function runBrowserCheck(browser, context, project, check, index) {
         if (popupCapturePromises.length)
             await Promise.all(popupCapturePromises);
         pageSnapshots.push(...await writePlaywrightPageSnapshots(page, workOrder.options.artifactDir, project.name, name, index));
+        browserArtifacts.push(...await (0, accessibility_snapshot_artifacts_1.writePlaywrightAccessibilitySnapshotArtifact)(page, workOrder.options.artifactDir, project.name, name, index));
         const finalState = await capturePageFinalState(page);
         const telemetryLogs = writeBrowserTelemetryLogs({
             artifactDir: workOrder.options.artifactDir,
@@ -2594,13 +2633,25 @@ async function runBrowserCheck(browser, context, project, check, index) {
             ...telemetryLogs,
             adversarial: check.adversarial === true,
             probeType: check.probeType || check.probe_type,
+            context: check.context,
         };
     }
     catch (error) {
         const finalState = await capturePageFinalState(page);
         if (popupCapturePromises.length)
             await Promise.all(popupCapturePromises).catch(() => []);
+        if (!normalScreenshotRequested) {
+            screenshots.push(...await (0, failure_screenshots_1.writePlaywrightFailureScreenshot)({
+                page,
+                artifactDir: context.workOrder.options.artifactDir,
+                projectName: project.name,
+                checkName: name,
+                index,
+                failedStep: steps.find(step => step.status === "failed"),
+            }).catch(() => []));
+        }
         pageSnapshots.push(...await writePlaywrightPageSnapshots(page, context.workOrder.options.artifactDir, project.name, name, index).catch(() => []));
+        browserArtifacts.push(...await (0, accessibility_snapshot_artifacts_1.writePlaywrightAccessibilitySnapshotArtifact)(page, context.workOrder.options.artifactDir, project.name, name, index).catch(() => []));
         const telemetryLogs = writeBrowserTelemetryLogs({
             artifactDir: context.workOrder.options.artifactDir,
             projectName: project.name,
@@ -2656,6 +2707,7 @@ async function runBrowserCheck(browser, context, project, check, index) {
             ...telemetryLogs,
             adversarial: check.adversarial === true,
             probeType: check.probeType || check.probe_type,
+            context: check.context,
             error: error.message || String(error),
         };
     }

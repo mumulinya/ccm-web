@@ -29,15 +29,15 @@ const title = computed(() => {
   return `${from} 向 ${to} 提问`
 })
 const statusLabelMap = {
-  waiting: '等待目标 Agent',
-  asking: '目标 Agent 工作中',
+  waiting: '等待目标成员',
+  asking: '目标成员处理中',
   answered: '已回答',
-  injected: '已注入原 Agent',
-  resumed: '原 Agent 已续跑',
+  injected: '已交回提问方',
+  resumed: '提问方已继续处理',
   failed: '回答失败',
   timeout: '已超时',
   needs_user: '等待用户确认',
-  manual: '人工接管',
+  manual: '人工接手',
   rejected: '已拒绝',
 }
 const statusLabel = computed(() => statusLabelMap[qa.value.status] || qa.value.status || '问答中')
@@ -62,7 +62,7 @@ const meta = computed(() => {
   }
   return parts.join(' · ')
 })
-const visibleSummary = computed(() => userPreview.value.summary || sanitizeUserFacingAgentText(props.msg.display_content || props.msg.content || qa.value.content || '', 'Agent 问答进展已更新。', 260))
+const visibleSummary = computed(() => userPreview.value.summary || sanitizeUserFacingAgentText(props.msg.display_content || props.msg.content || qa.value.content || '', '协作问答进展已更新。', 260))
 const visibleQuestion = computed(() => userPreview.value.question || (qa.value.question ? sanitizeUserFacingAgentText(qa.value.question, '问题原文已放入技术详情。', 180) : ''))
 const visibleAnswer = computed(() => userPreview.value.answer || (qa.value.answer ? sanitizeUserFacingAgentText(qa.value.answer, '回答详情已放入技术详情。', 220) : ''))
 const visibleNextAction = computed(() => userPreview.value.next_action || '')
@@ -120,7 +120,7 @@ const isLoading = (action) => !!props.actionLoading[`${qa.value.id}:${action}`]
         class="btn btn-sm btn-outline"
         :disabled="isLoading('manual')"
         @click="emit('action', 'manual')"
-      >人工接管</button>
+      >人工接手</button>
       <button
         v-if="canArbitrate"
         class="btn btn-sm btn-outline"

@@ -152,7 +152,7 @@ function buildGroupTaskIntakeSummary(input) {
             : `我已接管「${goal}」，会按任务链路继续推进。`,
         items: [
             { label: "负责人", value: `${(0, user_facing_text_1.sanitizeMainAgentRoleLanguage)(input.coordinator || "我")} 已接管需求` },
-            { label: "执行前检查", value: requiresConfirmation ? "计划已生成，需先确认范围" : "只读检查已完成" },
+            { label: "执行前检查", value: requiresConfirmation ? "计划已生成，需先确认范围" : "只读检查已通过" },
             { label: "队列状态", value: queueText },
             { label: "后续跟踪", value: "等待执行成员提交结果说明，我再验收和总结" },
         ],
@@ -478,7 +478,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         intake_draft: planModePreflight,
                         status_detail: planModePreflight.requires_confirmation
                             ? "执行前计划已准备好，等待你确认后才会安排执行成员"
-                            : "执行前计划已完成，低风险任务自动进入执行队列",
+                            : "执行前计划已就绪，低风险任务自动进入执行队列",
                         workflow_meta: {
                             ...(task.workflow_meta || {}),
                             plan_mode: planModePreflight,
@@ -498,7 +498,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     }) || task;
                     const intakeTimelineEvent = appendTaskTimelineEvent(task.id, {
                         type: planModePreflight.requires_confirmation ? "plan_mode_waiting_confirmation" : "plan_mode_auto_continue",
-                        title: planModePreflight.requires_confirmation ? "执行前计划已生成" : "执行前计划已完成",
+                        title: planModePreflight.requires_confirmation ? "执行前计划已生成" : "执行前计划已就绪",
                         detail: planModePreflight.risk?.summary || taskTitle,
                         status: "active",
                         phase: "intake",
@@ -508,7 +508,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     const intakeProgressCheckpoint = {
                         schema: "ccm-main-agent-live-checkpoint-v1",
                         id: intakeTimelineEvent?.id || `intake-${task.id}`,
-                        label: planModePreflight.requires_confirmation ? "执行前计划已生成" : "执行前计划已完成",
+                        label: planModePreflight.requires_confirmation ? "执行前计划已生成" : "执行前计划已就绪",
                         detail: compactMemoryText(planModePreflight.risk?.summary || taskTitle, 180),
                         status: "active",
                         phase: "intake",
@@ -519,7 +519,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     const understoodGoal = compactMemoryText(userMessage || task.title, 180).replace(/[。.!！]+$/g, "");
                     const receiptContent = planModePreflight.requires_confirmation
                         ? `我先按只读方式看了一轮：${understoodGoal}。这个需求${planModePreflight.risk?.summary ? `因为「${planModePreflight.risk.summary}」` : "需要先确认范围"}，我已经整理好执行前计划。你确认后，我再安排执行成员开始修改。`
-                        : `我明白了：${understoodGoal}。我已完成执行前只读检查，风险较低，会进入队列开始修改和检查，进度会持续更新在下方任务卡中。`;
+                        : `我明白了：${understoodGoal}。执行前只读检查已通过，风险较低，会进入队列开始修改和检查，进度会持续更新在下方任务卡中。`;
                     const queueResult = task.auto_execute && task.intake_state !== "awaiting_confirmation"
                         ? enqueueTask(task.id, ctx)
                         : { queued: false, message: planModePreflight.requires_confirmation ? "任务已创建，等待用户确认执行前计划" : "任务已创建，等待手动启动" };
@@ -770,7 +770,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                         });
                         updateGroupMemory(group_id, {
                             currentPhase: workflowMeta.phase,
-                            decision: `${dispatchPolicy?.action || "unknown"}：${dispatchPolicy?.reason || "我已完成派发判断"}`,
+                            decision: `${dispatchPolicy?.action || "unknown"}：${dispatchPolicy?.reason || "派发判断已整理"}`,
                             reason: dispatchPolicy?.risk || "",
                             nextAction: clarificationSummary?.next_action || dispatchPolicy?.nextStep || (planAssignments.length ? "等待执行成员提交结果说明" : "等待用户继续补充"),
                         });
@@ -979,7 +979,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     });
                     updateGroupMemory(group_id, {
                         currentPhase: workflowMeta2.phase,
-                        decision: `${dispatchPolicy2?.action || "unknown"}：${dispatchPolicy2?.reason || "我已完成派发判断"}`,
+                        decision: `${dispatchPolicy2?.action || "unknown"}：${dispatchPolicy2?.reason || "派发判断已整理"}`,
                         reason: dispatchPolicy2?.risk || "",
                         nextAction: dispatchPolicy2?.nextStep || (planAssignments2.length ? "等待执行成员提交结果说明" : "等待用户继续补充"),
                     });
@@ -1318,7 +1318,7 @@ function handleGroupLiveRoutes(req, res, parsed, ctx, deps) {
                     id: "m" + Date.now().toString(36) + "decompose",
                     role: "assistant",
                     agent: coordinator.project,
-                    content: `📋 需求分解完成，共 ${createdTasks.length} 个任务：\n${createdTasks.map((t, i) => `${i + 1}. [${t.target_project}] ${t.title}`).join("\n")}`,
+                    content: `📋 需求已分解，共 ${createdTasks.length} 个任务：\n${createdTasks.map((t, i) => `${i + 1}. [${t.target_project}] ${t.title}`).join("\n")}`,
                     timestamp: new Date().toISOString(),
                 });
                 (0, utils_1.sendJson)(res, { success: true, tasks: createdTasks, raw_output: output });

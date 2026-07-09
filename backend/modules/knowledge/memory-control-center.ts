@@ -26,6 +26,7 @@ const GROUP_MEMORY_WORKER_CONTEXT_COMPACT_HOOKS_DIR = path.join(CCM_DIR, "group-
 const GROUP_MEMORY_WORKER_CONTEXT_COMPACT_OUTCOMES_DIR = path.join(CCM_DIR, "group-memory-worker-context-compact-outcomes");
 const GROUP_MEMORY_WORKER_CONTEXT_COMPACT_STRATEGIES_DIR = path.join(CCM_DIR, "group-memory-worker-context-compact-strategies");
 const GROUP_MEMORY_WORKER_CONTEXT_PTL_EMERGENCIES_DIR = path.join(CCM_DIR, "group-memory-worker-context-ptl-emergencies");
+const GROUP_TYPED_MEMORY_MD_DIR = path.join(CCM_DIR, "group-memory-md");
 const GROUP_SESSION_MEMORY_DIR = path.join(CCM_DIR, "group-session-memory");
 const GROUP_TOOL_CONTINUITY_DIR = path.join(CCM_DIR, "group-tool-continuity");
 const GROUP_COMPACT_FILE_REFERENCE_DIR = path.join(CCM_DIR, "group-memory-file-references");
@@ -399,6 +400,10 @@ function compactMemoryCenterText(value: any, max = 360) {
   return text.length > max ? `${text.slice(0, Math.max(1, max - 1))}…` : text;
 }
 
+function uniqueStrings(values: any[] = [], limit = 40) {
+  return [...new Set(values.map((item: any) => String(item || "").trim()).filter(Boolean))].slice(0, limit);
+}
+
 function summarizePostCompactUsageRow(row: any = {}) {
   return {
     candidate_id: String(row.candidate_id || row.candidateId || ""),
@@ -597,13 +602,32 @@ export function buildGroupPostCompactUsageDiagnostics(groupId: string, memory: a
     const apiMicrocompactReceiptDiscipline = buildApiMicrocompactReceiptDisciplineReport({ groupIds: [id], taskLimit: 160 }).groups?.[0] || null;
     const apiMicrocompactNativeApplyReadiness = buildApiMicrocompactNativeApplyReadinessReport({ groupIds: [id], taskLimit: 160 }).groups?.[0] || null;
     const apiMicrocompactNativeApplyProof = buildApiMicrocompactNativeApplyProofReport({ groupIds: [id], taskLimit: 160 }).groups?.[0] || null;
+    const crossGroupPressureRecallUsage = buildWorkerContextPacketCrossGroupPressureRecallUsageReport({ groupIds: [id] }).groups?.[0] || null;
+    const pressureProvenanceFeedbackPolicyRepairWorkItems = syncWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItems(
+      id,
+      workerContextPacketPressureProvenanceFeedbackPolicyActionableRows(id)
+    );
+    const pressureProvenanceFeedbackComplianceHealth = buildWorkerContextPacketPressureProvenanceFeedbackComplianceHealthReport({
+      groupIds: [id],
+      syncRepairWorkItems: false,
+    }).groups?.[0] || null;
+    const pressureProvenanceFeedbackProviderDispatchAdvisory = buildWorkerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport({
+      groupIds: [id],
+      syncRepairWorkItems: false,
+      complianceHealthReport: {
+        groups: pressureProvenanceFeedbackComplianceHealth ? [pressureProvenanceFeedbackComplianceHealth] : [],
+      },
+    }).groups?.[0] || null;
     const apiMicrocompactNativeApplyProofRepairWorkItems = apiMicrocompactNativeApplyProof
       ? syncApiMicrocompactNativeApplyProofRepairWorkItems(id, apiMicrocompactNativeApplyProof)
       : replayRepairWorkItems;
     const readPlanRevalidationRepairWorkItems = compactFileReferenceReadPlanRevalidationDiscipline
       ? syncCompactFileReferenceReadPlanRevalidationRepairWorkItems(id, compactFileReferenceReadPlanRevalidationDiscipline)
       : apiMicrocompactNativeApplyProofRepairWorkItems;
-    const replayRepairWorkItemsFinal = readPlanRevalidationRepairWorkItems || replayRepairWorkItems;
+    const crossGroupPressureRecallUsageRepairWorkItems = crossGroupPressureRecallUsage
+      ? syncCrossGroupPressureRecallUsageRepairWorkItems(id, crossGroupPressureRecallUsage)
+      : readPlanRevalidationRepairWorkItems;
+    const replayRepairWorkItemsFinal = pressureProvenanceFeedbackPolicyRepairWorkItems || crossGroupPressureRecallUsageRepairWorkItems || readPlanRevalidationRepairWorkItems || replayRepairWorkItems;
     const replayRepairDispatchCandidatesFinal = buildReplayRepairMainAgentDispatchCandidates(id);
     const taskAgentMemoryContextSnapshots = buildGroupTaskAgentMemoryContextSnapshotOverview(id);
     const compactFileReferenceReadPlanRevalidationSessionBinding = compactFileReferenceReadPlanRevalidationDiscipline ? {
@@ -675,6 +699,11 @@ export function buildGroupPostCompactUsageDiagnostics(groupId: string, memory: a
       apiMicrocompactNativeApplyReadiness,
       apiMicrocompactNativeApplyProof,
       apiMicrocompactNativeApplyProofRepairWorkItems,
+      crossGroupPressureRecallUsage,
+      crossGroupPressureRecallUsageRepairWorkItems,
+      pressureProvenanceFeedbackPolicyRepairWorkItems,
+      pressureProvenanceFeedbackComplianceHealth,
+      pressureProvenanceFeedbackProviderDispatchAdvisory,
       compactionHooks: hookLedger,
       boundaryReplay: replay,
       replayRepairWorkItems: replayRepairWorkItemsFinal,
@@ -5686,6 +5715,9 @@ function buildReplayRepairDispatchCandidate(groupId: string, item: any = {}, ind
     binding_id: item.binding_id || item.worker_context_packet_binding_id || "",
     assignment_id: item.assignment_id || "",
     dispatch_key: item.dispatch_key || "",
+    pressure_memory_provenance_gap_codes: item.pressure_memory_provenance_gap_codes || [],
+    pressure_memory_provenance_repair_work_item_ids: item.pressure_memory_provenance_repair_work_item_ids || [],
+    pressure_memory_provenance_rel_paths: item.pressure_memory_provenance_rel_paths || [],
     request_telemetry_entry_id: item.request_telemetry_entry_id || "",
     request_telemetry_status: item.request_telemetry_status || "",
     request_telemetry_source: item.request_telemetry_source || "",
@@ -8687,6 +8719,4981 @@ function evaluateWorkerContextPacketContextUsageRepairTypedMemory(options: any =
   return check;
 }
 
+function workerContextPacketTypedMemoryPressureRecall(entry: any = {}) {
+  return entry.worker_context_packet_typed_memory_pressure_recall
+    || entry.workerContextPacketTypedMemoryPressureRecall
+    || entry.worker_context_packet?.typed_memory_pressure_recall
+    || entry.workerContextPacket?.typedMemoryPressureRecall
+    || null;
+}
+
+function buildWorkerContextPacketPressureRecallTypedMemoryUsageReport(options: any = {}) {
+  const {
+    buildGroupTypedMemoryPressureRecallUsageSummary,
+    readGroupTypedMemoryPressureRecallUsageLedger,
+  } = require("../collaboration/group-memory-index");
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const usageLedger = readGroupTypedMemoryPressureRecallUsageLedger(groupId);
+    const usageSummary = buildGroupTypedMemoryPressureRecallUsageSummary(groupId, {
+      nowMs: options.nowMs || options.now_ms,
+      now: options.now,
+      generatedAt: options.generatedAt || options.generated_at,
+      usageHalfLifeDays: options.usageHalfLifeDays || options.usage_half_life_days,
+      usageStaleAfterDays: options.usageStaleAfterDays || options.usage_stale_after_days,
+      disableUsageAging: options.disableUsageAging || options.disable_usage_aging,
+    });
+    const entries = (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+      .filter((entry: any) => entry.worker_context_packet_id || workerContextPacketContextUsage(entry));
+    const pressureRows = entries
+      .map((entry: any) => {
+        const usage = workerContextPacketContextUsage(entry) || {};
+        const pressureStatus = workerContextPacketContextUsagePressureStatus(usage);
+        return { entry, usage, pressureStatus, pressureRecall: workerContextPacketTypedMemoryPressureRecall(entry) || {} };
+      })
+      .filter((row: any) => row.usage?.schema === "ccm-worker-context-usage-v1" && row.pressureStatus);
+    const checked = pressureRows.map((row: any) => {
+      const docs = Array.isArray(row.pressureRecall.docs) ? row.pressureRecall.docs : [];
+      const relPaths = new Set(docs.map((doc: any) => String(doc.rel_path || doc.relPath || "").trim().toLowerCase()).filter(Boolean));
+      const targetProject = String(row.entry.project || row.usage.project || "").trim().toLowerCase();
+      const packetId = String(row.entry.worker_context_packet_id || row.usage.packet_id || "").trim();
+      const usageEntries = (Array.isArray(usageLedger.entries) ? usageLedger.entries : []).filter((entry: any) => {
+        const sameTarget = !targetProject || String(entry.target_project || "").trim().toLowerCase() === targetProject;
+        const samePacket = packetId && String(entry.worker_context_packet_id || "") === packetId;
+        const sameDoc = relPaths.has(String(entry.rel_path || "").trim().toLowerCase());
+        return sameTarget && (samePacket || sameDoc);
+      });
+      const gaps: any[] = [];
+      const mustHaveRecall = ["over_budget", "critical"].includes(row.pressureStatus);
+      if (mustHaveRecall && docs.length === 0) {
+        gaps.push({
+          severity: "fail",
+          reason: `WorkerContextPacket ${packetId || "unknown"} ${row.pressureStatus} 但未记录 pressure typed MEMORY.md recall`,
+        });
+      }
+      if (docs.length > 0 && usageEntries.length === 0) {
+        gaps.push({
+          severity: "warn",
+          reason: `WorkerContextPacket ${packetId || "unknown"} surfaced pressure typed MEMORY.md，但缺少 memoryUsed/memoryIgnored usage ledger 回执`,
+        });
+      }
+      return {
+        groupId,
+        entry: row.entry,
+        usage: row.usage,
+        pressureStatus: row.pressureStatus,
+        packetId,
+        project: row.entry.project || row.usage.project || "",
+        pressureRecall: row.pressureRecall,
+        pressureDocCount: docs.length,
+        pressureDocs: docs,
+        usageEntryCount: usageEntries.length,
+        usageEntries: usageEntries.slice(-8),
+        gaps,
+      };
+    });
+    const failRows = checked.filter((row: any) => row.gaps.some((gap: any) => gap.severity === "fail"));
+    const warnRows = checked.filter((row: any) => row.gaps.some((gap: any) => gap.severity === "warn"));
+    const status = checked.length === 0 ? "empty" : failRows.length ? "fail" : warnRows.length ? "warn" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-pressure-recall-typed-memory-usage-group-v1",
+      groupId,
+      status,
+      file: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      usageLedgerFile: usageLedger.file || "",
+      pressurePacketCount: checked.length,
+      overBudgetCount: checked.filter((row: any) => row.pressureStatus === "over_budget").length,
+      criticalCount: checked.filter((row: any) => row.pressureStatus === "critical").length,
+      compactRecommendedCount: checked.filter((row: any) => row.pressureStatus === "compact_recommended").length,
+      pressureRecallPacketCount: checked.filter((row: any) => Number(row.pressureDocCount || 0) > 0).length,
+      usageLedgerPacketCount: checked.filter((row: any) => Number(row.usageEntryCount || 0) > 0).length,
+      pressureDocCount: checked.reduce((sum, row) => sum + Number(row.pressureDocCount || 0), 0),
+      usageEntryCount: checked.reduce((sum, row) => sum + Number(row.usageEntryCount || 0), 0),
+      staleUsageMemoryCount: Number(usageSummary.aging?.stale_memory_count || 0),
+      staleUsageEntryCount: Number(usageSummary.aging?.stale_entry_count || 0),
+      freshUsageEntryCount: Number(usageSummary.aging?.fresh_entry_count || 0),
+      usageWeightedTotals: usageSummary.weighted_totals || {},
+      usageRawTotals: usageSummary.totals || {},
+      usageAging: usageSummary.aging || {},
+      maxPressure: checked.reduce((max, row) => Math.max(max, Number(row.usage?.pressure || 0)), 0),
+      packets: checked.slice(-12).reverse().map((row: any) => ({
+        packet_id: row.packetId,
+        project: row.project,
+        pressure_status: row.pressureStatus,
+        pressure: row.usage?.pressure || 0,
+        free_tokens: row.usage?.free_tokens || 0,
+        pressure_doc_count: row.pressureDocCount,
+        usage_entry_count: row.usageEntryCount,
+        docs: row.pressureDocs.map((doc: any) => doc.rel_path || doc.relPath || "").filter(Boolean).slice(0, 8),
+      })),
+      gaps: checked.flatMap((row: any) => row.gaps.map((gap: any) => ({
+        packet_id: row.packetId,
+        project: row.project,
+        pressure_status: row.pressureStatus,
+        pressure: row.usage?.pressure || 0,
+        reason: gap.reason,
+        severity: gap.severity,
+      }))).slice(0, 12),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.pressurePacketCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const failedRows = checkedRows.filter(row => row.status === "fail");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : failedRows.length ? "fail" : coverageRate >= 100 ? "ok" : "warn";
+  return {
+    schema: "ccm-worker-context-packet-pressure-recall-typed-memory-usage-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      pressurePacketCount: checkedRows.reduce((sum, row) => sum + Number(row.pressurePacketCount || 0), 0),
+      overBudgetCount: checkedRows.reduce((sum, row) => sum + Number(row.overBudgetCount || 0), 0),
+      criticalCount: checkedRows.reduce((sum, row) => sum + Number(row.criticalCount || 0), 0),
+      pressureRecallPacketCount: checkedRows.reduce((sum, row) => sum + Number(row.pressureRecallPacketCount || 0), 0),
+      usageLedgerPacketCount: checkedRows.reduce((sum, row) => sum + Number(row.usageLedgerPacketCount || 0), 0),
+      pressureDocCount: checkedRows.reduce((sum, row) => sum + Number(row.pressureDocCount || 0), 0),
+      usageEntryCount: checkedRows.reduce((sum, row) => sum + Number(row.usageEntryCount || 0), 0),
+      staleUsageMemoryCount: checkedRows.reduce((sum, row) => sum + Number(row.staleUsageMemoryCount || 0), 0),
+      staleUsageEntryCount: checkedRows.reduce((sum, row) => sum + Number(row.staleUsageEntryCount || 0), 0),
+      freshUsageEntryCount: checkedRows.reduce((sum, row) => sum + Number(row.freshUsageEntryCount || 0), 0),
+      maxPressure: checkedRows.reduce((max, row) => Math.max(max, Number(row.maxPressure || 0)), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.pressurePacketCount || 0) - Number(a.pressurePacketCount || 0) || Number(b.maxPressure || 0) - Number(a.maxPressure || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function listGroupTypedMemoryPressureRecallUsageLedgerGroupsForCenter(options: any = {}) {
+  const cross = Array.isArray(options.crossGroupPressureRecallUsageGroupIds || options.cross_group_pressure_recall_usage_group_ids || options.crossGroupIds || options.cross_group_ids)
+    ? (options.crossGroupPressureRecallUsageGroupIds || options.cross_group_pressure_recall_usage_group_ids || options.crossGroupIds || options.cross_group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : [];
+  const scanned = (() => {
+    try {
+      return fs.readdirSync(GROUP_TYPED_MEMORY_MD_DIR, { withFileTypes: true })
+        .filter(entry => entry.isDirectory())
+        .map(entry => {
+          const file = path.join(GROUP_TYPED_MEMORY_MD_DIR, entry.name, ".pressure-recall-usage-ledger.json");
+          if (!fs.existsSync(file)) return "";
+          const parsed = readJson(file, null);
+          return String(parsed?.groupId || parsed?.group_id || entry.name || "").trim();
+        })
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  })();
+  return [...new Set([...cross, ...scanned])];
+}
+
+function workerContextPressureUsageRowsFromSummary(summary: any = {}) {
+  const rows = [
+    ...(Array.isArray(summary?.rows) ? summary.rows : []),
+    ...(Array.isArray(summary?.useful_pressure_memories) ? summary.useful_pressure_memories : []),
+    ...(Array.isArray(summary?.ignored_pressure_memories) ? summary.ignored_pressure_memories : []),
+    ...(Array.isArray(summary?.missing_usage_pressure_memories) ? summary.missing_usage_pressure_memories : []),
+    ...(Array.isArray(summary?.stale_pressure_memories) ? summary.stale_pressure_memories : []),
+  ];
+  const seen = new Set<string>();
+  return rows.filter((row: any) => {
+    const key = `${String(row.rel_path || row.relPath || "").toLowerCase()}|${String(row.name || "").toLowerCase()}|${String(row.recommendation || "")}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function pressureRecallUsageRecommendationsConflict(left: string, right: string) {
+  const a = String(left || "");
+  const b = String(right || "");
+  return a && b && (
+    a === "promote_pressure_recall" && b === "deprioritize_pressure_recall"
+    || a === "deprioritize_pressure_recall" && b === "promote_pressure_recall"
+  );
+}
+
+function workerContextPressureRecallUsageTargetProjects(groupId: string, usageLedger: any = {}, bindingLedger: any = {}, options: any = {}) {
+  const explicit = normalizeQualityStringList(options.targetProjects || options.target_projects || options.targetProject || options.target_project)
+    .map((item: any) => String(item || "").trim().toLowerCase())
+    .filter(Boolean);
+  const usageProjects = (Array.isArray(usageLedger.entries) ? usageLedger.entries : [])
+    .map((entry: any) => String(entry.target_project || entry.targetProject || "").trim().toLowerCase())
+    .filter(Boolean);
+  const bindingProjects = (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+    .flatMap((entry: any) => {
+      const usage = workerContextPacketContextUsage(entry) || {};
+      return [
+        entry.project,
+        entry.target_project,
+        usage.project,
+        usage.target_project,
+      ];
+    })
+    .map((item: any) => String(item || "").trim().toLowerCase())
+    .filter(Boolean);
+  return [...new Set([...explicit, ...usageProjects, ...bindingProjects])];
+}
+
+function buildWorkerContextPacketCrossGroupPressureRecallUsageReport(options: any = {}) {
+  const {
+    buildGroupTypedMemoryPressureRecallUsageProjectSummary,
+    buildGroupTypedMemoryPressureRecallUsageSummary,
+    readGroupTypedMemoryPressureRecallUsageLedger,
+  } = require("../collaboration/group-memory-index");
+  const sourceGroupIds = listGroupTypedMemoryPressureRecallUsageLedgerGroupsForCenter(options);
+  const bindingGroupIds = replayRepairDispatchBindingGroupIds(options);
+  const targetGroupIds = bindingGroupIds.length ? bindingGroupIds : sourceGroupIds;
+  const crossGroupIds = sourceGroupIds.length ? sourceGroupIds : targetGroupIds;
+  const rows = targetGroupIds.map((groupId: string) => {
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const usageLedger = readGroupTypedMemoryPressureRecallUsageLedger(groupId);
+    const projects = workerContextPressureRecallUsageTargetProjects(groupId, usageLedger, bindingLedger, options);
+    const projectRows = projects.map((targetProject: string) => {
+      const localSummary = buildGroupTypedMemoryPressureRecallUsageSummary(groupId, {
+        targetProject,
+        nowMs: options.nowMs || options.now_ms,
+        now: options.now,
+        generatedAt: options.generatedAt || options.generated_at,
+        usageHalfLifeDays: options.usageHalfLifeDays || options.usage_half_life_days,
+        usageStaleAfterDays: options.usageStaleAfterDays || options.usage_stale_after_days,
+        disableUsageAging: options.disableUsageAging || options.disable_usage_aging,
+      });
+      const crossSummary = buildGroupTypedMemoryPressureRecallUsageProjectSummary(groupId, {
+        targetProject,
+        nowMs: options.nowMs || options.now_ms,
+        now: options.now,
+        generatedAt: options.generatedAt || options.generated_at,
+        usageHalfLifeDays: options.usageHalfLifeDays || options.usage_half_life_days,
+        usageStaleAfterDays: options.usageStaleAfterDays || options.usage_stale_after_days,
+        disableUsageAging: options.disableUsageAging || options.disable_usage_aging,
+        groupIds: crossGroupIds,
+        maxGroups: options.maxCrossGroupPressureRecallUsageGroups || options.max_cross_group_pressure_recall_usage_groups,
+      });
+      const localRows = workerContextPressureUsageRowsFromSummary(localSummary);
+      const crossRows = workerContextPressureUsageRowsFromSummary(crossSummary);
+      const localDocKeys = new Set(localRows.map((row: any) => `${String(row.rel_path || row.relPath || "").trim().toLowerCase()}|${String(row.name || "").trim().toLowerCase()}`));
+      const supplementRows = crossRows.filter((row: any) => !localDocKeys.has(`${String(row.rel_path || row.relPath || "").trim().toLowerCase()}|${String(row.name || "").trim().toLowerCase()}`));
+      const conflictRows = localRows.flatMap((localRow: any) => crossRows
+        .filter((crossRow: any) => {
+          const sameRel = String(localRow.rel_path || localRow.relPath || "").trim().toLowerCase()
+            && String(localRow.rel_path || localRow.relPath || "").trim().toLowerCase() === String(crossRow.rel_path || crossRow.relPath || "").trim().toLowerCase();
+          const sameName = String(localRow.name || "").trim().toLowerCase()
+            && String(localRow.name || "").trim().toLowerCase() === String(crossRow.name || "").trim().toLowerCase();
+          return (sameRel || sameName) && pressureRecallUsageRecommendationsConflict(localRow.recommendation, crossRow.recommendation);
+        })
+        .map((crossRow: any) => ({
+          rel_path: localRow.rel_path || crossRow.rel_path || "",
+          name: localRow.name || crossRow.name || "",
+          local_recommendation: localRow.recommendation || "",
+          cross_group_recommendation: crossRow.recommendation || "",
+          local_weighted_total_count: localRow.weighted_total_count || 0,
+          cross_group_weighted_total_count: crossRow.weighted_total_count || 0,
+          source_group_count: crossSummary.source_group_count || 0,
+        })));
+      const crossFresh = Number(crossSummary.aging?.fresh_entry_count || 0);
+      const crossStale = Number(crossSummary.aging?.stale_entry_count || 0);
+      const status = projects.length === 0
+        ? "empty"
+        : conflictRows.length ? "warn"
+          : Number(crossSummary.memory_count || 0) > 0 && crossFresh === 0 && crossStale > 0 ? "warn"
+            : Number(localSummary.memory_count || 0) > 0 || Number(crossSummary.memory_count || 0) > 0 ? "ok"
+              : "empty";
+      const mode = Number(localSummary.memory_count || 0) > 0
+        ? supplementRows.length > 0 ? "local_first_with_cross_group_supplement" : "local_first"
+        : Number(crossSummary.memory_count || 0) > 0 ? "cross_group_project_assist" : "no_pressure_usage_history";
+      const gaps = [
+        ...conflictRows.map((row: any) => ({
+          severity: "warn",
+          reason: `${targetProject} pressure memory ${row.rel_path || row.name || "unknown"} has local ${row.local_recommendation} but cross-group ${row.cross_group_recommendation}`,
+          rel_path: row.rel_path || "",
+        })),
+        ...(Number(crossSummary.memory_count || 0) > 0 && crossFresh === 0 && crossStale > 0 ? [{
+          severity: "warn",
+          reason: `${targetProject} cross-group pressure usage history is stale-only; keep as audit evidence, not promotion`,
+        }] : []),
+      ];
+      return {
+        targetProject,
+        status,
+        mode,
+        localMemoryCount: Number(localSummary.memory_count || 0),
+        crossGroupMemoryCount: Number(crossSummary.memory_count || 0),
+        crossGroupSupplementCount: supplementRows.length,
+        localWeightedTotals: localSummary.weighted_totals || {},
+        crossGroupWeightedTotals: crossSummary.weighted_totals || {},
+        sourceGroupCount: Number(crossSummary.source_group_count || 0),
+        sourceGroups: Array.isArray(crossSummary.source_groups) ? crossSummary.source_groups.slice(0, 8).map((item: any) => ({
+          groupId: item.groupId || item.group_id || "",
+          entry_count: Number(item.entry_count || 0),
+          updatedAt: item.updatedAt || item.updated_at || "",
+        })) : [],
+        staleCrossGroupEntryCount: crossStale,
+        freshCrossGroupEntryCount: crossFresh,
+        conflictCount: conflictRows.length,
+        conflictRows: conflictRows.slice(0, 8),
+        supplementRows: supplementRows.slice(0, 8).map((row: any) => ({
+          rel_path: row.rel_path || row.relPath || "",
+          name: row.name || "",
+          recommendation: row.recommendation || "",
+          weighted_used_count: row.weighted_used_count || 0,
+          weighted_verified_count: row.weighted_verified_count || 0,
+          weighted_ignored_count: row.weighted_ignored_count || 0,
+          weighted_total_count: row.weighted_total_count || 0,
+          group_ids: row.group_ids || row.groupIds || [],
+        })),
+        gaps,
+      };
+    });
+    const checkedProjects = projectRows.filter((row: any) => row.status !== "empty");
+    const warnProjects = projectRows.filter((row: any) => row.status === "warn");
+    const status = checkedProjects.length === 0 ? "empty" : warnProjects.length ? "warn" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-cross-group-pressure-recall-usage-group-v1",
+      groupId,
+      status,
+      file: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      usageLedgerFile: usageLedger.file || "",
+      projectCount: projects.length,
+      checkedProjectCount: checkedProjects.length,
+      localProjectCount: projectRows.filter((row: any) => row.localMemoryCount > 0).length,
+      crossGroupAssistProjectCount: projectRows.filter((row: any) => row.mode === "cross_group_project_assist" || row.mode === "local_first_with_cross_group_supplement").length,
+      crossGroupSupplementCount: projectRows.reduce((sum: number, row: any) => sum + Number(row.crossGroupSupplementCount || 0), 0),
+      sourceGroupCount: Math.max(0, ...projectRows.map((row: any) => Number(row.sourceGroupCount || 0))),
+      conflictCount: projectRows.reduce((sum: number, row: any) => sum + Number(row.conflictCount || 0), 0),
+      staleCrossGroupEntryCount: projectRows.reduce((sum: number, row: any) => sum + Number(row.staleCrossGroupEntryCount || 0), 0),
+      freshCrossGroupEntryCount: projectRows.reduce((sum: number, row: any) => sum + Number(row.freshCrossGroupEntryCount || 0), 0),
+      projects: projectRows,
+      gaps: projectRows.flatMap((row: any) => (row.gaps || []).map((gap: any) => ({
+        target_project: row.targetProject,
+        reason: gap.reason,
+        severity: gap.severity || "warn",
+        rel_path: gap.rel_path || "",
+      }))).slice(0, 12),
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.checkedProjectCount || 0) > 0);
+  const okRows = checkedRows.filter((row: any) => row.status === "ok");
+  const warnRows = checkedRows.filter((row: any) => row.status === "warn");
+  const coverageRate = checkedRows.length ? Math.round((okRows.length / checkedRows.length) * 1000) / 10 : null;
+  const actualSourceGroupIds = [...new Set(rows.flatMap((row: any) => (row.projects || [])
+    .flatMap((project: any) => (project.sourceGroups || []).map((source: any) => String(source.groupId || source.group_id || "").trim()).filter(Boolean))))];
+  return {
+    schema: "ccm-worker-context-packet-cross-group-pressure-recall-usage-report-v1",
+    generatedAt: now(),
+    sourceGroupIds: actualSourceGroupIds.slice(0, 80),
+    overall: {
+      status: coverageRate === null ? "empty" : warnRows.length ? "warn" : "ok",
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: okRows.length,
+      sourceGroupCount: actualSourceGroupIds.length,
+      projectCount: rows.reduce((sum: number, row: any) => sum + Number(row.projectCount || 0), 0),
+      checkedProjectCount: rows.reduce((sum: number, row: any) => sum + Number(row.checkedProjectCount || 0), 0),
+      localProjectCount: rows.reduce((sum: number, row: any) => sum + Number(row.localProjectCount || 0), 0),
+      crossGroupAssistProjectCount: rows.reduce((sum: number, row: any) => sum + Number(row.crossGroupAssistProjectCount || 0), 0),
+      crossGroupSupplementCount: rows.reduce((sum: number, row: any) => sum + Number(row.crossGroupSupplementCount || 0), 0),
+      conflictCount: rows.reduce((sum: number, row: any) => sum + Number(row.conflictCount || 0), 0),
+      staleCrossGroupEntryCount: rows.reduce((sum: number, row: any) => sum + Number(row.staleCrossGroupEntryCount || 0), 0),
+      freshCrossGroupEntryCount: rows.reduce((sum: number, row: any) => sum + Number(row.freshCrossGroupEntryCount || 0), 0),
+    },
+    groups: rows.sort((a: any, b: any) =>
+      Number(b.crossGroupAssistProjectCount || 0) - Number(a.crossGroupAssistProjectCount || 0)
+      || Number(b.crossGroupSupplementCount || 0) - Number(a.crossGroupSupplementCount || 0)
+      || Number(b.checkedProjectCount || 0) - Number(a.checkedProjectCount || 0)
+    ).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketCrossGroupPressureRecallUsage(options: any = {}) {
+  const report = buildWorkerContextPacketCrossGroupPressureRecallUsageReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || [])
+    .filter((row: any) => Number(row.checkedProjectCount || 0) > 0)
+    .slice(0, 12)
+    .map((row: any) => ({
+      groupId: row.groupId,
+      checkedProjectCount: row.checkedProjectCount,
+      localProjectCount: row.localProjectCount,
+      crossGroupAssistProjectCount: row.crossGroupAssistProjectCount,
+      crossGroupSupplementCount: row.crossGroupSupplementCount,
+      sourceGroupCount: row.sourceGroupCount,
+      usageLedgerFile: row.usageLedgerFile,
+    }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 4).map((gap: any) => ({
+    groupId: row.groupId,
+    target_project: gap.target_project || "",
+    reason: gap.reason || "cross-group pressure recall usage audit warning",
+    severity: gap.severity || "warn",
+    rel_path: gap.rel_path || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_cross_group_pressure_recall_usage",
+    "WorkerContextPacket Cross-Group Pressure Recall Usage",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "跨群聊同项目 pressure typed MEMORY.md 使用反馈必须可审计：本群聊历史优先，跨群聊只补缺；同项目限定、陈旧提示和冲突提示必须在 Memory Center 可见。"
+  );
+  check.report = report;
+  return check;
+}
+
+function crossGroupPressureRecallUsageRepairActiveGaps(group: any = {}) {
+  const projects = Array.isArray(group.projects) ? group.projects : [];
+  const gaps: any[] = [];
+  for (const project of projects) {
+    const targetProject = String(project.targetProject || project.target_project || "").trim();
+    for (const row of Array.isArray(project.conflictRows) ? project.conflictRows : []) {
+      gaps.push({
+        type: "recommendation_conflict",
+        severity: "high",
+        target_project: targetProject,
+        rel_path: row.rel_path || row.relPath || "",
+        name: row.name || "",
+        local_recommendation: row.local_recommendation || "",
+        cross_group_recommendation: row.cross_group_recommendation || "",
+        source_group_count: Number(row.source_group_count || project.sourceGroupCount || 0),
+        source_groups: project.sourceGroups || [],
+        reason: `${targetProject || "project"} pressure memory ${row.rel_path || row.name || "unknown"} has local ${row.local_recommendation || "unknown"} but cross-group ${row.cross_group_recommendation || "unknown"}`,
+      });
+    }
+    if (Number(project.crossGroupMemoryCount || 0) > 0
+      && Number(project.freshCrossGroupEntryCount || 0) === 0
+      && Number(project.staleCrossGroupEntryCount || 0) > 0) {
+      gaps.push({
+        type: "stale_only_cross_group_pressure_usage",
+        severity: "medium",
+        target_project: targetProject,
+        source_group_count: Number(project.sourceGroupCount || 0),
+        source_groups: project.sourceGroups || [],
+        stale_entry_count: Number(project.staleCrossGroupEntryCount || 0),
+        reason: `${targetProject || "project"} cross-group pressure usage history is stale-only`,
+      });
+    }
+  }
+  return gaps;
+}
+
+function buildCrossGroupPressureRecallUsageRepairWorkItem(groupId: string, group: any = {}, gap: any = {}, index = 0, existing: any = {}, at = now()) {
+  const targetProject = String(gap.target_project || gap.targetProject || group.targetProject || "").trim();
+  const relPath = String(gap.rel_path || gap.relPath || "").trim();
+  const kind = String(gap.type || "cross_group_pressure_usage").trim();
+  const id = `cross-pressure-usage-repair:${hash([groupId, targetProject, kind, relPath, gap.reason || "", index], 16)}`;
+  const previousStatus = replayRepairWorkItemStatus(existing.status);
+  const status = ["in_progress", "blocked", "completed", "cancelled"].includes(previousStatus) ? previousStatus : "pending";
+  const conflict = kind === "recommendation_conflict";
+  const staleOnly = kind === "stale_only_cross_group_pressure_usage";
+  const subject = conflict
+    ? "修复跨群聊 pressure memory 推荐冲突"
+    : "清理陈旧跨群聊 pressure memory 使用证据";
+  const instruction = conflict
+    ? [
+      `核验 ${targetProject || "target project"} 的本群聊 pressure recall usage ledger 与跨群聊 source ledger。`,
+      `本地推荐 ${gap.local_recommendation || "unknown"}，跨群聊推荐 ${gap.cross_group_recommendation || "unknown"}。`,
+      "若本地回执正确，保持 local-first 并把跨群聊经验降权/蒸馏；若跨群聊证据更新鲜，补齐本群聊 memoryUsed/memoryIgnored 回执后重新生成 pressure usage summary。",
+    ].join(" ")
+    : [
+      `核验 ${targetProject || "target project"} 的跨群聊 pressure recall usage history。`,
+      `当前只有 stale cross-group evidence（${gap.stale_entry_count || 0} entries）。`,
+      "归档或压缩旧 ledger，避免 stale-only 证据继续影响新的子 Agent WorkerContextPacket。",
+    ].join(" ");
+  return {
+    id,
+    work_item_id: id,
+    taskId: "",
+    scopeId: groupId,
+    group_id: groupId,
+    subject: compactMemoryCenterText(subject, 150),
+    description: compactMemoryCenterText(gap.reason || subject, 520),
+    activeForm: compactMemoryCenterText(`${targetProject || "project"}：${gap.reason || subject}`, 180),
+    owner: existing.owner && previousStatus !== "pending" ? existing.owner : "group-main-agent",
+    target: compactMemoryCenterText(targetProject || "memory-context", 120),
+    agentType: "group-main-agent",
+    status,
+    priority: conflict ? "high" : "medium",
+    component: "cross_group_pressure_recall_usage",
+    source: "cross_group_pressure_recall_usage_repair",
+    source_action_id: id,
+    repair_target: relPath || targetProject || "pressure_recall_usage_ledger",
+    target_project: targetProject,
+    dispatch_target: existing.dispatch_target || existing.dispatchTarget || "",
+    reason: compactMemoryCenterText(gap.reason || "", 360),
+    instruction: compactMemoryCenterText(instruction, 900),
+    expected: conflict
+      ? "local-first 与 cross-group pressure usage 推荐冲突被消除，或被明确记录为本地优先且跨群聊只作背景提示。"
+      : "stale-only cross-group pressure usage ledger 被归档、压缩或重新采样，不再作为 promotion 信号。",
+    prompt_patch: compactMemoryCenterText([
+      "修复 cross-group pressure recall usage：",
+      `target_project=${targetProject || "unknown"}`,
+      relPath ? `memory_doc=${relPath}` : "",
+      gap.local_recommendation ? `local=${gap.local_recommendation}` : "",
+      gap.cross_group_recommendation ? `cross_group=${gap.cross_group_recommendation}` : "",
+      `source_group_count=${gap.source_group_count || 0}`,
+    ].filter(Boolean).join("\n"), 1400),
+    cross_group_pressure_recall_usage_gap_type: kind,
+    cross_group_pressure_recall_usage_reason: compactMemoryCenterText(gap.reason || "", 500),
+    cross_group_pressure_recall_usage_rel_path: relPath,
+    local_recommendation: gap.local_recommendation || "",
+    cross_group_recommendation: gap.cross_group_recommendation || "",
+    source_group_count: Number(gap.source_group_count || 0),
+    source_groups: Array.isArray(gap.source_groups) ? gap.source_groups.slice(0, 8) : [],
+    stale_entry_count: Number(gap.stale_entry_count || 0),
+    shouldCreateRealTask: false,
+    evidence: [
+      gap.reason || "",
+      relPath ? `memory_doc=${relPath}` : "",
+      targetProject ? `target_project=${targetProject}` : "",
+    ].filter(Boolean).slice(0, 12),
+    history: Array.isArray(existing.history) ? existing.history : [],
+    blockers: Array.isArray(existing.blockers) ? existing.blockers : [],
+    createdAt: existing.createdAt || existing.created_at || at,
+    updatedAt: existing.updatedAt || existing.updated_at || at,
+    lastSeenAt: existing.lastSeenAt || existing.last_seen_at || at,
+    completedAt: existing.completedAt || existing.completed_at || "",
+    seenCount: Math.max(1, Number(existing.seenCount || existing.seen_count || 1) || 1),
+  };
+}
+
+function syncCrossGroupPressureRecallUsageRepairWorkItems(groupId: string, group: any = {}, options: any = {}) {
+  if (!groupId || !group?.schema) return summarizeReplayRepairPendingWorkItems(groupId);
+  const at = String(options.at || options.generatedAt || options.generated_at || now());
+  const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+  const previousItems = Array.isArray(ledger.items) ? ledger.items : [];
+  const previousById = new Map<string, any>(previousItems.map((item: any) => [String(item.id || item.work_item_id || ""), item]));
+  const activeGaps = crossGroupPressureRecallUsageRepairActiveGaps(group);
+  const currentIds = new Set<string>();
+  const nextRepairItems: any[] = [];
+  let changed = false;
+
+  for (const [index, gap] of activeGaps.entries()) {
+    const draft = buildCrossGroupPressureRecallUsageRepairWorkItem(groupId, group, gap, index, {}, at);
+    const existing = previousById.get(draft.id) || {};
+    let item = buildCrossGroupPressureRecallUsageRepairWorkItem(groupId, group, gap, index, existing, at);
+    const previousSignature = replayRepairWorkItemSignature(existing);
+    const nextSignature = replayRepairWorkItemSignature(item);
+    if (existing.id && previousSignature === nextSignature) {
+      item = {
+        ...existing,
+        ...item,
+        createdAt: existing.createdAt || item.createdAt,
+        updatedAt: existing.updatedAt || item.updatedAt,
+        lastSeenAt: existing.lastSeenAt || item.lastSeenAt,
+        seenCount: Number(existing.seenCount || 1),
+      };
+    } else {
+      item = {
+        ...item,
+        updatedAt: at,
+        lastSeenAt: at,
+        seenCount: existing.id ? Number(existing.seenCount || 1) + 1 : 1,
+      };
+      changed = true;
+    }
+    currentIds.add(item.id);
+    nextRepairItems.push(item);
+  }
+
+  const untouchedItems: any[] = [];
+  for (const existing of previousItems) {
+    const id = String(existing.id || existing.work_item_id || "");
+    const source = String(existing.source || "");
+    if (source !== "cross_group_pressure_recall_usage_repair") {
+      untouchedItems.push(existing);
+      continue;
+    }
+    if (!id || currentIds.has(id)) continue;
+    const currentStatus = replayRepairWorkItemStatus(existing.status);
+    if (!replayRepairWorkItemOpen(currentStatus)) {
+      nextRepairItems.push(existing);
+      continue;
+    }
+    const resolved = String(group.status || "") === "ok" || activeGaps.length === 0;
+    nextRepairItems.push({
+      ...existing,
+      status: resolved ? "completed" : "cancelled",
+      updatedAt: at,
+      completedAt: resolved ? (existing.completedAt || at) : existing.completedAt || "",
+      resolutionReason: resolved ? "cross_group_pressure_recall_usage_report_ok" : "superseded_by_latest_cross_group_pressure_usage_report",
+      latestCrossGroupPressureRecallUsage: {
+        status: group.status || "",
+        conflictCount: group.conflictCount || 0,
+        staleCrossGroupEntryCount: group.staleCrossGroupEntryCount || 0,
+        crossGroupAssistProjectCount: group.crossGroupAssistProjectCount || 0,
+      },
+    });
+    changed = true;
+  }
+
+  const nextItems = [...untouchedItems, ...nextRepairItems]
+    .sort((a, b) => {
+      const statusRank = replayRepairWorkItemOpen(a.status) === replayRepairWorkItemOpen(b.status) ? 0 : replayRepairWorkItemOpen(a.status) ? -1 : 1;
+      if (statusRank) return statusRank;
+      const priority = replayRepairPriorityRank(a.priority) - replayRepairPriorityRank(b.priority);
+      if (priority) return priority;
+      return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    })
+    .slice(0, 160);
+  const stats = replayRepairWorkItemStats(nextItems);
+  const nextLedger = {
+    ...ledger,
+    latestCrossGroupPressureRecallUsage: {
+      status: group.status || "",
+      checkedProjectCount: group.checkedProjectCount || 0,
+      crossGroupAssistProjectCount: group.crossGroupAssistProjectCount || 0,
+      crossGroupSupplementCount: group.crossGroupSupplementCount || 0,
+      conflictCount: group.conflictCount || 0,
+      staleCrossGroupEntryCount: group.staleCrossGroupEntryCount || 0,
+    },
+    items: nextItems,
+    stats,
+    updatedAt: changed || !ledger.updatedAt ? at : ledger.updatedAt,
+  };
+  const currentComparable = JSON.stringify({
+    latestCrossGroupPressureRecallUsage: ledger.latestCrossGroupPressureRecallUsage || null,
+    items: previousItems.filter((item: any) => String(item.source || "") === "cross_group_pressure_recall_usage_repair"),
+  });
+  const nextComparable = JSON.stringify({
+    latestCrossGroupPressureRecallUsage: nextLedger.latestCrossGroupPressureRecallUsage || null,
+    items: nextItems.filter((item: any) => String(item.source || "") === "cross_group_pressure_recall_usage_repair"),
+  });
+  if (changed || currentComparable !== nextComparable || !fs.existsSync(ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId))) {
+    return summarizeReplayRepairPendingWorkItems(groupId, writeGroupCompactBoundaryReplayRepairWorkItems(groupId, nextLedger));
+  }
+  return summarizeReplayRepairPendingWorkItems(groupId, ledger);
+}
+
+function buildWorkerContextPacketCrossGroupPressureRecallUsageRepairWorkItemReport(options: any = {}) {
+  const pressureReport = options.crossGroupPressureRecallUsageReport
+    || options.cross_group_pressure_recall_usage_report
+    || buildWorkerContextPacketCrossGroupPressureRecallUsageReport(options);
+  const rows = (Array.isArray(pressureReport.groups) ? pressureReport.groups : []).map((group: any) => {
+    const groupId = String(group.groupId || "");
+    const activeGaps = crossGroupPressureRecallUsageRepairActiveGaps(group);
+    const workItems = syncCrossGroupPressureRecallUsageRepairWorkItems(groupId, group, {
+      at: options.generatedAt || options.generated_at || now(),
+    });
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const repairItems = (Array.isArray(ledger.items) ? ledger.items : [])
+      .filter((item: any) => String(item.source || "") === "cross_group_pressure_recall_usage_repair");
+    const openItems = repairItems.filter((item: any) => replayRepairWorkItemOpen(item.status));
+    const completedItems = repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "completed");
+    const requiredActionCount = activeGaps.length;
+    const coveredItemCount = requiredActionCount > 0 ? openItems.length + completedItems.length : completedItems.length;
+    const status = requiredActionCount > 0
+      ? coveredItemCount >= requiredActionCount ? "ok" : "fail"
+      : openItems.length > 0 ? "warn" : "empty";
+    return {
+      schema: "ccm-worker-context-packet-cross-group-pressure-recall-usage-repair-work-item-group-v1",
+      groupId,
+      status,
+      pressureUsageStatus: group.status || "",
+      requiredActionCount,
+      coveredItemCount,
+      openItemCount: openItems.length,
+      completedCount: completedItems.length,
+      pendingCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "pending").length,
+      inProgressCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "in_progress").length,
+      blockedCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "blocked").length,
+      conflictRepairCount: repairItems.filter((item: any) => item.cross_group_pressure_recall_usage_gap_type === "recommendation_conflict").length,
+      staleOnlyRepairCount: repairItems.filter((item: any) => item.cross_group_pressure_recall_usage_gap_type === "stale_only_cross_group_pressure_usage").length,
+      file: workItems.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      latestCrossGroupPressureRecallUsage: ledger.latestCrossGroupPressureRecallUsage || null,
+      items: repairItems.slice(0, 12).map((item: any) => ({
+        id: item.id || item.work_item_id || "",
+        status: replayRepairWorkItemStatus(item.status),
+        priority: item.priority || "",
+        component: item.component || "",
+        target_project: item.target_project || "",
+        rel_path: item.cross_group_pressure_recall_usage_rel_path || "",
+        gap_type: item.cross_group_pressure_recall_usage_gap_type || "",
+        local_recommendation: item.local_recommendation || "",
+        cross_group_recommendation: item.cross_group_recommendation || "",
+        source_group_count: Number(item.source_group_count || 0),
+        stale_entry_count: Number(item.stale_entry_count || 0),
+        dispatch_target: item.dispatch_target || "",
+        instruction: compactMemoryCenterText(item.instruction || "", 260),
+      })),
+      gaps: status === "fail" ? activeGaps.slice(0, 8).map((gap: any) => ({
+        reason: gap.reason || "cross-group pressure recall usage repair work item missing",
+        target_project: gap.target_project || "",
+        rel_path: gap.rel_path || "",
+        type: gap.type || "",
+      })) : [],
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.requiredActionCount || 0) > 0 || Number(row.openItemCount || 0) > 0);
+  const groupsNeedingWork = checkedRows.filter(row => Number(row.requiredActionCount || 0) > 0);
+  const groupsCovered = groupsNeedingWork.filter(row => Number(row.coveredItemCount || 0) >= Number(row.requiredActionCount || 0));
+  const coverageRate = groupsNeedingWork.length ? Math.round((groupsCovered.length / groupsNeedingWork.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? checkedRows.some(row => row.status === "warn") ? "warn" : "empty"
+    : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-cross-group-pressure-recall-usage-repair-work-item-report-v1",
+    generatedAt: now(),
+    pressureReport: {
+      schema: pressureReport.schema || "",
+      overall: pressureReport.overall || {},
+    },
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsNeedingWork: groupsNeedingWork.length,
+      groupsCovered: groupsCovered.length,
+      requiredActionCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredActionCount || 0), 0),
+      coveredItemCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredItemCount || 0), 0),
+      openItemCount: checkedRows.reduce((sum, row) => sum + Number(row.openItemCount || 0), 0),
+      conflictRepairCount: checkedRows.reduce((sum, row) => sum + Number(row.conflictRepairCount || 0), 0),
+      staleOnlyRepairCount: checkedRows.reduce((sum, row) => sum + Number(row.staleOnlyRepairCount || 0), 0),
+    },
+    groups: rows.sort((a, b) =>
+      Number(b.openItemCount || 0) - Number(a.openItemCount || 0)
+      || Number(b.requiredActionCount || 0) - Number(a.requiredActionCount || 0)
+    ).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketCrossGroupPressureRecallUsageRepairWorkItems(options: any = {}) {
+  const report = buildWorkerContextPacketCrossGroupPressureRecallUsageRepairWorkItemReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = checked === 0
+    ? 0
+    : (report.groups || []).filter((row: any) => (Number(row.requiredActionCount || 0) > 0 || Number(row.openItemCount || 0) > 0) && row.status === "ok").length;
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok" && Number(row.requiredActionCount || 0) > 0).slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    requiredActionCount: row.requiredActionCount,
+    coveredItemCount: row.coveredItemCount,
+    openItemCount: row.openItemCount,
+    conflictRepairCount: row.conflictRepairCount,
+    staleOnlyRepairCount: row.staleOnlyRepairCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    reason: row.gaps?.[0]?.reason || "cross-group pressure recall usage repair work items 未覆盖冲突或 stale-only 告警",
+    requiredActionCount: row.requiredActionCount,
+    openItemCount: row.openItemCount,
+    coveredItemCount: row.coveredItemCount,
+  }));
+  const check: any = makeQualityCheck(
+    "worker_context_packet_cross_group_pressure_recall_usage_repair_work_items",
+    "WorkerContextPacket Cross-Group Pressure Recall Usage Repair Work Items",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "把跨群聊同项目 pressure MEMORY 使用冲突和 stale-only 证据物化为群聊主 Agent 可读 repair work items；只进入修复队列，不自动创建真实任务。"
+  );
+  check.report = report;
+  return check;
+}
+
+function evaluateWorkerContextPacketPressureRecallTypedMemoryUsage(options: any = {}) {
+  const report = buildWorkerContextPacketPressureRecallTypedMemoryUsageReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    pressurePacketCount: row.pressurePacketCount,
+    pressureRecallPacketCount: row.pressureRecallPacketCount,
+    usageLedgerPacketCount: row.usageLedgerPacketCount,
+    staleUsageEntryCount: row.staleUsageEntryCount,
+    freshUsageEntryCount: row.freshUsageEntryCount,
+    maxPressure: row.maxPressure,
+    usageLedgerFile: row.usageLedgerFile,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "WorkerContextPacket pressure typed memory recall usage 缺失",
+    packet_id: gap.packet_id || "",
+    project: gap.project || "",
+    pressure_status: gap.pressure_status || "",
+    severity: gap.severity || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_recall_typed_memory_usage",
+    "WorkerContextPacket Pressure Recall Typed Memory Usage",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 WorkerContextPacket 处于 critical/over_budget 时，typed MEMORY.md 必须召回上下文压力修复记忆；子 Agent 回执还必须用 memoryUsed/memoryIgnored 反馈这些 pressure recall 是否被使用，形成可评分闭环。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPacketPressureMemoryProvenanceReceiptDiscipline(entry: any = {}) {
+  return entry.worker_context_packet_pressure_memory_provenance_receipt_discipline
+    || entry.workerContextPacketPressureMemoryProvenanceReceiptDiscipline
+    || entry.worker_context_packet?.pressure_memory_provenance_receipt_discipline
+    || entry.workerContextPacket?.pressureMemoryProvenanceReceiptDiscipline
+    || null;
+}
+
+function buildWorkerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+      .filter((entry: any) => entry.worker_context_packet_id || workerContextPacketTypedMemoryPressureRecall(entry));
+    const packets = entries.map((entry: any) => {
+      const requiredDocs = workerContextPacketPressureMemoryProvenanceDocRows(entry)
+        .filter((doc: any) => doc.requires_memory_provenance_usage === true);
+      const discipline = workerContextPacketPressureMemoryProvenanceReceiptDiscipline(entry) || {};
+      const disciplineRows = Array.isArray(discipline.rows) ? discipline.rows : [];
+      const requiredFields = Array.isArray(discipline.requiredFields || discipline.required_fields) ? (discipline.requiredFields || discipline.required_fields) : [];
+      const acceptance = entry.worker_context_packet_acceptance || entry.workerContextPacketAcceptance || {};
+      const renderedFlags = entry.worker_context_packet_render_probe?.rendered_flags || entry.workerContextPacketRenderProbe?.renderedFlags || {};
+      const renderedExcerpt = String(entry.worker_context_packet_render_probe?.rendered_excerpt || entry.workerContextPacketRenderProbe?.renderedExcerpt || "");
+      const usageCategories = Array.isArray(entry.worker_context_packet_context_usage?.categories)
+        ? entry.worker_context_packet_context_usage.categories
+        : Array.isArray(entry.workerContextPacketContextUsage?.categories) ? entry.workerContextPacketContextUsage.categories : [];
+      const disciplineCategory = usageCategories.find((item: any) => item.id === "pressure_memory_provenance_receipt_discipline") || {};
+      const gaps: any[] = [];
+      if (requiredDocs.length > 0) {
+        if (discipline.schema !== "ccm-pressure-memory-provenance-receipt-pre-dispatch-discipline-v1" || discipline.active !== true) {
+          gaps.push({ reason: "WorkerContextPacket 缺少 pressure provenance pre-dispatch discipline", severity: "fail" });
+        }
+        for (const field of ["relPath", "usageState", "provenanceStatus", "repairWorkItemId", "repairStatus", "repairGapType", "currentSourceVerified"]) {
+          if (!requiredFields.includes(field)) gaps.push({ reason: `pre-dispatch discipline 缺少 required field ${field}`, severity: "fail" });
+        }
+        for (const doc of requiredDocs) {
+          const docRel = String(doc.rel_path || "").trim().toLowerCase();
+          const docRepair = String(doc.repair_work_item_id || "").trim().toLowerCase();
+          const covered = disciplineRows.some((row: any) => {
+            const rowRel = String(row.relPath || row.rel_path || "").trim().toLowerCase();
+            const rowRepair = String(row.repairWorkItemId || row.repair_work_item_id || "").trim().toLowerCase();
+            return (docRepair && rowRepair === docRepair) || (docRel && rowRel === docRel);
+          });
+          if (!covered) gaps.push({ reason: `pre-dispatch discipline 未覆盖 ${doc.rel_path || doc.name || doc.repair_work_item_id || "pressure memory"}`, severity: "fail" });
+        }
+        if (acceptance.memory_provenance_usage_required !== true || acceptance.pressure_memory_provenance_receipt_required !== true) {
+          gaps.push({ reason: "WorkerContextPacket acceptance 未声明 memory_provenance_usage_required / pressure_memory_provenance_receipt_required", severity: "fail" });
+        }
+        if (disciplineCategory.id !== "pressure_memory_provenance_receipt_discipline" || disciplineCategory.required !== true || Number(disciplineCategory.tokens || 0) <= 0) {
+          gaps.push({ reason: "Context usage 缺少 required pressure_memory_provenance_receipt_discipline 分类", severity: "fail" });
+        }
+        if (renderedFlags.has_pressure_memory_provenance_receipt_discipline !== true || !/memoryProvenanceUsage/i.test(renderedExcerpt)) {
+          gaps.push({ reason: "WorkerContextPacket 渲染缺少 pressure provenance discipline 或 memoryProvenanceUsage 示例", severity: "fail" });
+        }
+      }
+      return {
+        groupId,
+        packetId: entry.worker_context_packet_id || "",
+        project: entry.project || "",
+        requiredDocCount: requiredDocs.length,
+        disciplineDocCount: disciplineRows.length,
+        disciplineSchema: discipline.schema || "",
+        acceptanceRequiresProvenance: acceptance.memory_provenance_usage_required === true && acceptance.pressure_memory_provenance_receipt_required === true,
+        usageCategoryRequired: disciplineCategory.required === true,
+        renderedDiscipline: renderedFlags.has_pressure_memory_provenance_receipt_discipline === true,
+        renderedMemoryProvenanceUsage: renderedFlags.has_memory_provenance_usage_example === true || /memoryProvenanceUsage/i.test(renderedExcerpt),
+        docs: requiredDocs.slice(0, 8).map((doc: any) => ({
+          rel_path: doc.rel_path || "",
+          provenance_status: doc.provenance_status || "",
+          repair_work_item_id: doc.repair_work_item_id || "",
+          repair_status: doc.repair_status || "",
+          repair_gap_type: doc.repair_gap_type || "",
+        })),
+        gaps,
+      };
+    });
+    const checked = packets.filter((packet: any) => Number(packet.requiredDocCount || 0) > 0);
+    const passed = checked.filter((packet: any) => packet.gaps.length === 0);
+    const status = checked.length === 0 ? "empty" : passed.length === checked.length ? "ok" : passed.length > 0 ? "warn" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-pre-dispatch-discipline-group-v1",
+      groupId,
+      status,
+      file: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      checkedPacketCount: checked.length,
+      passedPacketCount: passed.length,
+      requiredDocCount: checked.reduce((sum: number, packet: any) => sum + Number(packet.requiredDocCount || 0), 0),
+      disciplineDocCount: checked.reduce((sum: number, packet: any) => sum + Number(packet.disciplineDocCount || 0), 0),
+      acceptanceCoveredCount: checked.filter((packet: any) => packet.acceptanceRequiresProvenance).length,
+      usageCategoryCoveredCount: checked.filter((packet: any) => packet.usageCategoryRequired).length,
+      renderedCoveredCount: checked.filter((packet: any) => packet.renderedDiscipline && packet.renderedMemoryProvenanceUsage).length,
+      packets: checked.slice(-12).reverse(),
+      gaps: checked.flatMap((packet: any) => packet.gaps.map((gap: any) => ({
+        packet_id: packet.packetId,
+        project: packet.project,
+        reason: gap.reason,
+        severity: gap.severity || "fail",
+      }))).slice(0, 16),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.checkedPacketCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-pre-dispatch-discipline-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      checkedPacketCount: checkedRows.reduce((sum, row) => sum + Number(row.checkedPacketCount || 0), 0),
+      passedPacketCount: checkedRows.reduce((sum, row) => sum + Number(row.passedPacketCount || 0), 0),
+      requiredDocCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredDocCount || 0), 0),
+      disciplineDocCount: checkedRows.reduce((sum, row) => sum + Number(row.disciplineDocCount || 0), 0),
+      acceptanceCoveredCount: checkedRows.reduce((sum, row) => sum + Number(row.acceptanceCoveredCount || 0), 0),
+      usageCategoryCoveredCount: checkedRows.reduce((sum, row) => sum + Number(row.usageCategoryCoveredCount || 0), 0),
+      renderedCoveredCount: checkedRows.reduce((sum, row) => sum + Number(row.renderedCoveredCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.checkedPacketCount || 0) - Number(a.checkedPacketCount || 0) || Number(b.requiredDocCount || 0) - Number(a.requiredDocCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureMemoryProvenanceReceiptPreDispatchDiscipline(options: any = {}) {
+  const report = buildWorkerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    checkedPacketCount: row.checkedPacketCount,
+    requiredDocCount: row.requiredDocCount,
+    disciplineDocCount: row.disciplineDocCount,
+    acceptanceCoveredCount: row.acceptanceCoveredCount,
+    usageCategoryCoveredCount: row.usageCategoryCoveredCount,
+    renderedCoveredCount: row.renderedCoveredCount,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    packet_id: gap.packet_id || "",
+    project: gap.project || "",
+    reason: gap.reason || "pressure provenance pre-dispatch discipline 缺失",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_memory_provenance_receipt_pre_dispatch_discipline",
+    "WorkerContextPacket Pressure Memory Provenance Receipt Pre-Dispatch Discipline",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 WorkerContextPacket pressure recall 下发 disputed/stale-under-repair typed MEMORY.md 时，首次派发前必须注入 memoryProvenanceUsage discipline、acceptance gate、usage category 和可复制示例，减少事后 repair。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPacketAttributionAgentType(entry: any = {}) {
+  return String(
+    entry.agent_type
+    || entry.agentType
+    || entry.worker_context_packet_agent_type
+    || entry.workerContextPacketAgentType
+    || entry.executor
+    || entry.runner
+    || entry.worker_context_packet?.agent_type
+    || entry.workerContextPacket?.agentType
+    || "unknown"
+  ).trim() || "unknown";
+}
+
+function buildWorkerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+      .filter((entry: any) => {
+        const discipline = workerContextPacketPressureMemoryProvenanceReceiptDiscipline(entry) || {};
+        return discipline.schema === "ccm-pressure-memory-provenance-receipt-pre-dispatch-discipline-v1"
+          || discipline.active === true
+          || entry.worker_context_packet_acceptance?.pressure_memory_provenance_receipt_required === true
+          || entry.worker_context_packet_acceptance?.memory_provenance_usage_required === true;
+      });
+    const checked = entries.map((entry: any) => {
+      const receiptRow = workerContextPacketPressureMemoryProvenanceReceiptRow(groupId, entry, options);
+      const agentType = workerContextPacketAttributionAgentType(entry);
+      const gaps = Array.isArray(receiptRow.gaps) ? receiptRow.gaps : [];
+      const requiredDocCount = Number(receiptRow.requiredDocs?.length || 0);
+      const status = requiredDocCount === 0 ? "empty" : gaps.length ? "non_compliant" : "compliant";
+      return {
+        schema: "ccm-worker-context-packet-pressure-provenance-post-dispatch-compliance-packet-v1",
+        groupId,
+        packet_id: receiptRow.packetId || entry.worker_context_packet_id || "",
+        binding_id: receiptRow.bindingId || entry.binding_id || "",
+        assignment_id: entry.assignment_id || "",
+        dispatch_key: entry.dispatch_key || "",
+        project: receiptRow.project || entry.project || "",
+        agent_type: agentType,
+        status,
+        pre_dispatch_prompted: true,
+        required_doc_count: requiredDocCount,
+        discipline_doc_count: Number((workerContextPacketPressureMemoryProvenanceReceiptDiscipline(entry)?.rows || []).length || 0),
+        receipt_count: Number(receiptRow.receipts?.length || 0),
+        receipt_row_count: Number(receiptRow.receiptRows?.length || 0),
+        compliant_doc_count: Number(receiptRow.docChecks?.filter((check: any) => !check.gaps?.length).length || 0),
+        missing_receipt: gaps.some((gap: any) => gap.code === "child_agent_receipt"),
+        missing_memory_provenance_usage: gaps.some((gap: any) => gap.code === "receipt_memoryProvenanceUsage" || gap.code === "receipt_memoryProvenanceUsage_doc"),
+        current_source_verified_gap: gaps.some((gap: any) => gap.code === "receipt_currentSourceVerified"),
+        rel_paths: uniqueStrings((receiptRow.requiredDocs || []).map((doc: any) => doc.rel_path || doc.name || ""), 20),
+        repair_work_item_ids: uniqueStrings((receiptRow.requiredDocs || []).map((doc: any) => doc.repair_work_item_id || ""), 20),
+        docs: (receiptRow.requiredDocs || []).slice(0, 8).map((doc: any) => ({
+          rel_path: doc.rel_path || "",
+          provenance_status: doc.provenance_status || "",
+          repair_work_item_id: doc.repair_work_item_id || "",
+          repair_status: doc.repair_status || "",
+          repair_gap_type: doc.repair_gap_type || "",
+        })),
+        gaps: gaps.map((gap: any) => ({
+          code: gap.code || "",
+          reason: gap.reason || "",
+          severity: gap.severity || "fail",
+          rel_path: gap.rel_path || "",
+          repair_work_item_id: gap.repair_work_item_id || "",
+          provenance_status: gap.provenance_status || "",
+        })),
+      };
+    }).filter((row: any) => Number(row.required_doc_count || 0) > 0);
+    const compliant = checked.filter((row: any) => row.status === "compliant");
+    const violations = checked.filter((row: any) => row.status !== "compliant");
+    let distillation: any = null;
+    let recoveryDistillation: any = null;
+    let distillationError = "";
+    if (violations.length) {
+      try {
+        const {
+          distillPressureProvenancePreDispatchComplianceToTypedMemory,
+        } = require("../collaboration/group-memory-index");
+        distillation = distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, {
+          packets: violations,
+        }, {
+          reason: "memory-center-pressure-provenance-post-dispatch-compliance-report",
+          frequentThreshold: options.frequentThreshold || options.frequent_threshold || 2,
+          updatedAt: options.generatedAt || options.generated_at || now(),
+        });
+      } catch (error: any) {
+        distillationError = String(error?.message || error);
+      }
+    }
+    if (compliant.length) {
+      try {
+        const {
+          distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory,
+        } = require("../collaboration/group-memory-index");
+        recoveryDistillation = distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId, {
+          packets: compliant,
+        }, {
+          reason: "memory-center-pressure-provenance-post-dispatch-compliance-recovery-report",
+          updatedAt: options.generatedAt || options.generated_at || now(),
+        });
+      } catch (error: any) {
+        distillationError = [distillationError, String(error?.message || error)].filter(Boolean).join("; ");
+      }
+    }
+    const {
+      readGroupTypedMemoryDistillationLedger,
+      scanGroupTypedMemoryDocuments,
+      buildGroupTypedMemoryRecall,
+    } = require("../collaboration/group-memory-index");
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = typedLedger.pressureProvenancePreDispatchComplianceArchive || {};
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const complianceDocs = (Array.isArray(docs) ? docs : []).filter((doc: any) => doc.source === "auto:pressure-provenance-pre-dispatch-compliance-distillation");
+    const recoveryDocs = (Array.isArray(docs) ? docs : []).filter((doc: any) => doc.source === "auto:pressure-provenance-compliance-recovery-distillation");
+    const recall = buildGroupTypedMemoryRecall(groupId, "pressure provenance pre-dispatch compliance memoryProvenanceUsage executor project currentSourceVerified", {
+      disableLedger: true,
+      forceMemory: true,
+      max: 8,
+      snippetChars: 320,
+    });
+    const recallText = [
+      ...(Array.isArray(recall.recalled) ? recall.recalled : []),
+      ...(Array.isArray(recall.entries) ? recall.entries : []),
+      ...(Array.isArray(recall.selected) ? recall.selected : []),
+      ...(Array.isArray(recall.docs) ? recall.docs : []),
+    ].map((item: any) => `${item.name || ""}\n${item.body || ""}\n${item.snippet || ""}\n${item.text || ""}`).join("\n");
+    const attributionMap = new Map<string, any>();
+    for (const packet of checked) {
+      const key = `${packet.agent_type || "unknown"}|${packet.project || "unknown"}`;
+      const row = attributionMap.get(key) || {
+        agent_type: packet.agent_type || "unknown",
+        project: packet.project || "unknown",
+        checked_count: 0,
+        compliant_count: 0,
+        violation_count: 0,
+        missing_receipt_count: 0,
+        missing_memory_provenance_usage_count: 0,
+        current_source_verified_gap_count: 0,
+      };
+      row.checked_count += 1;
+      if (packet.status === "compliant") row.compliant_count += 1;
+      else row.violation_count += 1;
+      if (packet.missing_receipt) row.missing_receipt_count += 1;
+      if (packet.missing_memory_provenance_usage) row.missing_memory_provenance_usage_count += 1;
+      if (packet.current_source_verified_gap) row.current_source_verified_gap_count += 1;
+      attributionMap.set(key, row);
+    }
+    const attributions = [...attributionMap.values()]
+      .map((row: any) => ({
+        ...row,
+        compliance_rate: row.checked_count ? Math.round((row.compliant_count / row.checked_count) * 1000) / 10 : null,
+        frequent_violation: Number(row.violation_count || 0) >= Number(options.frequentThreshold || options.frequent_threshold || 2),
+      }))
+      .sort((a: any, b: any) => Number(b.violation_count || 0) - Number(a.violation_count || 0) || String(a.agent_type || "").localeCompare(String(b.agent_type || "")));
+    const status = checked.length === 0 ? "empty" : violations.length === 0 ? "ok" : compliant.length > 0 ? "warn" : "fail";
+    const gaps: any[] = violations.flatMap((packet: any) => (packet.gaps || []).slice(0, 4).map((gap: any) => ({
+      packet_id: packet.packet_id,
+      binding_id: packet.binding_id,
+      project: packet.project,
+      agent_type: packet.agent_type,
+      code: gap.code || "",
+      reason: gap.reason || "pressure provenance post-dispatch compliance gap",
+      rel_path: gap.rel_path || "",
+      repair_work_item_id: gap.repair_work_item_id || "",
+    }))).slice(0, 16);
+    if (distillationError) gaps.push({ reason: `pressure provenance post-dispatch compliance typed memory 蒸馏失败：${distillationError}` });
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-post-dispatch-compliance-group-v1",
+      groupId,
+      status,
+      file: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      checkedPacketCount: checked.length,
+      compliantPacketCount: compliant.length,
+      violationPacketCount: violations.length,
+      complianceRate: checked.length ? Math.round((compliant.length / checked.length) * 1000) / 10 : null,
+      requiredDocCount: checked.reduce((sum: number, row: any) => sum + Number(row.required_doc_count || 0), 0),
+      receiptRowCount: checked.reduce((sum: number, row: any) => sum + Number(row.receipt_row_count || 0), 0),
+      missingReceiptCount: violations.filter((row: any) => row.missing_receipt).length,
+      missingMemoryProvenanceUsageCount: violations.filter((row: any) => row.missing_memory_provenance_usage).length,
+      currentSourceVerifiedGapCount: violations.filter((row: any) => row.current_source_verified_gap).length,
+      attributionCount: attributions.length,
+      frequentViolationAttributionCount: attributions.filter((row: any) => row.frequent_violation).length,
+      typedMemoryDocCount: complianceDocs.length,
+      typedMemoryRecoveryDocCount: recoveryDocs.length,
+      archivedViolationCount: Number(archive.archived_count || 0),
+      frequentArchivedAttributionCount: Number(archive.frequent_attribution_count || 0),
+      archivedRecoveryCount: Number((typedLedger.pressureProvenancePreDispatchComplianceRecoveryArchive || {}).archived_count || 0),
+      recoveryAttributionCount: Number((typedLedger.pressureProvenancePreDispatchComplianceRecoveryArchive || {}).attribution_count || 0),
+      recallMatchCount: /memoryProvenanceUsage|currentSourceVerified|pre-dispatch compliance/i.test(recallText) ? 1 : 0,
+      attributions: attributions.slice(0, 20),
+      packets: checked.slice(-20).reverse(),
+      violations: violations.slice(-20).reverse(),
+      distillation: distillation ? {
+        incomingRowCount: distillation.incomingRowCount || 0,
+        archivedCount: distillation.archivedCount || 0,
+        attributionCount: distillation.attributionCount || 0,
+        frequentAttributionCount: distillation.frequentAttributionCount || 0,
+        writeCount: distillation.writeCount || 0,
+      } : null,
+      recoveryDistillation: recoveryDistillation ? {
+        incomingRowCount: recoveryDistillation.incomingRowCount || 0,
+        archivedCount: recoveryDistillation.archivedCount || 0,
+        attributionCount: recoveryDistillation.attributionCount || 0,
+        compliantCount: recoveryDistillation.compliantCount || 0,
+        writeCount: recoveryDistillation.writeCount || 0,
+      } : null,
+      typedMemoryDocs: complianceDocs.slice(0, 8).map((doc: any) => ({ relPath: doc.relPath, name: doc.name, source: doc.source })),
+      typedMemoryRecoveryDocs: recoveryDocs.slice(0, 8).map((doc: any) => ({ relPath: doc.relPath, name: doc.name, source: doc.source })),
+      gaps,
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.checkedPacketCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-post-dispatch-compliance-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      checkedPacketCount: checkedRows.reduce((sum, row) => sum + Number(row.checkedPacketCount || 0), 0),
+      compliantPacketCount: checkedRows.reduce((sum, row) => sum + Number(row.compliantPacketCount || 0), 0),
+      violationPacketCount: checkedRows.reduce((sum, row) => sum + Number(row.violationPacketCount || 0), 0),
+      requiredDocCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredDocCount || 0), 0),
+      receiptRowCount: checkedRows.reduce((sum, row) => sum + Number(row.receiptRowCount || 0), 0),
+      missingReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.missingReceiptCount || 0), 0),
+      missingMemoryProvenanceUsageCount: checkedRows.reduce((sum, row) => sum + Number(row.missingMemoryProvenanceUsageCount || 0), 0),
+      currentSourceVerifiedGapCount: checkedRows.reduce((sum, row) => sum + Number(row.currentSourceVerifiedGapCount || 0), 0),
+      attributionCount: checkedRows.reduce((sum, row) => sum + Number(row.attributionCount || 0), 0),
+      frequentViolationAttributionCount: checkedRows.reduce((sum, row) => sum + Number(row.frequentViolationAttributionCount || 0), 0),
+      typedMemoryDocCount: checkedRows.reduce((sum, row) => sum + Number(row.typedMemoryDocCount || 0), 0),
+      typedMemoryRecoveryDocCount: checkedRows.reduce((sum, row) => sum + Number(row.typedMemoryRecoveryDocCount || 0), 0),
+      archivedViolationCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedViolationCount || 0), 0),
+      archivedRecoveryCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedRecoveryCount || 0), 0),
+      recoveryAttributionCount: checkedRows.reduce((sum, row) => sum + Number(row.recoveryAttributionCount || 0), 0),
+      recallMatchCount: checkedRows.reduce((sum, row) => sum + Number(row.recallMatchCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.violationPacketCount || 0) - Number(a.violationPacketCount || 0) || Number(b.checkedPacketCount || 0) - Number(a.checkedPacketCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureMemoryProvenanceReceiptPostDispatchCompliance(options: any = {}) {
+  const report = buildWorkerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    checkedPacketCount: row.checkedPacketCount,
+    compliantPacketCount: row.compliantPacketCount,
+    complianceRate: row.complianceRate,
+    requiredDocCount: row.requiredDocCount,
+    receiptRowCount: row.receiptRowCount,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 4).map((gap: any) => ({
+    groupId: row.groupId,
+    packet_id: gap.packet_id || "",
+    project: gap.project || "",
+    agent_type: gap.agent_type || "",
+    reason: gap.reason || "pressure provenance post-dispatch compliance gap",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_memory_provenance_receipt_post_dispatch_compliance",
+    "WorkerContextPacket Pressure Memory Provenance Receipt Post-Dispatch Compliance",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 WorkerContextPacket 已在首派发注入 pressure provenance discipline 后，最终子 Agent 回执必须真实履行 memoryProvenanceUsage；违约按 project/agentType 归因并沉淀为 typed feedback memory。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPacketPressureProvenanceDispatchFeedbackPolicy(entry: any = {}) {
+  return entry.worker_context_packet_pressure_provenance_dispatch_feedback_policy
+    || entry.workerContextPacketPressureProvenanceDispatchFeedbackPolicy
+    || entry.worker_context_packet?.pressure_provenance_dispatch_feedback_policy
+    || entry.workerContextPacket?.pressureProvenanceDispatchFeedbackPolicy
+    || null;
+}
+
+function pressureProvenanceDispatchFeedbackPolicyMatch(attribution: any = {}, entry: any = {}) {
+  const project = String(entry.project || entry.target_project || entry.targetProject || "").trim().toLowerCase();
+  const agentType = workerContextPacketAttributionAgentType(entry).toLowerCase();
+  const rowProject = String(attribution.project || attribution.target_project || attribution.targetProject || "").trim().toLowerCase();
+  const rowAgentType = String(attribution.agent_type || attribution.agentType || "unknown").trim().toLowerCase();
+  const projectMatches = !rowProject || rowProject === "unknown" || rowProject === "*" || rowProject === project;
+  const agentMatches = !rowAgentType || rowAgentType === "unknown" || rowAgentType === "*" || rowAgentType === agentType;
+  return projectMatches && agentMatches;
+}
+
+function buildWorkerContextPacketPressureProvenanceFeedbackDispatchPolicyReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const {
+      buildPressureProvenancePreDispatchComplianceDispatchPolicy,
+      readGroupTypedMemoryDistillationLedger,
+    } = require("../collaboration/group-memory-index");
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = typedLedger.pressureProvenancePreDispatchComplianceArchive || {};
+    const frequentAttributions = (Array.isArray(archive.attributions) ? archive.attributions : [])
+      .filter((row: any) => row.frequent === true || Number(row.violation_count || 0) >= Number(archive.frequent_threshold || options.frequentThreshold || options.frequent_threshold || 2));
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [];
+    const attributionChecks = frequentAttributions.map((attribution: any) => {
+      const policyProbe = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+        targetProject: attribution.project || attribution.target_project || attribution.targetProject || "",
+        agentType: attribution.agent_type || attribution.agentType || "unknown",
+        generatedAt: options.generatedAt || options.generated_at || now(),
+        frequentThreshold: archive.frequent_threshold || options.frequentThreshold || options.frequent_threshold || 2,
+      });
+      const policyRow = (policyProbe.policyRows || []).find((row: any) => {
+        const sameProject = String(row.project || "").toLowerCase() === String(attribution.project || "").toLowerCase();
+        const sameAgent = String(row.agent_type || row.agentType || "").toLowerCase() === String(attribution.agent_type || attribution.agentType || "").toLowerCase();
+        return sameProject && sameAgent;
+      }) || {};
+      const policyRequired = policyProbe.active === true;
+      const matchingEntries = entries.filter((entry: any) => pressureProvenanceDispatchFeedbackPolicyMatch(attribution, entry));
+      const policyEntries = matchingEntries.filter((entry: any) => {
+        const policy = workerContextPacketPressureProvenanceDispatchFeedbackPolicy(entry) || {};
+        return policy.schema === "ccm-pressure-provenance-pre-dispatch-compliance-dispatch-policy-v1"
+          && policy.active === true
+          && (entry.worker_context_packet_render_probe?.rendered_flags?.has_pressure_provenance_dispatch_feedback_policy === true
+            || JSON.stringify(policy).includes("memoryProvenanceUsage"));
+      });
+      return {
+        schema: "ccm-worker-context-packet-pressure-provenance-feedback-dispatch-policy-attribution-v1",
+        agent_type: attribution.agent_type || "unknown",
+        project: attribution.project || "unknown",
+        violation_count: Number(attribution.violation_count || 0),
+        missing_memory_provenance_usage_count: Number(attribution.missing_memory_provenance_usage_count || 0),
+        current_source_verified_gap_count: Number(attribution.current_source_verified_gap_count || 0),
+        effective_violation_count: Number(policyRow.effective_violation_count ?? attribution.violation_count ?? 0),
+        recovery_credit: Number(policyRow.recovery_credit || 0),
+        recovered: policyRow.recovered === true,
+        policyRequired,
+        matchingBindingCount: matchingEntries.length,
+        policyBindingCount: policyEntries.length,
+        covered: !policyRequired || policyEntries.length > 0,
+        latestPolicyPacketId: policyEntries.slice(-1)[0]?.worker_context_packet_id || "",
+        latestPolicyBindingId: policyEntries.slice(-1)[0]?.binding_id || "",
+      };
+    });
+    const covered = attributionChecks.filter((row: any) => row.covered);
+    const missing = attributionChecks.filter((row: any) => !row.covered);
+    const status = frequentAttributions.length === 0 ? "empty" : missing.length === 0 ? "ok" : covered.length > 0 ? "warn" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-feedback-dispatch-policy-group-v1",
+      groupId,
+      status,
+      typedLedgerFile: typedLedger.file || "",
+      bindingLedgerFile: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      frequentAttributionCount: frequentAttributions.length,
+      coveredAttributionCount: covered.length,
+      missingPolicyAttributionCount: missing.length,
+      bindingCount: entries.length,
+      policyBindingCount: entries.filter((entry: any) => workerContextPacketPressureProvenanceDispatchFeedbackPolicy(entry)?.active === true).length,
+      attributions: attributionChecks,
+      gaps: missing.slice(0, 12).map((row: any) => ({
+        agent_type: row.agent_type || "unknown",
+        project: row.project || "unknown",
+        reason: `pressure provenance feedback archive has frequent violations but no matching WorkerContextPacket dispatch feedback policy; agentType=${row.agent_type || "unknown"} project=${row.project || "unknown"}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.frequentAttributionCount || 0) > 0);
+  const passedRows = checkedRows.filter((row: any) => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-feedback-dispatch-policy-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      frequentAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.frequentAttributionCount || 0), 0),
+      coveredAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.coveredAttributionCount || 0), 0),
+      missingPolicyAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.missingPolicyAttributionCount || 0), 0),
+      policyBindingCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.policyBindingCount || 0), 0),
+    },
+    groups: rows.sort((a: any, b: any) => Number(b.missingPolicyAttributionCount || 0) - Number(a.missingPolicyAttributionCount || 0)).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceFeedbackDispatchPolicy(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceFeedbackDispatchPolicyReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    frequentAttributionCount: row.frequentAttributionCount,
+    coveredAttributionCount: row.coveredAttributionCount,
+    policyBindingCount: row.policyBindingCount,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).map((gap: any) => ({
+    groupId: row.groupId,
+    project: gap.project || "",
+    agent_type: gap.agent_type || "",
+    reason: gap.reason || "pressure provenance feedback dispatch policy missing",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_feedback_dispatch_policy",
+    "WorkerContextPacket Pressure Provenance Feedback Dispatch Policy",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 Phase 137 已把高频 pressure provenance 回执违约沉淀成 typed feedback memory 后，后续匹配 agentType/project 的 WorkerContextPacket 必须注入 dispatch feedback policy，要求 ACK 和最终回执复核。"
+  );
+  check.report = report;
+  return check;
+}
+
+function buildWorkerContextPacketPressureProvenanceFeedbackPolicyRecoveryReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const {
+      buildPressureProvenancePreDispatchComplianceDispatchPolicy,
+      readGroupTypedMemoryDistillationLedger,
+    } = require("../collaboration/group-memory-index");
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = typedLedger.pressureProvenancePreDispatchComplianceArchive || {};
+    const recoveryArchive = typedLedger.pressureProvenancePreDispatchComplianceRecoveryArchive || {};
+    const threshold = Math.max(1, Number(archive.frequent_threshold || options.frequentThreshold || options.frequent_threshold || 2));
+    const violationAttributions = (Array.isArray(archive.attributions) ? archive.attributions : [])
+      .filter((row: any) => row.frequent === true || Number(row.violation_count || 0) >= threshold);
+    const recoveryAttributions = Array.isArray(recoveryArchive.attributions) ? recoveryArchive.attributions : [];
+    const attributionChecks = violationAttributions.map((attribution: any) => {
+      const policy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+        targetProject: attribution.project || attribution.target_project || attribution.targetProject || "",
+        agentType: attribution.agent_type || attribution.agentType || "unknown",
+        generatedAt: options.generatedAt || options.generated_at || now(),
+        frequentThreshold: threshold,
+        recoveryCreditPerCompliant: options.recoveryCreditPerCompliant || options.recovery_credit_per_compliant,
+      });
+      const row = (policy.policyRows || []).find((item: any) => {
+        const sameProject = String(item.project || "").toLowerCase() === String(attribution.project || "").toLowerCase();
+        const sameAgent = String(item.agent_type || item.agentType || "").toLowerCase() === String(attribution.agent_type || attribution.agentType || "").toLowerCase();
+        return sameProject && sameAgent;
+      }) || {};
+      return {
+        schema: "ccm-worker-context-packet-pressure-provenance-feedback-policy-recovery-attribution-v1",
+        agent_type: attribution.agent_type || "unknown",
+        project: attribution.project || "unknown",
+        violation_count: Number(attribution.violation_count || 0),
+        recovery_compliant_count: Number(row.recovery_compliant_count || 0),
+        recovery_credit: Number(row.recovery_credit || 0),
+        effective_violation_count: Number(row.effective_violation_count ?? attribution.violation_count ?? 0),
+        recovered_violation_count: Number(row.recovered_violation_count || 0),
+        recovered: row.recovered === true,
+        policyActiveAfterRecovery: policy.active === true,
+        action: policy.action || "",
+        severity: policy.severity || "",
+      };
+    });
+    const recovered = attributionChecks.filter((row: any) => row.recovered === true);
+    const stillActive = attributionChecks.filter((row: any) => row.policyActiveAfterRecovery === true);
+    const checked = recoveryAttributions.length > 0 && violationAttributions.length > 0;
+    const status = !checked ? "empty" : recovered.length > 0 && stillActive.length === 0 ? "ok" : recovered.length > 0 ? "warn" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-feedback-policy-recovery-group-v1",
+      groupId,
+      status,
+      typedLedgerFile: typedLedger.file || "",
+      violationAttributionCount: violationAttributions.length,
+      recoveryAttributionCount: recoveryAttributions.length,
+      recoveredAttributionCount: recovered.length,
+      activeAfterRecoveryAttributionCount: stillActive.length,
+      archivedRecoveryCount: Number(recoveryArchive.archived_count || 0),
+      compliantRecoveryCount: Number(recoveryArchive.compliant_count || 0),
+      attributions: attributionChecks,
+      gaps: status === "fail" ? attributionChecks.slice(0, 12).map((row: any) => ({
+        agent_type: row.agent_type || "unknown",
+        project: row.project || "unknown",
+        reason: `pressure provenance recovery archive exists but no frequent attribution recovered below threshold; violations=${row.violation_count || 0} recoveryCredit=${row.recovery_credit || 0}`,
+      })) : [],
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.recoveryAttributionCount || 0) > 0 && Number(row.violationAttributionCount || 0) > 0);
+  const passedRows = checkedRows.filter((row: any) => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-feedback-policy-recovery-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      violationAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.violationAttributionCount || 0), 0),
+      recoveryAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.recoveryAttributionCount || 0), 0),
+      recoveredAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.recoveredAttributionCount || 0), 0),
+      activeAfterRecoveryAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.activeAfterRecoveryAttributionCount || 0), 0),
+      compliantRecoveryCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.compliantRecoveryCount || 0), 0),
+    },
+    groups: rows.sort((a: any, b: any) => Number(b.activeAfterRecoveryAttributionCount || 0) - Number(a.activeAfterRecoveryAttributionCount || 0)).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceFeedbackPolicyRecovery(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceFeedbackPolicyRecoveryReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    violationAttributionCount: row.violationAttributionCount,
+    recoveryAttributionCount: row.recoveryAttributionCount,
+    recoveredAttributionCount: row.recoveredAttributionCount,
+    compliantRecoveryCount: row.compliantRecoveryCount,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).map((gap: any) => ({
+    groupId: row.groupId,
+    project: gap.project || "",
+    agent_type: gap.agent_type || "",
+    reason: gap.reason || "pressure provenance feedback policy recovery missing",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_feedback_policy_recovery",
+    "WorkerContextPacket Pressure Provenance Feedback Policy Recovery",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 Phase 137/138 已有高频 pressure provenance 回执违约，但后续同一 agentType/project 产生足量 compliant memoryProvenanceUsage 回执时，feedback dispatch policy 必须把历史违规降为 recovered/monitor，而不是永久保持 active 惩罚。"
+  );
+  check.report = report;
+  return check;
+}
+
+function buildWorkerContextPacketPressureProvenanceFeedbackPolicyRelapseReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const {
+      buildPressureProvenancePreDispatchComplianceDispatchPolicy,
+      readGroupTypedMemoryDistillationLedger,
+    } = require("../collaboration/group-memory-index");
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = typedLedger.pressureProvenancePreDispatchComplianceArchive || {};
+    const recoveryArchive = typedLedger.pressureProvenancePreDispatchComplianceRecoveryArchive || {};
+    const threshold = Math.max(1, Number(archive.frequent_threshold || options.frequentThreshold || options.frequent_threshold || 2));
+    const recoveryAttributions = Array.isArray(recoveryArchive.attributions) ? recoveryArchive.attributions : [];
+    const violationAttributions = (Array.isArray(archive.attributions) ? archive.attributions : [])
+      .filter((row: any) => row.frequent === true || Number(row.violation_count || 0) >= threshold);
+    const attributionChecks = violationAttributions.map((attribution: any) => {
+      const policy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+        targetProject: attribution.project || attribution.target_project || attribution.targetProject || "",
+        agentType: attribution.agent_type || attribution.agentType || "unknown",
+        generatedAt: options.generatedAt || options.generated_at || now(),
+        frequentThreshold: threshold,
+        recoveryCreditPerCompliant: options.recoveryCreditPerCompliant || options.recovery_credit_per_compliant,
+      });
+      const row = (policy.policyRows || []).find((item: any) => {
+        const sameProject = String(item.project || "").toLowerCase() === String(attribution.project || "").toLowerCase();
+        const sameAgent = String(item.agent_type || item.agentType || "").toLowerCase() === String(attribution.agent_type || attribution.agentType || "").toLowerCase();
+        return sameProject && sameAgent;
+      }) || {};
+      return {
+        schema: "ccm-worker-context-packet-pressure-provenance-feedback-policy-relapse-attribution-v1",
+        agent_type: attribution.agent_type || "unknown",
+        project: attribution.project || "unknown",
+        violation_count: Number(attribution.violation_count || 0),
+        recovery_credit: Number(row.recovery_credit || 0),
+        effective_violation_count: Number(row.effective_violation_count ?? attribution.violation_count ?? 0),
+        post_recovery_violation_count: Number(row.post_recovery_violation_count || 0),
+        recovery_last_compliant_at: row.recovery_last_compliant_at || "",
+        recovery_streak_broken_at: row.recovery_streak_broken_at || "",
+        relapsed: row.relapsed === true,
+        policyActive: policy.active === true,
+        action: policy.action || "",
+        severity: policy.severity || "",
+      };
+    });
+    const relapseRows = attributionChecks.filter((row: any) => row.relapsed === true || Number(row.post_recovery_violation_count || 0) > 0);
+    const activeRelapseRows = relapseRows.filter((row: any) => row.policyActive === true && /reactivate|strengthen/.test(String(row.action || "")));
+    const checked = recoveryAttributions.length > 0 && relapseRows.length > 0;
+    const status = !checked ? "empty" : activeRelapseRows.length >= relapseRows.length ? "ok" : activeRelapseRows.length > 0 ? "warn" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-feedback-policy-relapse-group-v1",
+      groupId,
+      status,
+      typedLedgerFile: typedLedger.file || "",
+      violationAttributionCount: violationAttributions.length,
+      recoveryAttributionCount: recoveryAttributions.length,
+      relapseAttributionCount: relapseRows.length,
+      activeRelapseAttributionCount: activeRelapseRows.length,
+      attributions: attributionChecks,
+      gaps: relapseRows.filter((row: any) => !(row.policyActive === true && /reactivate|strengthen/.test(String(row.action || "")))).slice(0, 12).map((row: any) => ({
+        agent_type: row.agent_type || "unknown",
+        project: row.project || "unknown",
+        reason: `pressure provenance attribution relapsed after recovery but feedback policy was not reactivated; postRecoveryViolations=${row.post_recovery_violation_count || 0}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.relapseAttributionCount || 0) > 0);
+  const passedRows = checkedRows.filter((row: any) => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-feedback-policy-relapse-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      violationAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.violationAttributionCount || 0), 0),
+      recoveryAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.recoveryAttributionCount || 0), 0),
+      relapseAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.relapseAttributionCount || 0), 0),
+      activeRelapseAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.activeRelapseAttributionCount || 0), 0),
+    },
+    groups: rows.sort((a: any, b: any) => Number(b.relapseAttributionCount || 0) - Number(a.relapseAttributionCount || 0)).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceFeedbackPolicyRelapse(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceFeedbackPolicyRelapseReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    relapseAttributionCount: row.relapseAttributionCount,
+    activeRelapseAttributionCount: row.activeRelapseAttributionCount,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).map((gap: any) => ({
+    groupId: row.groupId,
+    project: gap.project || "",
+    agent_type: gap.agent_type || "",
+    reason: gap.reason || "pressure provenance feedback policy relapse missing",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_feedback_policy_relapse",
+    "WorkerContextPacket Pressure Provenance Feedback Policy Relapse",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当某个 agentType/project 已通过 compliant receipts 恢复，但之后又出现 pressure provenance 回执违规时，feedback policy 必须标记 relapsed 并重新激活严格 ACK/最终回执复核。"
+  );
+  check.report = report;
+  return check;
+}
+
+function buildWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItem(groupId: string, row: any = {}, index = 0, existing: any = {}, at = now()) {
+  const agentType = String(row.agent_type || row.agentType || "unknown").trim() || "unknown";
+  const project = String(row.project || row.target_project || row.targetProject || "unknown").trim() || "unknown";
+  const relapsed = row.relapsed === true;
+  const effectiveViolations = Number(row.effective_violation_count ?? row.effectiveViolationCount ?? row.violation_count ?? 0);
+  const recoveryCredit = Number(row.recovery_credit || row.recoveryCredit || 0);
+  const postRecoveryViolations = Number(row.post_recovery_violation_count || row.postRecoveryViolationCount || 0);
+  const id = `pressure-provenance-feedback-policy-repair:${hash([
+    groupId,
+    agentType,
+    project,
+    row.recovery_streak_broken_at || row.recoveryStreakBrokenAt || "",
+    relapsed ? "relapsed" : "active",
+  ], 14)}`;
+  const previousStatus = replayRepairWorkItemStatus(existing.status);
+  const status = ["in_progress", "blocked", "completed", "cancelled"].includes(previousStatus) ? previousStatus : "pending";
+  const priority = relapsed ? "critical" : effectiveViolations >= 4 ? "high" : "medium";
+  const reason = relapsed
+    ? `recovered pressure provenance attribution relapsed after ${row.recovery_last_compliant_at || row.recoveryLastCompliantAt || "last compliant receipt"}; postRecoveryViolations=${postRecoveryViolations}`
+    : `pressure provenance feedback policy still active; effectiveViolations=${effectiveViolations}`;
+  const instruction = [
+    `修复 agentType=${agentType} project=${project} 的 pressure provenance feedback policy。`,
+    relapsed ? "该执行器/项目已恢复后再次违规，必须先修复回执纪律再继续普通实现派发。" : "该执行器/项目仍有高有效违规数，必须降低 effective violations。",
+    "下一次子 Agent 派发必须携带 pressure provenance dispatch feedback policy，并要求 ACK memoryProvenanceUsage。",
+    "最终 CCM_AGENT_RECEIPT 必须包含 memoryProvenanceUsage；使用 disputed/stale-under-repair pressure MEMORY.md 时 currentSourceVerified=true。",
+    "修复完成条件：后续 compliant pressure provenance receipts 使 policy 降为 monitor/recovered，且没有 post-recovery violation。",
+  ].join(" ");
+  return {
+    id,
+    work_item_id: id,
+    taskId: "",
+    scopeId: groupId,
+    group_id: groupId,
+    subject: compactMemoryCenterText(relapsed ? "修复 pressure provenance recovery relapse" : "修复 pressure provenance feedback policy", 150),
+    description: compactMemoryCenterText(reason, 520),
+    activeForm: compactMemoryCenterText(`修复 pressure provenance feedback：${agentType}/${project}`, 180),
+    owner: existing.owner && previousStatus !== "pending" ? existing.owner : "group-main-agent",
+    target: compactMemoryCenterText(project, 120),
+    agentType: "group-main-agent",
+    status,
+    priority,
+    component: "pressure_provenance_feedback_policy",
+    source: "worker_context_pressure_provenance_feedback_policy_repair",
+    source_action_id: `pressure-provenance-feedback-policy:${agentType}:${project}:${relapsed ? "relapse" : "active"}`,
+    repair_target: `${agentType}/${project}`,
+    instruction: compactMemoryCenterText(instruction, 900),
+    expected: compactMemoryCenterText("policy.active=false or action=monitor_recovered_pressure_memory_provenance_receipt_contract; memoryProvenanceUsage compliant receipts present; no relapsed post-recovery violations", 420),
+    source_reason: compactMemoryCenterText(reason, 420),
+    attempt: Math.max(1, Number(existing.attempt || 1) || 1),
+    target_project: project,
+    pressure_provenance_feedback_agent_type: agentType,
+    pressure_provenance_feedback_project: project,
+    pressure_provenance_feedback_policy_action: row.action || "",
+    pressure_provenance_feedback_policy_severity: row.severity || "",
+    pressure_provenance_effective_violation_count: effectiveViolations,
+    pressure_provenance_violation_count: Number(row.violation_count || row.violationCount || 0),
+    pressure_provenance_recovery_credit: recoveryCredit,
+    pressure_provenance_recovery_compliant_count: Number(row.recovery_compliant_count || row.recoveryCompliantCount || 0),
+    pressure_provenance_post_recovery_violation_count: postRecoveryViolations,
+    pressure_provenance_relapsed: relapsed,
+    pressure_provenance_recovery_last_compliant_at: row.recovery_last_compliant_at || row.recoveryLastCompliantAt || "",
+    pressure_provenance_recovery_streak_broken_at: row.recovery_streak_broken_at || row.recoveryStreakBrokenAt || "",
+    pressure_provenance_rel_paths: Array.isArray(row.rel_paths || row.relPaths) ? (row.rel_paths || row.relPaths).slice(0, 16) : [],
+    pressure_provenance_gap_codes: Array.isArray(row.gap_codes || row.gapCodes) ? (row.gap_codes || row.gapCodes).slice(0, 16) : [],
+    dispatch_hint: {
+      claim_policy: "group_main_agent_before_child_dispatch",
+      next_step: relapsed ? "dispatch_receipt_discipline_repair_before_ordinary_work" : "dispatch_pressure_provenance_compliance_repair",
+      should_create_real_task: false,
+      reason: "Memory Center diagnostic sidecar; main Agent may claim and dispatch deliberately.",
+    },
+    evidence: [
+      `agentType=${agentType}`,
+      `project=${project}`,
+      `effectiveViolations=${effectiveViolations}`,
+      recoveryCredit ? `recoveryCredit=${recoveryCredit}` : "",
+      relapsed ? "relapsed=true" : "",
+      postRecoveryViolations ? `postRecoveryViolations=${postRecoveryViolations}` : "",
+      row.recovery_streak_broken_at ? `recoveryStreakBrokenAt=${row.recovery_streak_broken_at}` : "",
+    ].filter(Boolean),
+    filesChanged: [],
+    verification: [
+      "重新运行 worker_context_packet_pressure_provenance_feedback_policy_recovery",
+      "重新运行 worker_context_packet_pressure_provenance_feedback_policy_relapse",
+      "确认后续 CCM_AGENT_RECEIPT.memoryProvenanceUsage compliant",
+    ],
+    blockers: [],
+    needs: ["子 Agent 更正 pressure provenance receipt discipline", "主 Agent 复核 final receipt before close"],
+    createdAt: existing.createdAt || existing.created_at || at,
+    updatedAt: existing.updatedAt || existing.updated_at || at,
+    lastSeenAt: existing.lastSeenAt || existing.last_seen_at || at,
+    completedAt: existing.completedAt || existing.completed_at || "",
+    seenCount: Math.max(1, Number(existing.seenCount || existing.seen_count || 1) || 1),
+  };
+}
+
+function syncWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItems(groupId: string, policyRows: any[] = [], options: any = {}) {
+  if (!groupId) return summarizeReplayRepairPendingWorkItems(groupId);
+  const at = String(options.at || now());
+  const threshold = Math.max(1, Number(options.frequentThreshold || options.frequent_threshold || 2));
+  const actionableRows = (Array.isArray(policyRows) ? policyRows : []).filter((row: any) => {
+    const effectiveViolations = Number(row.effective_violation_count ?? row.effectiveViolationCount ?? row.violation_count ?? 0);
+    return row.relapsed === true || effectiveViolations >= threshold;
+  });
+  const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+  const previousItems = Array.isArray(ledger.items) ? ledger.items : [];
+  const previousById = new Map<string, any>(previousItems.map((item: any) => [String(item.id || item.work_item_id || ""), item]));
+  const currentIds = new Set<string>();
+  const nextRepairItems: any[] = [];
+  let changed = false;
+  for (const [index, row] of actionableRows.entries()) {
+    const draft = buildWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItem(groupId, row, index, {}, at);
+    const existing = previousById.get(draft.id) || {};
+    let item = buildWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItem(groupId, row, index, existing, at);
+    const previousSignature = replayRepairWorkItemSignature(existing);
+    const nextSignature = replayRepairWorkItemSignature(item);
+    if (existing.id && previousSignature === nextSignature) {
+      item = { ...existing, ...item, createdAt: existing.createdAt || item.createdAt, updatedAt: existing.updatedAt || item.updatedAt, lastSeenAt: existing.lastSeenAt || item.lastSeenAt, seenCount: Number(existing.seenCount || 1) };
+    } else {
+      item = { ...item, updatedAt: at, lastSeenAt: at, seenCount: existing.id ? Number(existing.seenCount || 1) + 1 : 1 };
+      changed = true;
+    }
+    currentIds.add(item.id);
+    nextRepairItems.push(item);
+  }
+  const untouchedItems: any[] = [];
+  for (const existing of previousItems) {
+    const id = String(existing.id || existing.work_item_id || "");
+    const source = String(existing.source || "");
+    if (source !== "worker_context_pressure_provenance_feedback_policy_repair") {
+      untouchedItems.push(existing);
+      continue;
+    }
+    if (!id || currentIds.has(id)) continue;
+    const currentStatus = replayRepairWorkItemStatus(existing.status);
+    if (!replayRepairWorkItemOpen(currentStatus)) {
+      nextRepairItems.push(existing);
+      continue;
+    }
+    nextRepairItems.push({
+      ...existing,
+      status: "completed",
+      updatedAt: at,
+      completedAt: existing.completedAt || at,
+      resolutionReason: "pressure_provenance_feedback_policy_recovered_or_no_longer_active",
+      latestPressureProvenanceFeedbackPolicy: {
+        actionableCount: actionableRows.length,
+      },
+    });
+    changed = true;
+  }
+  const nextItems = [...untouchedItems, ...nextRepairItems]
+    .sort((a, b) => {
+      const statusRank = replayRepairWorkItemOpen(a.status) === replayRepairWorkItemOpen(b.status) ? 0 : replayRepairWorkItemOpen(a.status) ? -1 : 1;
+      if (statusRank) return statusRank;
+      const priority = replayRepairPriorityRank(a.priority) - replayRepairPriorityRank(b.priority);
+      if (priority) return priority;
+      return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    })
+    .slice(0, 160);
+  const stats = replayRepairWorkItemStats(nextItems);
+  const nextLedger = {
+    ...ledger,
+    latestPressureProvenanceFeedbackPolicyRepair: {
+      actionableCount: actionableRows.length,
+      relapsedCount: actionableRows.filter((row: any) => row.relapsed === true).length,
+      maxEffectiveViolationCount: actionableRows.reduce((max: number, row: any) => Math.max(max, Number(row.effective_violation_count ?? row.effectiveViolationCount ?? 0)), 0),
+    },
+    items: nextItems,
+    stats,
+    updatedAt: changed || !ledger.updatedAt ? at : ledger.updatedAt,
+  };
+  const currentComparable = JSON.stringify(previousItems.filter((item: any) => String(item.source || "") === "worker_context_pressure_provenance_feedback_policy_repair"));
+  const nextComparable = JSON.stringify(nextItems.filter((item: any) => String(item.source || "") === "worker_context_pressure_provenance_feedback_policy_repair"));
+  if (changed || currentComparable !== nextComparable || !fs.existsSync(ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId))) {
+    return summarizeReplayRepairPendingWorkItems(groupId, writeGroupCompactBoundaryReplayRepairWorkItems(groupId, nextLedger));
+  }
+  return summarizeReplayRepairPendingWorkItems(groupId, ledger);
+}
+
+function workerContextPacketPressureProvenanceFeedbackPolicyActionableRows(groupId: string, options: any = {}) {
+  const {
+    buildPressureProvenancePreDispatchComplianceDispatchPolicy,
+    readGroupTypedMemoryDistillationLedger,
+  } = require("../collaboration/group-memory-index");
+  const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+  const archive = typedLedger.pressureProvenancePreDispatchComplianceArchive || {};
+  const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
+  const threshold = Math.max(1, Number(archive.frequent_threshold || options.frequentThreshold || options.frequent_threshold || 2));
+  const rows: any[] = [];
+  const seen = new Set<string>();
+  for (const attribution of attributions) {
+    const policy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+      targetProject: attribution.project || attribution.target_project || attribution.targetProject || "",
+      agentType: attribution.agent_type || attribution.agentType || "unknown",
+      generatedAt: options.generatedAt || options.generated_at || now(),
+      frequentThreshold: threshold,
+      recoveryCreditPerCompliant: options.recoveryCreditPerCompliant || options.recovery_credit_per_compliant,
+    });
+    const policyRows = Array.isArray(policy.policyRows) ? policy.policyRows : [];
+    for (const row of policyRows) {
+      const key = `${String(row.agent_type || row.agentType || "").toLowerCase()}|${String(row.project || "").toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const effectiveViolations = Number(row.effective_violation_count ?? row.effectiveViolationCount ?? row.violation_count ?? 0);
+      if (policy.active === true && (row.relapsed === true || effectiveViolations >= threshold)) {
+        rows.push({ ...row, action: policy.action || "", severity: policy.severity || "" });
+      }
+    }
+  }
+  return rows;
+}
+
+function buildWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItemReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const actionableRows = workerContextPacketPressureProvenanceFeedbackPolicyActionableRows(groupId, options);
+    const workItems = syncWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItems(groupId, actionableRows, {
+      at: options.generatedAt || options.generated_at || now(),
+      frequentThreshold: options.frequentThreshold || options.frequent_threshold,
+    });
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const repairItems = (Array.isArray(ledger.items) ? ledger.items : [])
+      .filter((item: any) => String(item.source || "") === "worker_context_pressure_provenance_feedback_policy_repair");
+    const expectedIds = new Set(actionableRows.map((row: any, index: number) => buildWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItem(groupId, row, index, {}, options.generatedAt || options.generated_at || now()).id));
+    const currentRepairItems = repairItems.filter((item: any) => expectedIds.has(String(item.id || item.work_item_id || "")));
+    const openItems = currentRepairItems.filter((item: any) => replayRepairWorkItemOpen(item.status));
+    const staleOpenItems = repairItems.filter((item: any) => replayRepairWorkItemOpen(item.status) && !expectedIds.has(String(item.id || item.work_item_id || "")));
+    const requiredActionCount = actionableRows.length;
+    const coveredItemCount = openItems.length;
+    const status = requiredActionCount > 0
+      ? coveredItemCount >= requiredActionCount ? "ok" : "fail"
+      : staleOpenItems.length > 0 ? "warn" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-feedback-policy-repair-work-item-group-v1",
+      groupId,
+      status,
+      requiredActionCount,
+      openItemCount: openItems.length + staleOpenItems.length,
+      currentOpenItemCount: openItems.length,
+      staleOpenItemCount: staleOpenItems.length,
+      coveredItemCount,
+      total: repairItems.length,
+      pendingCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "pending").length,
+      inProgressCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "in_progress").length,
+      completedCount: repairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "completed").length,
+      relapsedActionableCount: actionableRows.filter((row: any) => row.relapsed === true).length,
+      maxEffectiveViolationCount: actionableRows.reduce((max: number, row: any) => Math.max(max, Number(row.effective_violation_count ?? row.effectiveViolationCount ?? 0)), 0),
+      file: workItems.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      actionableRows: actionableRows.slice(0, 12).map((row: any) => ({
+        agent_type: row.agent_type || row.agentType || "unknown",
+        project: row.project || "unknown",
+        relapsed: row.relapsed === true,
+        effective_violation_count: Number(row.effective_violation_count ?? row.effectiveViolationCount ?? 0),
+        post_recovery_violation_count: Number(row.post_recovery_violation_count || row.postRecoveryViolationCount || 0),
+      })),
+      items: repairItems.slice(0, 12).map((item: any) => ({
+        id: item.id || item.work_item_id || "",
+        status: replayRepairWorkItemStatus(item.status),
+        priority: item.priority || "",
+        target_project: item.target_project || "",
+        agent_type: item.pressure_provenance_feedback_agent_type || "",
+        effective_violation_count: item.pressure_provenance_effective_violation_count || 0,
+        relapsed: item.pressure_provenance_relapsed === true,
+      })),
+      gaps: status === "fail" ? actionableRows.slice(0, 12).map((row: any) => ({
+        agent_type: row.agent_type || row.agentType || "unknown",
+        project: row.project || "unknown",
+        reason: `active pressure provenance feedback policy lacks repair work item; relapsed=${row.relapsed === true}; effectiveViolations=${row.effective_violation_count ?? row.effectiveViolationCount ?? 0}`,
+      })) : [],
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.requiredActionCount || 0) > 0 || Number(row.openItemCount || 0) > 0);
+  const requiredRows = checkedRows.filter((row: any) => Number(row.requiredActionCount || 0) > 0);
+  const coveredRows = requiredRows.filter((row: any) => Number(row.coveredItemCount || 0) >= Number(row.requiredActionCount || 0));
+  const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? checkedRows.some((row: any) => row.status === "warn") ? "warn" : "empty"
+    : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-feedback-policy-repair-work-item-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsNeedingWorkItems: requiredRows.length,
+      groupsCovered: coveredRows.length,
+      requiredActionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.requiredActionCount || 0), 0),
+      openItemCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.openItemCount || 0), 0),
+      coveredItemCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.coveredItemCount || 0), 0),
+      relapsedActionableCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.relapsedActionableCount || 0), 0),
+      maxEffectiveViolationCount: checkedRows.reduce((max: number, row: any) => Math.max(max, Number(row.maxEffectiveViolationCount || 0)), 0),
+    },
+    groups: rows.sort((a: any, b: any) => Number(b.requiredActionCount || 0) - Number(a.requiredActionCount || 0) || Number(b.openItemCount || 0) - Number(a.openItemCount || 0)).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItems(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItemReport(options);
+  const checked = Number(report.overall.groupsNeedingWorkItems || 0);
+  const passed = (report.groups || []).filter((row: any) => Number(row.requiredActionCount || 0) > 0 && row.status === "ok").length;
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    requiredActionCount: row.requiredActionCount,
+    coveredItemCount: row.coveredItemCount,
+    relapsedActionableCount: row.relapsedActionableCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).map((gap: any) => ({
+    groupId: row.groupId,
+    project: gap.project || "",
+    agent_type: gap.agent_type || "",
+    reason: gap.reason || "pressure provenance feedback policy repair work item missing",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_feedback_policy_repair_work_items",
+    "WorkerContextPacket Pressure Provenance Feedback Policy Repair Work Items",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 pressure provenance feedback policy 因 relapsed=true 或 effective violations 仍高而 active 时，必须自动生成 group-main-agent 可领取的 repair work item，要求先修复 memoryProvenanceUsage/currentSourceVerified 回执纪律再继续普通派发。"
+  );
+  check.report = report;
+  return check;
+}
+
+function pressureProvenanceFeedbackComplianceKey(agentType: any, project: any) {
+  const agent = String(agentType || "unknown").trim().toLowerCase() || "unknown";
+  const target = String(project || "unknown").trim().toLowerCase() || "unknown";
+  return `${agent}|${target}`;
+}
+
+function pressureProvenanceFeedbackRepairItemMatchesHealthRow(item: any = {}, row: any = {}) {
+  const itemAgent = String(item.pressure_provenance_feedback_agent_type || item.agent_type || item.agentType || "").trim().toLowerCase();
+  const itemProject = String(item.pressure_provenance_feedback_project || item.target_project || item.targetProject || "").trim().toLowerCase();
+  const rowAgent = String(row.agent_type || row.agentType || "").trim().toLowerCase();
+  const rowProject = String(row.project || row.target_project || row.targetProject || "").trim().toLowerCase();
+  return (!rowAgent || itemAgent === rowAgent) && (!rowProject || itemProject === rowProject);
+}
+
+function pressureProvenanceFeedbackComplianceHealthStatus(row: any = {}) {
+  if (row.relapsed === true && row.policyActive === true) return "critical";
+  if (row.policyActive === true) return "warning";
+  if (row.recovered === true) return "monitor";
+  if (Number(row.violation_count || 0) > 0) return "watch";
+  return "healthy";
+}
+
+function pressureProvenanceFeedbackComplianceDispatchRecommendation(row: any = {}) {
+  if (row.relapsed === true && row.policyActive === true) return "hold_child_dispatch_until_pressure_provenance_repair";
+  if (row.policyActive === true) return "strict_receipt_review_or_repair_before_ordinary_dispatch";
+  if (row.recovered === true) return "allow_dispatch_with_receipt_sampling";
+  if (Number(row.violation_count || 0) > 0) return "allow_dispatch_with_pressure_provenance_monitoring";
+  return "normal_dispatch";
+}
+
+function pressureProvenanceFeedbackComplianceRiskRank(status: any) {
+  switch (String(status || "")) {
+    case "critical": return 4;
+    case "warning": return 3;
+    case "watch": return 2;
+    case "monitor": return 1;
+    default: return 0;
+  }
+}
+
+function buildWorkerContextPacketPressureProvenanceFeedbackComplianceHealthReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const {
+      buildPressureProvenancePreDispatchComplianceDispatchPolicy,
+      readGroupTypedMemoryDistillationLedger,
+    } = require("../collaboration/group-memory-index");
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = typedLedger.pressureProvenancePreDispatchComplianceArchive || {};
+    const recoveryArchive = typedLedger.pressureProvenancePreDispatchComplianceRecoveryArchive || {};
+    const threshold = Math.max(1, Number(archive.frequent_threshold || options.frequentThreshold || options.frequent_threshold || 2));
+    const violationAttributions = Array.isArray(archive.attributions) ? archive.attributions : [];
+    const recoveryAttributions = Array.isArray(recoveryArchive.attributions) ? recoveryArchive.attributions : [];
+    const baseRows = new Map<string, any>();
+    const remember = (raw: any = {}, kind: "violation" | "recovery") => {
+      const agentType = String(raw.agent_type || raw.agentType || "unknown").trim() || "unknown";
+      const project = String(raw.project || raw.target_project || raw.targetProject || "unknown").trim() || "unknown";
+      const key = pressureProvenanceFeedbackComplianceKey(agentType, project);
+      const current = baseRows.get(key) || { agent_type: agentType, project, violation: {}, recovery: {} };
+      if (kind === "violation") current.violation = raw;
+      else current.recovery = raw;
+      baseRows.set(key, { ...current, agent_type: current.agent_type || agentType, project: current.project || project });
+    };
+    for (const attribution of violationAttributions) remember(attribution, "violation");
+    for (const attribution of recoveryAttributions) remember(attribution, "recovery");
+    const actionableRows = workerContextPacketPressureProvenanceFeedbackPolicyActionableRows(groupId, options);
+    for (const row of actionableRows) remember(row, "violation");
+    if (options.syncRepairWorkItems !== false && options.sync_repair_work_items !== false) {
+      syncWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItems(groupId, actionableRows, {
+        at: options.generatedAt || options.generated_at || now(),
+        frequentThreshold: threshold,
+      });
+    }
+    const repairLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const repairItems = (Array.isArray(repairLedger.items) ? repairLedger.items : [])
+      .filter((item: any) => String(item.source || "") === "worker_context_pressure_provenance_feedback_policy_repair");
+    const healthRows = [...baseRows.values()].map((base: any) => {
+      const violation = base.violation || {};
+      const recovery = base.recovery || {};
+      const policy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+        targetProject: base.project,
+        agentType: base.agent_type,
+        generatedAt: options.generatedAt || options.generated_at || now(),
+        frequentThreshold: threshold,
+        recoveryCreditPerCompliant: options.recoveryCreditPerCompliant || options.recovery_credit_per_compliant,
+      });
+      const policyRow = (Array.isArray(policy.policyRows) ? policy.policyRows : []).find((item: any) => {
+        return pressureProvenanceFeedbackComplianceKey(item.agent_type || item.agentType, item.project) === pressureProvenanceFeedbackComplianceKey(base.agent_type, base.project);
+      }) || {};
+      const violationCount = Number(policyRow.violation_count ?? violation.violation_count ?? 0);
+      const recoveryCredit = Number(policyRow.recovery_credit ?? 0);
+      const effectiveViolationCount = Number(policyRow.effective_violation_count ?? violationCount);
+      const relapsed = policyRow.relapsed === true;
+      const recovered = policyRow.recovered === true;
+      const policyActive = policy.active === true && (relapsed || effectiveViolationCount >= threshold);
+      const matchingRepairItems = repairItems.filter((item: any) => pressureProvenanceFeedbackRepairItemMatchesHealthRow(item, base));
+      const openRepairItems = matchingRepairItems.filter((item: any) => replayRepairWorkItemOpen(item.status));
+      const completedRepairItems = matchingRepairItems.filter((item: any) => replayRepairWorkItemStatus(item.status) === "completed");
+      const draftRow: any = {
+        schema: "ccm-worker-context-packet-pressure-provenance-feedback-compliance-health-row-v1",
+        groupId,
+        agent_type: base.agent_type || "unknown",
+        project: base.project || "unknown",
+        threshold,
+        violation_count: violationCount,
+        effective_violation_count: effectiveViolationCount,
+        recovered_violation_count: Number(policyRow.recovered_violation_count || 0),
+        recovery_compliant_count: Number(policyRow.recovery_compliant_count ?? recovery.compliant_count ?? 0),
+        recovery_credit: recoveryCredit,
+        post_recovery_violation_count: Number(policyRow.post_recovery_violation_count || 0),
+        relapsed,
+        recovered,
+        policyActive,
+        policy_action: policy.action || "",
+        policy_severity: policy.severity || "",
+        first_violation_at: policyRow.first_violation_at || violation.first_violation_at || "",
+        last_violation_at: policyRow.last_violation_at || violation.last_violation_at || "",
+        recovery_first_compliant_at: recovery.first_compliant_at || "",
+        recovery_last_compliant_at: policyRow.recovery_last_compliant_at || recovery.last_compliant_at || "",
+        recovery_streak_broken_at: policyRow.recovery_streak_broken_at || "",
+        missing_receipt_count: Number(policyRow.missing_receipt_count ?? violation.missing_receipt_count ?? 0),
+        missing_memory_provenance_usage_count: Number(policyRow.missing_memory_provenance_usage_count ?? violation.missing_memory_provenance_usage_count ?? 0),
+        current_source_verified_gap_count: Number(policyRow.current_source_verified_gap_count ?? violation.current_source_verified_gap_count ?? 0),
+        rel_paths: uniqueStrings([...(policyRow.rel_paths || []), ...(violation.rel_paths || []), ...(recovery.rel_paths || [])], 16),
+        gap_codes: uniqueStrings([...(policyRow.gap_codes || []), ...(violation.gap_codes || [])], 16),
+        open_repair_item_count: openRepairItems.length,
+        completed_repair_item_count: completedRepairItems.length,
+        current_open_repair_item_ids: openRepairItems.map((item: any) => String(item.id || item.work_item_id || "")).filter(Boolean).slice(0, 8),
+        latest_repair_item_id: matchingRepairItems[0]?.id || matchingRepairItems[0]?.work_item_id || "",
+        repair_backlog_state: policyActive
+          ? openRepairItems.length > 0 ? "open" : "missing"
+          : completedRepairItems.length > 0 ? "resolved" : "not_required",
+      };
+      draftRow.health_status = pressureProvenanceFeedbackComplianceHealthStatus(draftRow);
+      draftRow.dispatch_recommendation = pressureProvenanceFeedbackComplianceDispatchRecommendation(draftRow);
+      draftRow.quality_coverage_ok = !policyActive || openRepairItems.length > 0;
+      draftRow.summary = compactMemoryCenterText(
+        `agentType=${draftRow.agent_type}; project=${draftRow.project}; health=${draftRow.health_status}; active=${policyActive}; relapsed=${relapsed}; effectiveViolations=${effectiveViolationCount}; recoveryCredit=${recoveryCredit}; openRepairItems=${openRepairItems.length}`,
+        420
+      );
+      return draftRow;
+    }).sort((a: any, b: any) => {
+      const risk = pressureProvenanceFeedbackComplianceRiskRank(b.health_status) - pressureProvenanceFeedbackComplianceRiskRank(a.health_status);
+      if (risk) return risk;
+      return Number(b.effective_violation_count || 0) - Number(a.effective_violation_count || 0);
+    });
+    const missingRepairRows = healthRows.filter((row: any) => row.policyActive === true && Number(row.open_repair_item_count || 0) <= 0);
+    const activeRows = healthRows.filter((row: any) => row.policyActive === true);
+    const riskStatus = healthRows.reduce((status: string, row: any) => {
+      return pressureProvenanceFeedbackComplianceRiskRank(row.health_status) > pressureProvenanceFeedbackComplianceRiskRank(status)
+        ? row.health_status
+        : status;
+    }, "healthy");
+    const status = healthRows.length === 0 ? "empty" : missingRepairRows.length > 0 ? "fail" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-feedback-compliance-health-group-v1",
+      groupId,
+      status,
+      riskStatus,
+      typedLedgerFile: typedLedger.file || "",
+      repairWorkItemsFile: repairLedger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      threshold,
+      healthRowCount: healthRows.length,
+      activePolicyRowCount: activeRows.length,
+      relapsedRowCount: healthRows.filter((row: any) => row.relapsed === true).length,
+      recoveredRowCount: healthRows.filter((row: any) => row.recovered === true).length,
+      criticalRowCount: healthRows.filter((row: any) => row.health_status === "critical").length,
+      warningRowCount: healthRows.filter((row: any) => row.health_status === "warning").length,
+      monitorRowCount: healthRows.filter((row: any) => row.health_status === "monitor").length,
+      watchRowCount: healthRows.filter((row: any) => row.health_status === "watch").length,
+      missingRepairRowCount: missingRepairRows.length,
+      openRepairItemCount: healthRows.reduce((sum: number, row: any) => sum + Number(row.open_repair_item_count || 0), 0),
+      completedRepairItemCount: healthRows.reduce((sum: number, row: any) => sum + Number(row.completed_repair_item_count || 0), 0),
+      rows: healthRows.slice(0, 40),
+      gaps: missingRepairRows.slice(0, 12).map((row: any) => ({
+        agent_type: row.agent_type || "unknown",
+        project: row.project || "unknown",
+        reason: `pressure provenance compliance health active row has no open repair work item; health=${row.health_status}; effectiveViolations=${row.effective_violation_count || 0}; relapsed=${row.relapsed === true}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.healthRowCount || 0) > 0);
+  const passedRows = checkedRows.filter((row: any) => Number(row.missingRepairRowCount || 0) === 0);
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const allHealthRows = rows.flatMap((row: any) => row.rows || []);
+  const riskStatus = allHealthRows.reduce((status: string, row: any) => {
+    return pressureProvenanceFeedbackComplianceRiskRank(row.health_status) > pressureProvenanceFeedbackComplianceRiskRank(status)
+      ? row.health_status
+      : status;
+  }, "healthy");
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-feedback-compliance-health-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      riskStatus: checkedRows.length ? riskStatus : "empty",
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      healthRowCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.healthRowCount || 0), 0),
+      activePolicyRowCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.activePolicyRowCount || 0), 0),
+      relapsedRowCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.relapsedRowCount || 0), 0),
+      recoveredRowCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.recoveredRowCount || 0), 0),
+      criticalRowCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.criticalRowCount || 0), 0),
+      warningRowCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.warningRowCount || 0), 0),
+      monitorRowCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.monitorRowCount || 0), 0),
+      watchRowCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.watchRowCount || 0), 0),
+      openRepairItemCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.openRepairItemCount || 0), 0),
+      missingRepairRowCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.missingRepairRowCount || 0), 0),
+    },
+    groups: rows.sort((a: any, b: any) => {
+      const risk = pressureProvenanceFeedbackComplianceRiskRank(b.riskStatus) - pressureProvenanceFeedbackComplianceRiskRank(a.riskStatus);
+      if (risk) return risk;
+      return Number(b.activePolicyRowCount || 0) - Number(a.activePolicyRowCount || 0);
+    }).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "fail" || row.riskStatus === "critical" || row.riskStatus === "warning").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceFeedbackComplianceHealth(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceFeedbackComplianceHealthReport(options);
+  const checked = Number(report.overall.healthRowCount || 0);
+  const failedRows = Number(report.overall.missingRepairRowCount || 0);
+  const passed = Math.max(0, checked - failedRows);
+  const evidence = (report.groups || []).flatMap((group: any) => (group.rows || []).slice(0, 4).map((row: any) => ({
+    groupId: group.groupId,
+    agent_type: row.agent_type || "",
+    project: row.project || "",
+    health_status: row.health_status || "",
+    dispatch_recommendation: row.dispatch_recommendation || "",
+    effective_violation_count: row.effective_violation_count || 0,
+    open_repair_item_count: row.open_repair_item_count || 0,
+  }))).slice(0, 12);
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).map((gap: any) => ({
+    groupId: row.groupId,
+    project: gap.project || "",
+    agent_type: gap.agent_type || "",
+    reason: gap.reason || "pressure provenance compliance health row missing repair backlog",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_feedback_compliance_health",
+    "WorkerContextPacket Pressure Provenance Feedback Compliance Health",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "把 pressure provenance feedback policy、recovery、relapse 与 repair work items 聚合成每个 agentType/project 的健康行；活跃或复发策略必须带 open repair backlog，供群聊主 Agent 调度第三方子 Agent 前判断风险。"
+  );
+  check.report = report;
+  return check;
+}
+
+function normalizePressureProvenanceFeedbackProviderCandidate(raw: any = {}, index = 0) {
+  const entry = raw?.entry || raw?.candidate || raw || {};
+  const project = String(entry.project || entry.target_project || entry.targetProject || entry.name || "").trim();
+  const agentType = String(entry.agent_type || entry.agentType || entry.agent || entry.type || entry.runner || entry.executor || "unknown").trim() || "unknown";
+  if (!project) return null;
+  return {
+    schema: "ccm-pressure-provenance-feedback-provider-candidate-v1",
+    candidate_id: String(entry.candidate_id || entry.candidateId || `provider-candidate:${pressureProvenanceFeedbackComplianceKey(agentType, project)}:${index}`).trim(),
+    project,
+    agent_type: agentType,
+    configured: entry.configured === true || entry.source === "project_config" || entry.current === true,
+    current: entry.current === true,
+    source: String(entry.source || (entry.configured ? "project_config" : "advisory_input")).trim(),
+    work_dir: String(entry.work_dir || entry.workDir || "").trim(),
+  };
+}
+
+function pressureProvenanceFeedbackProviderCandidatesFromOptions(groupId: string, healthGroup: any = {}, options: any = {}) {
+  const explicit = [
+    ...(Array.isArray(options.providerCandidates) ? options.providerCandidates : []),
+    ...(Array.isArray(options.provider_candidates) ? options.provider_candidates : []),
+    ...(Array.isArray(options.dispatchCandidates) ? options.dispatchCandidates : []),
+    ...(Array.isArray(options.dispatch_candidates) ? options.dispatch_candidates : []),
+  ].filter((item: any) => {
+    const candidateGroup = String(item?.groupId || item?.group_id || "").trim();
+    return !candidateGroup || candidateGroup === groupId;
+  }).map(normalizePressureProvenanceFeedbackProviderCandidate).filter(Boolean);
+  if (explicit.length) return explicit;
+
+  const fromProjectConfigs: any[] = [];
+  const projectConfigs = options.projectConfigs || options.project_configs || null;
+  const projectRows = Array.isArray(projectConfigs)
+    ? projectConfigs
+    : projectConfigs && typeof projectConfigs === "object"
+      ? Object.entries(projectConfigs).map(([name, value]: any) => ({ ...(value || {}), name }))
+      : [];
+  for (const [index, item] of projectRows.entries()) {
+    const project = String(item.project || item.name || item.target_project || item.targetProject || "").trim();
+    if (!project) continue;
+    fromProjectConfigs.push(normalizePressureProvenanceFeedbackProviderCandidate({
+      ...item,
+      project,
+      agent_type: item.agent_type || item.agentType || item.agent || item.type || item.runner || item.executor || "unknown",
+      configured: true,
+      source: "project_config",
+    }, index));
+  }
+  const healthRows = Array.isArray(healthGroup.rows) ? healthGroup.rows : [];
+  const fromHealthRows = healthRows.map((row: any, index: number) => normalizePressureProvenanceFeedbackProviderCandidate({
+    project: row.project,
+    agent_type: row.agent_type,
+    source: "compliance_health",
+  }, index)).filter(Boolean);
+  const byKey = new Map<string, any>();
+  for (const candidate of [...fromProjectConfigs, ...fromHealthRows]) {
+    const key = pressureProvenanceFeedbackComplianceKey(candidate.agent_type, candidate.project);
+    byKey.set(key, { ...(byKey.get(key) || {}), ...candidate });
+  }
+  return [...byKey.values()];
+}
+
+function pressureProvenanceFeedbackProviderDispatchPolicy(row: any = {}) {
+  const health = String(row.health_status || "healthy");
+  if (health === "critical") return "hold_until_repair";
+  if (health === "warning") return "strict_review_before_dispatch";
+  if (health === "monitor") return "allow_with_receipt_sampling";
+  if (health === "watch") return "allow_with_monitoring";
+  return "preferred";
+}
+
+function buildWorkerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport(options: any = {}) {
+  const healthReport = options.complianceHealthReport
+    || options.compliance_health_report
+    || buildWorkerContextPacketPressureProvenanceFeedbackComplianceHealthReport(options);
+  const groups = (Array.isArray(healthReport.groups) ? healthReport.groups : []).map((healthGroup: any) => {
+    const groupId = String(healthGroup.groupId || "");
+    const healthRows = Array.isArray(healthGroup.rows) ? healthGroup.rows : [];
+    const healthByKey = new Map<string, any>(healthRows.map((row: any) => [pressureProvenanceFeedbackComplianceKey(row.agent_type, row.project), row]));
+    const candidates = pressureProvenanceFeedbackProviderCandidatesFromOptions(groupId, healthGroup, options).map((candidate: any) => {
+      const health = healthByKey.get(pressureProvenanceFeedbackComplianceKey(candidate.agent_type, candidate.project)) || {};
+      const merged = {
+        ...candidate,
+        health_status: health.health_status || "healthy",
+        dispatch_policy: pressureProvenanceFeedbackProviderDispatchPolicy(health.health_status ? health : { health_status: "healthy" }),
+        dispatch_recommendation: health.dispatch_recommendation || "normal_dispatch",
+        policyActive: health.policyActive === true,
+        relapsed: health.relapsed === true,
+        recovered: health.recovered === true,
+        effective_violation_count: Number(health.effective_violation_count || 0),
+        recovery_credit: Number(health.recovery_credit || 0),
+        open_repair_item_count: Number(health.open_repair_item_count || 0),
+        completed_repair_item_count: Number(health.completed_repair_item_count || 0),
+        repair_backlog_state: health.repair_backlog_state || "not_required",
+        current_open_repair_item_ids: Array.isArray(health.current_open_repair_item_ids) ? health.current_open_repair_item_ids.slice(0, 8) : [],
+      };
+      return {
+        ...merged,
+        risk_rank: pressureProvenanceFeedbackComplianceRiskRank(merged.health_status),
+        provider_score: Math.max(0, 100 - pressureProvenanceFeedbackComplianceRiskRank(merged.health_status) * 25 - Math.min(20, Number(merged.effective_violation_count || 0) * 2)),
+      };
+    });
+    const byProject = new Map<string, any[]>();
+    for (const candidate of candidates) {
+      const key = String(candidate.project || "unknown").trim() || "unknown";
+      byProject.set(key, [...(byProject.get(key) || []), candidate]);
+    }
+    const projectRows = [...byProject.entries()].map(([project, projectCandidates]) => {
+      const sorted = [...projectCandidates].sort((a: any, b: any) => Number(b.provider_score || 0) - Number(a.provider_score || 0) || String(a.agent_type || "").localeCompare(String(b.agent_type || "")));
+      const preferred = sorted[0] || {};
+      const risky = sorted.filter((candidate: any) => ["critical", "warning"].includes(String(candidate.health_status || "")));
+      const critical = sorted.filter((candidate: any) => String(candidate.health_status || "") === "critical");
+      const alternatives = sorted.filter((candidate: any) => !["critical", "warning"].includes(String(candidate.health_status || "")));
+      const configuredRisk = sorted.filter((candidate: any) => candidate.configured === true && ["critical", "warning"].includes(String(candidate.health_status || "")));
+      return {
+        schema: "ccm-pressure-provenance-feedback-provider-dispatch-project-advisory-v1",
+        groupId,
+        project,
+        status: critical.length > 0 && alternatives.length === 0 ? "blocked" : risky.length > 0 ? "warn" : "ok",
+        preferred_agent_type: preferred.agent_type || "",
+        preferred_dispatch_policy: preferred.dispatch_policy || "",
+        preferred_health_status: preferred.health_status || "",
+        safer_alternative_count: alternatives.length,
+        risky_candidate_count: risky.length,
+        critical_candidate_count: critical.length,
+        configured_risky_candidate_count: configuredRisk.length,
+        should_hold_configured_dispatch: configuredRisk.some((candidate: any) => String(candidate.health_status || "") === "critical"),
+        candidates: sorted,
+        recommendation: critical.length > 0 && alternatives.length > 0
+          ? `prefer ${preferred.agent_type || "alternative"} for ${project}; hold critical runner until repair`
+          : critical.length > 0
+            ? `hold ${project} child-agent dispatch until pressure provenance repair closes`
+            : risky.length > 0
+              ? `dispatch ${project} only with strict pressure provenance receipt review`
+              : `dispatch ${project} normally with ${preferred.agent_type || "configured runner"}`,
+      };
+    }).sort((a: any, b: any) => Number(b.critical_candidate_count || 0) - Number(a.critical_candidate_count || 0) || Number(b.risky_candidate_count || 0) - Number(a.risky_candidate_count || 0));
+    const blockedProjects = projectRows.filter((row: any) => row.status === "blocked");
+    const warnProjects = projectRows.filter((row: any) => row.status === "warn");
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-feedback-provider-dispatch-advisory-group-v1",
+      groupId,
+      status: blockedProjects.length > 0 ? "fail" : warnProjects.length > 0 ? "warn" : projectRows.length ? "ok" : "empty",
+      healthRiskStatus: healthGroup.riskStatus || "empty",
+      projectCount: projectRows.length,
+      candidateCount: candidates.length,
+      riskyCandidateCount: candidates.filter((candidate: any) => ["critical", "warning"].includes(String(candidate.health_status || ""))).length,
+      criticalCandidateCount: candidates.filter((candidate: any) => String(candidate.health_status || "") === "critical").length,
+      configuredRiskyCandidateCount: projectRows.reduce((sum: number, row: any) => sum + Number(row.configured_risky_candidate_count || 0), 0),
+      blockedProjectCount: blockedProjects.length,
+      saferAlternativeCount: projectRows.reduce((sum: number, row: any) => sum + Number(row.safer_alternative_count || 0), 0),
+      projects: projectRows.slice(0, 30),
+      gaps: blockedProjects.slice(0, 12).map((row: any) => ({
+        project: row.project || "",
+        reason: row.recommendation || "pressure provenance provider dispatch blocked",
+      })),
+    };
+  });
+  const checkedRows = groups.filter((row: any) => Number(row.projectCount || 0) > 0);
+  const passedRows = checkedRows.filter((row: any) => row.status !== "fail");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? checkedRows.some((row: any) => row.status === "warn") ? "warn" : "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-feedback-provider-dispatch-advisory-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: groups.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      projectCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.projectCount || 0), 0),
+      candidateCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.candidateCount || 0), 0),
+      riskyCandidateCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.riskyCandidateCount || 0), 0),
+      criticalCandidateCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.criticalCandidateCount || 0), 0),
+      configuredRiskyCandidateCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.configuredRiskyCandidateCount || 0), 0),
+      blockedProjectCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.blockedProjectCount || 0), 0),
+      saferAlternativeCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.saferAlternativeCount || 0), 0),
+    },
+    groups: groups.sort((a: any, b: any) => Number(b.blockedProjectCount || 0) - Number(a.blockedProjectCount || 0) || Number(b.riskyCandidateCount || 0) - Number(a.riskyCandidateCount || 0)).slice(0, 50),
+    weakGroups: groups.filter((row: any) => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisory(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).flatMap((group: any) => (group.projects || []).slice(0, 4).map((row: any) => ({
+    groupId: group.groupId,
+    project: row.project || "",
+    preferred_agent_type: row.preferred_agent_type || "",
+    preferred_health_status: row.preferred_health_status || "",
+    risky_candidate_count: row.risky_candidate_count || 0,
+    safer_alternative_count: row.safer_alternative_count || 0,
+    recommendation: row.recommendation || "",
+  }))).slice(0, 12);
+  const gaps = (report.weakGroups || []).flatMap((group: any) => (group.gaps || []).map((gap: any) => ({
+    groupId: group.groupId,
+    project: gap.project || "",
+    reason: gap.reason || "pressure provenance provider dispatch advisory blocked",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_feedback_provider_dispatch_advisory",
+    "WorkerContextPacket Pressure Provenance Feedback Provider Dispatch Advisory",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "把 agentType/project compliance health 转成主 Agent 派发前可读的 provider advisory；critical runner 必须 hold，存在更健康候选时应优先选择更健康 runner。"
+  );
+  check.report = report;
+  return check;
+}
+
+function pressureProvenanceProviderDispatchGateCandidateRows(group: any = {}) {
+  return (Array.isArray(group.projects) ? group.projects : [])
+    .flatMap((project: any) => (Array.isArray(project.candidates) ? project.candidates : [])
+      .filter((candidate: any) => String(candidate.dispatch_policy || candidate.dispatchPolicy || "") === "hold_until_repair"
+        || String(candidate.health_status || candidate.healthStatus || "") === "critical")
+      .map((candidate: any) => ({
+        groupId: group.groupId || "",
+        project: project.project || candidate.project || "",
+        agent_type: candidate.agent_type || candidate.agentType || "unknown",
+        health_status: candidate.health_status || candidate.healthStatus || "",
+        dispatch_policy: candidate.dispatch_policy || candidate.dispatchPolicy || "",
+      })));
+}
+
+function pressureProvenanceProviderDispatchGateEntryMatches(candidate: any = {}, entry: any = {}) {
+  const project = String(candidate.project || "").trim().toLowerCase();
+  const agentType = String(candidate.agent_type || candidate.agentType || "").trim().toLowerCase();
+  const entryProject = String(entry.project || entry.target_project || entry.targetProject || "").trim().toLowerCase();
+  const entryAgent = String(entry.agent_type || entry.agentType || entry.executor || entry.runner || "").trim().toLowerCase();
+  return (!project || project === entryProject) && (!agentType || agentType === entryAgent);
+}
+
+function buildWorkerContextPacketPressureProvenanceProviderDispatchGateReport(options: any = {}) {
+  const advisoryReport = options.providerDispatchAdvisoryReport
+    || options.provider_dispatch_advisory_report
+    || buildWorkerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport(options);
+  const rows = (Array.isArray(advisoryReport.groups) ? advisoryReport.groups : []).map((group: any) => {
+    const groupId = String(group.groupId || "");
+    const criticalCandidates = pressureProvenanceProviderDispatchGateCandidateRows(group);
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [];
+    const checks = criticalCandidates.flatMap((candidate: any) => {
+      const matchingEntries = entries.filter((entry: any) => entry.worker_context_packet_id && pressureProvenanceProviderDispatchGateEntryMatches(candidate, entry));
+      return matchingEntries.map((entry: any) => {
+        const packetAdvisory = entry.worker_context_packet_pressure_provenance_provider_dispatch_advisory
+          || entry.workerContextPacketPressureProvenanceProviderDispatchAdvisory
+          || {};
+        const gate = entry.worker_context_pre_dispatch_gate || entry.workerContextPreDispatchGate || {};
+        const renderFlags = entry.worker_context_packet_render_probe?.rendered_flags || {};
+        const advisoryHold = packetAdvisory.should_hold_dispatch === true
+          || packetAdvisory.shouldHoldDispatch === true
+          || packetAdvisory.selected_candidate?.should_hold_dispatch === true
+          || packetAdvisory.selectedCandidate?.shouldHoldDispatch === true;
+        const covered = advisoryHold
+          && gate.provider_dispatch_hold === true
+          && gate.dispatch_ready === false
+          && gate.repair_source === "worker_context_pressure_provenance_feedback_provider_dispatch_advisory"
+          && renderFlags.has_pressure_provenance_provider_dispatch_advisory === true;
+        return {
+          schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-gate-binding-check-v1",
+          groupId,
+          project: candidate.project || "",
+          agent_type: candidate.agent_type || "unknown",
+          binding_id: entry.binding_id || "",
+          worker_context_packet_id: entry.worker_context_packet_id || "",
+          dispatch_ready: gate.dispatch_ready !== false,
+          provider_dispatch_hold: gate.provider_dispatch_hold === true,
+          repair_source: gate.repair_source || "",
+          packet_advisory_hold: advisoryHold,
+          rendered_has_advisory: renderFlags.has_pressure_provenance_provider_dispatch_advisory === true,
+          covered,
+        };
+      });
+    });
+    const missingBindingCandidates = criticalCandidates.filter((candidate: any) => !entries.some((entry: any) => entry.worker_context_packet_id && pressureProvenanceProviderDispatchGateEntryMatches(candidate, entry)));
+    const failedChecks = checks.filter((check: any) => !check.covered);
+    const status = criticalCandidates.length === 0
+      ? "empty"
+      : missingBindingCandidates.length > 0 ? "warn" : failedChecks.length > 0 ? "fail" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-gate-group-v1",
+      groupId,
+      status,
+      file: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      criticalCandidateCount: criticalCandidates.length,
+      checkedBindingCount: checks.length,
+      coveredBindingCount: checks.filter((check: any) => check.covered).length,
+      failedBindingCount: failedChecks.length,
+      missingBindingCandidateCount: missingBindingCandidates.length,
+      checks: checks.slice(0, 20),
+      gaps: [
+        ...failedChecks.slice(0, 8).map((check: any) => ({
+          project: check.project || "",
+          agent_type: check.agent_type || "",
+          binding_id: check.binding_id || "",
+          reason: "critical pressure provenance provider dispatch binding missing advisory hold gate",
+        })),
+        ...missingBindingCandidates.slice(0, 4).map((candidate: any) => ({
+          project: candidate.project || "",
+          agent_type: candidate.agent_type || "",
+          reason: "critical pressure provenance provider has no WorkerContextPacket binding to audit yet",
+        })),
+      ],
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.checkedBindingCount || 0) > 0);
+  const passedRows = checkedRows.filter((row: any) => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? rows.some((row: any) => row.status === "warn") ? "warn" : "empty"
+    : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-gate-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      criticalCandidateCount: rows.reduce((sum: number, row: any) => sum + Number(row.criticalCandidateCount || 0), 0),
+      checkedBindingCount: rows.reduce((sum: number, row: any) => sum + Number(row.checkedBindingCount || 0), 0),
+      coveredBindingCount: rows.reduce((sum: number, row: any) => sum + Number(row.coveredBindingCount || 0), 0),
+      failedBindingCount: rows.reduce((sum: number, row: any) => sum + Number(row.failedBindingCount || 0), 0),
+      missingBindingCandidateCount: rows.reduce((sum: number, row: any) => sum + Number(row.missingBindingCandidateCount || 0), 0),
+    },
+    groups: rows.sort((a: any, b: any) => Number(b.failedBindingCount || 0) - Number(a.failedBindingCount || 0) || Number(b.criticalCandidateCount || 0) - Number(a.criticalCandidateCount || 0)).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceProviderDispatchGate(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceProviderDispatchGateReport(options);
+  const checked = Number(report.overall.checkedBindingCount || 0);
+  const passed = Number(report.overall.coveredBindingCount || 0);
+  const evidence = (report.groups || []).flatMap((group: any) => (group.checks || []).filter((check: any) => check.covered).map((check: any) => ({
+    groupId: group.groupId,
+    project: check.project || "",
+    agent_type: check.agent_type || "",
+    binding_id: check.binding_id || "",
+    worker_context_packet_id: check.worker_context_packet_id || "",
+    provider_dispatch_hold: check.provider_dispatch_hold === true,
+  }))).slice(0, 12);
+  const gaps = (report.weakGroups || []).flatMap((group: any) => (group.gaps || []).map((gap: any) => ({
+    groupId: group.groupId,
+    project: gap.project || "",
+    agent_type: gap.agent_type || "",
+    binding_id: gap.binding_id || "",
+    reason: gap.reason || "pressure provenance provider dispatch gate missing",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_provider_dispatch_gate",
+    "WorkerContextPacket Pressure Provenance Provider Dispatch Gate",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 provider advisory 判定 selected agentType/project 为 critical 时，实际 WorkerContextPacket 派发 binding 必须渲染 advisory，并由 pre-dispatch gate 阻断该第三方子 Agent 会话直到 repair/recovery。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextProviderDispatchDecisionFromEntry(entry: any = {}) {
+  return entry.worker_context_provider_dispatch_decision
+    || entry.workerContextProviderDispatchDecision
+    || entry.provider_dispatch_decision
+    || entry.providerDispatchDecision
+    || null;
+}
+
+function workerContextProviderDispatchDecisionAdvisoryFromEntry(entry: any = {}) {
+  const decision = workerContextProviderDispatchDecisionFromEntry(entry) || {};
+  const gate = entry.worker_context_pre_dispatch_gate || entry.workerContextPreDispatchGate || {};
+  return entry.worker_context_packet_pressure_provenance_provider_dispatch_advisory
+    || entry.workerContextPacketPressureProvenanceProviderDispatchAdvisory
+    || gate.pressure_provenance_provider_dispatch_advisory
+    || gate.pressureProvenanceProviderDispatchAdvisory
+    || decision.pressure_provenance_provider_dispatch_advisory
+    || decision.pressureProvenanceProviderDispatchAdvisory
+    || null;
+}
+
+function workerContextProviderDispatchOverrideReceiptFromEntry(entry: any = {}) {
+  const decision = workerContextProviderDispatchDecisionFromEntry(entry) || {};
+  const gate = entry.worker_context_pre_dispatch_gate || entry.workerContextPreDispatchGate || {};
+  return entry.worker_context_provider_dispatch_override_receipt
+    || entry.workerContextProviderDispatchOverrideReceipt
+    || decision.provider_dispatch_override_receipt
+    || decision.providerDispatchOverrideReceipt
+    || gate.provider_dispatch_override_receipt
+    || gate.providerDispatchOverrideReceipt
+    || decision.override
+    || null;
+}
+
+function workerContextProviderDispatchDecisionExpectedAction(entry: any = {}) {
+  const gate = entry.worker_context_pre_dispatch_gate || entry.workerContextPreDispatchGate || {};
+  const advisory = workerContextProviderDispatchDecisionAdvisoryFromEntry(entry) || {};
+  const selected = advisory.selected_candidate || advisory.selectedCandidate || {};
+  const dispatchPolicy = String(selected.dispatch_policy || selected.dispatchPolicy || advisory.dispatch_policy || advisory.dispatchPolicy || "");
+  const overrideReceipt = workerContextProviderDispatchOverrideReceiptFromEntry(entry) || {};
+  const providerHold = gate.provider_dispatch_hold === true
+    || advisory.should_hold_dispatch === true
+    || advisory.shouldHoldDispatch === true
+    || selected.should_hold_dispatch === true
+    || selected.shouldHoldDispatch === true
+    || dispatchPolicy === "hold_until_repair";
+  const providerHoldOverridden = providerHold
+    && (gate.provider_dispatch_hold_overridden === true || gate.providerDispatchHoldOverridden === true)
+    && overrideReceipt.valid === true;
+  if (providerHoldOverridden) return "dispatch_with_provider_override";
+  if (providerHold) return "hold_until_repair";
+  if (gate.dispatch_ready === false) return "hold_for_context_repair";
+  if (dispatchPolicy === "allow_with_receipt_sampling") return "dispatch_with_receipt_sampling";
+  if (dispatchPolicy === "strict_review_before_dispatch") return "strict_review_before_dispatch";
+  if (dispatchPolicy === "allow_with_monitoring") return "dispatch_with_monitoring";
+  return "dispatch";
+}
+
+function buildWorkerContextPacketPressureProvenanceProviderDispatchDecisionLedgerReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+      .filter((entry: any) => {
+        const advisory = workerContextProviderDispatchDecisionAdvisoryFromEntry(entry);
+        const gate = entry.worker_context_pre_dispatch_gate || entry.workerContextPreDispatchGate || {};
+        const decision = workerContextProviderDispatchDecisionFromEntry(entry);
+        return !!entry.worker_context_packet_id && (!!advisory?.schema || gate.provider_dispatch_hold === true || !!decision?.schema);
+      });
+    const checks = entries.map((entry: any) => {
+      const gate = entry.worker_context_pre_dispatch_gate || entry.workerContextPreDispatchGate || {};
+      const advisory = workerContextProviderDispatchDecisionAdvisoryFromEntry(entry) || {};
+      const selected = advisory.selected_candidate || advisory.selectedCandidate || {};
+      const decision = workerContextProviderDispatchDecisionFromEntry(entry) || {};
+      const overrideReceipt = workerContextProviderDispatchOverrideReceiptFromEntry(entry) || {};
+      const expectedAction = workerContextProviderDispatchDecisionExpectedAction(entry);
+      const action = String(decision.action || decision.decision || "");
+      const dispatchReadyExpected = gate.dispatch_ready !== false && expectedAction !== "hold_until_repair";
+      const providerHoldExpected = expectedAction === "hold_until_repair";
+      const schemaOk = decision.schema === "ccm-worker-context-provider-dispatch-decision-v1";
+      const actionOk = action === expectedAction;
+      const dispatchReadyOk = decision.dispatch_ready === dispatchReadyExpected || decision.dispatchReady === dispatchReadyExpected;
+      const holdOk = !providerHoldExpected
+        || (decision.provider_dispatch_hold === true
+          && decision.should_create_real_task === false
+          && decision.requires_repair_before_dispatch === true
+          && decision.repair_source === "worker_context_pressure_provenance_feedback_provider_dispatch_advisory");
+      const receiptSamplingOk = expectedAction !== "dispatch_with_receipt_sampling"
+        || decision.requires_receipt_sampling === true;
+      const overrideOk = expectedAction !== "dispatch_with_provider_override"
+        || (decision.provider_dispatch_hold === true
+          && decision.provider_dispatch_hold_overridden === true
+          && decision.requires_repair_followup === true
+          && decision.should_create_real_task === true
+          && overrideReceipt.schema === "ccm-pressure-provenance-provider-dispatch-override-receipt-v1"
+          && overrideReceipt.valid === true
+          && overrideReceipt.risk_accepted === true
+          && overrideReceipt.acknowledges_repair_required === true
+          && !!String(overrideReceipt.approved_by || "").trim()
+          && !!String(overrideReceipt.reason || "").trim());
+      const covered = schemaOk && actionOk && dispatchReadyOk && holdOk && receiptSamplingOk && overrideOk;
+      return {
+        schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-decision-ledger-check-v1",
+        groupId,
+        project: entry.project || selected.project || advisory.project || "",
+        agent_type: entry.agent_type || selected.agent_type || selected.agentType || advisory.agent_type || advisory.agentType || "unknown",
+        binding_id: entry.binding_id || "",
+        assignment_id: entry.assignment_id || "",
+        worker_context_packet_id: entry.worker_context_packet_id || "",
+        decision_id: decision.decision_id || decision.decisionId || "",
+        expected_action: expectedAction,
+        action,
+        health_status: decision.health_status || selected.health_status || selected.healthStatus || advisory.health_status || "",
+        dispatch_policy: decision.dispatch_policy || selected.dispatch_policy || selected.dispatchPolicy || advisory.dispatch_policy || "",
+        dispatch_ready: decision.dispatch_ready,
+        provider_dispatch_hold: decision.provider_dispatch_hold === true,
+        schemaOk,
+        actionOk,
+        dispatchReadyOk,
+        holdOk,
+        receiptSamplingOk,
+        overrideOk,
+        override_receipt_id: overrideReceipt.override_id || "",
+        override_receipt_valid: overrideReceipt.valid === true,
+        covered,
+      };
+    });
+    const failedChecks = checks.filter((check: any) => !check.covered);
+    const status = checks.length === 0 ? "empty" : failedChecks.length > 0 ? "fail" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-decision-ledger-group-v1",
+      groupId,
+      status,
+      file: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      checkedDecisionCount: checks.length,
+      coveredDecisionCount: checks.filter((check: any) => check.covered).length,
+      failedDecisionCount: failedChecks.length,
+      holdDecisionCount: checks.filter((check: any) => check.action === "hold_until_repair").length,
+      receiptSamplingDecisionCount: checks.filter((check: any) => check.action === "dispatch_with_receipt_sampling").length,
+      checks: checks.slice(0, 24),
+      gaps: failedChecks.slice(0, 12).map((check: any) => ({
+        project: check.project || "",
+        agent_type: check.agent_type || "",
+        binding_id: check.binding_id || "",
+        assignment_id: check.assignment_id || "",
+        expected_action: check.expected_action || "",
+        action: check.action || "",
+        reason: "provider dispatch decision ledger missing or inconsistent with advisory/gate",
+      })),
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.checkedDecisionCount || 0) > 0);
+  const passedRows = checkedRows.filter((row: any) => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? "empty"
+    : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-decision-ledger-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      checkedDecisionCount: rows.reduce((sum: number, row: any) => sum + Number(row.checkedDecisionCount || 0), 0),
+      coveredDecisionCount: rows.reduce((sum: number, row: any) => sum + Number(row.coveredDecisionCount || 0), 0),
+      failedDecisionCount: rows.reduce((sum: number, row: any) => sum + Number(row.failedDecisionCount || 0), 0),
+      holdDecisionCount: rows.reduce((sum: number, row: any) => sum + Number(row.holdDecisionCount || 0), 0),
+      receiptSamplingDecisionCount: rows.reduce((sum: number, row: any) => sum + Number(row.receiptSamplingDecisionCount || 0), 0),
+    },
+    groups: rows.sort((a: any, b: any) => Number(b.failedDecisionCount || 0) - Number(a.failedDecisionCount || 0) || Number(b.checkedDecisionCount || 0) - Number(a.checkedDecisionCount || 0)).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "fail").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceProviderDispatchDecisionLedger(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceProviderDispatchDecisionLedgerReport(options);
+  const checked = Number(report.overall.checkedDecisionCount || 0);
+  const passed = Number(report.overall.coveredDecisionCount || 0);
+  const evidence = (report.groups || []).flatMap((group: any) => (group.checks || []).filter((check: any) => check.covered).map((check: any) => ({
+    groupId: group.groupId,
+    project: check.project || "",
+    agent_type: check.agent_type || "",
+    binding_id: check.binding_id || "",
+    decision_id: check.decision_id || "",
+    action: check.action || "",
+  }))).slice(0, 12);
+  const gaps = (report.weakGroups || []).flatMap((group: any) => (group.gaps || []).map((gap: any) => ({
+    groupId: group.groupId,
+    project: gap.project || "",
+    agent_type: gap.agent_type || "",
+    binding_id: gap.binding_id || "",
+    expected_action: gap.expected_action || "",
+    action: gap.action || "",
+    reason: gap.reason || "provider dispatch decision ledger missing",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_provider_dispatch_decision_ledger",
+    "WorkerContextPacket Pressure Provenance Provider Dispatch Decision Ledger",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "主 Agent 每次把 provider advisory 应用于第三方子 Agent 派发时，必须把 hold/dispatch/sampling 决策写入 binding ledger，且 decision action 必须和 advisory/pre-dispatch gate 一致。"
+  );
+  check.report = report;
+  return check;
+}
+
+function buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideReceiptReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+      .filter((entry: any) => {
+        const decision = workerContextProviderDispatchDecisionFromEntry(entry) || {};
+        const gate = entry.worker_context_pre_dispatch_gate || entry.workerContextPreDispatchGate || {};
+        const receipt = workerContextProviderDispatchOverrideReceiptFromEntry(entry);
+        return !!entry.worker_context_packet_id
+          && (!!receipt?.schema || decision.action === "dispatch_with_provider_override" || gate.provider_dispatch_hold_overridden === true);
+      });
+    const checks = entries.map((entry: any) => {
+      const decision = workerContextProviderDispatchDecisionFromEntry(entry) || {};
+      const gate = entry.worker_context_pre_dispatch_gate || entry.workerContextPreDispatchGate || {};
+      const receipt = workerContextProviderDispatchOverrideReceiptFromEntry(entry) || {};
+      const schemaOk = receipt.schema === "ccm-pressure-provenance-provider-dispatch-override-receipt-v1";
+      const approvalOk = receipt.valid === true
+        && receipt.approved === true
+        && !!String(receipt.approved_by || "").trim()
+        && receipt.risk_accepted === true
+        && receipt.acknowledges_repair_required === true
+        && !!String(receipt.reason || "").trim();
+      const dispatchOk = decision.action === "dispatch_with_provider_override"
+        && decision.dispatch_ready === true
+        && decision.should_create_real_task === true
+        && decision.provider_dispatch_hold === true
+        && decision.provider_dispatch_hold_overridden === true
+        && decision.requires_repair_followup === true;
+      const gateOk = gate.provider_dispatch_hold === true
+        && gate.provider_dispatch_hold_overridden === true
+        && gate.dispatch_ready !== false
+        && gate.next_step === "dispatch_child_agent_with_provider_override_receipt";
+      const covered = schemaOk && approvalOk && dispatchOk && gateOk;
+      return {
+        schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-receipt-check-v1",
+        groupId,
+        project: entry.project || receipt.project || decision.project || "",
+        agent_type: entry.agent_type || receipt.agent_type || decision.agent_type || "unknown",
+        binding_id: entry.binding_id || "",
+        assignment_id: entry.assignment_id || "",
+        worker_context_packet_id: entry.worker_context_packet_id || "",
+        decision_id: decision.decision_id || "",
+        override_id: receipt.override_id || "",
+        action: decision.action || "",
+        approved_by: receipt.approved_by || "",
+        schemaOk,
+        approvalOk,
+        dispatchOk,
+        gateOk,
+        receipt_valid: receipt.valid === true,
+        gaps: Array.isArray(receipt.gaps) ? receipt.gaps : [],
+        covered,
+      };
+    });
+    const failedChecks = checks.filter((check: any) => !check.covered);
+    const status = checks.length === 0 ? "empty" : failedChecks.length > 0 ? "fail" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-receipt-group-v1",
+      groupId,
+      status,
+      file: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      checkedOverrideCount: checks.length,
+      coveredOverrideCount: checks.filter((check: any) => check.covered).length,
+      failedOverrideCount: failedChecks.length,
+      checks: checks.slice(0, 24),
+      gaps: failedChecks.slice(0, 12).map((check: any) => ({
+        project: check.project || "",
+        agent_type: check.agent_type || "",
+        binding_id: check.binding_id || "",
+        assignment_id: check.assignment_id || "",
+        override_id: check.override_id || "",
+        gaps: check.gaps || [],
+        reason: "provider dispatch override receipt missing required approval/risk/follow-up proof",
+      })),
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.checkedOverrideCount || 0) > 0);
+  const passedRows = checkedRows.filter((row: any) => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? "empty"
+    : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-receipt-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      checkedOverrideCount: rows.reduce((sum: number, row: any) => sum + Number(row.checkedOverrideCount || 0), 0),
+      coveredOverrideCount: rows.reduce((sum: number, row: any) => sum + Number(row.coveredOverrideCount || 0), 0),
+      failedOverrideCount: rows.reduce((sum: number, row: any) => sum + Number(row.failedOverrideCount || 0), 0),
+    },
+    groups: rows.sort((a: any, b: any) => Number(b.failedOverrideCount || 0) - Number(a.failedOverrideCount || 0) || Number(b.checkedOverrideCount || 0) - Number(a.checkedOverrideCount || 0)).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "fail").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideReceipt(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideReceiptReport(options);
+  const checked = Number(report.overall.checkedOverrideCount || 0);
+  const passed = Number(report.overall.coveredOverrideCount || 0);
+  const evidence = (report.groups || []).flatMap((group: any) => (group.checks || []).filter((check: any) => check.covered).map((check: any) => ({
+    groupId: group.groupId,
+    project: check.project || "",
+    agent_type: check.agent_type || "",
+    binding_id: check.binding_id || "",
+    override_id: check.override_id || "",
+    approved_by: check.approved_by || "",
+  }))).slice(0, 12);
+  const gaps = (report.weakGroups || []).flatMap((group: any) => (group.gaps || []).map((gap: any) => ({
+    groupId: group.groupId,
+    project: gap.project || "",
+    agent_type: gap.agent_type || "",
+    binding_id: gap.binding_id || "",
+    override_id: gap.override_id || "",
+    gaps: gap.gaps || [],
+    reason: gap.reason || "provider dispatch override receipt invalid",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_provider_dispatch_override_receipts",
+    "WorkerContextPacket Pressure Provenance Provider Dispatch Override Receipts",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "只有结构化用户批准 receipt 才能临时 override pressure provenance provider hold；receipt 必须声明 approved_by、risk_accepted、acknowledges_repair_required、reason，并保留后续 repair/recovery 义务。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextProviderDispatchOverrideCompletionFromEntry(entry: any = {}) {
+  return entry.worker_context_provider_dispatch_override_completion
+    || entry.workerContextProviderDispatchOverrideCompletion
+    || entry.provider_dispatch_override_completion
+    || entry.providerDispatchOverrideCompletion
+    || null;
+}
+
+function workerContextProviderDispatchOverrideFollowupFromEntry(entry: any = {}) {
+  return entry.worker_context_provider_dispatch_override_followup_repair
+    || entry.workerContextProviderDispatchOverrideFollowupRepair
+    || entry.provider_dispatch_override_followup_repair_work_item
+    || entry.providerDispatchOverrideFollowupRepairWorkItem
+    || null;
+}
+
+function buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const workItemLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const workItems = Array.isArray(workItemLedger.items) ? workItemLedger.items : [];
+    const entries = (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+      .filter((entry: any) => workerContextProviderDispatchDecisionFromEntry(entry)?.action === "dispatch_with_provider_override");
+    const checks = entries.map((entry: any) => {
+      const decision = workerContextProviderDispatchDecisionFromEntry(entry) || {};
+      const followup = workerContextProviderDispatchOverrideFollowupFromEntry(entry) || {};
+      const completion = workerContextProviderDispatchOverrideCompletionFromEntry(entry) || {};
+      const workItemId = String(followup.work_item_id || followup.workItemId || completion.followup_work_item_id || completion.followupWorkItemId || "").trim();
+      const item = workItems.find((candidate: any) => String(candidate.work_item_id || candidate.id || "") === workItemId) || {};
+      const followupExists = !!workItemId && item.source === "worker_context_pressure_provenance_provider_dispatch_override_followup";
+      const completionOk = completion.completion_ok === true
+        && completion.status === "completed"
+        && Number(completion.memory_provenance_usage_count || 0) > 0
+        && Number(completion.current_source_verified_count || 0) === Number(completion.memory_provenance_usage_count || 0)
+        && !!String(completion.task_agent_session_id || "").trim()
+        && !!String(completion.execution_id || "").trim();
+      const workItemClosed = followupExists
+        && replayRepairWorkItemStatus(item.status) === "completed"
+        && item.completion_source === "provider_dispatch_override_completion_receipt";
+      const covered = followupExists && completionOk && workItemClosed;
+      return {
+        schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-followup-check-v1",
+        groupId,
+        project: entry.project || decision.project || "",
+        agent_type: entry.agent_type || decision.agent_type || "unknown",
+        binding_id: entry.binding_id || "",
+        assignment_id: entry.assignment_id || "",
+        worker_context_packet_id: entry.worker_context_packet_id || "",
+        decision_id: decision.decision_id || "",
+        override_id: workerContextProviderDispatchOverrideReceiptFromEntry(entry)?.override_id || "",
+        followup_work_item_id: workItemId,
+        completion_id: completion.completion_id || "",
+        completion_status: completion.status || "",
+        work_item_status: item.status || "",
+        memory_provenance_usage_count: Number(completion.memory_provenance_usage_count || 0),
+        current_source_verified_count: Number(completion.current_source_verified_count || 0),
+        followupExists,
+        completionOk,
+        workItemClosed,
+        covered,
+      };
+    });
+    const failedChecks = checks.filter((check: any) => !check.covered);
+    const status = checks.length === 0 ? "empty" : failedChecks.length > 0 ? "fail" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-followup-group-v1",
+      groupId,
+      status,
+      bindingFile: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      workItemsFile: workItemLedger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      checkedOverrideDispatchCount: checks.length,
+      coveredOverrideDispatchCount: checks.filter((check: any) => check.covered).length,
+      failedOverrideDispatchCount: failedChecks.length,
+      openFollowupCount: checks.filter((check: any) => check.followupExists && !check.workItemClosed).length,
+      completedFollowupCount: checks.filter((check: any) => check.workItemClosed).length,
+      checks: checks.slice(0, 24),
+      gaps: failedChecks.slice(0, 12).map((check: any) => ({
+        project: check.project || "",
+        agent_type: check.agent_type || "",
+        binding_id: check.binding_id || "",
+        assignment_id: check.assignment_id || "",
+        followup_work_item_id: check.followup_work_item_id || "",
+        completion_id: check.completion_id || "",
+        reason: !check.followupExists
+          ? "provider override dispatch missing follow-up repair work item"
+          : !check.completionOk
+          ? "provider override follow-up missing verified completion receipt memoryProvenanceUsage/currentSourceVerified evidence"
+          : "provider override follow-up repair work item not closed",
+      })),
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.checkedOverrideDispatchCount || 0) > 0);
+  const passedRows = checkedRows.filter((row: any) => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? "empty"
+    : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-followup-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      checkedOverrideDispatchCount: rows.reduce((sum: number, row: any) => sum + Number(row.checkedOverrideDispatchCount || 0), 0),
+      coveredOverrideDispatchCount: rows.reduce((sum: number, row: any) => sum + Number(row.coveredOverrideDispatchCount || 0), 0),
+      failedOverrideDispatchCount: rows.reduce((sum: number, row: any) => sum + Number(row.failedOverrideDispatchCount || 0), 0),
+      openFollowupCount: rows.reduce((sum: number, row: any) => sum + Number(row.openFollowupCount || 0), 0),
+      completedFollowupCount: rows.reduce((sum: number, row: any) => sum + Number(row.completedFollowupCount || 0), 0),
+    },
+    groups: rows.sort((a: any, b: any) => Number(b.failedOverrideDispatchCount || 0) - Number(a.failedOverrideDispatchCount || 0) || Number(b.checkedOverrideDispatchCount || 0) - Number(a.checkedOverrideDispatchCount || 0)).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "fail").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowup(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReport(options);
+  const checked = Number(report.overall.checkedOverrideDispatchCount || 0);
+  const passed = Number(report.overall.coveredOverrideDispatchCount || 0);
+  const evidence = (report.groups || []).flatMap((group: any) => (group.checks || []).filter((check: any) => check.covered).map((check: any) => ({
+    groupId: group.groupId,
+    project: check.project || "",
+    agent_type: check.agent_type || "",
+    binding_id: check.binding_id || "",
+    followup_work_item_id: check.followup_work_item_id || "",
+    completion_id: check.completion_id || "",
+  }))).slice(0, 12);
+  const gaps = (report.weakGroups || []).flatMap((group: any) => (group.gaps || []).map((gap: any) => ({
+    groupId: group.groupId,
+    project: gap.project || "",
+    agent_type: gap.agent_type || "",
+    binding_id: gap.binding_id || "",
+    followup_work_item_id: gap.followup_work_item_id || "",
+    completion_id: gap.completion_id || "",
+    reason: gap.reason || "provider override follow-up repair loop incomplete",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_provider_dispatch_override_followups",
+    "WorkerContextPacket Pressure Provenance Provider Dispatch Override Follow-ups",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "每次 provider hold 被 override 放行后，必须创建 follow-up repair work item，并在子 Agent 完成回执中用 memoryProvenanceUsage/currentSourceVerified=true 补强证据后关闭该 work item。"
+  );
+  check.report = report;
+  return check;
+}
+
+function providerDispatchOverrideFollowupTypedMemoryUsageRows(receipt: any = {}) {
+  return [
+    ...(Array.isArray(receipt.memoryProvenanceUsage) ? receipt.memoryProvenanceUsage : []),
+    ...(Array.isArray(receipt.memory_provenance_usage) ? receipt.memory_provenance_usage : []),
+    ...(Array.isArray(receipt.pressureMemoryProvenanceUsage) ? receipt.pressureMemoryProvenanceUsage : []),
+    ...(Array.isArray(receipt.pressure_memory_provenance_usage) ? receipt.pressure_memory_provenance_usage : []),
+  ].filter((row: any) => row && typeof row === "object");
+}
+
+function providerDispatchOverrideFollowupTypedMemoryCompletionOk(entry: any = {}) {
+  const completion = workerContextProviderDispatchOverrideCompletionFromEntry(entry) || {};
+  const receipt = completion.receipt || {};
+  const usageRows = providerDispatchOverrideFollowupTypedMemoryUsageRows(receipt);
+  const verifiedRows = usageRows.filter((row: any) => row.currentSourceVerified === true || row.current_source_verified === true);
+  return completion.completion_ok === true
+    && String(completion.status || "").toLowerCase() === "completed"
+    && Number(completion.memory_provenance_usage_count || usageRows.length || 0) > 0
+    && Number(completion.current_source_verified_count || verifiedRows.length || 0) === Number(completion.memory_provenance_usage_count || usageRows.length || 0)
+    && !!String(completion.task_agent_session_id || "").trim()
+    && !!String(completion.execution_id || "").trim();
+}
+
+function providerDispatchOverrideFollowupTypedMemoryEntryKey(entry: any = {}) {
+  const decision = workerContextProviderDispatchDecisionFromEntry(entry) || {};
+  const receipt = workerContextProviderDispatchOverrideReceiptFromEntry(entry) || {};
+  const completion = workerContextProviderDispatchOverrideCompletionFromEntry(entry) || {};
+  const followup = workerContextProviderDispatchOverrideFollowupFromEntry(entry) || {};
+  return [
+    String(entry.binding_id || completion.binding_id || "").trim(),
+    String(entry.assignment_id || completion.assignment_id || "").trim(),
+    String(entry.worker_context_packet_id || completion.worker_context_packet_id || "").trim(),
+    String(decision.decision_id || completion.decision_id || "").trim(),
+    String(receipt.override_id || completion.override_id || "").trim(),
+    String(completion.completion_id || "").trim(),
+    String(followup.work_item_id || completion.followup_work_item_id || "").trim(),
+  ].filter(Boolean).join("|").toLowerCase();
+}
+
+function providerDispatchOverrideFollowupTypedMemoryArchiveMatchesEntry(row: any = {}, entry: any = {}) {
+  const rowKey = [
+    String(row.binding_id || "").trim(),
+    String(row.assignment_id || "").trim(),
+    String(row.worker_context_packet_id || "").trim(),
+    String(row.decision_id || "").trim(),
+    String(row.override_id || "").trim(),
+    String(row.completion_id || "").trim(),
+    String(row.followup_work_item_id || "").trim(),
+  ].filter(Boolean).join("|").toLowerCase();
+  const entryKey = providerDispatchOverrideFollowupTypedMemoryEntryKey(entry);
+  if (rowKey && entryKey && rowKey === entryKey) return true;
+  const completion = workerContextProviderDispatchOverrideCompletionFromEntry(entry) || {};
+  const receipt = workerContextProviderDispatchOverrideReceiptFromEntry(entry) || {};
+  return (!!completion.completion_id && completion.completion_id === row.completion_id)
+    || (!!receipt.override_id && receipt.override_id === row.override_id)
+    || (!!entry.binding_id && entry.binding_id === row.binding_id);
+}
+
+function providerDispatchOverrideFollowupTypedMemoryProbeQuery(entries: any[] = []) {
+  return compactMemoryCenterText(entries.map((entry: any) => {
+    const decision = workerContextProviderDispatchDecisionFromEntry(entry) || {};
+    const receipt = workerContextProviderDispatchOverrideReceiptFromEntry(entry) || {};
+    const completion = workerContextProviderDispatchOverrideCompletionFromEntry(entry) || {};
+    const usageRows = providerDispatchOverrideFollowupTypedMemoryUsageRows(completion.receipt || {});
+    return [
+      entry.project || decision.project || completion.project,
+      entry.agent_type || decision.agent_type || completion.agent_type,
+      entry.binding_id,
+      entry.assignment_id,
+      entry.worker_context_packet_id,
+      decision.decision_id,
+      receipt.override_id,
+      completion.completion_id,
+      completion.followup_work_item_id,
+      completion.task_id,
+      completion.task_agent_session_id,
+      completion.execution_id,
+      completion.reason,
+      ...usageRows.flatMap((row: any) => [
+        row.relPath || row.rel_path || row.path || row.file,
+        row.usageState || row.usage_state,
+        row.repairStatus || row.repair_status,
+        row.repairGapType || row.repair_gap_type,
+        row.reason || row.summary || row.note,
+      ]),
+    ].filter(Boolean).join(" ");
+  }).filter(Boolean).join("\n") || "pressure provenance provider dispatch override follow-up repaired memoryProvenanceUsage currentSourceVerified", 4200);
+}
+
+function buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupTypedMemoryReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const {
+    buildGroupTypedMemoryRecall,
+    distillProviderDispatchOverrideFollowupToTypedMemory,
+    readGroupTypedMemoryDistillationLedger,
+    scanGroupTypedMemoryDocuments,
+  } = require("../collaboration/group-memory-index");
+  const rows = groupIds.map((groupId: string) => {
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+      .filter((entry: any) => workerContextProviderDispatchDecisionFromEntry(entry)?.action === "dispatch_with_provider_override")
+      .filter(providerDispatchOverrideFollowupTypedMemoryCompletionOk);
+    const distillation = entries.length
+      ? distillProviderDispatchOverrideFollowupToTypedMemory(groupId, { rows: entries }, {
+        reason: "memory-center-provider-dispatch-override-followup-typed-memory-report",
+        updatedAt: options.generatedAt || options.generated_at || now(),
+      })
+      : null;
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = typedLedger.pressureProvenanceProviderDispatchOverrideFollowupArchive || {};
+    const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const recallDoc = docs.find((doc: any) => doc.relPath === "provider-dispatch-override-followup-recall.md");
+    const archivedEntries = entries.filter((entry: any) => archiveRows.some((row: any) => providerDispatchOverrideFollowupTypedMemoryArchiveMatchesEntry(row, entry)));
+    const recall = entries.length
+      ? buildGroupTypedMemoryRecall(groupId, providerDispatchOverrideFollowupTypedMemoryProbeQuery(entries), {
+        max: 8,
+        disableLedger: true,
+        forceMemory: true,
+        snippetChars: 280,
+      })
+      : { recalled: [] };
+    const recalledText = JSON.stringify(recall.recalled || []);
+    const unverifiedArchiveRows = archiveRows.filter((row: any) => row.all_current_source_verified !== true);
+    const gaps: any[] = [];
+    if (entries.length && archivedEntries.length < entries.length) {
+      gaps.push({
+        reason: `provider dispatch override follow-up typed archive missing ${entries.length - archivedEntries.length} completed repair row(s)`,
+        missing: entries.length - archivedEntries.length,
+      });
+    }
+    if (entries.length && (!recallDoc || recallDoc.type !== "feedback")) {
+      gaps.push({ reason: "completed provider dispatch override follow-ups were not written as feedback typed memory", required: entries.length });
+    }
+    if (entries.length && !recalledText.includes("provider-dispatch-override-followup-recall.md")) {
+      gaps.push({ reason: "provider dispatch override follow-up typed memory cannot be recalled by repair evidence probe" });
+    }
+    if (unverifiedArchiveRows.length) {
+      gaps.push({
+        reason: "provider dispatch override follow-up archive contains rows without all_current_source_verified=true",
+        count: unverifiedArchiveRows.length,
+      });
+    }
+    const status = entries.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-followup-typed-memory-group-v1",
+      groupId,
+      status,
+      bindingFile: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      typedMemoryLedgerFile: typedLedger.file || "",
+      completedOverrideFollowupCount: entries.length,
+      archivedOverrideFollowupCount: archivedEntries.length,
+      typedArchiveCount: Number(archive.archived_count || archiveRows.length || 0),
+      typedCompletedCount: Number(archive.completed_count || 0),
+      typedAttributionCount: Number(archive.attribution_count || 0),
+      typedDocCount: Number(!!recallDoc),
+      recallProbeCount: Array.isArray(recall.recalled) ? recall.recalled.length : 0,
+      recallProbeCovered: recalledText.includes("provider-dispatch-override-followup-recall.md"),
+      distillation: distillation ? {
+        incomingRowCount: distillation.incomingRowCount || 0,
+        archivedCount: distillation.archivedCount || 0,
+        completedCount: distillation.completedCount || 0,
+        attributionCount: distillation.attributionCount || 0,
+        writeCount: distillation.writeCount || 0,
+      } : null,
+      docs: [recallDoc].filter(Boolean).map((doc: any) => ({
+        relPath: doc.relPath,
+        type: doc.type,
+        source: doc.source,
+        file: doc.file,
+      })),
+      bindings: entries.slice(-12).reverse().map((entry: any) => {
+        const completion = workerContextProviderDispatchOverrideCompletionFromEntry(entry) || {};
+        const receipt = workerContextProviderDispatchOverrideReceiptFromEntry(entry) || {};
+        return {
+          binding_id: entry.binding_id || "",
+          assignment_id: entry.assignment_id || "",
+          worker_context_packet_id: entry.worker_context_packet_id || "",
+          project: entry.project || completion.project || "",
+          agent_type: entry.agent_type || completion.agent_type || "",
+          override_id: receipt.override_id || completion.override_id || "",
+          completion_id: completion.completion_id || "",
+          followup_work_item_id: completion.followup_work_item_id || "",
+          task_id: completion.task_id || "",
+          task_agent_session_id: completion.task_agent_session_id || "",
+          execution_id: completion.execution_id || "",
+        };
+      }),
+      gaps: gaps.slice(0, 8),
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.completedOverrideFollowupCount || 0) > 0);
+  const passedRows = checkedRows.filter((row: any) => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-followup-typed-memory-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      completedOverrideFollowupCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.completedOverrideFollowupCount || 0), 0),
+      archivedOverrideFollowupCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.archivedOverrideFollowupCount || 0), 0),
+      typedArchiveCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.typedArchiveCount || 0), 0),
+      typedCompletedCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.typedCompletedCount || 0), 0),
+      typedDocCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.typedDocCount || 0), 0),
+      recallProbeCoveredCount: checkedRows.filter((row: any) => row.recallProbeCovered === true).length,
+      metadataGapCount: checkedRows.reduce((sum: number, row: any) => sum + Number((row.gaps || []).length), 0),
+    },
+    groups: rows.sort((a: any, b: any) => Number(b.completedOverrideFollowupCount || 0) - Number(a.completedOverrideFollowupCount || 0)).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupTypedMemory(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupTypedMemoryReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    completedOverrideFollowupCount: row.completedOverrideFollowupCount,
+    archivedOverrideFollowupCount: row.archivedOverrideFollowupCount,
+    typedDocCount: row.typedDocCount,
+    recallProbeCovered: row.recallProbeCovered,
+    typedMemoryLedgerFile: row.typedMemoryLedgerFile,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "provider dispatch override follow-up typed memory missing",
+    completedOverrideFollowupCount: row.completedOverrideFollowupCount || 0,
+    archivedOverrideFollowupCount: row.archivedOverrideFollowupCount || 0,
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_typed_memory",
+    "WorkerContextPacket Pressure Provenance Provider Dispatch Override Follow-up Typed Memory",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "provider hold 被 override 放行并完成 follow-up repair 后，完成回执必须沉淀为 feedback typed MEMORY.md，下一次子 Agent 新会话可召回该风险和修复闭环。"
+  );
+  check.report = report;
+  return check;
+}
+
+function buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicyReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const {
+    buildPressureProvenancePreDispatchComplianceDispatchPolicy,
+    readGroupTypedMemoryDistillationLedger,
+  } = require("../collaboration/group-memory-index");
+  const rows = groupIds.map((groupId: string) => {
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = typedLedger.pressureProvenanceProviderDispatchOverrideFollowupArchive || {};
+    const attributions = Array.isArray(archive.attributions) ? archive.attributions : [];
+    const probes = attributions.map((attribution: any) => {
+      const agentType = String(attribution.agent_type || attribution.agentType || "unknown").trim() || "unknown";
+      const project = String(attribution.project || attribution.target_project || attribution.targetProject || "unknown").trim() || "unknown";
+      const policy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+        targetProject: project,
+        agentType,
+        frequentThreshold: options.frequentThreshold || options.frequent_threshold || 2,
+        generatedAt: options.generatedAt || options.generated_at || now(),
+      });
+      const policyRows = Array.isArray(policy.policyRows || policy.policy_rows) ? (policy.policyRows || policy.policy_rows) : [];
+      const policyRow = policyRows.find((row: any) => String(row.agent_type || row.agentType || "unknown").toLowerCase() === agentType.toLowerCase()
+        && String(row.project || row.target_project || row.targetProject || "unknown").toLowerCase() === project.toLowerCase()) || policyRows[0] || {};
+      const completedCount = Number(attribution.completed_count || attribution.completedCount || 0);
+      const covered = policy.providerOverrideFollowupHistoryEnabled !== false
+        && policyRow.provider_override_followup_repaired === true
+        && Number(policyRow.provider_override_followup_repaired_count || 0) >= completedCount
+        && Number(policy.providerOverrideFollowupRepairedAttributionCount || 0) > 0;
+      return {
+        schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-followup-pre-dispatch-policy-probe-v1",
+        agent_type: agentType,
+        project,
+        completedOverrideFollowupCount: completedCount,
+        policyActive: policy.active === true,
+        policyAction: policy.action || "",
+        policyReason: policy.reason || "",
+        providerOverrideFollowupHistoryEnabled: policy.providerOverrideFollowupHistoryEnabled !== false,
+        policyProviderOverrideFollowupRepairedAttributionCount: Number(policy.providerOverrideFollowupRepairedAttributionCount || 0),
+        rowProviderOverrideFollowupRepaired: policyRow.provider_override_followup_repaired === true,
+        rowProviderOverrideFollowupRepairedCount: Number(policyRow.provider_override_followup_repaired_count || 0),
+        rowProviderOverrideFollowupLastCompletedAt: policyRow.provider_override_followup_last_completed_at || "",
+        rowProviderOverrideFollowupFreshAfterLastViolation: policyRow.provider_override_followup_fresh_after_last_violation === true,
+        covered,
+      };
+    });
+    const covered = probes.filter((row: any) => row.covered === true);
+    const missing = probes.filter((row: any) => row.covered !== true);
+    const status = attributions.length === 0 ? "empty" : missing.length === 0 ? "ok" : covered.length > 0 ? "warn" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-followup-pre-dispatch-policy-group-v1",
+      groupId,
+      status,
+      typedMemoryLedgerFile: typedLedger.file || "",
+      providerOverrideFollowupAttributionCount: attributions.length,
+      coveredProviderOverrideFollowupAttributionCount: covered.length,
+      missingProviderOverrideFollowupPolicyCount: missing.length,
+      probes,
+      gaps: missing.slice(0, 12).map((row: any) => ({
+        agent_type: row.agent_type || "unknown",
+        project: row.project || "unknown",
+        reason: `provider dispatch override follow-up typed archive not surfaced in pre-dispatch policy row for agentType=${row.agent_type || "unknown"} project=${row.project || "unknown"}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.providerOverrideFollowupAttributionCount || 0) > 0);
+  const passedRows = checkedRows.filter((row: any) => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-followup-pre-dispatch-policy-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      providerOverrideFollowupAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.providerOverrideFollowupAttributionCount || 0), 0),
+      coveredProviderOverrideFollowupAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.coveredProviderOverrideFollowupAttributionCount || 0), 0),
+      missingProviderOverrideFollowupPolicyCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.missingProviderOverrideFollowupPolicyCount || 0), 0),
+    },
+    groups: rows.sort((a: any, b: any) => Number(b.missingProviderOverrideFollowupPolicyCount || 0) - Number(a.missingProviderOverrideFollowupPolicyCount || 0)).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicy(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicyReport(options);
+  const checked = Number(report.overall.providerOverrideFollowupAttributionCount || 0);
+  const passed = Number(report.overall.coveredProviderOverrideFollowupAttributionCount || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    providerOverrideFollowupAttributionCount: row.providerOverrideFollowupAttributionCount,
+    coveredProviderOverrideFollowupAttributionCount: row.coveredProviderOverrideFollowupAttributionCount,
+    probes: (row.probes || []).filter((probe: any) => probe.covered).slice(0, 4).map((probe: any) => ({
+      agent_type: probe.agent_type,
+      project: probe.project,
+      completedOverrideFollowupCount: probe.completedOverrideFollowupCount,
+      policyAction: probe.policyAction,
+      rowProviderOverrideFollowupRepairedCount: probe.rowProviderOverrideFollowupRepairedCount,
+    })),
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).map((gap: any) => ({
+    groupId: row.groupId,
+    project: gap.project || "",
+    agent_type: gap.agent_type || "",
+    reason: gap.reason || "provider dispatch override follow-up pre-dispatch policy missing",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_pre_dispatch_policy",
+    "WorkerContextPacket Pressure Provenance Provider Dispatch Override Follow-up Pre-dispatch Policy",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "已完成的 provider dispatch override follow-up typed memory 必须进入 pre-dispatch policy row；它可作为 repaired-history 信号触发 receipt sampling，但不能覆盖新的 active hold。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPacketProviderDispatchOverrideFollowupReceiptContract(entry: any = {}) {
+  return entry.worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract
+    || entry.workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContract
+    || entry.worker_context_packet?.pressure_provenance_provider_dispatch_override_followup_receipt_contract
+    || entry.workerContextPacket?.pressureProvenanceProviderDispatchOverrideFollowupReceiptContract
+    || null;
+}
+
+function workerContextPacketProviderDispatchOverrideFollowupReceiptContractRequired(entry: any = {}) {
+  const decision = workerContextProviderDispatchDecisionFromEntry(entry) || {};
+  const advisory = workerContextProviderDispatchDecisionAdvisoryFromEntry(entry) || {};
+  const selected = advisory.selected_candidate || advisory.selectedCandidate || {};
+  const acceptance = entry.worker_context_packet_acceptance || entry.workerContextPacketAcceptance || {};
+  const dispatchPolicy = String(
+    decision.dispatch_policy
+    || decision.dispatchPolicy
+    || selected.dispatch_policy
+    || selected.dispatchPolicy
+    || advisory.dispatch_policy
+    || advisory.dispatchPolicy
+    || ""
+  );
+  return (selected.provider_override_followup_repaired === true || selected.providerOverrideFollowupRepaired === true)
+    && (decision.action === "dispatch_with_receipt_sampling"
+      || decision.decision === "dispatch_with_receipt_sampling"
+      || dispatchPolicy === "allow_with_receipt_sampling"
+      || acceptance.pressure_provenance_provider_dispatch_override_followup_sampling_required === true);
+}
+
+function buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+      .filter((entry: any) => entry.worker_context_packet_id)
+      .filter(workerContextPacketProviderDispatchOverrideFollowupReceiptContractRequired);
+    const checks = entries.map((entry: any) => {
+      const contract = workerContextPacketProviderDispatchOverrideFollowupReceiptContract(entry) || {};
+      const acceptance = entry.worker_context_packet_acceptance || entry.workerContextPacketAcceptance || {};
+      const contextUsage = entry.worker_context_packet_context_usage || entry.workerContextPacketContextUsage || {};
+      const usageCategories = Array.isArray(contextUsage.categories) ? contextUsage.categories : [];
+      const category = usageCategories.find((item: any) => item.id === "pressure_provenance_provider_dispatch_override_followup_receipt_contract") || {};
+      const renderFlags = entry.worker_context_packet_render_probe?.rendered_flags || entry.workerContextPacketRenderProbe?.renderedFlags || {};
+      const renderedExcerpt = String(entry.worker_context_packet_render_probe?.rendered_excerpt || entry.workerContextPacketRenderProbe?.renderedExcerpt || "");
+      const requiredFields = Array.isArray(contract.required_receipt_fields || contract.requiredReceiptFields)
+        ? (contract.required_receipt_fields || contract.requiredReceiptFields)
+        : [];
+      const relPaths = Array.isArray(contract.rel_paths || contract.relPaths) ? (contract.rel_paths || contract.relPaths) : [];
+      const workItemIds = Array.isArray(contract.followup_work_item_ids || contract.followupWorkItemIds) ? (contract.followup_work_item_ids || contract.followupWorkItemIds) : [];
+      const gaps: any[] = [];
+      if (contract.schema !== "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-contract-v1" || contract.active !== true) {
+        gaps.push({ reason: "WorkerContextPacket missing active provider dispatch override follow-up receipt contract" });
+      }
+      for (const field of ["memoryProvenanceUsage", "relPath", "usageState", "repairStatus", "repairGapType", "currentSourceVerified", "providerDispatchOverrideFollowupHistoryReverified", "providerDispatchOverrideId"]) {
+        if (!requiredFields.includes(field)) gaps.push({ reason: `provider override follow-up contract missing required field ${field}` });
+      }
+      if (acceptance.pressure_provenance_provider_dispatch_override_followup_sampling_required !== true
+        || acceptance.pressure_provenance_provider_dispatch_override_followup_receipt_required !== true
+        || acceptance.provider_dispatch_override_followup_history_reverification_required !== true
+        || acceptance.memory_provenance_usage_required !== true) {
+        gaps.push({ reason: "WorkerContextPacket acceptance missing provider override follow-up sampling/receipt/reverification gates" });
+      }
+      if (category.id !== "pressure_provenance_provider_dispatch_override_followup_receipt_contract"
+        || category.required !== true
+        || Number(category.tokens || 0) <= 0) {
+        gaps.push({ reason: "Context usage missing required provider override follow-up receipt contract category" });
+      }
+      if (renderFlags.has_pressure_provenance_provider_dispatch_override_followup_receipt_contract !== true
+        || !renderedExcerpt.includes("providerDispatchOverrideFollowupHistoryReverified")) {
+        gaps.push({ reason: "WorkerContextPacket render missing provider override follow-up receipt contract copy" });
+      }
+      return {
+        schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-followup-receipt-contract-check-v1",
+        groupId,
+        binding_id: entry.binding_id || "",
+        project: entry.project || "",
+        agent_type: entry.agent_type || "unknown",
+        worker_context_packet_id: entry.worker_context_packet_id || "",
+        contract_schema: contract.schema || "",
+        contract_active: contract.active === true,
+        repaired_count: Number(contract.provider_override_followup_repaired_count || contract.providerOverrideFollowupRepairedCount || 0),
+        rel_path_count: relPaths.length,
+        followup_work_item_count: workItemIds.length,
+        acceptance_sampling_required: acceptance.pressure_provenance_provider_dispatch_override_followup_sampling_required === true,
+        acceptance_receipt_required: acceptance.pressure_provenance_provider_dispatch_override_followup_receipt_required === true,
+        acceptance_reverification_required: acceptance.provider_dispatch_override_followup_history_reverification_required === true,
+        usage_category_required: category.required === true,
+        rendered_contract: renderFlags.has_pressure_provenance_provider_dispatch_override_followup_receipt_contract === true,
+        covered: gaps.length === 0,
+        gaps,
+      };
+    });
+    const failed = checks.filter((check: any) => !check.covered);
+    const status = checks.length === 0 ? "empty" : failed.length === 0 ? "ok" : checks.length > failed.length ? "warn" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-followup-receipt-contract-group-v1",
+      groupId,
+      status,
+      file: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      checkedPacketCount: checks.length,
+      coveredPacketCount: checks.filter((check: any) => check.covered).length,
+      failedPacketCount: failed.length,
+      checks: checks.slice(-16).reverse(),
+      gaps: failed.flatMap((check: any) => (check.gaps || []).map((gap: any) => ({
+        binding_id: check.binding_id || "",
+        packet_id: check.worker_context_packet_id || "",
+        project: check.project || "",
+        agent_type: check.agent_type || "",
+        reason: gap.reason || "provider override follow-up receipt contract missing",
+      }))).slice(0, 16),
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.checkedPacketCount || 0) > 0);
+  const passedRows = checkedRows.filter((row: any) => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-followup-receipt-contract-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      checkedPacketCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.checkedPacketCount || 0), 0),
+      coveredPacketCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.coveredPacketCount || 0), 0),
+      failedPacketCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.failedPacketCount || 0), 0),
+    },
+    groups: rows.sort((a: any, b: any) => Number(b.failedPacketCount || 0) - Number(a.failedPacketCount || 0) || Number(b.checkedPacketCount || 0) - Number(a.checkedPacketCount || 0)).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContract(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractReport(options);
+  const checked = Number(report.overall.checkedPacketCount || 0);
+  const passed = Number(report.overall.coveredPacketCount || 0);
+  const evidence = (report.groups || []).flatMap((row: any) => (row.checks || []).filter((check: any) => check.covered).slice(0, 4).map((check: any) => ({
+    groupId: row.groupId,
+    binding_id: check.binding_id,
+    packet_id: check.worker_context_packet_id,
+    project: check.project,
+    agent_type: check.agent_type,
+    repaired_count: check.repaired_count,
+  }))).slice(0, 12);
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).map((gap: any) => ({
+    groupId: row.groupId,
+    binding_id: gap.binding_id || "",
+    packet_id: gap.packet_id || "",
+    project: gap.project || "",
+    agent_type: gap.agent_type || "",
+    reason: gap.reason || "provider override follow-up receipt contract missing",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract",
+    "WorkerContextPacket Pressure Provenance Provider Dispatch Override Follow-up Receipt Contract",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 repaired-history 让 provider dispatch 进入 receipt sampling 时，WorkerContextPacket 必须向子 Agent 注入 provider override follow-up receipt contract，并要求最终回执重验当前源。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextProviderDispatchOverrideFollowupReceiptContractValidationFromEntry(entry: any = {}) {
+  return entry.worker_context_provider_dispatch_override_followup_receipt_contract_validation
+    || entry.workerContextProviderDispatchOverrideFollowupReceiptContractValidation
+    || entry.provider_dispatch_override_followup_receipt_contract_validation
+    || entry.providerDispatchOverrideFollowupReceiptContractValidation
+    || null;
+}
+
+function buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const bindingLedger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(bindingLedger.entries) ? bindingLedger.entries : [])
+      .filter((entry: any) => entry.worker_context_packet_id)
+      .filter(workerContextPacketProviderDispatchOverrideFollowupReceiptContractRequired);
+    const checks = entries.map((entry: any) => {
+      const contract = workerContextPacketProviderDispatchOverrideFollowupReceiptContract(entry) || {};
+      const validation = workerContextProviderDispatchOverrideFollowupReceiptContractValidationFromEntry(entry) || {};
+      const gaps: any[] = [];
+      if (validation.schema !== "ccm-worker-context-provider-dispatch-override-followup-receipt-contract-validation-v1") {
+        gaps.push({ reason: "provider override follow-up receipt contract validation missing" });
+      }
+      if (validation.contract_satisfied !== true || validation.status !== "passed") {
+        gaps.push({ reason: "provider override follow-up receipt contract validation did not pass" });
+      }
+      if (Number(validation.memory_provenance_usage_count || 0) <= 0) {
+        gaps.push({ reason: "validated receipt missing memoryProvenanceUsage rows" });
+      }
+      if (Number(validation.provider_override_followup_reverified_row_count || 0) <= 0) {
+        gaps.push({ reason: "validated receipt missing provider override follow-up reverified rows" });
+      }
+      if (Number(contract.rel_paths?.length || contract.relPaths?.length || 0) > 0
+        && Number(validation.covered_rel_path_count || 0) < Number(contract.rel_paths?.length || contract.relPaths?.length || 0)) {
+        gaps.push({ reason: "validated receipt did not cover all contract rel paths" });
+      }
+      if (Number(contract.followup_work_item_ids?.length || contract.followupWorkItemIds?.length || 0) > 0
+        && Number(validation.covered_followup_work_item_count || 0) < Number(contract.followup_work_item_ids?.length || contract.followupWorkItemIds?.length || 0)) {
+        gaps.push({ reason: "validated receipt did not cover all follow-up work item ids" });
+      }
+      if (Number(contract.override_ids?.length || contract.overrideIds?.length || 0) > 0
+        && Number(validation.covered_override_id_count || 0) < Number(contract.override_ids?.length || contract.overrideIds?.length || 0)) {
+        gaps.push({ reason: "validated receipt did not cover all provider override ids" });
+      }
+      return {
+        schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-followup-receipt-contract-validation-check-v1",
+        groupId,
+        binding_id: entry.binding_id || "",
+        project: entry.project || "",
+        agent_type: entry.agent_type || "unknown",
+        worker_context_packet_id: entry.worker_context_packet_id || "",
+        validation_id: validation.validation_id || "",
+        validation_status: validation.status || "",
+        contract_satisfied: validation.contract_satisfied === true,
+        memory_provenance_usage_count: Number(validation.memory_provenance_usage_count || 0),
+        reverified_row_count: Number(validation.provider_override_followup_reverified_row_count || 0),
+        covered_rel_path_count: Number(validation.covered_rel_path_count || 0),
+        covered_followup_work_item_count: Number(validation.covered_followup_work_item_count || 0),
+        covered_override_id_count: Number(validation.covered_override_id_count || 0),
+        covered: gaps.length === 0,
+        gaps,
+      };
+    });
+    const failed = checks.filter((check: any) => !check.covered);
+    const status = checks.length === 0 ? "empty" : failed.length === 0 ? "ok" : checks.length > failed.length ? "warn" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-followup-receipt-contract-validation-group-v1",
+      groupId,
+      status,
+      file: bindingLedger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      checkedPacketCount: checks.length,
+      passedValidationCount: checks.filter((check: any) => check.covered).length,
+      failedValidationCount: failed.length,
+      checks: checks.slice(-16).reverse(),
+      gaps: failed.flatMap((check: any) => (check.gaps || []).map((gap: any) => ({
+        binding_id: check.binding_id || "",
+        packet_id: check.worker_context_packet_id || "",
+        project: check.project || "",
+        agent_type: check.agent_type || "",
+        reason: gap.reason || "provider override follow-up receipt contract validation missing",
+      }))).slice(0, 16),
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.checkedPacketCount || 0) > 0);
+  const passedRows = checkedRows.filter((row: any) => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-provider-dispatch-override-followup-receipt-contract-validation-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      checkedPacketCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.checkedPacketCount || 0), 0),
+      passedValidationCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.passedValidationCount || 0), 0),
+      failedValidationCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.failedValidationCount || 0), 0),
+    },
+    groups: rows.sort((a: any, b: any) => Number(b.failedValidationCount || 0) - Number(a.failedValidationCount || 0) || Number(b.checkedPacketCount || 0) - Number(a.checkedPacketCount || 0)).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidation(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationReport(options);
+  const checked = Number(report.overall.checkedPacketCount || 0);
+  const passed = Number(report.overall.passedValidationCount || 0);
+  const evidence = (report.groups || []).flatMap((row: any) => (row.checks || []).filter((check: any) => check.covered).slice(0, 4).map((check: any) => ({
+    groupId: row.groupId,
+    binding_id: check.binding_id,
+    packet_id: check.worker_context_packet_id,
+    project: check.project,
+    agent_type: check.agent_type,
+    validation_id: check.validation_id,
+  }))).slice(0, 12);
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).map((gap: any) => ({
+    groupId: row.groupId,
+    binding_id: gap.binding_id || "",
+    packet_id: gap.packet_id || "",
+    project: gap.project || "",
+    agent_type: gap.agent_type || "",
+    reason: gap.reason || "provider override follow-up receipt contract validation missing",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract_validation",
+    "WorkerContextPacket Pressure Provenance Provider Dispatch Override Follow-up Receipt Contract Validation",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 repaired-history sampling dispatch 完成后，最终子 Agent receipt 必须通过 provider override follow-up contract validation，覆盖 relPath/work item/override id 并标记当前源已复核。"
+  );
+  check.report = report;
+  return check;
+}
+
+function buildWorkerContextPacketPressureProvenanceFeedbackRecallRiskGatingReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const {
+      buildGroupTypedMemoryRecall,
+      buildPressureProvenancePreDispatchComplianceDispatchPolicy,
+      readGroupTypedMemoryDistillationLedger,
+    } = require("../collaboration/group-memory-index");
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = typedLedger.pressureProvenancePreDispatchComplianceArchive || {};
+    const frequentThreshold = Number(archive.frequent_threshold || options.frequentThreshold || options.frequent_threshold || 2);
+    const frequentAttributions = (Array.isArray(archive.attributions) ? archive.attributions : [])
+      .filter((row: any) => row.frequent === true || Number(row.violation_count || 0) >= frequentThreshold);
+    const probes = frequentAttributions.map((attribution: any) => {
+      const policy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+        targetProject: attribution.project || attribution.target_project || attribution.targetProject || "",
+        agentType: attribution.agent_type || attribution.agentType || "unknown",
+        generatedAt: options.generatedAt || options.generated_at || now(),
+        frequentThreshold,
+      });
+      const recall = buildGroupTypedMemoryRecall(groupId, [
+        "WorkerContextPacket context pressure context_usage typed MEMORY.md",
+        "子 Agent 普通实现任务 pressure recall risk gating probe",
+      ].join("\n"), {
+        disableLedger: true,
+        forceMemory: true,
+        forceWorkerContextPressureRecall: true,
+        targetProject: attribution.project || attribution.target_project || attribution.targetProject || "",
+        pressureProvenanceDispatchFeedbackPolicy: policy,
+        workerContextPressureRecallUsageRepairHints: options.workerContextPressureRecallUsageRepairHints
+          || options.worker_context_pressure_recall_usage_repair_hints,
+        workerContextPressureRecallUsage: options.workerContextPressureRecallUsage
+          || options.worker_context_pressure_recall_usage,
+        workerContextPressure: {
+          status: "over_budget",
+          pressure: 101,
+          reason: "memory-center pressure provenance feedback recall risk gating probe",
+        },
+        max: Number(options.maxTypedMemory || options.max_typed_memory || 8),
+        snippetChars: 320,
+      });
+      const scoring = recall.workerContextPressureFeedbackPolicyScoring || {};
+      const recalled = Array.isArray(recall.recalled) ? recall.recalled : [];
+      const diagnostics = Array.isArray(recall.diagnostics) ? recall.diagnostics : [];
+      const riskDocs = [
+        ...recalled.map((doc: any) => ({ ...doc, skipped: false })),
+        ...diagnostics.filter((item: any) => item.workerContextPressureFeedbackPolicy?.risk_doc === true),
+      ].filter((item: any) => item.workerContextPressureFeedbackPolicy?.risk_doc === true);
+      const covered = scoring.active === true
+        && Number(scoring.risk_doc_count || 0) > 0
+        && (Number(scoring.deprioritized_count || 0) > 0
+          || Number(scoring.risk_gated_count || 0) > 0
+          || Number(scoring.repair_first_count || 0) > 0);
+      return {
+        schema: "ccm-worker-context-packet-pressure-provenance-feedback-recall-risk-gating-probe-v1",
+        agent_type: attribution.agent_type || attribution.agentType || "unknown",
+        project: attribution.project || attribution.target_project || attribution.targetProject || "unknown",
+        violation_count: Number(attribution.violation_count || 0),
+        policyActive: policy.active === true,
+        riskDocCount: Number(scoring.risk_doc_count || 0),
+        deprioritizedCount: Number(scoring.deprioritized_count || 0),
+        riskGatedCount: Number(scoring.risk_gated_count || 0),
+        repairFirstCount: Number(scoring.repair_first_count || 0),
+        covered,
+        recalledCount: recalled.length,
+        riskDocs: riskDocs.slice(0, 6).map((doc: any) => ({
+          relPath: doc.relPath || doc.rel_path || "",
+          name: doc.name || "",
+          score: doc.score,
+          skipped: doc.skipped === true,
+          reason: doc.reason || "",
+          action: doc.workerContextPressureFeedbackPolicy?.action || "",
+          adjustment: Number(doc.workerContextPressureFeedbackPolicy?.adjustment || 0),
+        })),
+      };
+    });
+    const riskProbes = probes.filter((row: any) => Number(row.riskDocCount || 0) > 0);
+    const covered = riskProbes.filter((row: any) => row.covered === true);
+    const missing = riskProbes.filter((row: any) => row.covered !== true);
+    const status = frequentAttributions.length === 0 ? "empty" : riskProbes.length === 0 ? "empty" : missing.length === 0 ? "ok" : covered.length > 0 ? "warn" : "fail";
+    return {
+      schema: "ccm-worker-context-packet-pressure-provenance-feedback-recall-risk-gating-group-v1",
+      groupId,
+      status,
+      typedLedgerFile: typedLedger.file || "",
+      frequentAttributionCount: frequentAttributions.length,
+      riskAttributionCount: riskProbes.length,
+      coveredRiskAttributionCount: covered.length,
+      missingRiskGatingAttributionCount: missing.length,
+      probes,
+      gaps: missing.slice(0, 12).map((row: any) => ({
+        agent_type: row.agent_type || "unknown",
+        project: row.project || "unknown",
+        reason: `pressure provenance feedback policy active but risky under-repair pressure MEMORY.md was not deprioritized/gated; agentType=${row.agent_type || "unknown"} project=${row.project || "unknown"}`,
+      })),
+    };
+  });
+  const checkedRows = rows.filter((row: any) => Number(row.riskAttributionCount || 0) > 0);
+  const passedRows = checkedRows.filter((row: any) => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-provenance-feedback-recall-risk-gating-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      frequentAttributionCount: rows.reduce((sum: number, row: any) => sum + Number(row.frequentAttributionCount || 0), 0),
+      riskAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.riskAttributionCount || 0), 0),
+      coveredRiskAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.coveredRiskAttributionCount || 0), 0),
+      missingRiskGatingAttributionCount: checkedRows.reduce((sum: number, row: any) => sum + Number(row.missingRiskGatingAttributionCount || 0), 0),
+    },
+    groups: rows.sort((a: any, b: any) => Number(b.missingRiskGatingAttributionCount || 0) - Number(a.missingRiskGatingAttributionCount || 0)).slice(0, 50),
+    weakGroups: rows.filter((row: any) => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureProvenanceFeedbackRecallRiskGating(options: any = {}) {
+  const report = buildWorkerContextPacketPressureProvenanceFeedbackRecallRiskGatingReport(options);
+  const checked = Number(report.overall.riskAttributionCount || 0);
+  const passed = Number(report.overall.coveredRiskAttributionCount || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    riskAttributionCount: row.riskAttributionCount,
+    coveredRiskAttributionCount: row.coveredRiskAttributionCount,
+    probes: (row.probes || []).filter((probe: any) => probe.covered).slice(0, 4).map((probe: any) => ({
+      agent_type: probe.agent_type,
+      project: probe.project,
+      riskDocCount: probe.riskDocCount,
+      deprioritizedCount: probe.deprioritizedCount,
+      riskGatedCount: probe.riskGatedCount,
+    })),
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).map((gap: any) => ({
+    groupId: row.groupId,
+    project: gap.project || "",
+    agent_type: gap.agent_type || "",
+    reason: gap.reason || "pressure provenance feedback recall risk gating missing",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_provenance_feedback_recall_risk_gating",
+    "WorkerContextPacket Pressure Provenance Feedback Recall Risk Gating",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当某个 agentType/project 已有高频 pressure provenance 回执违约，且压力 MEMORY.md 带 disputed_under_repair 或 stale_evidence_under_repair 风险时，typed MEMORY.md 召回必须被 feedback policy 降权、门控或标记 repair-first。"
+  );
+  check.report = report;
+  return check;
+}
+
+function pressureMemoryProvenanceStatus(value: any) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function pressureMemoryProvenanceUnderRepair(value: any = {}) {
+  const provenance = pressureMemoryProvenanceStatus(value.provenance_status || value.provenanceStatus);
+  return provenance === "disputed_under_repair"
+    || provenance === "stale_evidence_under_repair"
+    || !!String(value.repair_work_item_id || value.repairWorkItemId || value.work_item_id || value.workItemId || "").trim()
+    || value.repair_open === true
+    || value.repairOpen === true;
+}
+
+function workerContextPacketPressureMemoryProvenanceDocRows(entry: any = {}) {
+  const recall = workerContextPacketTypedMemoryPressureRecall(entry) || {};
+  const docs = Array.isArray(recall.docs) ? recall.docs : [];
+  const rows: any[] = [];
+  const seen = new Set<string>();
+  for (const doc of docs) {
+    const directMatches = [
+      ...(Array.isArray(doc.pressure_usage_matches || doc.pressureUsageMatches) ? (doc.pressure_usage_matches || doc.pressureUsageMatches) : []),
+      ...(Array.isArray(doc.workerContextPressureUsage?.matched) ? doc.workerContextPressureUsage.matched : []),
+      ...(Array.isArray(doc.worker_context_pressure_usage?.matched) ? doc.worker_context_pressure_usage.matched : []),
+    ];
+    const candidates = directMatches.length ? directMatches : [doc];
+    for (const match of candidates) {
+      const relPath = String(match.rel_path || match.relPath || doc.rel_path || doc.relPath || "").trim();
+      const name = String(match.name || doc.name || "").trim();
+      const provenanceStatus = pressureMemoryProvenanceStatus(match.provenance_status || match.provenanceStatus || doc.provenance_status || doc.provenanceStatus);
+      const repairWorkItemId = String(match.repair_work_item_id || match.repairWorkItemId || doc.repair_work_item_id || doc.repairWorkItemId || "").trim();
+      const repairStatus = String(match.repair_status || match.repairStatus || doc.repair_status || doc.repairStatus || "").trim().toLowerCase();
+      const repairGapType = String(match.repair_gap_type || match.repairGapType || doc.repair_gap_type || doc.repairGapType || "").trim();
+      const requiresReceipt = doc.requires_memory_provenance_usage === true
+        || doc.requiresMemoryProvenanceUsage === true
+        || pressureMemoryProvenanceUnderRepair(match)
+        || pressureMemoryProvenanceUnderRepair(doc);
+      if (!requiresReceipt && !provenanceStatus && !repairWorkItemId && !repairStatus && !repairGapType) continue;
+      const key = `${relPath.toLowerCase()}|${name.toLowerCase()}|${provenanceStatus}|${repairWorkItemId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      rows.push({
+        rel_path: relPath,
+        name,
+        type: doc.type || "",
+        target_project: match.target_project || match.targetProject || entry.project || "",
+        pressure_status: doc.pressure_status || doc.pressureStatus || recall.pressure_status || "",
+        pressure_adjustment: Number(doc.pressure_adjustment || doc.pressureAdjustment || 0),
+        pressure_usage_adjustment: Number(doc.pressure_usage_adjustment || doc.pressureUsageAdjustment || match.delta || 0),
+        pressure_usage_recommendation: match.recommendation || doc.pressure_usage_recommendation || "",
+        hint_scope: match.hint_scope || match.hintScope || "",
+        provenance_status: provenanceStatus,
+        repair_work_item_id: repairWorkItemId,
+        repair_status: repairStatus,
+        repair_gap_type: repairGapType,
+        repair_open: match.repair_open === true || match.repairOpen === true || !!repairWorkItemId,
+        requires_memory_provenance_usage: requiresReceipt,
+      });
+    }
+  }
+  return rows;
+}
+
+function pressureMemoryProvenanceReceiptMatchesDoc(row: any = {}, doc: any = {}) {
+  const rowRepair = String(row.repair_work_item_id || "").trim().toLowerCase();
+  const docRepair = String(doc.repair_work_item_id || "").trim().toLowerCase();
+  if (rowRepair && docRepair) return rowRepair === docRepair;
+  const rowRel = String(row.rel_path || "").trim().toLowerCase();
+  const docRel = String(doc.rel_path || "").trim().toLowerCase();
+  if (rowRel && docRel && rowRel === docRel) return true;
+  const rowName = String(row.name || "").trim().toLowerCase();
+  const docName = String(doc.name || "").trim().toLowerCase();
+  return !!rowName && !!docName && rowName === docName;
+}
+
+function pressureMemoryProvenanceTrusted(doc: any = {}) {
+  const provenance = pressureMemoryProvenanceStatus(doc.provenance_status);
+  return !!provenance && !["disputed_under_repair", "stale_evidence_under_repair"].includes(provenance) && !doc.repair_work_item_id;
+}
+
+function workerContextPacketPressureMemoryProvenanceReceiptRow(groupId: string, entry: any = {}, options: any = {}) {
+  const provenanceDocs = workerContextPacketPressureMemoryProvenanceDocRows(entry);
+  const requiredDocs = provenanceDocs.filter((doc: any) => doc.requires_memory_provenance_usage === true);
+  const sources = collectWorkerContextPacketReceiptSources(groupId, entry, options);
+  const matchingSources = sources.filter(source => workerContextPacketReceiptMatchesBinding(source, entry));
+  const projectSources = matchingSources.length ? matchingSources : sources.filter(source => {
+    const project = String(source.project || source.agent || "").trim().toLowerCase();
+    return project && project === String(entry.project || "").trim().toLowerCase();
+  });
+  const receiptRows = projectSources.flatMap((source: any) => (Array.isArray(source.memoryProvenanceUsage) ? source.memoryProvenanceUsage : [])
+    .map((row: any) => ({
+      ...row,
+      receipt_source: source.source || "",
+      receipt_status: source.status || "",
+      receipt_project: source.project || source.agent || "",
+      worker_context_packet_id: source.worker_context_packet_id || "",
+    })));
+  const docChecks = requiredDocs.map((doc: any) => {
+    const matchingRows = receiptRows.filter((row: any) => pressureMemoryProvenanceReceiptMatchesDoc(row, doc));
+    const row = matchingRows[0] || null;
+    const gaps: any[] = [];
+    if (!projectSources.length) {
+      gaps.push({ code: "child_agent_receipt", severity: "fail", reason: "pressure repair provenance 已下发，但缺少匹配的子 Agent 回执" });
+    } else if (!receiptRows.length) {
+      gaps.push({ code: "receipt_memoryProvenanceUsage", severity: "fail", reason: "子 Agent 回执缺少结构化 memoryProvenanceUsage" });
+    } else if (!matchingRows.length) {
+      gaps.push({ code: "receipt_memoryProvenanceUsage_doc", severity: "fail", reason: `memoryProvenanceUsage 未逐条覆盖 ${doc.rel_path || doc.name || "pressure memory"}` });
+    } else {
+      const docProvenance = pressureMemoryProvenanceStatus(doc.provenance_status);
+      const rowProvenance = pressureMemoryProvenanceStatus(row.provenance_status);
+      if (docProvenance && !rowProvenance) {
+        gaps.push({ code: "receipt_provenanceStatus", severity: "warn", reason: `memoryProvenanceUsage 缺少 provenanceStatus=${docProvenance}` });
+      }
+      if (doc.repair_work_item_id && !row.repair_work_item_id) {
+        gaps.push({ code: "receipt_repairWorkItemId", severity: "warn", reason: `memoryProvenanceUsage 缺少 repairWorkItemId=${doc.repair_work_item_id}` });
+      } else if (doc.repair_work_item_id && row.repair_work_item_id && String(doc.repair_work_item_id) !== String(row.repair_work_item_id)) {
+        gaps.push({ code: "receipt_repairWorkItemId_mismatch", severity: "warn", reason: `memoryProvenanceUsage repairWorkItemId 不匹配：expected ${doc.repair_work_item_id}, got ${row.repair_work_item_id}` });
+      }
+      const underRepair = ["disputed_under_repair", "stale_evidence_under_repair"].includes(docProvenance)
+        || ["disputed_under_repair", "stale_evidence_under_repair"].includes(rowProvenance)
+        || !!doc.repair_work_item_id;
+      if (underRepair && ["used", "verified"].includes(row.usage_state) && row.current_source_verified !== true) {
+        gaps.push({ code: "receipt_currentSourceVerified", severity: "warn", reason: "disputed/stale-under-repair pressure memory 被使用，但 currentSourceVerified 未声明 true" });
+      }
+    }
+    return {
+      doc,
+      row,
+      matchingRowCount: matchingRows.length,
+      gaps,
+    };
+  });
+  const gaps = docChecks.flatMap((check: any) => check.gaps.map((gap: any) => ({
+    ...gap,
+    rel_path: check.doc.rel_path || "",
+    name: check.doc.name || "",
+    repair_work_item_id: check.doc.repair_work_item_id || "",
+    provenance_status: check.doc.provenance_status || "",
+  })));
+  return {
+    entry,
+    project: entry.project || "",
+    packetId: entry.worker_context_packet_id || "",
+    bindingId: entry.binding_id || "",
+    provenanceDocs,
+    requiredDocs,
+    receipts: projectSources,
+    receiptRows,
+    docChecks,
+    gaps,
+  };
+}
+
+function buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairWorkItem(groupId: string, row: any = {}, index = 0, existing: any = {}, at = now()) {
+  const entry = row.entry || {};
+  const packetId = String(entry.worker_context_packet_id || row.packetId || "").trim();
+  const bindingId = String(entry.binding_id || row.bindingId || "").trim();
+  const targetProject = String(entry.project || row.project || "").trim();
+  const gapCodes = uniqueStrings((row.gaps || []).map((gap: any) => gap.code || gap.reason || "").filter(Boolean), 12);
+  const repairIds = uniqueStrings((row.requiredDocs || row.provenanceDocs || []).map((doc: any) => doc.repair_work_item_id || "").filter(Boolean), 12);
+  const relPaths = uniqueStrings((row.requiredDocs || row.provenanceDocs || []).map((doc: any) => doc.rel_path || doc.name || "").filter(Boolean), 12);
+  const id = `worker-context-pressure-provenance-receipt-repair:${hash([
+    groupId,
+    bindingId,
+    packetId,
+    targetProject,
+    repairIds.join("|"),
+    relPaths.join("|"),
+  ], 14)}`;
+  const previousStatus = replayRepairWorkItemStatus(existing.status);
+  const status = ["in_progress", "blocked"].includes(previousStatus) ? previousStatus : "pending";
+  const reason = compactMemoryCenterText(`pressure memory provenance receipt gaps: ${gapCodes.join(",") || "missing_memoryProvenanceUsage"}`, 360);
+  const instruction = [
+    `要求 ${targetProject || "目标子 Agent"} 补齐 pressure memory provenance 回执。`,
+    packetId ? `worker_context_packet_id=${packetId}` : "",
+    bindingId ? `binding_id=${bindingId}` : "",
+    relPaths.length ? `memory_docs=${relPaths.join(",")}` : "",
+    repairIds.length ? `repair_work_item_ids=${repairIds.join(",")}` : "",
+    "CCM_AGENT_RECEIPT.memoryProvenanceUsage 必须逐条声明 relPath、usageState、provenanceStatus、repairWorkItemId、repairStatus、repairGapType。",
+    "如果使用 disputed_under_repair 或 stale_evidence_under_repair 记忆，必须在同一行声明 currentSourceVerified=true；若未使用，应写 usageState=ignored 并说明原因。",
+  ].filter(Boolean).join(" ");
+  return {
+    id,
+    work_item_id: id,
+    taskId: String(entry.assignment_id || ""),
+    scopeId: groupId,
+    group_id: groupId,
+    subject: "补齐 pressure memory provenance 子 Agent 回执",
+    description: reason,
+    activeForm: compactMemoryCenterText(`补齐 memoryProvenanceUsage：${targetProject || packetId || "worker"}`, 180),
+    owner: existing.owner && previousStatus !== "pending" ? existing.owner : "group-main-agent",
+    target: compactMemoryCenterText(targetProject || "memory-context", 120),
+    agentType: "group-main-agent",
+    status,
+    priority: (row.gaps || []).some((gap: any) => gap.code === "child_agent_receipt" || gap.code === "receipt_memoryProvenanceUsage") ? "critical" : "high",
+    component: "worker_context_pressure_memory_provenance_receipt_contract",
+    source: "worker_context_pressure_memory_provenance_receipt_repair",
+    source_action_id: `pressure-memory-provenance-receipt:${bindingId || packetId || index}`,
+    repair_target: packetId || bindingId || "worker_context_packet",
+    instruction: compactMemoryCenterText(instruction, 1100),
+    expected: "CCM_AGENT_RECEIPT.memoryProvenanceUsage covers every pressure repair memory and marks currentSourceVerified=true when disputed/stale memory is used",
+    source_reason: reason,
+    replay_status: "pressure_memory_provenance_receipt_gap",
+    target_project: targetProject,
+    dispatch_target: targetProject,
+    pressure_memory_provenance_gap_codes: gapCodes,
+    pressure_memory_provenance_repair_work_item_ids: repairIds,
+    pressure_memory_provenance_rel_paths: relPaths,
+    prompt_patch: compactMemoryCenterText([
+      "Pressure memory provenance receipt repair:",
+      `- group=${groupId}`,
+      targetProject ? `- target_project=${targetProject}` : "",
+      packetId ? `- worker_context_packet_id=${packetId}` : "",
+      bindingId ? `- binding_id=${bindingId}` : "",
+      relPaths.length ? `- memory_docs=${relPaths.join(",")}` : "",
+      repairIds.length ? `- repair_work_item_ids=${repairIds.join(",")}` : "",
+      "- Return a corrected CCM_AGENT_RECEIPT.memoryProvenanceUsage block.",
+      "- Each row must include relPath, usageState, provenanceStatus, repairWorkItemId, repairStatus, repairGapType.",
+      "- If usageState is used/verified for disputed_under_repair or stale_evidence_under_repair, set currentSourceVerified=true.",
+    ].filter(Boolean).join("\n"), 1800),
+    dispatch_hint: {
+      claim_policy: "group_main_agent_before_child_dispatch",
+      next_step: "request_corrected_child_agent_memoryProvenanceUsage_receipt",
+      should_create_real_task: false,
+      reason: "Memory Center diagnostic sidecar; main Agent may claim and request a corrected receipt deliberately.",
+    },
+    raw_recovery: {
+      rule: "worker_context_packet_pressure_memory_provenance_receipts",
+      gaps: gapCodes,
+      requiredDocs: (row.requiredDocs || []).slice(0, 8),
+    },
+    worker_context_packet_id: packetId,
+    worker_context_packet_binding_id: bindingId,
+    binding_id: bindingId,
+    assignment_id: entry.assignment_id || "",
+    dispatch_key: entry.dispatch_key || "",
+    evidence: [
+      packetId ? `worker_context_packet_id=${packetId}` : "",
+      bindingId ? `binding_id=${bindingId}` : "",
+      relPaths.length ? `memory_docs=${relPaths.join(",")}` : "",
+      repairIds.length ? `repair_work_item_ids=${repairIds.join(",")}` : "",
+      reason,
+    ].filter(Boolean),
+    filesChanged: [],
+    verification: ["重新运行 worker_context_packet_pressure_memory_provenance_receipts", "确认 memoryProvenanceUsage 覆盖 pressure repair provenance"],
+    blockers: [],
+    needs: ["子 Agent 更正 CCM_AGENT_RECEIPT.memoryProvenanceUsage"],
+    createdAt: existing.createdAt || existing.created_at || at,
+    updatedAt: existing.updatedAt || existing.updated_at || at,
+    lastSeenAt: existing.lastSeenAt || existing.last_seen_at || at,
+    completedAt: existing.completedAt || existing.completed_at || "",
+    seenCount: Math.max(1, Number(existing.seenCount || existing.seen_count || 1) || 1),
+  };
+}
+
+function syncWorkerContextPacketPressureMemoryProvenanceReceiptRepairWorkItems(groupId: string, gapRows: any[] = [], options: any = {}) {
+  if (!groupId) return summarizeReplayRepairPendingWorkItems(groupId);
+  const at = String(options.at || now());
+  const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+  const previousItems = Array.isArray(ledger.items) ? ledger.items : [];
+  const previousById = new Map<string, any>(previousItems.map((item: any) => [String(item.id || item.work_item_id || ""), item]));
+  const currentIds = new Set<string>();
+  const nextRepairItems: any[] = [];
+  let changed = false;
+  for (const [index, row] of gapRows.entries()) {
+    const draft = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairWorkItem(groupId, row, index, {}, at);
+    const existing = previousById.get(draft.id) || {};
+    let item = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairWorkItem(groupId, row, index, existing, at);
+    const previousSignature = replayRepairWorkItemSignature(existing);
+    const nextSignature = replayRepairWorkItemSignature(item);
+    if (existing.id && previousSignature === nextSignature) {
+      item = { ...existing, ...item, createdAt: existing.createdAt || item.createdAt, updatedAt: existing.updatedAt || item.updatedAt, lastSeenAt: existing.lastSeenAt || item.lastSeenAt, seenCount: Number(existing.seenCount || 1) };
+    } else {
+      item = { ...item, updatedAt: at, lastSeenAt: at, seenCount: existing.id ? Number(existing.seenCount || 1) + 1 : 1 };
+      changed = true;
+    }
+    currentIds.add(item.id);
+    nextRepairItems.push(item);
+  }
+  const untouchedItems: any[] = [];
+  for (const existing of previousItems) {
+    const id = String(existing.id || existing.work_item_id || "");
+    const source = String(existing.source || "");
+    if (source !== "worker_context_pressure_memory_provenance_receipt_repair") {
+      untouchedItems.push(existing);
+      continue;
+    }
+    if (!id || currentIds.has(id)) continue;
+    const currentStatus = replayRepairWorkItemStatus(existing.status);
+    if (!replayRepairWorkItemOpen(currentStatus)) {
+      nextRepairItems.push(existing);
+      continue;
+    }
+    nextRepairItems.push({
+      ...existing,
+      status: "completed",
+      updatedAt: at,
+      completedAt: existing.completedAt || at,
+      resolutionReason: "worker_context_pressure_memory_provenance_receipt_compliant",
+      latestWorkerContextPressureMemoryProvenanceReceipts: { gapCount: gapRows.length },
+    });
+    changed = true;
+  }
+  const nextItems = [...untouchedItems, ...nextRepairItems]
+    .sort((a, b) => {
+      const statusRank = replayRepairWorkItemOpen(a.status) === replayRepairWorkItemOpen(b.status) ? 0 : replayRepairWorkItemOpen(a.status) ? -1 : 1;
+      if (statusRank) return statusRank;
+      const priority = replayRepairPriorityRank(a.priority) - replayRepairPriorityRank(b.priority);
+      if (priority) return priority;
+      return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+    })
+    .slice(0, 160);
+  const stats = replayRepairWorkItemStats(nextItems);
+  const nextLedger = {
+    ...ledger,
+    latestWorkerContextPressureMemoryProvenanceReceipts: {
+      gapCount: gapRows.length,
+      packetIds: gapRows.map((row: any) => row.packetId || row.entry?.worker_context_packet_id || "").filter(Boolean).slice(0, 20),
+    },
+    items: nextItems,
+    stats,
+    updatedAt: changed || !ledger.updatedAt ? at : ledger.updatedAt,
+  };
+  const currentComparable = JSON.stringify(previousItems.filter((item: any) => String(item.source || "") === "worker_context_pressure_memory_provenance_receipt_repair"));
+  const nextComparable = JSON.stringify(nextItems.filter((item: any) => String(item.source || "") === "worker_context_pressure_memory_provenance_receipt_repair"));
+  if (changed || currentComparable !== nextComparable || !fs.existsSync(ledger.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId))) {
+    return summarizeReplayRepairPendingWorkItems(groupId, writeGroupCompactBoundaryReplayRepairWorkItems(groupId, nextLedger));
+  }
+  return summarizeReplayRepairPendingWorkItems(groupId, ledger);
+}
+
+function buildWorkerContextPacketPressureMemoryProvenanceReceiptReport(options: any = {}) {
+  const groupIds = replayRepairDispatchBindingGroupIds(options);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupReplayRepairDispatchBindingLedger(groupId);
+    const entries = (Array.isArray(ledger.entries) ? ledger.entries : [])
+      .filter((entry: any) => entry.worker_context_packet_id || workerContextPacketContextUsage(entry));
+    const checked = entries.map((entry: any) => workerContextPacketPressureMemoryProvenanceReceiptRow(groupId, entry, options))
+      .filter((row: any) => row.provenanceDocs.length > 0);
+    const gapRows = checked.filter((row: any) => row.gaps.length > 0);
+    const failRows = gapRows.filter((row: any) => row.gaps.some((gap: any) => gap.severity === "fail"));
+    const warnRows = gapRows.filter((row: any) => row.gaps.some((gap: any) => gap.severity === "warn"));
+    const workItems = syncWorkerContextPacketPressureMemoryProvenanceReceiptRepairWorkItems(groupId, gapRows, { at: options.generatedAt || options.generated_at || now() });
+    const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const repairItems = (Array.isArray(workLedger.items) ? workLedger.items : [])
+      .filter((item: any) => String(item.source || "") === "worker_context_pressure_memory_provenance_receipt_repair");
+    const openItems = repairItems.filter((item: any) => replayRepairWorkItemOpen(item.status));
+    const allDocs = checked.flatMap((row: any) => row.provenanceDocs);
+    const requiredDocs = checked.flatMap((row: any) => row.requiredDocs);
+    const allReceiptRows = checked.flatMap((row: any) => row.receiptRows);
+    const verifiedUnderRepairRows = checked.flatMap((row: any) => row.docChecks)
+      .filter((check: any) => check.row && pressureMemoryProvenanceUnderRepair(check.doc) && check.row.current_source_verified === true);
+    const projectMap = new Map<string, any>();
+    for (const row of checked) {
+      const project = String(row.project || row.entry?.project || "unknown").trim() || "unknown";
+      const current = projectMap.get(project) || {
+        project,
+        provenanceDocCount: 0,
+        requiredProvenanceDocCount: 0,
+        receiptRowCount: 0,
+        trustedCount: 0,
+        disputedCount: 0,
+        staleUnderRepairCount: 0,
+        verifiedUnderRepairCount: 0,
+        gapCount: 0,
+      };
+      current.provenanceDocCount += row.provenanceDocs.length;
+      current.requiredProvenanceDocCount += row.requiredDocs.length;
+      current.receiptRowCount += row.receiptRows.length;
+      current.trustedCount += row.provenanceDocs.filter((doc: any) => pressureMemoryProvenanceTrusted(doc)).length;
+      current.disputedCount += row.provenanceDocs.filter((doc: any) => doc.provenance_status === "disputed_under_repair").length;
+      current.staleUnderRepairCount += row.provenanceDocs.filter((doc: any) => doc.provenance_status === "stale_evidence_under_repair").length;
+      current.verifiedUnderRepairCount += row.docChecks.filter((check: any) => check.row && pressureMemoryProvenanceUnderRepair(check.doc) && check.row.current_source_verified === true).length;
+      current.gapCount += row.gaps.length;
+      projectMap.set(project, current);
+    }
+    const status = checked.length === 0 ? "empty" : failRows.length ? "fail" : warnRows.length ? "warn" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-pressure-memory-provenance-receipt-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchBindingLedgerFile(groupId),
+      workItemsFile: workItems.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      pressureProvenancePacketCount: checked.length,
+      provenanceDocCount: allDocs.length,
+      requiredProvenanceDocCount: requiredDocs.length,
+      receiptRowCount: allReceiptRows.length,
+      compliantDocCount: Math.max(0, requiredDocs.length - checked.reduce((sum, row) => sum + row.docChecks.filter((check: any) => check.gaps.length > 0).length, 0)),
+      missingReceiptCount: checked.reduce((sum, row) => sum + row.gaps.filter((gap: any) => gap.code === "child_agent_receipt").length, 0),
+      missingMemoryProvenanceUsageCount: checked.reduce((sum, row) => sum + row.gaps.filter((gap: any) => gap.code === "receipt_memoryProvenanceUsage").length, 0),
+      missingStructuredDocReceiptCount: checked.reduce((sum, row) => sum + row.gaps.filter((gap: any) => gap.code === "receipt_memoryProvenanceUsage_doc").length, 0),
+      unsafeDisputedUseCount: checked.reduce((sum, row) => sum + row.gaps.filter((gap: any) => gap.code === "receipt_currentSourceVerified").length, 0),
+      missingRepairWorkItemIdCount: checked.reduce((sum, row) => sum + row.gaps.filter((gap: any) => gap.code === "receipt_repairWorkItemId" || gap.code === "receipt_repairWorkItemId_mismatch").length, 0),
+      trustedCount: allDocs.filter((doc: any) => pressureMemoryProvenanceTrusted(doc)).length,
+      disputedCount: allDocs.filter((doc: any) => doc.provenance_status === "disputed_under_repair").length,
+      staleUnderRepairCount: allDocs.filter((doc: any) => doc.provenance_status === "stale_evidence_under_repair").length,
+      verifiedUnderRepairCount: verifiedUnderRepairRows.length,
+      repairWorkItemCount: repairItems.length,
+      openRepairWorkItemCount: openItems.length,
+      projects: [...projectMap.values()].sort((a, b) => Number(b.gapCount || 0) - Number(a.gapCount || 0) || Number(b.provenanceDocCount || 0) - Number(a.provenanceDocCount || 0)),
+      receipts: checked.slice(-12).reverse().map((row: any) => ({
+        binding_id: row.bindingId,
+        packet_id: row.packetId,
+        project: row.project,
+        provenance_doc_count: row.provenanceDocs.length,
+        required_doc_count: row.requiredDocs.length,
+        receipt_row_count: row.receiptRows.length,
+        gaps: row.gaps.map((gap: any) => gap.code || gap.reason || "").slice(0, 8),
+      })),
+      repairItems: repairItems.slice(0, 12).map((item: any) => ({
+        id: item.id || item.work_item_id || "",
+        status: replayRepairWorkItemStatus(item.status),
+        priority: item.priority || "",
+        packet_id: item.worker_context_packet_id || "",
+        target_project: item.target_project || "",
+        gap_codes: item.pressure_memory_provenance_gap_codes || [],
+      })),
+      gaps: gapRows.slice(0, 8).map((row: any) => ({
+        binding_id: row.bindingId,
+        packet_id: row.packetId,
+        project: row.project,
+        reason: `WorkerContextPacket pressure memory provenance receipt 缺少/异常：${uniqueStrings(row.gaps.map((gap: any) => gap.code || gap.reason || ""), 8).join(",")}`,
+        gaps: row.gaps.slice(0, 6),
+      })),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.provenanceDocCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const failedRows = checkedRows.filter(row => row.status === "fail");
+  const warnedRows = checkedRows.filter(row => row.status === "warn");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : failedRows.length ? "fail" : warnedRows.length ? "warn" : "ok";
+  return {
+    schema: "ccm-worker-context-packet-pressure-memory-provenance-receipt-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      pressureProvenancePacketCount: checkedRows.reduce((sum, row) => sum + Number(row.pressureProvenancePacketCount || 0), 0),
+      provenanceDocCount: checkedRows.reduce((sum, row) => sum + Number(row.provenanceDocCount || 0), 0),
+      requiredProvenanceDocCount: checkedRows.reduce((sum, row) => sum + Number(row.requiredProvenanceDocCount || 0), 0),
+      receiptRowCount: checkedRows.reduce((sum, row) => sum + Number(row.receiptRowCount || 0), 0),
+      compliantDocCount: checkedRows.reduce((sum, row) => sum + Number(row.compliantDocCount || 0), 0),
+      missingReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.missingReceiptCount || 0), 0),
+      missingMemoryProvenanceUsageCount: checkedRows.reduce((sum, row) => sum + Number(row.missingMemoryProvenanceUsageCount || 0), 0),
+      missingStructuredDocReceiptCount: checkedRows.reduce((sum, row) => sum + Number(row.missingStructuredDocReceiptCount || 0), 0),
+      unsafeDisputedUseCount: checkedRows.reduce((sum, row) => sum + Number(row.unsafeDisputedUseCount || 0), 0),
+      missingRepairWorkItemIdCount: checkedRows.reduce((sum, row) => sum + Number(row.missingRepairWorkItemIdCount || 0), 0),
+      trustedCount: checkedRows.reduce((sum, row) => sum + Number(row.trustedCount || 0), 0),
+      disputedCount: checkedRows.reduce((sum, row) => sum + Number(row.disputedCount || 0), 0),
+      staleUnderRepairCount: checkedRows.reduce((sum, row) => sum + Number(row.staleUnderRepairCount || 0), 0),
+      verifiedUnderRepairCount: checkedRows.reduce((sum, row) => sum + Number(row.verifiedUnderRepairCount || 0), 0),
+      repairWorkItemCount: checkedRows.reduce((sum, row) => sum + Number(row.repairWorkItemCount || 0), 0),
+      openRepairWorkItemCount: checkedRows.reduce((sum, row) => sum + Number(row.openRepairWorkItemCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.provenanceDocCount || 0) - Number(a.provenanceDocCount || 0) || Number(b.openRepairWorkItemCount || 0) - Number(a.openRepairWorkItemCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureMemoryProvenanceReceipts(options: any = {}) {
+  const report = buildWorkerContextPacketPressureMemoryProvenanceReceiptReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    pressureProvenancePacketCount: row.pressureProvenancePacketCount,
+    provenanceDocCount: row.provenanceDocCount,
+    receiptRowCount: row.receiptRowCount,
+    verifiedUnderRepairCount: row.verifiedUnderRepairCount,
+    workItemsFile: row.workItemsFile,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "pressure memory provenance receipt 缺失",
+    binding_id: gap.binding_id || "",
+    packet_id: gap.packet_id || "",
+    project: gap.project || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_memory_provenance_receipts",
+    "WorkerContextPacket Pressure Memory Provenance Receipts",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 WorkerContextPacket 向子 Agent 下发 disputed/stale-under-repair pressure MEMORY.md 时，子 Agent 必须用 memoryProvenanceUsage 逐条声明使用状态、repair work item、provenanceStatus 和 currentSourceVerified。"
+  );
+  check.report = report;
+  return check;
+}
+
+function isWorkerContextPressureMemoryProvenanceReceiptRepairSource(source: any) {
+  return String(source || "").trim() === "worker_context_pressure_memory_provenance_receipt_repair";
+}
+
+function isWorkerContextPressureMemoryProvenanceReceiptRepairWorkItem(item: any = {}) {
+  return isWorkerContextPressureMemoryProvenanceReceiptRepairSource(item.source);
+}
+
+function workerContextPressureMemoryProvenanceReceiptRepairDispatchGroupIds(options: any = {}, receiptReport: any = {}) {
+  const explicit = Array.isArray(options.groupIds || options.group_ids)
+    ? (options.groupIds || options.group_ids).map((item: any) => String(item || "").trim()).filter(Boolean)
+    : null;
+  if (explicit?.length) return explicit;
+  const reportGroupIds = Array.isArray(receiptReport.groups)
+    ? receiptReport.groups.map((row: any) => String(row.groupId || "").trim()).filter(Boolean)
+    : [];
+  return [...new Set([
+    ...replayRepairDispatchCandidateGroupIds(options),
+    ...reportGroupIds,
+  ])].filter(Boolean);
+}
+
+function workerContextPressureMemoryProvenanceReceiptRepairCandidateMetadataGaps(item: any = {}, candidate: any = {}) {
+  const gaps: string[] = [];
+  if (!candidate || !candidate.work_item_id) {
+    gaps.push("candidate_missing");
+    return gaps;
+  }
+  if (!isWorkerContextPressureMemoryProvenanceReceiptRepairSource(candidate.source)) gaps.push("source");
+  if (candidate.component !== "worker_context_pressure_memory_provenance_receipt_contract") gaps.push("component");
+  if (candidate.shouldCreateRealTask !== false && candidate.should_create_real_task !== false) gaps.push("should_create_real_task_false");
+  const mirroredFields = [
+    "worker_context_packet_id",
+    "worker_context_packet_binding_id",
+    "binding_id",
+    "assignment_id",
+    "dispatch_key",
+  ];
+  for (const field of mirroredFields) {
+    const expectedValue = field === "worker_context_packet_binding_id"
+      ? item.worker_context_packet_binding_id || item.binding_id || ""
+      : item[field] || "";
+    const expected = String(expectedValue || "").trim();
+    if (expected && String(candidate[field] || "").trim() !== expected) gaps.push(field);
+  }
+  const expectedRelPaths = Array.isArray(item.pressure_memory_provenance_rel_paths) ? item.pressure_memory_provenance_rel_paths : [];
+  const candidateRelPaths = Array.isArray(candidate.pressure_memory_provenance_rel_paths) ? candidate.pressure_memory_provenance_rel_paths : [];
+  for (const relPath of expectedRelPaths) {
+    if (relPath && !candidateRelPaths.includes(relPath)) gaps.push("pressure_memory_provenance_rel_paths");
+  }
+  const expectedRepairIds = Array.isArray(item.pressure_memory_provenance_repair_work_item_ids) ? item.pressure_memory_provenance_repair_work_item_ids : [];
+  const candidateRepairIds = Array.isArray(candidate.pressure_memory_provenance_repair_work_item_ids) ? candidate.pressure_memory_provenance_repair_work_item_ids : [];
+  for (const repairId of expectedRepairIds) {
+    if (repairId && !candidateRepairIds.includes(repairId)) gaps.push("pressure_memory_provenance_repair_work_item_ids");
+  }
+  const text = [
+    candidate.instruction,
+    candidate.expected,
+    candidate.prompt_patch,
+    candidate.source_reason,
+  ].filter(Boolean).join("\n");
+  if (!/memoryProvenanceUsage/i.test(text)) gaps.push("memoryProvenanceUsage_prompt");
+  if (!/provenanceStatus|provenance_status/i.test(text)) gaps.push("provenanceStatus_prompt");
+  if (!/repairWorkItemId|repair_work_item_id/i.test(text)) gaps.push("repairWorkItemId_prompt");
+  if (!/currentSourceVerified|current_source_verified/i.test(text)) gaps.push("currentSourceVerified_prompt");
+  return [...new Set(gaps)];
+}
+
+function buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport(options: any = {}) {
+  const receiptReport = options.receiptReport
+    || options.receipt_report
+    || buildWorkerContextPacketPressureMemoryProvenanceReceiptReport(options);
+  const groupIds = workerContextPressureMemoryProvenanceReceiptRepairDispatchGroupIds(options, receiptReport);
+  const rows = groupIds.map((groupId: string) => {
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const items = Array.isArray(ledger.items) ? ledger.items : [];
+    const pressureItems = items.filter(isWorkerContextPressureMemoryProvenanceReceiptRepairWorkItem);
+    const openPressureItems = pressureItems.filter((item: any) => replayRepairWorkItemOpen(item.status));
+    const requiredItems = openPressureItems;
+    const limit = Math.max(Number(options.limit || 24), requiredItems.length + 8);
+    const summary = buildReplayRepairMainAgentDispatchCandidates(groupId, { limit, ledger });
+    const candidateByWorkId = new Map((summary.candidates || []).map((candidate: any) => [String(candidate.work_item_id || ""), candidate]));
+    const missing = requiredItems.filter((item: any) => !candidateByWorkId.has(replayRepairWorkItemId(item)));
+    const matched = requiredItems.map((item: any) => ({
+      item,
+      candidate: candidateByWorkId.get(replayRepairWorkItemId(item)) || null,
+    })).filter((entry: any) => entry.candidate);
+    const metadataGaps = matched
+      .map((entry: any) => ({
+        work_item_id: replayRepairWorkItemId(entry.item),
+        candidate_id: entry.candidate.candidate_id || "",
+        gaps: workerContextPressureMemoryProvenanceReceiptRepairCandidateMetadataGaps(entry.item, entry.candidate),
+        worker_context_packet_id: entry.candidate.worker_context_packet_id || "",
+        binding_id: entry.candidate.binding_id || entry.candidate.worker_context_packet_binding_id || "",
+      }))
+      .filter((entry: any) => entry.gaps.length > 0);
+    const pressureCandidates = (summary.candidates || []).filter((candidate: any) => isWorkerContextPressureMemoryProvenanceReceiptRepairSource(candidate.source));
+    const status = requiredItems.length === 0
+      ? pressureItems.length > 0 ? "warn" : "empty"
+      : missing.length > 0 ? "fail" : metadataGaps.length > 0 ? "warn" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-pressure-memory-provenance-receipt-repair-dispatch-candidate-group-v1",
+      groupId,
+      status,
+      file: summary.file,
+      updatedAt: summary.updatedAt,
+      pressureProvenanceRepairItemCount: pressureItems.length,
+      pressureProvenanceOpenItemCount: openPressureItems.length,
+      expectedCandidateCount: requiredItems.length,
+      coveredCandidateCount: requiredItems.length - missing.length,
+      candidateCount: pressureCandidates.length,
+      readyCount: pressureCandidates.filter((candidate: any) => candidate.dispatchMarked || candidate.claimedByMainAgent || candidate.status === "in_progress").length,
+      dispatchMarkedCount: pressureCandidates.filter((candidate: any) => candidate.dispatchMarked || String(candidate.dispatch_target || "").trim()).length,
+      metadataGapCount: metadataGaps.length,
+      promptPatchCandidateCount: pressureCandidates.filter((candidate: any) => /memoryProvenanceUsage/i.test(String(candidate.prompt_patch || ""))).length,
+      packetBoundCandidateCount: pressureCandidates.filter((candidate: any) => candidate.worker_context_packet_id).length,
+      provenanceRelPathCandidateCount: pressureCandidates.filter((candidate: any) => Array.isArray(candidate.pressure_memory_provenance_rel_paths) && candidate.pressure_memory_provenance_rel_paths.length).length,
+      candidates: pressureCandidates.slice(0, 12),
+      missingCandidates: missing.slice(0, 8).map((item: any) => ({
+        work_item_id: replayRepairWorkItemId(item),
+        status: replayRepairWorkItemStatus(item.status),
+        priority: item.priority || "",
+        reason: "pressure memory provenance receipt repair work item 缺少主 Agent 派发候选",
+      })),
+      metadataGaps: metadataGaps.slice(0, 8),
+      gaps: [
+        ...missing.slice(0, 8).map((item: any) => ({
+          work_item_id: replayRepairWorkItemId(item),
+          reason: "pressure memory provenance receipt repair work item 未进入主 Agent 派发候选",
+          status: replayRepairWorkItemStatus(item.status),
+          priority: item.priority || "",
+        })),
+        ...metadataGaps.slice(0, 8).map((gap: any) => ({
+          work_item_id: gap.work_item_id || "",
+          candidate_id: gap.candidate_id || "",
+          reason: `pressure memory provenance receipt repair dispatch candidate 缺少字段：${gap.gaps.join(",")}`,
+        })),
+      ].slice(0, 12),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.expectedCandidateCount || 0) > 0 || Number(row.candidateCount || 0) > 0);
+  const requiredRows = checkedRows.filter(row => Number(row.expectedCandidateCount || 0) > 0);
+  const coveredRows = requiredRows.filter(row => Number(row.coveredCandidateCount || 0) >= Number(row.expectedCandidateCount || 0));
+  const metadataCompleteRows = requiredRows.filter(row => Number(row.metadataGapCount || 0) === 0);
+  const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+  const metadataCoverageRate = requiredRows.length ? Math.round((metadataCompleteRows.length / requiredRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? "empty"
+    : coverageRate < 100 ? coverageRate >= 75 ? "warn" : "fail" : metadataCoverageRate === 100 ? "ok" : "warn";
+  return {
+    schema: "ccm-worker-context-packet-pressure-memory-provenance-receipt-repair-dispatch-candidate-report-v1",
+    generatedAt: now(),
+    receiptReport: { schema: receiptReport.schema || "", overall: receiptReport.overall || {} },
+    overall: {
+      status,
+      coverageRate,
+      metadataCoverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsNeedingCandidates: requiredRows.length,
+      groupsCovered: coveredRows.length,
+      groupsMetadataComplete: metadataCompleteRows.length,
+      expectedCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedCandidateCount || 0), 0),
+      coveredCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredCandidateCount || 0), 0),
+      candidateCount: checkedRows.reduce((sum, row) => sum + Number(row.candidateCount || 0), 0),
+      readyCount: checkedRows.reduce((sum, row) => sum + Number(row.readyCount || 0), 0),
+      dispatchMarkedCount: checkedRows.reduce((sum, row) => sum + Number(row.dispatchMarkedCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      promptPatchCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.promptPatchCandidateCount || 0), 0),
+      packetBoundCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.packetBoundCandidateCount || 0), 0),
+      provenanceRelPathCandidateCount: checkedRows.reduce((sum, row) => sum + Number(row.provenanceRelPathCandidateCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.expectedCandidateCount || 0) - Number(a.expectedCandidateCount || 0) || Number(b.candidateCount || 0) - Number(a.candidateCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidates(options: any = {}) {
+  const report = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport(options);
+  const checked = Number(report.overall.groupsNeedingCandidates || 0);
+  const passed = (report.groups || []).filter((row: any) => Number(row.expectedCandidateCount || 0) > 0 && row.status === "ok").length;
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    expectedCandidateCount: row.expectedCandidateCount,
+    coveredCandidateCount: row.coveredCandidateCount,
+    candidateCount: row.candidateCount,
+    packetBoundCandidateCount: row.packetBoundCandidateCount,
+    provenanceRelPathCandidateCount: row.provenanceRelPathCandidateCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "pressure memory provenance receipt repair dispatch candidate 缺失",
+    work_item_id: gap.work_item_id || "",
+    candidate_id: gap.candidate_id || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_candidates",
+    "WorkerContextPacket Pressure Memory Provenance Receipt Repair Dispatch Candidates",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "把 pressure memory provenance receipt repair work items 转成主 Agent 可读派发候选，并保留 worker_context_packet_id、binding、relPath、repairWorkItemId、memoryProvenanceUsage 修复 prompt；仍只作为规划上下文，不自动创建真实任务。"
+  );
+  check.report = report;
+  return check;
+}
+
+function workerContextPressureMemoryProvenanceReceiptDispatchBriefMetadataGaps(candidate: any = {}, brief: any = {}) {
+  const gaps = replayRepairDispatchBriefMetadataGaps(candidate, brief);
+  if (!brief || !brief.brief_id) return gaps;
+  if (!isWorkerContextPressureMemoryProvenanceReceiptRepairSource(brief.source)) gaps.push("source");
+  const mirroredFields = [
+    "worker_context_packet_id",
+    "worker_context_packet_binding_id",
+    "binding_id",
+    "assignment_id",
+    "dispatch_key",
+  ];
+  for (const field of mirroredFields) {
+    const expected = String(candidate[field] || "").trim();
+    if (expected && String(brief[field] || "").trim() !== expected) gaps.push(field);
+  }
+  const expectedRelPaths = Array.isArray(candidate.pressure_memory_provenance_rel_paths) ? candidate.pressure_memory_provenance_rel_paths : [];
+  const briefRelPaths = Array.isArray(brief.pressure_memory_provenance_rel_paths) ? brief.pressure_memory_provenance_rel_paths : [];
+  for (const relPath of expectedRelPaths) {
+    if (relPath && !briefRelPaths.includes(relPath)) gaps.push("pressure_memory_provenance_rel_paths");
+  }
+  const expectedRepairIds = Array.isArray(candidate.pressure_memory_provenance_repair_work_item_ids) ? candidate.pressure_memory_provenance_repair_work_item_ids : [];
+  const briefRepairIds = Array.isArray(brief.pressure_memory_provenance_repair_work_item_ids) ? brief.pressure_memory_provenance_repair_work_item_ids : [];
+  for (const repairId of expectedRepairIds) {
+    if (repairId && !briefRepairIds.includes(repairId)) gaps.push("pressure_memory_provenance_repair_work_item_ids");
+  }
+  const workerTask = String(brief.worker_task || "");
+  if (!/memoryProvenanceUsage/i.test(workerTask)) gaps.push("worker_task_memoryProvenanceUsage");
+  if (!/provenanceStatus|provenance_status/i.test(workerTask)) gaps.push("worker_task_provenanceStatus");
+  if (!/repairWorkItemId|repair_work_item_id/i.test(workerTask)) gaps.push("worker_task_repairWorkItemId");
+  if (!/currentSourceVerified|current_source_verified/i.test(workerTask)) gaps.push("worker_task_currentSourceVerified");
+  if (candidate.worker_context_packet_id && !workerTask.includes(String(candidate.worker_context_packet_id))) gaps.push("worker_task_packet_id");
+  for (const relPath of expectedRelPaths.slice(0, 4)) {
+    if (relPath && !workerTask.includes(String(relPath))) gaps.push("worker_task_rel_path");
+  }
+  return [...new Set(gaps)];
+}
+
+function buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport(options: any = {}) {
+  const candidateReport = options.candidateReport
+    || options.candidate_report
+    || buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport(options);
+  const rows = (candidateReport.groups || []).map((candidateGroup: any) => {
+    const groupId = String(candidateGroup.groupId || "");
+    const pressureCandidates = Array.isArray(candidateGroup.candidates)
+      ? candidateGroup.candidates.filter((candidate: any) => isWorkerContextPressureMemoryProvenanceReceiptRepairSource(candidate.source))
+      : [];
+    const candidateSummary = {
+      schema: "ccm-replay-repair-main-agent-dispatch-candidates-v1",
+      groupId,
+      file: candidateGroup.file || getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId),
+      updatedAt: candidateGroup.updatedAt || "",
+      candidateCount: pressureCandidates.length,
+      openItemCount: candidateGroup.pressureProvenanceOpenItemCount || pressureCandidates.length,
+      readyCount: candidateGroup.readyCount || pressureCandidates.length,
+      dispatchMarkedCount: candidateGroup.dispatchMarkedCount || 0,
+      shouldCreateRealTask: false,
+      candidates: pressureCandidates,
+    };
+    const ledger = syncReplayRepairDispatchPlanLedgerForCenter(groupId, candidateSummary, options);
+    const readyBriefs = (Array.isArray(ledger.briefs) ? ledger.briefs : [])
+      .filter((brief: any) => String(brief.status || "") === "ready" && isWorkerContextPressureMemoryProvenanceReceiptRepairSource(brief.source));
+    const briefByWorkId = new Map<string, any>(readyBriefs.map((brief: any) => [String(brief.work_item_id || ""), brief]));
+    const requiredCandidates = pressureCandidates.filter((candidate: any) => candidate.work_item_id);
+    const missing = requiredCandidates.filter((candidate: any) => !briefByWorkId.has(String(candidate.work_item_id || "")));
+    const metadataGaps = requiredCandidates
+      .map((candidate: any) => {
+        const brief = briefByWorkId.get(String(candidate.work_item_id || "")) || null;
+        return {
+          work_item_id: candidate.work_item_id || "",
+          candidate_id: candidate.candidate_id || "",
+          brief_id: brief?.brief_id || "",
+          gaps: workerContextPressureMemoryProvenanceReceiptDispatchBriefMetadataGaps(candidate, brief),
+        };
+      })
+      .filter((entry: any) => entry.gaps.length > 0);
+    const status = requiredCandidates.length === 0
+      ? "empty"
+      : missing.length > 0 ? "fail" : metadataGaps.length > 0 ? "warn" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-pressure-memory-provenance-receipt-repair-dispatch-brief-group-v1",
+      groupId,
+      status,
+      file: ledger.file || getGroupReplayRepairDispatchPlanLedgerFile(groupId),
+      sourceCandidateFile: ledger.sourceCandidateFile || candidateGroup.file || "",
+      expectedBriefCount: requiredCandidates.length,
+      coveredBriefCount: requiredCandidates.length - missing.length,
+      readyBriefCount: readyBriefs.length,
+      metadataGapCount: metadataGaps.length,
+      packetBoundBriefCount: readyBriefs.filter((brief: any) => brief.worker_context_packet_id).length,
+      memoryProvenanceUsagePromptBriefCount: readyBriefs.filter((brief: any) => /memoryProvenanceUsage/i.test(String(brief.worker_task || ""))).length,
+      currentSourceVerifiedPromptBriefCount: readyBriefs.filter((brief: any) => /currentSourceVerified|current_source_verified/i.test(String(brief.worker_task || ""))).length,
+      shouldCreateRealTask: ledger.shouldCreateRealTask === false || ledger.should_create_real_task === false,
+      briefs: readyBriefs.slice(0, 12).map((brief: any) => ({
+        brief_id: brief.brief_id || "",
+        work_item_id: brief.work_item_id || "",
+        source: brief.source || "",
+        target_project: brief.target_project || "",
+        worker_context_packet_id: brief.worker_context_packet_id || "",
+        worker_context_packet_binding_id: brief.worker_context_packet_binding_id || brief.binding_id || "",
+        pressure_memory_provenance_rel_paths: brief.pressure_memory_provenance_rel_paths || [],
+        pressure_memory_provenance_repair_work_item_ids: brief.pressure_memory_provenance_repair_work_item_ids || [],
+        worker_task: compactMemoryCenterText(brief.worker_task || "", 520),
+      })),
+      missingBriefs: missing.slice(0, 8).map((candidate: any) => ({
+        work_item_id: candidate.work_item_id || "",
+        candidate_id: candidate.candidate_id || "",
+        reason: "pressure memory provenance receipt repair dispatch candidate 缺少 corrected-receipt 派发简报",
+      })),
+      metadataGaps: metadataGaps.slice(0, 8),
+      gaps: [
+        ...missing.slice(0, 8).map((candidate: any) => ({
+          work_item_id: candidate.work_item_id || "",
+          candidate_id: candidate.candidate_id || "",
+          reason: "pressure memory provenance receipt repair dispatch candidate 缺少 corrected-receipt worker brief",
+        })),
+        ...metadataGaps.slice(0, 8).map((gap: any) => ({
+          work_item_id: gap.work_item_id || "",
+          candidate_id: gap.candidate_id || "",
+          brief_id: gap.brief_id || "",
+          reason: `pressure memory provenance receipt repair dispatch brief 缺少字段：${gap.gaps.join(",")}`,
+        })),
+      ].slice(0, 12),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.expectedBriefCount || 0) > 0 || Number(row.readyBriefCount || 0) > 0);
+  const requiredRows = checkedRows.filter(row => Number(row.expectedBriefCount || 0) > 0);
+  const coveredRows = requiredRows.filter(row => Number(row.coveredBriefCount || 0) >= Number(row.expectedBriefCount || 0));
+  const metadataCompleteRows = requiredRows.filter(row => Number(row.metadataGapCount || 0) === 0);
+  const coverageRate = requiredRows.length ? Math.round((coveredRows.length / requiredRows.length) * 1000) / 10 : null;
+  const metadataCoverageRate = requiredRows.length ? Math.round((metadataCompleteRows.length / requiredRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null
+    ? "empty"
+    : coverageRate < 100 ? coverageRate >= 75 ? "warn" : "fail" : metadataCoverageRate === 100 ? "ok" : "warn";
+  return {
+    schema: "ccm-worker-context-packet-pressure-memory-provenance-receipt-repair-dispatch-brief-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      metadataCoverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsNeedingBriefs: requiredRows.length,
+      groupsCovered: coveredRows.length,
+      groupsMetadataComplete: metadataCompleteRows.length,
+      expectedBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.expectedBriefCount || 0), 0),
+      coveredBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.coveredBriefCount || 0), 0),
+      readyBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.readyBriefCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number(row.metadataGapCount || 0), 0),
+      packetBoundBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.packetBoundBriefCount || 0), 0),
+      memoryProvenanceUsagePromptBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.memoryProvenanceUsagePromptBriefCount || 0), 0),
+      currentSourceVerifiedPromptBriefCount: checkedRows.reduce((sum, row) => sum + Number(row.currentSourceVerifiedPromptBriefCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.expectedBriefCount || 0) - Number(a.expectedBriefCount || 0) || Number(b.readyBriefCount || 0) - Number(a.readyBriefCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefs(options: any = {}) {
+  const report = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport(options);
+  const checked = Number(report.overall.groupsNeedingBriefs || 0);
+  const passed = (report.groups || []).filter((row: any) => Number(row.expectedBriefCount || 0) > 0 && row.status === "ok").length;
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    expectedBriefCount: row.expectedBriefCount,
+    coveredBriefCount: row.coveredBriefCount,
+    readyBriefCount: row.readyBriefCount,
+    packetBoundBriefCount: row.packetBoundBriefCount,
+    memoryProvenanceUsagePromptBriefCount: row.memoryProvenanceUsagePromptBriefCount,
+    file: row.file,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "pressure memory provenance receipt repair dispatch brief 缺失",
+    work_item_id: gap.work_item_id || "",
+    candidate_id: gap.candidate_id || "",
+    brief_id: gap.brief_id || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_briefs",
+    "WorkerContextPacket Pressure Memory Provenance Receipt Repair Dispatch Briefs",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "把 pressure memory provenance receipt repair candidates 编译成主 Agent 可复制给子 Agent 的 corrected-receipt worker brief；brief 必须包含 CCM_AGENT_RECEIPT.memoryProvenanceUsage、repairWorkItemId、provenanceStatus 和 currentSourceVerified 约束。"
+  );
+  check.report = report;
+  return check;
+}
+
+function buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport(options: any = {}) {
+  const receiptReport = options.receiptReport
+    || options.receipt_report
+    || buildWorkerContextPacketPressureMemoryProvenanceReceiptReport(options);
+  const candidateReport = options.candidateReport
+    || options.candidate_report
+    || buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport({ ...options, receiptReport });
+  const briefReport = options.briefReport
+    || options.brief_report
+    || buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport({ ...options, candidateReport });
+  const groupIds = [...new Set([
+    ...(receiptReport.groups || []).map((row: any) => row.groupId),
+    ...(candidateReport.groups || []).map((row: any) => row.groupId),
+    ...(briefReport.groups || []).map((row: any) => row.groupId),
+  ].map((item: any) => String(item || "").trim()).filter(Boolean))];
+  const rows = groupIds.map((groupId: string) => {
+    const receiptGroup = (receiptReport.groups || []).find((row: any) => row.groupId === groupId) || {};
+    const candidateGroup = (candidateReport.groups || []).find((row: any) => row.groupId === groupId) || {};
+    const briefGroup = (briefReport.groups || []).find((row: any) => row.groupId === groupId) || {};
+    const workLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const repairItems = (Array.isArray(workLedger.items) ? workLedger.items : []).filter(isWorkerContextPressureMemoryProvenanceReceiptRepairWorkItem);
+    const candidates = Array.isArray(candidateGroup.candidates) ? candidateGroup.candidates : [];
+    const briefs = Array.isArray(briefGroup.briefs) ? briefGroup.briefs : [];
+    const inputRows = [
+      ...repairItems,
+      ...candidates,
+      ...briefs,
+      ...(Array.isArray(receiptGroup.gaps) ? receiptGroup.gaps : []),
+      ...(Array.isArray(candidateGroup.gaps) ? candidateGroup.gaps : []),
+      ...(Array.isArray(briefGroup.gaps) ? briefGroup.gaps : []),
+    ];
+    let distillation: any = null;
+    let distillationError = "";
+    try {
+      const {
+        distillPressureMemoryProvenanceReceiptRepairToTypedMemory,
+      } = require("../collaboration/group-memory-index");
+      distillation = inputRows.length
+        ? distillPressureMemoryProvenanceReceiptRepairToTypedMemory(groupId, {
+          items: repairItems,
+          candidates,
+          briefs,
+          gaps: [
+            ...(Array.isArray(receiptGroup.gaps) ? receiptGroup.gaps : []),
+            ...(Array.isArray(candidateGroup.gaps) ? candidateGroup.gaps : []),
+            ...(Array.isArray(briefGroup.gaps) ? briefGroup.gaps : []),
+          ],
+        }, {
+          reason: "memory-center-pressure-memory-provenance-receipt-repair-typed-memory-report",
+          updatedAt: options.generatedAt || options.generated_at || now(),
+        })
+        : null;
+    } catch (error: any) {
+      distillationError = String(error?.message || error);
+    }
+    const {
+      readGroupTypedMemoryDistillationLedger,
+      scanGroupTypedMemoryDocuments,
+      buildGroupTypedMemoryRecall,
+    } = require("../collaboration/group-memory-index");
+    const distillationLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = distillationLedger.pressureMemoryProvenanceReceiptRepairArchive || {};
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const disciplineDocs = (Array.isArray(docs) ? docs : []).filter((doc: any) => String(doc.source || "") === "auto:pressure-memory-provenance-receipt-repair-distillation");
+    const docText = disciplineDocs.map((doc: any) => String(doc.body || "")).join("\n");
+    const recall = buildGroupTypedMemoryRecall(groupId, "pressure memory provenance receipt memoryProvenanceUsage repairWorkItemId provenanceStatus currentSourceVerified disputed_under_repair stale_evidence_under_repair", {
+      disableLedger: true,
+      forceMemory: true,
+      max: 8,
+      snippetChars: 320,
+    });
+    const recallText = [
+      ...(Array.isArray(recall.recalled) ? recall.recalled : []),
+      ...(Array.isArray(recall.entries) ? recall.entries : []),
+      ...(Array.isArray(recall.selected) ? recall.selected : []),
+      ...(Array.isArray(recall.docs) ? recall.docs : []),
+    ].map((item: any) => `${item.name || ""}\n${item.body || ""}\n${item.snippet || ""}\n${item.text || ""}`).join("\n");
+    const recallMatchCount = Array.isArray(recall.recalled)
+      ? recall.recalled.length
+      : Number(recall.matched_count || recall.entryCount || recall.entries?.length || 0);
+    const gaps: any[] = [];
+    if (distillationError) gaps.push({ reason: `pressure memory provenance receipt typed memory 蒸馏失败：${distillationError}` });
+    if (inputRows.length && !distillation) gaps.push({ reason: "存在 pressure memory provenance receipt repair 行但未触发 typed memory 蒸馏" });
+    if (inputRows.length && Number(archive.archived_count || 0) < 1) gaps.push({ reason: "pressure memory provenance receipt repair archive 为空" });
+    if (inputRows.length && !disciplineDocs.length) gaps.push({ reason: "未写入 pressure memory provenance receipt discipline typed MEMORY.md 文档" });
+    if (disciplineDocs.length && !/memoryProvenanceUsage/i.test(docText)) gaps.push({ reason: "typed memory 文档缺少 memoryProvenanceUsage 规则" });
+    if (disciplineDocs.length && !/repairWorkItemId/i.test(docText)) gaps.push({ reason: "typed memory 文档缺少 repairWorkItemId 规则" });
+    if (disciplineDocs.length && !/provenanceStatus/i.test(docText)) gaps.push({ reason: "typed memory 文档缺少 provenanceStatus 规则" });
+    if (disciplineDocs.length && !/currentSourceVerified/i.test(docText)) gaps.push({ reason: "typed memory 文档缺少 currentSourceVerified 规则" });
+    if (disciplineDocs.length && !/disputed_under_repair|stale_evidence_under_repair/i.test(docText)) gaps.push({ reason: "typed memory 文档缺少 under-repair provenance 状态" });
+    if (inputRows.length && !/memoryProvenanceUsage|repairWorkItemId|currentSourceVerified|provenanceStatus/i.test(recallText)) gaps.push({ reason: "pressure memory provenance receipt discipline typed memory 无法通过 recall probe 召回" });
+    const status = inputRows.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-pressure-memory-provenance-receipt-repair-typed-memory-group-v1",
+      groupId,
+      status,
+      inputRowCount: inputRows.length,
+      repairItemCount: repairItems.length,
+      candidateCount: candidates.length,
+      briefCount: briefs.length,
+      archivedCount: Number(archive.archived_count || 0),
+      typedMemoryDocCount: disciplineDocs.length,
+      recallMatchCount,
+      relPathCount: Number(archive.rel_path_count || 0),
+      repairWorkItemCount: Number(archive.repair_work_item_count || 0),
+      correctedPromptCount: Number(archive.corrected_prompt_count || 0),
+      currentSourceVerifiedPromptCount: Number(archive.current_source_verified_prompt_count || 0),
+      typedMemoryLedgerFile: distillationLedger.file || "",
+      docs: disciplineDocs.slice(0, 8).map((doc: any) => ({ relPath: doc.relPath, name: doc.name, source: doc.source })),
+      distillation: distillation ? {
+        incomingRowCount: distillation.incomingRowCount || 0,
+        archivedCount: distillation.archivedCount || 0,
+        writeCount: distillation.writeCount || 0,
+        correctedPromptCount: distillation.correctedPromptCount || 0,
+        currentSourceVerifiedPromptCount: distillation.currentSourceVerifiedPromptCount || 0,
+      } : null,
+      gaps,
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.inputRowCount || 0) > 0 || Number(row.archivedCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-pressure-memory-provenance-receipt-repair-typed-memory-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      inputRowCount: checkedRows.reduce((sum, row) => sum + Number(row.inputRowCount || 0), 0),
+      archivedCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedCount || 0), 0),
+      typedMemoryDocCount: checkedRows.reduce((sum, row) => sum + Number(row.typedMemoryDocCount || 0), 0),
+      recallMatchCount: checkedRows.reduce((sum, row) => sum + Number(row.recallMatchCount || 0), 0),
+      correctedPromptCount: checkedRows.reduce((sum, row) => sum + Number(row.correctedPromptCount || 0), 0),
+      currentSourceVerifiedPromptCount: checkedRows.reduce((sum, row) => sum + Number(row.currentSourceVerifiedPromptCount || 0), 0),
+      relPathCount: checkedRows.reduce((sum, row) => sum + Number(row.relPathCount || 0), 0),
+      repairWorkItemCount: checkedRows.reduce((sum, row) => sum + Number(row.repairWorkItemCount || 0), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.inputRowCount || 0) - Number(a.inputRowCount || 0) || Number(b.archivedCount || 0) - Number(a.archivedCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemory(options: any = {}) {
+  const report = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    inputRowCount: row.inputRowCount,
+    archivedCount: row.archivedCount,
+    typedMemoryDocCount: row.typedMemoryDocCount,
+    recallMatchCount: row.recallMatchCount,
+    correctedPromptCount: row.correctedPromptCount,
+    currentSourceVerifiedPromptCount: row.currentSourceVerifiedPromptCount,
+    typedMemoryLedgerFile: row.typedMemoryLedgerFile,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "pressure memory provenance receipt repair typed memory 缺失",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_pressure_memory_provenance_receipt_repair_typed_memory",
+    "WorkerContextPacket Pressure Memory Provenance Receipt Repair Typed Memory",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 pressure memory provenance receipt repair 反复出现时，必须沉淀为 feedback typed MEMORY.md，让后续子 Agent 会话能召回 memoryProvenanceUsage / repairWorkItemId / currentSourceVerified 回执纪律。"
+  );
+  check.report = report;
+  return check;
+}
+
 function workerContextPacketPreDispatchGate(entry: any = {}) {
   return entry.worker_context_pre_dispatch_gate
     || entry.workerContextPreDispatchGate
@@ -8872,7 +13879,7 @@ function workerContextPacketPartialCompactPolicyValid(entry: any = {}) {
     ? (policy.supported_categories || policy.supportedCategories).map((item: any) => String(item || "")).filter(Boolean)
     : [];
   return policy.schema === "ccm-worker-context-partial-compact-policy-v1"
-    && policy.method === "usage_top_category_pressure"
+    && String(policy.method || "").startsWith("usage_top_category_pressure")
     && selected.length > 0
     && selected.every((category: string) => supported.includes(category))
     && Array.isArray(policy.candidates)
@@ -9660,6 +14667,156 @@ function evaluateWorkerContextPacketPtlEmergencyDowngrade(options: any = {}) {
   return check;
 }
 
+function buildWorkerContextPacketPtlEmergencyTypedMemoryReport(options: any = {}) {
+  const ptlReport = options.ptlReport
+    || options.ptl_report
+    || buildWorkerContextPacketPtlEmergencyDowngradeReport(options);
+  const {
+    buildGroupTypedMemoryRecall,
+    distillPtlEmergencyDowngradeToTypedMemory,
+    readGroupTypedMemoryDistillationLedger,
+    scanGroupTypedMemoryDocuments,
+  } = require("../collaboration/group-memory-index");
+  const rows = (ptlReport.groups || []).map((group: any) => {
+    const groupId = String(group.groupId || "").trim();
+    const outcomeLedger = readGroupWorkerContextCompactOutcomeLedger(groupId);
+    const hint = readGroupWorkerContextPtlEmergencyHint(groupId);
+    const outcomes = (Array.isArray(outcomeLedger.entries) ? outcomeLedger.entries : [])
+      .filter((entry: any) => entry.distillation_candidate !== false)
+      .filter((entry: any) => entry.status === "blocked" || entry.dispatch_ready === false || entry.task_compacted === true);
+    let distillation: any = null;
+    let distillationError = "";
+    try {
+      distillation = hint.engaged === true || outcomes.length
+        ? distillPtlEmergencyDowngradeToTypedMemory(groupId, {
+          hint,
+          outcomes,
+        }, {
+          reason: "memory-center-ptl-emergency-typed-memory-report",
+          updatedAt: options.generatedAt || options.generated_at || now(),
+        })
+        : null;
+    } catch (error: any) {
+      distillationError = String(error?.message || error);
+    }
+    const distillationLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = distillationLedger.ptlEmergencyArchive || {};
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const doc = (Array.isArray(docs) ? docs : []).find((item: any) => item.relPath === "worker-context-ptl-emergency-downgrade.md" || String(item.source || "") === "auto:ptl-emergency-downgrade-distillation");
+    const docText = String(doc?.body || "");
+    const recall = hint.engaged === true || outcomes.length
+      ? buildGroupTypedMemoryRecall(groupId, "WorkerContextPacket PTL emergency downgrade maxTaskChars maxRenderedChars repeated compact failure blocked outcomes task_compacted", {
+        max: 8,
+        disableLedger: true,
+        forceMemory: true,
+        snippetChars: 260,
+      })
+      : { recalled: [] };
+    const recallText = JSON.stringify(Array.isArray(recall.recalled) ? recall.recalled : []);
+    const gaps: any[] = [];
+    if (distillationError) gaps.push({ reason: `PTL emergency typed memory 蒸馏失败：${distillationError}` });
+    if ((hint.engaged === true || outcomes.length) && !distillation) gaps.push({ reason: "存在 PTL emergency hint/outcomes 但未触发 typed memory 蒸馏" });
+    if ((hint.engaged === true || outcomes.length) && archive.schema !== "ccm-ptl-emergency-typed-memory-distillation-v1") gaps.push({ reason: "PTL emergency archive 缺失或 schema 异常" });
+    if ((hint.engaged === true || outcomes.length) && !doc) gaps.push({ reason: "未写入 PTL emergency downgrade typed MEMORY.md 文档" });
+    if (doc && !/PTL Emergency Downgrade|PTL emergency/i.test(docText)) gaps.push({ reason: "typed memory 文档缺少 PTL emergency 标题/语义" });
+    if (doc && !/maxTaskChars|maxRenderedChars|maxRecallItems|maxStringChars/i.test(docText)) gaps.push({ reason: "typed memory 文档缺少 emergency retry budgets" });
+    if (doc && !/Blocked outcomes|task_compacted|repeated compact failure/i.test(docText)) gaps.push({ reason: "typed memory 文档缺少 blocked outcome / task compacted 纪律" });
+    if ((hint.engaged === true || outcomes.length) && !/worker-context-ptl-emergency-downgrade\.md|PTL emergency|maxTaskChars|maxRenderedChars|task_compacted/i.test(recallText)) {
+      gaps.push({ reason: "PTL emergency typed memory 无法通过 recall probe 召回" });
+    }
+    const status = hint.engaged !== true && outcomes.length === 0 ? "empty" : gaps.length ? "fail" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-ptl-emergency-typed-memory-group-v1",
+      groupId,
+      status,
+      engaged: hint.engaged === true,
+      emergencyLevel: hint.emergency_level || group.emergencyLevel || "",
+      outcomeCount: outcomes.length,
+      blockedOutcomeCount: Number(archive.blocked_outcome_count || group.blockedOutcomeCount || 0),
+      taskCompactedBlockedCount: Number(archive.task_compacted_blocked_count || group.taskCompactedBlockedCount || 0),
+      failedCategoryCount: Number(archive.failed_category_count || 0),
+      typedDocCount: doc ? 1 : 0,
+      recallMatchCount: Array.isArray(recall.recalled) ? recall.recalled.length : 0,
+      typedMemoryLedgerFile: distillationLedger.file || "",
+      sourceHintFile: hint.file || group.file || "",
+      sourceOutcomeFile: outcomeLedger.file || group.outcomeFile || "",
+      distillation: distillation ? {
+        engaged: distillation.engaged === true,
+        emergencyLevel: distillation.emergencyLevel || "",
+        blockedOutcomeCount: distillation.blockedOutcomeCount || 0,
+        taskCompactedBlockedCount: distillation.taskCompactedBlockedCount || 0,
+        failedCategoryCount: distillation.failedCategoryCount || 0,
+        outcomeCount: distillation.outcomeCount || 0,
+        writeCount: distillation.writeCount || 0,
+      } : null,
+      docs: doc ? [{
+        relPath: doc.relPath,
+        type: doc.type,
+        source: doc.source,
+        file: doc.file,
+      }] : [],
+      gaps: gaps.slice(0, 8),
+    };
+  });
+  const checkedRows = rows.filter(row => row.engaged === true || Number(row.outcomeCount || 0) > 0 || Number(row.typedDocCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-ptl-emergency-typed-memory-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      engagedCount: checkedRows.filter(row => row.engaged === true).length,
+      outcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.outcomeCount || 0), 0),
+      blockedOutcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.blockedOutcomeCount || 0), 0),
+      taskCompactedBlockedCount: checkedRows.reduce((sum, row) => sum + Number(row.taskCompactedBlockedCount || 0), 0),
+      failedCategoryCount: checkedRows.reduce((sum, row) => sum + Number(row.failedCategoryCount || 0), 0),
+      typedDocCount: checkedRows.reduce((sum, row) => sum + Number(row.typedDocCount || 0), 0),
+      recallMatchCount: checkedRows.reduce((sum, row) => sum + Number(row.recallMatchCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.blockedOutcomeCount || 0) - Number(a.blockedOutcomeCount || 0) || Number(b.outcomeCount || 0) - Number(a.outcomeCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketPtlEmergencyTypedMemory(options: any = {}) {
+  const report = buildWorkerContextPacketPtlEmergencyTypedMemoryReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    emergencyLevel: row.emergencyLevel,
+    blockedOutcomeCount: row.blockedOutcomeCount,
+    taskCompactedBlockedCount: row.taskCompactedBlockedCount,
+    typedDocCount: row.typedDocCount,
+    recallMatchCount: row.recallMatchCount,
+    typedMemoryLedgerFile: row.typedMemoryLedgerFile,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "WorkerContextPacket PTL emergency typed memory 缺失",
+    blockedOutcomeCount: row.blockedOutcomeCount || 0,
+    emergencyLevel: row.emergencyLevel || "",
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_ptl_emergency_typed_memory",
+    "WorkerContextPacket PTL Emergency Typed Memory",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "当 PTL emergency downgrade 被触发时，必须沉淀为 feedback typed MEMORY.md，让后续子 Agent 会话能召回 maxTaskChars/maxRenderedChars/replay/metadata 紧急降级预算。"
+  );
+  check.report = report;
+  return check;
+}
+
 function workerContextPacketMemoryPolicy(entry: any = {}) {
   return entry.worker_context_packet_memory_policy
     || entry.workerContextPacketMemoryPolicy
@@ -9851,10 +15008,53 @@ function workerContextPacketReceiptStringList(value: any): string[] {
   return [typeof value === "string" ? value : JSON.stringify(value || {})].map(item => item.trim()).filter(Boolean);
 }
 
+function normalizeWorkerContextPacketMemoryProvenanceUsageState(value: any) {
+  const text = String(value || "").trim().toLowerCase();
+  if (/verified|validated|checked|current_source_verified|current source|re-read|核验|验证|当前源|已检查/.test(text)) return "verified";
+  if (/ignored|ignore|skip|unused|not_used|未使用|不使用|忽略|跳过/.test(text)) return "ignored";
+  if (/used|use|applied|referenced|consumed|使用|采用|应用|引用|参考/.test(text)) return "used";
+  if (/mentioned|surfaced|shown|presented|提及|出现|下发/.test(text)) return "mentioned";
+  return text;
+}
+
+function normalizeWorkerContextPacketMemoryProvenanceUsageRows(value: any) {
+  const rawItems = Array.isArray(value) ? value : (value ? [value] : []);
+  return rawItems.map((raw: any) => {
+    const item = typeof raw === "string" ? { reason: raw } : raw;
+    if (!item || typeof item !== "object") return null;
+    return {
+      rel_path: String(item.relPath || item.rel_path || item.memoryRelPath || item.memory_rel_path || item.path || "").trim(),
+      name: String(item.name || item.memoryName || item.memory_name || item.title || "").trim(),
+      usage_state: normalizeWorkerContextPacketMemoryProvenanceUsageState(item.usageState || item.usage_state || item.status || item.state || ""),
+      provenance_status: String(item.provenanceStatus || item.provenance_status || item.trustState || item.trust_state || "").trim().toLowerCase(),
+      repair_work_item_id: String(item.repairWorkItemId || item.repair_work_item_id || item.workItemId || item.work_item_id || "").trim(),
+      repair_status: String(item.repairStatus || item.repair_status || "").trim().toLowerCase(),
+      repair_gap_type: String(item.repairGapType || item.repair_gap_type || item.gapType || item.gap_type || "").trim(),
+      current_source_verified: item.currentSourceVerified === true || item.current_source_verified === true || item.verified === true,
+      reason: compactMemoryCenterText(item.reason || item.note || item.evidence || item.value || item.text || "", 600),
+    };
+  }).filter((item: any) => item && (
+    item.rel_path
+    || item.name
+    || item.usage_state
+    || item.provenance_status
+    || item.repair_work_item_id
+    || item.reason
+  )).slice(0, 80);
+}
+
 function normalizeWorkerContextPacketReceiptSource(raw: any = {}, source = "", fallback: any = {}) {
   if (!raw || typeof raw !== "object") return null;
   const memoryIgnored = normalizeQualityStringList(raw.memoryIgnored || raw.memory_ignored || raw.ignored);
   const memoryUsed = normalizeQualityStringList(raw.memoryUsed || raw.memory_used || raw.used || raw.memoryReferences || raw.memory_references);
+  const memoryProvenanceUsage = normalizeWorkerContextPacketMemoryProvenanceUsageRows(
+    raw.memoryProvenanceUsage
+      || raw.memory_provenance_usage
+      || raw.typedMemoryProvenanceUsage
+      || raw.typed_memory_provenance_usage
+      || raw.pressureMemoryUsage
+      || raw.pressure_memory_usage
+  );
   const text = [
     raw.summary,
     raw.status,
@@ -9863,8 +15063,9 @@ function normalizeWorkerContextPacketReceiptSource(raw: any = {}, source = "", f
     JSON.stringify(raw || {}),
     ...memoryIgnored,
     ...memoryUsed,
+    ...memoryProvenanceUsage.map((item: any) => JSON.stringify(item || {})),
   ].filter(Boolean).join("\n");
-  if (!text.trim() && !memoryIgnored.length && !memoryUsed.length) return null;
+  if (!text.trim() && !memoryIgnored.length && !memoryUsed.length && !memoryProvenanceUsage.length) return null;
   return {
     source,
     agent: String(raw.agent || raw.project || raw.target_project || raw.targetProject || fallback.project || fallback.agent || "").trim(),
@@ -9879,6 +15080,7 @@ function normalizeWorkerContextPacketReceiptSource(raw: any = {}, source = "", f
     execution_id: String(raw.execution_id || raw.executionId || fallback.execution_id || fallback.executionId || "").trim(),
     memoryIgnored,
     memoryUsed,
+    memoryProvenanceUsage,
     text,
     raw,
   };
@@ -15514,6 +20716,30 @@ function memoryQualityCheckDescriptors(lightweight: boolean, options: any = {}) 
     { id: "worker_context_packet_context_usage", run: () => evaluateWorkerContextPacketContextUsage(options) },
     { id: "worker_context_packet_context_usage_repair_work_items", run: () => evaluateWorkerContextPacketContextUsageRepairWorkItems(options) },
     { id: "worker_context_packet_context_usage_repair_typed_memory", run: () => evaluateWorkerContextPacketContextUsageRepairTypedMemory(options) },
+    { id: "worker_context_packet_pressure_recall_typed_memory_usage", run: () => evaluateWorkerContextPacketPressureRecallTypedMemoryUsage(options) },
+    { id: "worker_context_packet_cross_group_pressure_recall_usage", run: () => evaluateWorkerContextPacketCrossGroupPressureRecallUsage(options) },
+    { id: "worker_context_packet_cross_group_pressure_recall_usage_repair_work_items", run: () => evaluateWorkerContextPacketCrossGroupPressureRecallUsageRepairWorkItems(options) },
+    { id: "worker_context_packet_pressure_memory_provenance_receipt_pre_dispatch_discipline", run: () => evaluateWorkerContextPacketPressureMemoryProvenanceReceiptPreDispatchDiscipline(options) },
+    { id: "worker_context_packet_pressure_memory_provenance_receipt_post_dispatch_compliance", run: () => evaluateWorkerContextPacketPressureMemoryProvenanceReceiptPostDispatchCompliance(options) },
+    { id: "worker_context_packet_pressure_provenance_feedback_dispatch_policy", run: () => evaluateWorkerContextPacketPressureProvenanceFeedbackDispatchPolicy(options) },
+    { id: "worker_context_packet_pressure_provenance_feedback_policy_recovery", run: () => evaluateWorkerContextPacketPressureProvenanceFeedbackPolicyRecovery(options) },
+    { id: "worker_context_packet_pressure_provenance_feedback_policy_relapse", run: () => evaluateWorkerContextPacketPressureProvenanceFeedbackPolicyRelapse(options) },
+    { id: "worker_context_packet_pressure_provenance_feedback_policy_repair_work_items", run: () => evaluateWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItems(options) },
+    { id: "worker_context_packet_pressure_provenance_feedback_compliance_health", run: () => evaluateWorkerContextPacketPressureProvenanceFeedbackComplianceHealth(options) },
+    { id: "worker_context_packet_pressure_provenance_feedback_provider_dispatch_advisory", run: () => evaluateWorkerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisory(options) },
+    { id: "worker_context_packet_pressure_provenance_provider_dispatch_gate", run: () => evaluateWorkerContextPacketPressureProvenanceProviderDispatchGate(options) },
+    { id: "worker_context_packet_pressure_provenance_provider_dispatch_decision_ledger", run: () => evaluateWorkerContextPacketPressureProvenanceProviderDispatchDecisionLedger(options) },
+    { id: "worker_context_packet_pressure_provenance_provider_dispatch_override_receipts", run: () => evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideReceipt(options) },
+    { id: "worker_context_packet_pressure_provenance_provider_dispatch_override_followups", run: () => evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowup(options) },
+    { id: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_typed_memory", run: () => evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupTypedMemory(options) },
+    { id: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_pre_dispatch_policy", run: () => evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicy(options) },
+    { id: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract", run: () => evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContract(options) },
+    { id: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract_validation", run: () => evaluateWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidation(options) },
+    { id: "worker_context_packet_pressure_provenance_feedback_recall_risk_gating", run: () => evaluateWorkerContextPacketPressureProvenanceFeedbackRecallRiskGating(options) },
+    { id: "worker_context_packet_pressure_memory_provenance_receipts", run: () => evaluateWorkerContextPacketPressureMemoryProvenanceReceipts(options) },
+    { id: "worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_candidates", run: () => evaluateWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidates(options) },
+    { id: "worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_briefs", run: () => evaluateWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefs(options) },
+    { id: "worker_context_packet_pressure_memory_provenance_receipt_repair_typed_memory", run: () => evaluateWorkerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemory(options) },
     { id: "worker_context_packet_pre_dispatch_gate", run: () => evaluateWorkerContextPacketPreDispatchGate(options) },
     { id: "worker_context_packet_compaction_retry", run: () => evaluateWorkerContextPacketCompactionRetry(options) },
     { id: "worker_context_packet_compact_hook_ledger", run: () => evaluateWorkerContextPacketCompactHookLedger(options) },
@@ -15521,6 +20747,7 @@ function memoryQualityCheckDescriptors(lightweight: boolean, options: any = {}) 
     { id: "worker_context_packet_compact_strategy_memory", run: () => evaluateWorkerContextPacketCompactStrategyMemory(options) },
     { id: "worker_context_packet_compact_strategy_typed_memory", run: () => evaluateWorkerContextPacketCompactStrategyTypedMemory(options) },
     { id: "worker_context_packet_ptl_emergency_downgrade", run: () => evaluateWorkerContextPacketPtlEmergencyDowngrade(options) },
+    { id: "worker_context_packet_ptl_emergency_typed_memory", run: () => evaluateWorkerContextPacketPtlEmergencyTypedMemory(options) },
     { id: "worker_context_packet_ignore_memory_policy", run: () => evaluateWorkerContextPacketIgnoreMemoryPolicy(options) },
     { id: "worker_context_packet_ignore_memory_receipt_compliance", run: () => evaluateWorkerContextPacketIgnoreMemoryReceiptCompliance(options) },
     { id: "worker_context_packet_ignore_memory_receipt_repair_work_items", run: () => evaluateWorkerContextPacketIgnoreMemoryReceiptRepairWorkItems(options) },
@@ -15663,6 +20890,39 @@ export function buildMemoryCenterOverview() {
   const apiMicrocompactNativeApplyProofRepairAssignmentBindingReport = buildApiMicrocompactNativeApplyProofRepairAssignmentBindingReport({});
   const workerContextPacketContextUsageReport = buildWorkerContextPacketContextUsageReport({});
   const workerContextPacketContextUsageRepairWorkItemReport = buildWorkerContextPacketContextUsageRepairWorkItemReport({});
+  const workerContextPacketCrossGroupPressureRecallUsageReport = buildWorkerContextPacketCrossGroupPressureRecallUsageReport({});
+  const workerContextPacketCrossGroupPressureRecallUsageRepairWorkItemReport = buildWorkerContextPacketCrossGroupPressureRecallUsageRepairWorkItemReport({
+    crossGroupPressureRecallUsageReport: workerContextPacketCrossGroupPressureRecallUsageReport,
+  });
+  const workerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineReport({});
+  const workerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceReport({});
+  const workerContextPacketPressureProvenanceFeedbackDispatchPolicyReport = buildWorkerContextPacketPressureProvenanceFeedbackDispatchPolicyReport({});
+  const workerContextPacketPressureProvenanceFeedbackComplianceHealthReport = buildWorkerContextPacketPressureProvenanceFeedbackComplianceHealthReport({});
+  const workerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport = buildWorkerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport({
+    complianceHealthReport: workerContextPacketPressureProvenanceFeedbackComplianceHealthReport,
+  });
+  const workerContextPacketPressureProvenanceProviderDispatchGateReport = buildWorkerContextPacketPressureProvenanceProviderDispatchGateReport({
+    providerDispatchAdvisoryReport: workerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport,
+  });
+  const workerContextPacketPressureProvenanceProviderDispatchDecisionLedgerReport = buildWorkerContextPacketPressureProvenanceProviderDispatchDecisionLedgerReport({});
+  const workerContextPacketPressureProvenanceProviderDispatchOverrideReceiptReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideReceiptReport({});
+  const workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReport({});
+  const workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupTypedMemoryReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupTypedMemoryReport({});
+  const workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicyReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicyReport({});
+  const workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractReport({});
+  const workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationReport({});
+  const workerContextPacketPressureMemoryProvenanceReceiptReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptReport({});
+  const workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport({
+    receiptReport: workerContextPacketPressureMemoryProvenanceReceiptReport,
+  });
+  const workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport({
+    candidateReport: workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport,
+  });
+  const workerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport({
+    receiptReport: workerContextPacketPressureMemoryProvenanceReceiptReport,
+    candidateReport: workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport,
+    briefReport: workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport,
+  });
   const workerContextPacketPreDispatchGateReport = buildWorkerContextPacketPreDispatchGateReport({});
   const workerContextPacketCompactionRetryReport = buildWorkerContextPacketCompactionRetryReport({});
   const workerContextPacketCompactHookLedgerReport = buildWorkerContextPacketCompactHookLedgerReport({});
@@ -16092,6 +21352,468 @@ export function buildMemoryCenterOverview() {
       severity,
       code: "worker_context_packet_context_usage_repair_work_items",
       message: row.gaps?.[0]?.reason || `WorkerContextPacket context usage repair work items open ${row.openItemCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketCrossGroupPressureRecallUsageReport.overall?.status === "warn") {
+    addSystemAlert(
+      "warning",
+      "worker_context_packet_cross_group_pressure_recall_usage",
+      `跨群聊 pressure memory 使用反馈需关注：assist ${workerContextPacketCrossGroupPressureRecallUsageReport.overall.crossGroupAssistProjectCount || 0} 个项目，冲突 ${workerContextPacketCrossGroupPressureRecallUsageReport.overall.conflictCount || 0} 个，stale ${workerContextPacketCrossGroupPressureRecallUsageReport.overall.staleCrossGroupEntryCount || 0} 条`
+    );
+  }
+  for (const row of workerContextPacketCrossGroupPressureRecallUsageReport.weakGroups || []) {
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_cross_group_pressure_recall_usage`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity: "warning",
+      code: "worker_context_packet_cross_group_pressure_recall_usage",
+      message: row.gaps?.[0]?.reason || `跨群聊 pressure memory 使用反馈存在 ${row.conflictCount || 0} 个冲突或 stale-only 提示`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketCrossGroupPressureRecallUsageRepairWorkItemReport.overall?.status === "fail" || workerContextPacketCrossGroupPressureRecallUsageRepairWorkItemReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketCrossGroupPressureRecallUsageRepairWorkItemReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_cross_group_pressure_recall_usage_repair_work_items",
+      `跨群聊 pressure memory 修复待办覆盖率 ${workerContextPacketCrossGroupPressureRecallUsageRepairWorkItemReport.overall.coverageRate ?? "待采样"}%，required ${workerContextPacketCrossGroupPressureRecallUsageRepairWorkItemReport.overall.requiredActionCount || 0} 个，open ${workerContextPacketCrossGroupPressureRecallUsageRepairWorkItemReport.overall.openItemCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketCrossGroupPressureRecallUsageRepairWorkItemReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_cross_group_pressure_recall_usage_repair_work_items`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_cross_group_pressure_recall_usage_repair_work_items",
+      message: row.gaps?.[0]?.reason || `跨群聊 pressure memory 修复待办 required ${row.requiredActionCount || 0} / covered ${row.coveredItemCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineReport.overall?.status === "fail" || workerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_pressure_memory_provenance_receipt_pre_dispatch_discipline",
+      `pressure provenance 首派发回执纪律覆盖率 ${workerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineReport.overall.coverageRate ?? "待采样"}%，packets ${workerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineReport.overall.checkedPacketCount || 0} 个，docs ${workerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineReport.overall.requiredDocCount || 0} 条，rendered ${workerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineReport.overall.renderedCoveredCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_memory_provenance_receipt_pre_dispatch_discipline`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pressure_memory_provenance_receipt_pre_dispatch_discipline",
+      message: row.gaps?.[0]?.reason || `pressure provenance pre-dispatch discipline missing ${Math.max(0, Number(row.checkedPacketCount || 0) - Number(row.passedPacketCount || 0))} packets`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceReport.overall?.status === "fail" || workerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_pressure_memory_provenance_receipt_post_dispatch_compliance",
+      `pressure provenance 首派发后回执履约率 ${workerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceReport.overall.coverageRate ?? "待采样"}%，checked ${workerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceReport.overall.checkedPacketCount || 0} 个，violation ${workerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceReport.overall.violationPacketCount || 0} 个，frequent attribution ${workerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceReport.overall.frequentViolationAttributionCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    const firstAttribution = (row.attributions || []).find((item: any) => Number(item.violation_count || 0) > 0) || {};
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_memory_provenance_receipt_post_dispatch_compliance`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pressure_memory_provenance_receipt_post_dispatch_compliance",
+      message: row.gaps?.[0]?.reason || `pressure provenance post-dispatch compliance violations ${row.violationPacketCount || 0}；agentType=${firstAttribution.agent_type || "unknown"} project=${firstAttribution.project || "unknown"}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPressureProvenanceFeedbackDispatchPolicyReport.overall?.status === "fail" || workerContextPacketPressureProvenanceFeedbackDispatchPolicyReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketPressureProvenanceFeedbackDispatchPolicyReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_pressure_provenance_feedback_dispatch_policy",
+      `pressure provenance feedback policy 覆盖率 ${workerContextPacketPressureProvenanceFeedbackDispatchPolicyReport.overall.coverageRate ?? "待采样"}%，frequent attribution ${workerContextPacketPressureProvenanceFeedbackDispatchPolicyReport.overall.frequentAttributionCount || 0} 个，missing policy ${workerContextPacketPressureProvenanceFeedbackDispatchPolicyReport.overall.missingPolicyAttributionCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketPressureProvenanceFeedbackDispatchPolicyReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    const gap = row.gaps?.[0] || {};
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_provenance_feedback_dispatch_policy`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pressure_provenance_feedback_dispatch_policy",
+      message: gap.reason || `pressure provenance feedback policy missing ${row.missingPolicyAttributionCount || 0} attribution(s)`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPressureProvenanceFeedbackComplianceHealthReport.overall?.riskStatus === "critical"
+    || workerContextPacketPressureProvenanceFeedbackComplianceHealthReport.overall?.riskStatus === "warning") {
+    addSystemAlert(
+      workerContextPacketPressureProvenanceFeedbackComplianceHealthReport.overall.riskStatus === "critical" ? "critical" : "warning",
+      "worker_context_packet_pressure_provenance_feedback_compliance_health",
+      `pressure provenance provider health ${workerContextPacketPressureProvenanceFeedbackComplianceHealthReport.overall.riskStatus}：critical ${workerContextPacketPressureProvenanceFeedbackComplianceHealthReport.overall.criticalRowCount || 0} 个，warning ${workerContextPacketPressureProvenanceFeedbackComplianceHealthReport.overall.warningRowCount || 0} 个，open repair ${workerContextPacketPressureProvenanceFeedbackComplianceHealthReport.overall.openRepairItemCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketPressureProvenanceFeedbackComplianceHealthReport.weakGroups || []) {
+    const severity = row.riskStatus === "critical" ? "critical" : "warning";
+    const riskRow = (row.rows || []).find((item: any) => ["critical", "warning"].includes(String(item.health_status || ""))) || {};
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_provenance_feedback_compliance_health`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pressure_provenance_feedback_compliance_health",
+      message: riskRow.summary || `pressure provenance compliance health ${row.riskStatus}; active ${row.activePolicyRowCount || 0}; open repair ${row.openRepairItemCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport.overall?.status === "fail"
+    || workerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_pressure_provenance_feedback_provider_dispatch_advisory",
+      `pressure provenance provider advisory：blocked projects ${workerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport.overall.blockedProjectCount || 0} 个，critical candidates ${workerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport.overall.criticalCandidateCount || 0} 个，safer alternatives ${workerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport.overall.saferAlternativeCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    const project = (row.projects || []).find((item: any) => item.status === "blocked" || item.status === "warn") || {};
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_provenance_feedback_provider_dispatch_advisory`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pressure_provenance_feedback_provider_dispatch_advisory",
+      message: project.recommendation || `pressure provenance provider advisory ${row.status}; risky candidates ${row.riskyCandidateCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPressureProvenanceProviderDispatchGateReport.overall?.status === "fail") {
+    addSystemAlert(
+      "critical",
+      "worker_context_packet_pressure_provenance_provider_dispatch_gate",
+      `pressure provenance provider dispatch gate 缺口：failed bindings ${workerContextPacketPressureProvenanceProviderDispatchGateReport.overall.failedBindingCount || 0} 个，critical candidates ${workerContextPacketPressureProvenanceProviderDispatchGateReport.overall.criticalCandidateCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketPressureProvenanceProviderDispatchGateReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    const gap = row.gaps?.[0] || {};
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_provenance_provider_dispatch_gate`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pressure_provenance_provider_dispatch_gate",
+      message: gap.reason || `pressure provenance provider dispatch gate status ${row.status}; checked bindings ${row.checkedBindingCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPressureProvenanceProviderDispatchDecisionLedgerReport.overall?.status === "fail") {
+    addSystemAlert(
+      "critical",
+      "worker_context_packet_pressure_provenance_provider_dispatch_decision_ledger",
+      `pressure provenance provider dispatch decision ledger 缺口：failed decisions ${workerContextPacketPressureProvenanceProviderDispatchDecisionLedgerReport.overall.failedDecisionCount || 0} 个，checked ${workerContextPacketPressureProvenanceProviderDispatchDecisionLedgerReport.overall.checkedDecisionCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketPressureProvenanceProviderDispatchDecisionLedgerReport.weakGroups || []) {
+    const gap = row.gaps?.[0] || {};
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_provenance_provider_dispatch_decision_ledger`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity: "critical",
+      code: "worker_context_packet_pressure_provenance_provider_dispatch_decision_ledger",
+      message: gap.reason || `pressure provenance provider dispatch decision ledger failed ${row.failedDecisionCount || 0} decision(s)`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      summary.health = "critical";
+    }
+  }
+  if (workerContextPacketPressureProvenanceProviderDispatchOverrideReceiptReport.overall?.status === "fail") {
+    addSystemAlert(
+      "critical",
+      "worker_context_packet_pressure_provenance_provider_dispatch_override_receipts",
+      `pressure provenance provider dispatch override receipt 缺口：failed overrides ${workerContextPacketPressureProvenanceProviderDispatchOverrideReceiptReport.overall.failedOverrideCount || 0} 个，checked ${workerContextPacketPressureProvenanceProviderDispatchOverrideReceiptReport.overall.checkedOverrideCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketPressureProvenanceProviderDispatchOverrideReceiptReport.weakGroups || []) {
+    const gap = row.gaps?.[0] || {};
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_provenance_provider_dispatch_override_receipts`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity: "critical",
+      code: "worker_context_packet_pressure_provenance_provider_dispatch_override_receipts",
+      message: gap.reason || `pressure provenance provider dispatch override receipt failed ${row.failedOverrideCount || 0} override(s)`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      summary.health = "critical";
+    }
+  }
+  if (workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReport.overall?.status === "fail") {
+    addSystemAlert(
+      "critical",
+      "worker_context_packet_pressure_provenance_provider_dispatch_override_followups",
+      `pressure provenance provider dispatch override follow-up 缺口：failed ${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReport.overall.failedOverrideDispatchCount || 0} 个，open follow-up ${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReport.overall.openFollowupCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReport.weakGroups || []) {
+    const gap = row.gaps?.[0] || {};
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_provenance_provider_dispatch_override_followups`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity: "critical",
+      code: "worker_context_packet_pressure_provenance_provider_dispatch_override_followups",
+      message: gap.reason || `pressure provenance provider dispatch override follow-up failed ${row.failedOverrideDispatchCount || 0} dispatch(es)`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      summary.health = "critical";
+    }
+  }
+  if (workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupTypedMemoryReport.overall?.status === "fail") {
+    addSystemAlert(
+      "critical",
+      "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_typed_memory",
+      `pressure provenance provider dispatch override follow-up typed memory 缺口：completed ${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupTypedMemoryReport.overall.completedOverrideFollowupCount || 0} 个，archived ${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupTypedMemoryReport.overall.archivedOverrideFollowupCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupTypedMemoryReport.weakGroups || []) {
+    const gap = row.gaps?.[0] || {};
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_provenance_provider_dispatch_override_followup_typed_memory`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_typed_memory",
+      message: gap.reason || `pressure provenance provider dispatch override follow-up typed memory archived ${row.archivedOverrideFollowupCount || 0}/${row.completedOverrideFollowupCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health !== "critical") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicyReport.overall?.status === "fail") {
+    addSystemAlert(
+      "critical",
+      "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_pre_dispatch_policy",
+      `pressure provenance provider dispatch override follow-up pre-dispatch policy 缺口：covered ${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicyReport.overall.coveredProviderOverrideFollowupAttributionCount || 0}/${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicyReport.overall.providerOverrideFollowupAttributionCount || 0}`
+    );
+  }
+  for (const row of workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicyReport.weakGroups || []) {
+    const gap = row.gaps?.[0] || {};
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_provenance_provider_dispatch_override_followup_pre_dispatch_policy`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_pre_dispatch_policy",
+      message: gap.reason || `pressure provenance provider dispatch override follow-up pre-dispatch policy covered ${row.coveredProviderOverrideFollowupAttributionCount || 0}/${row.providerOverrideFollowupAttributionCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health !== "critical") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractReport.overall?.status === "fail") {
+    addSystemAlert(
+      "critical",
+      "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract",
+      `pressure provenance provider dispatch override follow-up receipt contract 缺口：covered ${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractReport.overall.coveredPacketCount || 0}/${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractReport.overall.checkedPacketCount || 0}`
+    );
+  }
+  for (const row of workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractReport.weakGroups || []) {
+    const gap = row.gaps?.[0] || {};
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract",
+      message: gap.reason || `pressure provenance provider dispatch override follow-up receipt contract covered ${row.coveredPacketCount || 0}/${row.checkedPacketCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health !== "critical") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationReport.overall?.status === "fail") {
+    addSystemAlert(
+      "critical",
+      "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract_validation",
+      `pressure provenance provider dispatch override follow-up receipt contract validation 缺口：passed ${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationReport.overall.passedValidationCount || 0}/${workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationReport.overall.checkedPacketCount || 0}`
+    );
+  }
+  for (const row of workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationReport.weakGroups || []) {
+    const gap = row.gaps?.[0] || {};
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract_validation`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract_validation",
+      message: gap.reason || `pressure provenance provider dispatch override follow-up receipt contract validation passed ${row.passedValidationCount || 0}/${row.checkedPacketCount || 0}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health !== "critical") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPressureMemoryProvenanceReceiptReport.overall?.status === "fail" || workerContextPacketPressureMemoryProvenanceReceiptReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketPressureMemoryProvenanceReceiptReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_pressure_memory_provenance_receipts",
+      `pressure memory provenance 回执覆盖率 ${workerContextPacketPressureMemoryProvenanceReceiptReport.overall.coverageRate ?? "待采样"}%，required ${workerContextPacketPressureMemoryProvenanceReceiptReport.overall.requiredProvenanceDocCount || 0} 条，缺结构化回执 ${workerContextPacketPressureMemoryProvenanceReceiptReport.overall.missingMemoryProvenanceUsageCount || 0} 条，unsafe ${workerContextPacketPressureMemoryProvenanceReceiptReport.overall.unsafeDisputedUseCount || 0} 条`
+    );
+  }
+  for (const row of workerContextPacketPressureMemoryProvenanceReceiptReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_memory_provenance_receipts`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pressure_memory_provenance_receipts",
+      message: row.gaps?.[0]?.reason || `pressure memory provenance receipt gaps ${Number(row.missingReceiptCount || 0) + Number(row.missingMemoryProvenanceUsageCount || 0) + Number(row.unsafeDisputedUseCount || 0)}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport.overall?.status === "fail" || workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_candidates",
+      `pressure memory provenance 修复派发候选覆盖率 ${workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport.overall.coverageRate ?? "待采样"}%，expected ${workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport.overall.expectedCandidateCount || 0} 个，candidate ${workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport.overall.candidateCount || 0} 个，metadata gaps ${workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport.overall.metadataGapCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_candidates`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_candidates",
+      message: row.gaps?.[0]?.reason || `pressure memory provenance receipt repair dispatch candidates missing ${Math.max(0, Number(row.expectedCandidateCount || 0) - Number(row.coveredCandidateCount || 0))}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport.overall?.status === "fail" || workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_briefs",
+      `pressure memory provenance 修复派发简报覆盖率 ${workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport.overall.coverageRate ?? "待采样"}%，expected ${workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport.overall.expectedBriefCount || 0} 个，ready ${workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport.overall.readyBriefCount || 0} 个，metadata gaps ${workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport.overall.metadataGapCount || 0} 个`
+    );
+  }
+  for (const row of workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_briefs`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_briefs",
+      message: row.gaps?.[0]?.reason || `pressure memory provenance receipt repair dispatch briefs missing ${Math.max(0, Number(row.expectedBriefCount || 0) - Number(row.coveredBriefCount || 0))}`,
+    });
+    const summary = groups.find(item => item.id === row.groupId);
+    if (summary) {
+      summary.alerts = Number(summary.alerts || 0) + 1;
+      if (severity === "critical") summary.health = "critical";
+      else if (summary.health === "healthy") summary.health = "warning";
+    }
+  }
+  if (workerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport.overall?.status === "fail" || workerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport.overall?.status === "warn") {
+    addSystemAlert(
+      workerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport.overall.status === "fail" ? "critical" : "warning",
+      "worker_context_packet_pressure_memory_provenance_receipt_repair_typed_memory",
+      `pressure memory provenance 回执修复 typed memory 覆盖率 ${workerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport.overall.coverageRate ?? "待采样"}%，input ${workerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport.overall.inputRowCount || 0} 条，archived ${workerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport.overall.archivedCount || 0} 条，typed docs ${workerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport.overall.typedMemoryDocCount || 0} 个，recall ${workerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport.overall.recallMatchCount || 0} 次`
+    );
+  }
+  for (const row of workerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport.weakGroups || []) {
+    const severity = row.status === "fail" ? "critical" : "warning";
+    allAlerts.push({
+      id: `group:${row.groupId}:worker_context_packet_pressure_memory_provenance_receipt_repair_typed_memory`,
+      scope: "group",
+      scopeId: row.groupId,
+      severity,
+      code: "worker_context_packet_pressure_memory_provenance_receipt_repair_typed_memory",
+      message: row.gaps?.[0]?.reason || `pressure memory provenance receipt repair typed memory archived ${row.archivedCount || 0} / docs ${row.typedMemoryDocCount || 0}`,
     });
     const summary = groups.find(item => item.id === row.groupId);
     if (summary) {
@@ -16671,6 +22393,25 @@ export function buildMemoryCenterOverview() {
     apiMicrocompactNativeApplyProofRepairAssignmentBindingReport,
     workerContextPacketContextUsageReport,
     workerContextPacketContextUsageRepairWorkItemReport,
+    workerContextPacketCrossGroupPressureRecallUsageReport,
+    workerContextPacketCrossGroupPressureRecallUsageRepairWorkItemReport,
+    workerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineReport,
+    workerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceReport,
+    workerContextPacketPressureProvenanceFeedbackDispatchPolicyReport,
+    workerContextPacketPressureProvenanceFeedbackComplianceHealthReport,
+    workerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport,
+    workerContextPacketPressureProvenanceProviderDispatchGateReport,
+    workerContextPacketPressureProvenanceProviderDispatchDecisionLedgerReport,
+    workerContextPacketPressureProvenanceProviderDispatchOverrideReceiptReport,
+    workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReport,
+    workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupTypedMemoryReport,
+    workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicyReport,
+    workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractReport,
+    workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationReport,
+    workerContextPacketPressureMemoryProvenanceReceiptReport,
+    workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport,
+    workerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport,
+    workerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport,
     workerContextPacketPreDispatchGateReport,
     workerContextPacketCompactionRetryReport,
     workerContextPacketCompactHookLedgerReport,
@@ -20661,6 +26402,4137 @@ export function runMemoryCenterWorkerContextPacketContextUsageRepairTypedMemoryS
   }
 }
 
+export function runMemoryCenterWorkerContextPacketPressureRecallTypedMemoryUsageSelfTest() {
+  const groupId = `memory-center-worker-context-pressure-recall-typed-memory-usage-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  try {
+    const packetId = "wcp-pressure-recall-typed-memory-usage-selftest";
+    const usage = {
+      schema: "ccm-worker-context-usage-v1",
+      version: 1,
+      packet_id: packetId,
+      project: "api",
+      task_id: "pressure-recall-typed-memory-usage-task",
+      model_context_policy: "cc-style-api-view-after-memory-render",
+      max_tokens: 1000,
+      reserved_output_tokens: 120,
+      autocompact_buffer_tokens: 120,
+      total_tokens: 1210,
+      total_chars: 4840,
+      free_tokens: -330,
+      pressure: 121,
+      status: "over_budget",
+      compact_recommended: true,
+      categories: [
+        { id: "task_goal", name: "Task and goal", tokens: 80, chars: 320, required: true, included: true },
+        { id: "group_memory_rendered", name: "Group memory rendered context", tokens: 760, chars: 3040, source: "ccm-group-memory-context-v1", required: true, included: true },
+        { id: "typed_memory_recall", name: "Typed MEMORY.md recall", tokens: 230, chars: 920, source: "typed-memory", included: true },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 140, chars: 560, required: true, included: true },
+        { id: "free_space", name: "Free space", tokens: 0, chars: 0, source: "budget", included: false },
+        { id: "autocompact_buffer", name: "Autocompact buffer", tokens: 120, chars: 0, source: "budget", required: true, included: true },
+      ],
+      top_categories: [
+        { id: "group_memory_rendered", name: "Group memory rendered context", tokens: 760, chars: 3040 },
+        { id: "typed_memory_recall", name: "Typed MEMORY.md recall", tokens: 230, chars: 920 },
+        { id: "verification_and_acceptance", name: "Verification and acceptance", tokens: 140, chars: 560 },
+      ],
+    };
+    const entry = {
+      schema: "ccm-worker-context-packet-assignment-binding-v1",
+      binding_id: "binding-pressure-recall-typed-memory-usage-selftest",
+      groupId,
+      source: "worker_context_packet_pre_dispatch_gate",
+      project: "api",
+      assignment_id: "assignment-pressure-recall-typed-memory-usage-selftest",
+      dispatch_key: "dispatch-pressure-recall-typed-memory-usage-selftest",
+      worker_context_packet_id: packetId,
+      worker_context_packet_context_usage: usage,
+      worker_context_packet_render_probe: {
+        packet_id: packetId,
+        rendered_flags: { has_context_usage_budget: true },
+      },
+      should_create_real_task: false,
+      at: "2026-07-09T21:45:00.000Z",
+    };
+    const writeBinding = (nextEntry: any) => writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T21:45:00.000Z",
+      bindingCount: 1,
+      entries: [nextEntry],
+    });
+
+    writeBinding(entry);
+    const missingRecallReport = buildWorkerContextPacketPressureRecallTypedMemoryUsageReport({ groupIds: [groupId] });
+    const missingRecallQuality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_recall_typed_memory_usage"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const missingRecallCheck = (missingRecallQuality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_recall_typed_memory_usage") || {};
+
+    const pressureRecall = {
+      schema: "ccm-worker-context-packet-typed-memory-pressure-recall-v1",
+      active: true,
+      pressure_status: "over_budget",
+      boosted_count: 2,
+      recalled_count: 2,
+      docs: [
+        {
+          rel_path: "worker-context-usage-pressure-discipline.md",
+          name: "WorkerContextPacket Context Usage Pressure Discipline",
+          type: "reference",
+          score: 96,
+          pressure_adjustment: 12,
+          pressure_status: "over_budget",
+          kinds: ["context_usage"],
+        },
+        {
+          rel_path: "worker-context-compact-strategy-memory.md",
+          name: "WorkerContextPacket Compact Strategy Memory",
+          type: "reference",
+          score: 82,
+          pressure_adjustment: 8,
+          pressure_status: "over_budget",
+          kinds: ["compact_strategy"],
+        },
+      ],
+    };
+    writeBinding({
+      ...entry,
+      worker_context_packet_typed_memory_pressure_recall: pressureRecall,
+    });
+    const missingUsageReport = buildWorkerContextPacketPressureRecallTypedMemoryUsageReport({ groupIds: [groupId] });
+
+    const {
+      recordGroupTypedMemoryPressureRecallUsageLedger,
+      readGroupTypedMemoryPressureRecallUsageLedger,
+    } = require("../collaboration/group-memory-index");
+    const usageRecord = recordGroupTypedMemoryPressureRecallUsageLedger(groupId, {
+      targetProject: "api",
+      taskId: "pressure-recall-typed-memory-usage-task",
+      executionId: "execution-pressure-recall-typed-memory-usage-selftest",
+      agent: "api",
+      generatedAt: "2026-07-09T21:45:02.000Z",
+      rows: [
+        {
+          rel_path: "worker-context-usage-pressure-discipline.md",
+          name: "WorkerContextPacket Context Usage Pressure Discipline",
+          type: "reference",
+          worker_context_packet_id: packetId,
+          pressure_status: "over_budget",
+          pressure_adjustment: 12,
+          usage_state: "used",
+          direct_reference: true,
+          reason: "selftest: child agent receipt referenced pressure context usage discipline",
+        },
+        {
+          rel_path: "worker-context-compact-strategy-memory.md",
+          name: "WorkerContextPacket Compact Strategy Memory",
+          type: "reference",
+          worker_context_packet_id: packetId,
+          pressure_status: "over_budget",
+          pressure_adjustment: 8,
+          usage_state: "ignored",
+          reason: "selftest: compact strategy was surfaced but not needed for this packet",
+        },
+      ],
+    });
+    const staleUsageRecord = recordGroupTypedMemoryPressureRecallUsageLedger(groupId, {
+      targetProject: "api",
+      taskId: "pressure-recall-stale-typed-memory-usage-task",
+      executionId: "execution-pressure-recall-stale-typed-memory-usage-selftest",
+      agent: "api",
+      generatedAt: "2026-03-01T00:00:00.000Z",
+      rows: [
+        {
+          rel_path: "worker-context-compact-strategy-memory.md",
+          name: "WorkerContextPacket Compact Strategy Memory",
+          type: "reference",
+          worker_context_packet_id: "wcp-pressure-recall-stale-typed-memory-usage-selftest",
+          pressure_status: "over_budget",
+          pressure_adjustment: 8,
+          usage_state: "ignored",
+          reason: "selftest: stale ignored receipt should decay in MCC pressure recall usage health",
+        },
+      ],
+    });
+    const usageLedger = readGroupTypedMemoryPressureRecallUsageLedger(groupId);
+    const okReport = buildWorkerContextPacketPressureRecallTypedMemoryUsageReport({
+      groupIds: [groupId],
+      nowMs: Date.parse("2026-07-09T21:45:03.000Z"),
+    });
+    const okQuality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_recall_typed_memory_usage"],
+      groupIds: [groupId],
+      nowMs: Date.parse("2026-07-09T21:45:03.000Z"),
+      refresh: true,
+    });
+    const okQualityCheck = (okQuality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_recall_typed_memory_usage") || {};
+    const missingRecallGap = missingRecallReport.weakGroups?.[0]?.gaps?.[0]?.reason || "";
+    const missingUsageGap = missingUsageReport.weakGroups?.[0]?.gaps?.[0]?.reason || "";
+    const checks = {
+      highPressureWithoutRecallFails: missingRecallReport.overall?.status === "fail"
+        && Number(missingRecallReport.overall?.pressurePacketCount || 0) === 1
+        && /未记录 pressure typed MEMORY\.md recall/.test(missingRecallGap)
+        && missingRecallCheck.status === "fail",
+      recallWithoutReceiptWarns: missingUsageReport.overall?.status === "warn"
+        && Number(missingUsageReport.overall?.pressureRecallPacketCount || 0) === 1
+        && Number(missingUsageReport.overall?.usageLedgerPacketCount || 0) === 0
+        && /缺少 memoryUsed\/memoryIgnored usage ledger 回执/.test(missingUsageGap),
+      receiptLedgerClosesLoop: okReport.overall?.status === "ok"
+        && Number(okReport.overall?.pressurePacketCount || 0) === 1
+        && Number(okReport.overall?.pressureRecallPacketCount || 0) === 1
+        && Number(okReport.overall?.usageLedgerPacketCount || 0) === 1
+        && Number(okReport.overall?.usageEntryCount || 0) >= 2
+        && okQualityCheck.status === "ok",
+      usageLedgerPersistsUsedAndIgnored: usageRecord?.recorded_count === 2
+        && staleUsageRecord?.recorded_count === 1
+        && usageLedger.totals?.used === 1
+        && usageLedger.totals?.ignored === 2,
+      usageAgingHealthExposed: Number(okReport.overall?.staleUsageEntryCount || 0) >= 1
+        && Number(okReport.overall?.freshUsageEntryCount || 0) >= 2
+        && Number(okReport.groups?.[0]?.usageWeightedTotals?.ignored || 0) < Number(okReport.groups?.[0]?.usageRawTotals?.ignored || 0),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      reports: {
+        missingRecall: missingRecallReport.overall,
+        missingUsage: missingUsageReport.overall,
+        ok: okReport.overall,
+      },
+      qualityCheck: {
+        id: okQualityCheck.id || "",
+        status: okQualityCheck.status || "",
+        checked: okQualityCheck.checked || 0,
+        passed: okQualityCheck.passed || 0,
+      },
+      usageRecord: {
+        recorded_count: usageRecord?.recorded_count || 0,
+        stale_recorded_count: staleUsageRecord?.recorded_count || 0,
+        duplicate_count: usageRecord?.duplicate_count || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptSelfTest() {
+  const groupId = `memory-center-pressure-memory-provenance-receipt-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  try {
+    const packetId = "wcp-pressure-memory-provenance-receipt-selftest";
+    const relPath = "worker-context-usage-pressure-discipline.md";
+    const repairWorkItemId = "cgpru-phase133-provenance-receipt-selftest";
+    const entry: any = {
+      schema: "ccm-worker-context-packet-assignment-binding-v1",
+      binding_id: "binding-pressure-memory-provenance-receipt-selftest",
+      groupId,
+      source: "worker_context_packet_pre_dispatch_gate",
+      project: "api",
+      assignment_id: "assignment-pressure-memory-provenance-receipt-selftest",
+      dispatch_key: "dispatch-pressure-memory-provenance-receipt-selftest",
+      worker_context_packet_id: packetId,
+      worker_context_packet_context_usage: {
+        schema: "ccm-worker-context-usage-v1",
+        packet_id: packetId,
+        project: "api",
+        status: "over_budget",
+        pressure: 119,
+        total_tokens: 1190,
+        max_tokens: 1000,
+        free_tokens: -310,
+        autocompact_buffer_tokens: 120,
+      },
+      worker_context_packet_typed_memory_pressure_recall: {
+        schema: "ccm-worker-context-packet-typed-memory-pressure-recall-v1",
+        active: true,
+        pressure_status: "over_budget",
+        boosted_count: 1,
+        recalled_count: 1,
+        docs: [{
+          rel_path: relPath,
+          name: "WorkerContextPacket Context Usage Pressure Discipline",
+          type: "reference",
+          score: 98,
+          pressure_adjustment: 12,
+          pressure_status: "over_budget",
+          kinds: ["context_usage", "pressure_repair"],
+          pressure_usage_adjustment: 8,
+          pressure_usage_recommendation: "promote_pressure_recall",
+          pressure_usage_matches: [{
+            rel_path: relPath,
+            name: "WorkerContextPacket Context Usage Pressure Discipline",
+            target_project: "api",
+            recommendation: "promote_pressure_recall",
+            hint_scope: "cross_group_project",
+            provenance_status: "disputed_under_repair",
+            repair_work_item_id: repairWorkItemId,
+            repair_status: "pending",
+            repair_gap_type: "recommendation_conflict",
+            repair_open: true,
+          }],
+          provenance_status: "disputed_under_repair",
+          repair_work_item_id: repairWorkItemId,
+          repair_status: "pending",
+          repair_gap_type: "recommendation_conflict",
+          requires_memory_provenance_usage: true,
+        }],
+      },
+      should_create_real_task: false,
+      at: "2026-07-09T23:59:40.000Z",
+    };
+    const writeBinding = (nextEntry: any) => writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T23:59:40.000Z",
+      bindingCount: 1,
+      workerContextPacketBindingCount: 1,
+      entries: [nextEntry],
+    });
+    writeBinding(entry);
+    const missingReceiptReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T23:59:41.000Z",
+    });
+    const missingReceiptQuality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_memory_provenance_receipts"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const missingReceiptCheck = (missingReceiptQuality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_memory_provenance_receipts") || {};
+    const missingLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const openMissingItem = (missingLedger.items || []).find((item: any) => item.source === "worker_context_pressure_memory_provenance_receipt_repair" && replayRepairWorkItemOpen(item.status)) || {};
+
+    writeBinding({
+      ...entry,
+      worker_context_packet_receipt: {
+        agent: "api",
+        project: "api",
+        status: "done",
+        worker_context_packet_id: packetId,
+        memoryUsed: [`${relPath}; provenance=disputed_under_repair; work_item=${repairWorkItemId}`],
+        memoryIgnored: [],
+        summary: "泛化声明使用 pressure memory，但未提供 memoryProvenanceUsage。",
+      },
+    });
+    const missingStructuredReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T23:59:42.000Z",
+    });
+
+    writeBinding({
+      ...entry,
+      worker_context_packet_receipt: {
+        agent: "api",
+        project: "api",
+        status: "done",
+        worker_context_packet_id: packetId,
+        memoryUsed: [`${relPath}; provenance=disputed_under_repair; work_item=${repairWorkItemId}`],
+        memoryIgnored: [],
+        memoryProvenanceUsage: [{
+          relPath,
+          name: "WorkerContextPacket Context Usage Pressure Discipline",
+          usageState: "used",
+          provenanceStatus: "disputed_under_repair",
+          repairWorkItemId,
+          repairStatus: "pending",
+          repairGapType: "recommendation_conflict",
+          currentSourceVerified: false,
+          reason: "selftest unsafe use before current source verification",
+        }],
+        summary: "结构化声明存在，但未声明 currentSourceVerified=true。",
+      },
+    });
+    const unsafeReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T23:59:43.000Z",
+    });
+
+    writeBinding({
+      ...entry,
+      worker_context_packet_receipt: {
+        agent: "api",
+        project: "api",
+        status: "done",
+        worker_context_packet_id: packetId,
+        memoryUsed: [`${relPath}; provenance=disputed_under_repair; work_item=${repairWorkItemId}; current source verified`],
+        memoryIgnored: [],
+        memoryProvenanceUsage: [{
+          relPath,
+          name: "WorkerContextPacket Context Usage Pressure Discipline",
+          usageState: "used",
+          provenanceStatus: "disputed_under_repair",
+          repairWorkItemId,
+          repairStatus: "pending",
+          repairGapType: "recommendation_conflict",
+          currentSourceVerified: true,
+          reason: "disputed pressure memory used only after current source verification",
+        }],
+        summary: "使用 disputed pressure memory 前已重读当前源。",
+      },
+    });
+    const resolvedReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T23:59:44.000Z",
+    });
+    const resolvedQuality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_memory_provenance_receipts"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const resolvedCheck = (resolvedQuality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_memory_provenance_receipts") || {};
+    const resolvedLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const completedRepairItem = (resolvedLedger.items || []).find((item: any) => item.source === "worker_context_pressure_memory_provenance_receipt_repair") || {};
+    const checks = {
+      missingReceiptFailsAndCreatesRepair: missingReceiptReport.overall?.status === "fail"
+        && (Number(missingReceiptReport.overall?.missingReceiptCount || 0) + Number(missingReceiptReport.overall?.missingMemoryProvenanceUsageCount || 0)) >= 1
+        && missingReceiptCheck.status === "fail"
+        && openMissingItem.source === "worker_context_pressure_memory_provenance_receipt_repair"
+        && openMissingItem.component === "worker_context_pressure_memory_provenance_receipt_contract",
+      genericMemoryUsedStillFails: missingStructuredReport.overall?.status === "fail"
+        && Number(missingStructuredReport.overall?.missingMemoryProvenanceUsageCount || 0) === 1,
+      unsafeStructuredUseWarns: unsafeReport.overall?.status === "warn"
+        && Number(unsafeReport.overall?.unsafeDisputedUseCount || 0) === 1,
+      structuredVerifiedReceiptPassesAndClosesRepair: resolvedReport.overall?.status === "ok"
+        && Number(resolvedReport.overall?.verifiedUnderRepairCount || 0) === 1
+        && resolvedCheck.status === "ok"
+        && replayRepairWorkItemStatus(completedRepairItem.status) === "completed"
+        && completedRepairItem.resolutionReason === "worker_context_pressure_memory_provenance_receipt_compliant",
+      projectStatsExposeTrustedDisputedVerifiedCounts: resolvedReport.groups?.[0]?.projects?.[0]?.project === "api"
+        && Number(resolvedReport.groups?.[0]?.projects?.[0]?.disputedCount || 0) === 1
+        && Number(resolvedReport.groups?.[0]?.projects?.[0]?.verifiedUnderRepairCount || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      reports: {
+        missingReceipt: missingReceiptReport.overall,
+        missingStructured: missingStructuredReport.overall,
+        unsafe: unsafeReport.overall,
+        resolved: resolvedReport.overall,
+      },
+      repairItem: {
+        id: completedRepairItem.id || openMissingItem.id || "",
+        status: completedRepairItem.status || openMissingItem.status || "",
+        source: completedRepairItem.source || openMissingItem.source || "",
+        component: completedRepairItem.component || openMissingItem.component || "",
+      },
+      project: resolvedReport.groups?.[0]?.projects?.[0] || null,
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchSelfTest() {
+  const groupId = `memory-center-pressure-memory-provenance-receipt-dispatch-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+  try {
+    const packetId = "wcp-pressure-memory-provenance-receipt-dispatch-selftest";
+    const relPath = "worker-context-usage-pressure-discipline.md";
+    const repairWorkItemId = "cgpru-phase134-provenance-dispatch-selftest";
+    const entry: any = {
+      schema: "ccm-worker-context-packet-assignment-binding-v1",
+      binding_id: "binding-pressure-memory-provenance-receipt-dispatch-selftest",
+      groupId,
+      source: "worker_context_packet_pre_dispatch_gate",
+      project: "api",
+      assignment_id: "assignment-pressure-memory-provenance-receipt-dispatch-selftest",
+      dispatch_key: "dispatch-pressure-memory-provenance-receipt-dispatch-selftest",
+      worker_context_packet_id: packetId,
+      worker_context_packet_context_usage: {
+        schema: "ccm-worker-context-usage-v1",
+        packet_id: packetId,
+        project: "api",
+        status: "over_budget",
+        pressure: 120,
+        total_tokens: 1200,
+        max_tokens: 1000,
+        free_tokens: -320,
+        autocompact_buffer_tokens: 120,
+      },
+      worker_context_packet_typed_memory_pressure_recall: {
+        schema: "ccm-worker-context-packet-typed-memory-pressure-recall-v1",
+        active: true,
+        pressure_status: "over_budget",
+        boosted_count: 1,
+        recalled_count: 1,
+        docs: [{
+          rel_path: relPath,
+          name: "WorkerContextPacket Context Usage Pressure Discipline",
+          type: "reference",
+          score: 98,
+          pressure_adjustment: 12,
+          pressure_status: "over_budget",
+          kinds: ["context_usage", "pressure_repair"],
+          pressure_usage_adjustment: 8,
+          pressure_usage_recommendation: "promote_pressure_recall",
+          pressure_usage_matches: [{
+            rel_path: relPath,
+            name: "WorkerContextPacket Context Usage Pressure Discipline",
+            target_project: "api",
+            recommendation: "promote_pressure_recall",
+            hint_scope: "cross_group_project",
+            provenance_status: "disputed_under_repair",
+            repair_work_item_id: repairWorkItemId,
+            repair_status: "pending",
+            repair_gap_type: "recommendation_conflict",
+            repair_open: true,
+          }],
+          provenance_status: "disputed_under_repair",
+          repair_work_item_id: repairWorkItemId,
+          repair_status: "pending",
+          repair_gap_type: "recommendation_conflict",
+          requires_memory_provenance_usage: true,
+        }],
+      },
+      should_create_real_task: false,
+      at: "2026-07-09T23:59:50.000Z",
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T23:59:50.000Z",
+      bindingCount: 1,
+      workerContextPacketBindingCount: 1,
+      entries: [entry],
+    });
+    const receiptReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T23:59:51.000Z",
+    });
+    const candidateReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport({
+      groupIds: [groupId],
+      receiptReport,
+      generatedAt: "2026-07-09T23:59:52.000Z",
+    });
+    const candidateQuality = evaluateWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidates({
+      groupIds: [groupId],
+      receiptReport,
+      generatedAt: "2026-07-09T23:59:53.000Z",
+    });
+    const briefReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport({
+      groupIds: [groupId],
+      candidateReport,
+      generatedAt: "2026-07-09T23:59:54.000Z",
+    });
+    const briefQuality = evaluateWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefs({
+      groupIds: [groupId],
+      candidateReport,
+      generatedAt: "2026-07-09T23:59:55.000Z",
+    });
+    const candidate = candidateReport.groups?.[0]?.candidates?.[0] || {};
+    const dispatchPlanLedger = readGroupReplayRepairDispatchPlanLedger(groupId);
+    const brief = (dispatchPlanLedger.briefs || []).find((item: any) => isWorkerContextPressureMemoryProvenanceReceiptRepairSource(item.source)) || briefReport.groups?.[0]?.briefs?.[0] || {};
+    const workerTask = String(brief.worker_task || "");
+    const rendered = (() => {
+      try {
+        const { renderGroupMemoryContextBundle } = require("../collaboration/memory");
+        return renderGroupMemoryContextBundle({
+          schema: "ccm-group-memory-context-v1",
+          target_project: "api",
+          memory_policy: { use: "must_consider" },
+          group_state: { goal: "pressure provenance receipt repair dispatch selftest", currentPhase: "test" },
+          compaction: {
+            replayRepairDispatchCandidates: {
+              schema: "ccm-replay-repair-main-agent-dispatch-candidates-v1",
+              candidateCount: 1,
+              readyCount: 1,
+              dispatchMarkedCount: 0,
+              shouldCreateRealTask: false,
+              file: workItemsFile,
+              candidates: [candidate],
+            },
+          },
+        });
+      } catch (error: any) {
+        return String(error?.message || error);
+      }
+    })();
+    const checks = {
+      receiptGapCreatesRepairItem: receiptReport.overall?.status === "fail"
+        && Number(receiptReport.overall?.missingMemoryProvenanceUsageCount || 0) === 1
+        && Number(receiptReport.overall?.openRepairWorkItemCount || 0) === 1,
+      repairItemBecomesDispatchCandidate: candidateReport.overall?.status === "ok"
+        && Number(candidateReport.overall?.expectedCandidateCount || 0) === 1
+        && Number(candidateReport.overall?.coveredCandidateCount || 0) === 1
+        && candidate.source === "worker_context_pressure_memory_provenance_receipt_repair"
+        && candidate.component === "worker_context_pressure_memory_provenance_receipt_contract"
+        && candidate.worker_context_packet_id === packetId
+        && (candidate.pressure_memory_provenance_rel_paths || []).includes(relPath)
+        && (candidate.pressure_memory_provenance_repair_work_item_ids || []).includes(repairWorkItemId)
+        && /memoryProvenanceUsage/i.test(String(candidate.prompt_patch || "")),
+      candidateQualityCheckPasses: candidateQuality.id === "worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_candidates"
+        && candidateQuality.status === "ok"
+        && Number(candidateQuality.passed || 0) === 1,
+      correctedReceiptBriefCreated: briefReport.overall?.status === "ok"
+        && Number(briefReport.overall?.expectedBriefCount || 0) === 1
+        && Number(briefReport.overall?.coveredBriefCount || 0) === 1
+        && brief.source === "worker_context_pressure_memory_provenance_receipt_repair"
+        && brief.worker_context_packet_id === packetId
+        && (brief.pressure_memory_provenance_rel_paths || []).includes(relPath)
+        && /CCM_AGENT_RECEIPT/i.test(workerTask)
+        && /memoryProvenanceUsage/i.test(workerTask)
+        && /repairWorkItemId|repair_work_item_id/i.test(workerTask)
+        && /currentSourceVerified|current_source_verified/i.test(workerTask),
+      briefQualityCheckPasses: briefQuality.id === "worker_context_packet_pressure_memory_provenance_receipt_repair_dispatch_briefs"
+        && briefQuality.status === "ok"
+        && Number(briefQuality.passed || 0) === 1,
+      renderedContextMentionsPressureProvenanceCandidate: rendered.includes("Main Agent replay repair dispatch candidates")
+        && rendered.includes(packetId)
+        && rendered.includes("pressureDocs=")
+        && rendered.includes("pressureRepair=")
+        && rendered.includes("memoryProvenanceUsage"),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      receiptReport: receiptReport.overall,
+      candidateReport: candidateReport.overall,
+      briefReport: briefReport.overall,
+      candidate: {
+        work_item_id: candidate.work_item_id || "",
+        source: candidate.source || "",
+        worker_context_packet_id: candidate.worker_context_packet_id || "",
+        rel_paths: candidate.pressure_memory_provenance_rel_paths || [],
+        repair_ids: candidate.pressure_memory_provenance_repair_work_item_ids || [],
+      },
+      brief: {
+        brief_id: brief.brief_id || "",
+        source: brief.source || "",
+        worker_context_packet_id: brief.worker_context_packet_id || "",
+        rel_paths: brief.pressure_memory_provenance_rel_paths || [],
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`, dispatchPlanFile, `${dispatchPlanFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemorySelfTest() {
+  const groupId = `memory-center-pressure-memory-provenance-receipt-typed-memory-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const dispatchPlanFile = getGroupReplayRepairDispatchPlanLedgerFile(groupId);
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  try {
+    const packetId = "wcp-pressure-memory-provenance-receipt-typed-memory-selftest";
+    const relPath = "worker-context-usage-pressure-discipline.md";
+    const repairWorkItemId = "cgpru-phase135-provenance-typed-selftest";
+    const entry: any = {
+      schema: "ccm-worker-context-packet-assignment-binding-v1",
+      binding_id: "binding-pressure-memory-provenance-receipt-typed-memory-selftest",
+      groupId,
+      source: "worker_context_packet_pre_dispatch_gate",
+      project: "api",
+      assignment_id: "assignment-pressure-memory-provenance-receipt-typed-memory-selftest",
+      dispatch_key: "dispatch-pressure-memory-provenance-receipt-typed-memory-selftest",
+      worker_context_packet_id: packetId,
+      worker_context_packet_context_usage: {
+        schema: "ccm-worker-context-usage-v1",
+        packet_id: packetId,
+        project: "api",
+        status: "over_budget",
+        pressure: 121,
+        total_tokens: 1210,
+        max_tokens: 1000,
+        free_tokens: -330,
+        autocompact_buffer_tokens: 120,
+      },
+      worker_context_packet_typed_memory_pressure_recall: {
+        schema: "ccm-worker-context-packet-typed-memory-pressure-recall-v1",
+        active: true,
+        pressure_status: "over_budget",
+        boosted_count: 1,
+        recalled_count: 1,
+        docs: [{
+          rel_path: relPath,
+          name: "WorkerContextPacket Context Usage Pressure Discipline",
+          type: "reference",
+          score: 98,
+          pressure_adjustment: 12,
+          pressure_status: "over_budget",
+          kinds: ["context_usage", "pressure_repair"],
+          pressure_usage_adjustment: 8,
+          pressure_usage_recommendation: "promote_pressure_recall",
+          pressure_usage_matches: [{
+            rel_path: relPath,
+            name: "WorkerContextPacket Context Usage Pressure Discipline",
+            target_project: "api",
+            recommendation: "promote_pressure_recall",
+            hint_scope: "cross_group_project",
+            provenance_status: "disputed_under_repair",
+            repair_work_item_id: repairWorkItemId,
+            repair_status: "pending",
+            repair_gap_type: "recommendation_conflict",
+            repair_open: true,
+          }],
+          provenance_status: "disputed_under_repair",
+          repair_work_item_id: repairWorkItemId,
+          repair_status: "pending",
+          repair_gap_type: "recommendation_conflict",
+          requires_memory_provenance_usage: true,
+        }],
+      },
+      worker_context_packet_receipt: {
+        agent: "api",
+        project: "api",
+        status: "done",
+        worker_context_packet_id: packetId,
+        memoryUsed: [`${relPath}; provenance=disputed_under_repair; work_item=${repairWorkItemId}`],
+        memoryIgnored: [],
+        summary: "使用 pressure memory 但缺少结构化 memoryProvenanceUsage。",
+      },
+      should_create_real_task: false,
+      at: "2026-07-09T23:59:56.000Z",
+    };
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T23:59:56.000Z",
+      bindingCount: 1,
+      workerContextPacketBindingCount: 1,
+      entries: [entry],
+    });
+    const receiptReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T23:59:57.000Z",
+    });
+    const candidateReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchCandidateReport({
+      groupIds: [groupId],
+      receiptReport,
+      generatedAt: "2026-07-09T23:59:58.000Z",
+    });
+    const briefReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairDispatchBriefReport({
+      groupIds: [groupId],
+      candidateReport,
+      generatedAt: "2026-07-09T23:59:59.000Z",
+    });
+    const typedReport = buildWorkerContextPacketPressureMemoryProvenanceReceiptRepairTypedMemoryReport({
+      groupIds: [groupId],
+      receiptReport,
+      candidateReport,
+      briefReport,
+      generatedAt: "2026-07-10T00:00:00.000Z",
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_memory_provenance_receipt_repair_typed_memory"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_memory_provenance_receipt_repair_typed_memory") || {};
+    const {
+      readGroupTypedMemoryDistillationLedger,
+      scanGroupTypedMemoryDocuments,
+      buildGroupTypedMemoryRecall,
+    } = require("../collaboration/group-memory-index");
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = ledger.pressureMemoryProvenanceReceiptRepairArchive || {};
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const doc = (docs || []).find((item: any) => item.source === "auto:pressure-memory-provenance-receipt-repair-distillation") || {};
+    const docBody = String(doc.body || "");
+    const recall = buildGroupTypedMemoryRecall(groupId, "pressure memory provenance receipt memoryProvenanceUsage repairWorkItemId currentSourceVerified disputed_under_repair", {
+      disableLedger: true,
+      forceMemory: true,
+      max: 8,
+    });
+    const recallText = [
+      ...(Array.isArray(recall.recalled) ? recall.recalled : []),
+      ...(Array.isArray(recall.entries) ? recall.entries : []),
+      ...(Array.isArray(recall.selected) ? recall.selected : []),
+      ...(Array.isArray(recall.docs) ? recall.docs : []),
+    ].map((item: any) => `${item.name || ""}\n${item.body || ""}\n${item.snippet || ""}\n${item.text || ""}`).join("\n");
+    const checks = {
+      repairDispatchChainReady: receiptReport.overall?.status === "fail"
+        && Number(receiptReport.overall?.missingMemoryProvenanceUsageCount || 0) === 1
+        && Number(receiptReport.overall?.openRepairWorkItemCount || 0) === 1
+        && candidateReport.overall?.status === "ok"
+        && briefReport.overall?.status === "ok",
+      typedMemoryReportPasses: typedReport.overall?.status === "ok"
+        && Number(typedReport.overall?.typedMemoryDocCount || 0) >= 1
+        && Number(typedReport.overall?.archivedCount || 0) >= 1
+        && Number(typedReport.overall?.recallMatchCount || 0) >= 1,
+      qualityCheckExposesTypedMemory: qualityCheck.status === "ok"
+        && Number(qualityCheck.checked || 0) === 1
+        && Number(qualityCheck.passed || 0) === 1,
+      ledgerArchivesPressureProvenanceRows: archive.schema === "ccm-pressure-memory-provenance-receipt-repair-distillation-v1"
+        && Number(archive.archived_count || 0) >= 1
+        && Number(archive.corrected_prompt_count || 0) >= 1
+        && Number(archive.current_source_verified_prompt_count || 0) >= 1
+        && (archive.rel_paths || []).includes(relPath)
+        && (archive.repair_work_item_ids || []).includes(repairWorkItemId),
+      typedDocContainsReceiptDiscipline: doc.source === "auto:pressure-memory-provenance-receipt-repair-distillation"
+        && doc.relPath === "pressure-memory-provenance-receipt-discipline.md"
+        && docBody.includes("memoryProvenanceUsage")
+        && docBody.includes("repairWorkItemId")
+        && docBody.includes("provenanceStatus")
+        && docBody.includes("currentSourceVerified")
+        && docBody.includes("disputed_under_repair")
+        && docBody.includes(relPath),
+      recallFindsPressureProvenanceDiscipline: /memoryProvenanceUsage|repairWorkItemId|currentSourceVerified|disputed_under_repair/i.test(recallText),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      receiptReport: receiptReport.overall,
+      candidateReport: candidateReport.overall,
+      briefReport: briefReport.overall,
+      typedReport: typedReport.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+      archive: {
+        archived_count: archive.archived_count || 0,
+        corrected_prompt_count: archive.corrected_prompt_count || 0,
+        current_source_verified_prompt_count: archive.current_source_verified_prompt_count || 0,
+        rel_paths: archive.rel_paths || [],
+        repair_work_item_ids: archive.repair_work_item_ids || [],
+      },
+      doc: {
+        relPath: doc.relPath || "",
+        source: doc.source || "",
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`, dispatchPlanFile, `${dispatchPlanFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineSelfTest() {
+  const groupId = `memory-center-pressure-provenance-pre-dispatch-discipline-selftest-${process.pid}-${Date.now()}`;
+  const targetProject = "phase136-pressure-project";
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const messageFile = path.join(GROUP_MESSAGES_DIR, `${groupId}.json`);
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  let groupFile = "";
+  try {
+    const {
+      buildAgentMemoryContextBundle,
+      getGroupMemoryFile,
+      saveGroupMemory,
+    } = require("../collaboration/memory");
+    const { saveGroupMessages } = require("../collaboration/storage");
+    const {
+      recordGroupTypedMemoryPressureRecallUsageLedger,
+      upsertGroupTypedMemoryDocument,
+    } = require("../collaboration/group-memory-index");
+    const { buildWorkerContextPacket, renderWorkerContextPacket } = require("../../agents/runtime-kernel");
+    const { recordWorkerContextPacketAssignmentBindingForCoordinator } = require("../collaboration/group-orchestrator");
+    groupFile = getGroupMemoryFile(groupId);
+    saveGroupMessages(groupId, [{
+      id: "phase136-1",
+      role: "user",
+      target: "coordinator",
+      timestamp: "2026-07-10T00:10:00.000Z",
+      content: "继续 pressure provenance pre-dispatch discipline 自测。",
+    }]);
+    saveGroupMemory(groupId, {
+      goal: "验证 pressure provenance receipt discipline 首派发前进入 WorkerContextPacket",
+      currentPhase: "phase136",
+      persistentRequirements: [{ messageId: "phase136-1", text: "pre-dispatch WorkerContextPacket 必须携带 memoryProvenanceUsage discipline。" }],
+      compaction: {},
+    });
+    upsertGroupTypedMemoryDocument(groupId, {
+      type: "feedback",
+      slug: "worker-context-usage-pressure-discipline",
+      name: "WorkerContextPacket context usage pressure discipline",
+      source: "selftest:phase136-pressure-provenance-pre-dispatch",
+      body: [
+        "PHASE136_PRESSURE_PROVENANCE_PRE_DISPATCH_SENTINEL",
+        "When this pressure memory is under repair, the child Agent receipt must include memoryProvenanceUsage.",
+      ].join("\n"),
+    });
+    recordGroupTypedMemoryPressureRecallUsageLedger(groupId, {
+      targetProject,
+      taskId: "phase136-pressure-pre-dispatch-task",
+      executionId: "phase136-pressure-pre-dispatch-execution",
+      agent: targetProject,
+      generatedAt: "2026-07-10T00:10:00.000Z",
+      rows: [
+        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-phase136-pre-dispatch-ignored-1" },
+        { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-phase136-pre-dispatch-ignored-2" },
+      ],
+    });
+    writeJsonAtomic(workItemsFile, {
+      schema: "ccm-compact-boundary-replay-repair-work-items-v1",
+      version: 1,
+      groupId,
+      file: workItemsFile,
+      items: [{
+        id: "cgpru-phase136-pre-dispatch-discipline",
+        work_item_id: "cgpru-phase136-pre-dispatch-discipline",
+        source: "cross_group_pressure_recall_usage_repair",
+        component: "cross_group_pressure_recall_usage",
+        status: "pending",
+        priority: "high",
+        target_project: targetProject,
+        repair_target: "worker-context-usage-pressure-discipline.md",
+        cross_group_pressure_recall_usage_gap_type: "recommendation_conflict",
+        cross_group_pressure_recall_usage_rel_path: "worker-context-usage-pressure-discipline.md",
+        cross_group_pressure_recall_usage_reason: "selftest: pressure provenance must be disciplined before dispatch",
+        local_recommendation: "deprioritize_pressure_recall",
+        cross_group_recommendation: "promote_pressure_recall",
+        source_group_count: 1,
+        source_groups: [{ groupId: "phase136-source-group", entry_count: 2 }],
+        shouldCreateRealTask: false,
+        updatedAt: "2026-07-10T00:10:01.000Z",
+      }],
+      stats: { total: 1, openItemCount: 1, pendingCount: 1 },
+      updatedAt: "2026-07-10T00:10:01.000Z",
+    });
+    const bundle = buildAgentMemoryContextBundle(
+      groupId,
+      targetProject,
+      "继续 PHASE136_PRESSURE_PROVENANCE_PRE_DISPATCH_SENTINEL over_budget",
+      {
+        workerContextPacketContextUsage: {
+          schema: "ccm-worker-context-usage-v1",
+          packet_id: "wcp-phase136-pre-dispatch",
+          project: targetProject,
+          status: "over_budget",
+          pressure: 116,
+          total_tokens: 104_400,
+          max_tokens: 90_000,
+          free_tokens: -27_400,
+          autocompact_buffer_tokens: 13_000,
+        },
+        maxTypedMemory: 8,
+        minKeepTokens: 1,
+        generatedAt: "2026-07-10T00:10:02.000Z",
+      }
+    );
+    const packet = buildWorkerContextPacket({
+      group: { id: groupId, name: "phase136-pressure-provenance", members: [{ project: targetProject }] },
+      project: targetProject,
+      task: "继续 PHASE136_PRESSURE_PROVENANCE_PRE_DISPATCH_SENTINEL over_budget",
+      memory: bundle,
+      contextUsageOptions: { maxTokens: 90_000 },
+    });
+    const rendered = renderWorkerContextPacket(packet);
+    const binding = recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, {
+      scopeId: groupId,
+      project: targetProject,
+      task: "继续 PHASE136_PRESSURE_PROVENANCE_PRE_DISPATCH_SENTINEL over_budget",
+      assignmentId: "assignment-phase136-pre-dispatch",
+      dispatchKey: "dispatch-phase136-pre-dispatch",
+      taskFingerprint: "phase136-pressure-provenance-pre-dispatch",
+      worker_context_packet: packet,
+    }, { at: "2026-07-10T00:10:03.000Z" }) || {};
+    const report = buildWorkerContextPacketPressureMemoryProvenanceReceiptPreDispatchDisciplineReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-10T00:10:04.000Z",
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_memory_provenance_receipt_pre_dispatch_discipline"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_memory_provenance_receipt_pre_dispatch_discipline") || {};
+    const discipline = bundle.pressure_memory_provenance_receipt_discipline || {};
+    const packetDiscipline = packet.pressure_memory_provenance_receipt_discipline || {};
+    const checks = {
+      bundleBuildsDiscipline: discipline.schema === "ccm-pressure-memory-provenance-receipt-pre-dispatch-discipline-v1"
+        && discipline.active === true
+        && Number(discipline.docCount || 0) >= 1
+        && JSON.stringify(discipline.exampleRows || []).includes("currentSourceVerified"),
+      packetCarriesDisciplineAndAcceptance: packetDiscipline.schema === "ccm-pressure-memory-provenance-receipt-pre-dispatch-discipline-v1"
+        && packet.acceptance?.memory_provenance_usage_required === true
+        && packet.acceptance?.pressure_memory_provenance_receipt_required === true
+        && packet.context_usage?.categories?.some((item: any) => item.id === "pressure_memory_provenance_receipt_discipline" && item.required === true && Number(item.tokens || 0) > 0),
+      renderedPacketContainsCopyableReceiptExample: rendered.includes("Pressure memory provenance receipt discipline")
+        && rendered.includes("Example CCM_AGENT_RECEIPT.memoryProvenanceUsage")
+        && rendered.includes("repairStatus")
+        && rendered.includes("repairGapType")
+        && rendered.includes("currentSourceVerified"),
+      bindingRecordsPreDispatchDiscipline: binding.worker_context_packet_pressure_memory_provenance_receipt_discipline?.schema === "ccm-pressure-memory-provenance-receipt-pre-dispatch-discipline-v1"
+        && binding.worker_context_packet_render_probe?.rendered_flags?.has_pressure_memory_provenance_receipt_discipline === true
+        && binding.worker_context_packet_render_probe?.rendered_flags?.has_memory_provenance_usage_example === true,
+      reportPassesPreDispatchDiscipline: report.overall?.status === "ok"
+        && Number(report.overall?.checkedPacketCount || 0) === 1
+        && Number(report.overall?.passedPacketCount || 0) === 1
+        && Number(report.overall?.requiredDocCount || 0) >= 1
+        && Number(report.overall?.renderedCoveredCount || 0) === 1,
+      qualityCheckExposesPreDispatchDiscipline: qualityCheck.status === "ok"
+        && Number(qualityCheck.checked || 0) === 1
+        && Number(qualityCheck.passed || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+      discipline: {
+        docCount: discipline.docCount || 0,
+        requiredFields: discipline.requiredFields || [],
+      },
+      binding: {
+        binding_id: binding.binding_id || "",
+        packet_id: binding.worker_context_packet_id || "",
+      },
+    };
+  } finally {
+    for (const file of [groupFile, `${groupFile}.bak`, messageFile, `${messageFile}.bak`, bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceSelfTest() {
+  const groupId = `memory-center-pressure-provenance-post-dispatch-compliance-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  try {
+    const relPath = "worker-context-usage-pressure-discipline.md";
+    const repairWorkItemId = "cgpru-phase137-post-dispatch-compliance";
+    const pressureDoc = {
+      rel_path: relPath,
+      name: "WorkerContextPacket context usage pressure discipline",
+      type: "feedback",
+      pressure_status: "over_budget",
+      provenance_status: "disputed_under_repair",
+      repair_work_item_id: repairWorkItemId,
+      repair_status: "pending",
+      repair_gap_type: "recommendation_conflict",
+      requires_memory_provenance_usage: true,
+      pressure_usage_matches: [{
+        rel_path: relPath,
+        name: "WorkerContextPacket context usage pressure discipline",
+        target_project: "api",
+        recommendation: "promote_pressure_recall",
+        provenance_status: "disputed_under_repair",
+        repair_work_item_id: repairWorkItemId,
+        repair_status: "pending",
+        repair_gap_type: "recommendation_conflict",
+        repair_open: true,
+      }],
+    };
+    const discipline = {
+      schema: "ccm-pressure-memory-provenance-receipt-pre-dispatch-discipline-v1",
+      version: 1,
+      active: true,
+      source: "typed_memory_pressure_repair_provenance",
+      targetProject: "api",
+      docCount: 1,
+      requiredFields: ["relPath", "usageState", "provenanceStatus", "repairWorkItemId", "repairStatus", "repairGapType", "currentSourceVerified"],
+      rows: [{
+        relPath,
+        rel_path: relPath,
+        name: "WorkerContextPacket context usage pressure discipline",
+        provenanceStatus: "disputed_under_repair",
+        provenance_status: "disputed_under_repair",
+        repairWorkItemId,
+        repair_work_item_id: repairWorkItemId,
+        repairStatus: "pending",
+        repair_status: "pending",
+        repairGapType: "recommendation_conflict",
+        repair_gap_type: "recommendation_conflict",
+      }],
+      exampleRows: [{
+        relPath,
+        usageState: "used",
+        provenanceStatus: "disputed_under_repair",
+        repairWorkItemId,
+        repairStatus: "pending",
+        repairGapType: "recommendation_conflict",
+        currentSourceVerified: true,
+      }],
+    };
+    const baseEntry = (suffix: string, receipt: any = {}) => ({
+      schema: "ccm-worker-context-packet-assignment-binding-v1",
+      binding_id: `binding-phase137-${suffix}`,
+      groupId,
+      source: "worker_context_packet_pre_dispatch_gate",
+      project: "api",
+      agent_type: "codex",
+      assignment_id: `assignment-phase137-${suffix}`,
+      dispatch_key: `dispatch-phase137-${suffix}`,
+      task_fingerprint: `phase137-${suffix}`,
+      worker_context_packet_id: `wcp-phase137-${suffix}`,
+      worker_context_packet_context_usage: {
+        schema: "ccm-worker-context-usage-v1",
+        packet_id: `wcp-phase137-${suffix}`,
+        project: "api",
+        status: "over_budget",
+        pressure: 116,
+        total_tokens: 104_000,
+        max_tokens: 90_000,
+        free_tokens: -27_000,
+        autocompact_buffer_tokens: 13_000,
+        categories: [
+          { id: "pressure_memory_provenance_receipt_discipline", name: "Pressure memory provenance receipt discipline", required: true, included: true, tokens: 120, chars: 360, source: "typed-memory-pressure-provenance" },
+          { id: "verification_and_acceptance", name: "Verification and acceptance", required: true, included: true, tokens: 100, chars: 300 },
+        ],
+      },
+      worker_context_packet_acceptance: {
+        receipt_required: true,
+        memory_provenance_usage_required: true,
+        pressure_memory_provenance_receipt_required: true,
+      },
+      worker_context_packet_pressure_memory_provenance_receipt_discipline: discipline,
+      worker_context_packet_typed_memory_pressure_recall: {
+        schema: "ccm-worker-context-packet-typed-memory-pressure-recall-v1",
+        active: true,
+        pressure_status: "over_budget",
+        boosted_count: 1,
+        recalled_count: 1,
+        docs: [pressureDoc],
+      },
+      worker_context_packet_render_probe: {
+        packet_id: `wcp-phase137-${suffix}`,
+        rendered_flags: {
+          has_pressure_memory_provenance_receipt_discipline: true,
+          has_memory_provenance_usage_example: true,
+        },
+        rendered_excerpt: "Pressure memory provenance receipt discipline\nExample CCM_AGENT_RECEIPT.memoryProvenanceUsage currentSourceVerified repairStatus repairGapType",
+      },
+      worker_context_packet_receipt: receipt,
+      dispatch_ready: true,
+      should_create_real_task: true,
+      at: "2026-07-10T00:20:00.000Z",
+    });
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId,
+      file: bindingFile,
+      updatedAt: "2026-07-10T00:20:00.000Z",
+      bindingCount: 3,
+      workerContextPacketBindingCount: 3,
+      entries: [
+        baseEntry("ok", {
+          agent: "api",
+          project: "api",
+          status: "done",
+          worker_context_packet_id: "wcp-phase137-ok",
+          memoryUsed: [`${relPath}; current source verified`],
+          memoryProvenanceUsage: [{
+            relPath,
+            usageState: "used",
+            provenanceStatus: "disputed_under_repair",
+            repairWorkItemId,
+            repairStatus: "pending",
+            repairGapType: "recommendation_conflict",
+            currentSourceVerified: true,
+          }],
+          summary: "Compliant pressure provenance receipt.",
+        }),
+        baseEntry("missing-usage", {
+          agent: "api",
+          project: "api",
+          status: "done",
+          worker_context_packet_id: "wcp-phase137-missing-usage",
+          memoryUsed: [`${relPath}; used pressure memory`],
+          summary: "Used pressure memory but omitted structured memoryProvenanceUsage.",
+        }),
+        baseEntry("current-source-gap", {
+          agent: "api",
+          project: "api",
+          status: "done",
+          worker_context_packet_id: "wcp-phase137-current-source-gap",
+          memoryUsed: [`${relPath}; used pressure memory`],
+          memoryProvenanceUsage: [{
+            relPath,
+            usageState: "used",
+            provenanceStatus: "disputed_under_repair",
+            repairWorkItemId,
+            repairStatus: "pending",
+            repairGapType: "recommendation_conflict",
+            currentSourceVerified: false,
+          }],
+          summary: "Structured receipt present but currentSourceVerified=false.",
+        }),
+      ],
+    });
+    const report = buildWorkerContextPacketPressureMemoryProvenanceReceiptPostDispatchComplianceReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-10T00:20:01.000Z",
+      frequentThreshold: 2,
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_memory_provenance_receipt_post_dispatch_compliance"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_memory_provenance_receipt_post_dispatch_compliance") || {};
+    const {
+      readGroupTypedMemoryDistillationLedger,
+      scanGroupTypedMemoryDocuments,
+      buildGroupTypedMemoryRecall,
+    } = require("../collaboration/group-memory-index");
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = ledger.pressureProvenancePreDispatchComplianceArchive || {};
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const doc = (docs || []).find((item: any) => item.source === "auto:pressure-provenance-pre-dispatch-compliance-distillation") || {};
+    const recall = buildGroupTypedMemoryRecall(groupId, "pressure provenance pre-dispatch compliance codex api memoryProvenanceUsage currentSourceVerified", {
+      disableLedger: true,
+      forceMemory: true,
+      max: 8,
+    });
+    const recallText = [
+      ...(Array.isArray(recall.recalled) ? recall.recalled : []),
+      ...(Array.isArray(recall.entries) ? recall.entries : []),
+      ...(Array.isArray(recall.selected) ? recall.selected : []),
+      ...(Array.isArray(recall.docs) ? recall.docs : []),
+    ].map((item: any) => `${item.name || ""}\n${item.body || ""}\n${item.snippet || ""}\n${item.text || ""}`).join("\n");
+    const attribution = report.groups?.[0]?.attributions?.[0] || {};
+    const checks = {
+      reportAttributesPostDispatchFailures: report.overall?.status === "fail"
+        && Number(report.overall?.checkedPacketCount || 0) === 3
+        && Number(report.overall?.compliantPacketCount || 0) === 1
+        && Number(report.overall?.violationPacketCount || 0) === 2
+        && attribution.agent_type === "codex"
+        && attribution.project === "api"
+        && Number(attribution.violation_count || 0) === 2
+        && attribution.frequent_violation === true,
+      qualityCheckFailsWithActionableGaps: qualityCheck.status === "fail"
+        && Number(qualityCheck.checked || 0) === 1
+        && Number(qualityCheck.passed || 0) === 0
+        && (qualityCheck.gaps || []).some((gap: any) => /memoryProvenanceUsage|currentSourceVerified|pressure repair provenance/i.test(String(gap.reason || ""))),
+      typedMemoryArchivesFrequentAttribution: archive.schema === "ccm-pressure-provenance-pre-dispatch-compliance-distillation-v1"
+        && Number(archive.archived_count || 0) >= 2
+        && Number(archive.frequent_attribution_count || 0) >= 1
+        && (archive.attributions || []).some((row: any) => row.agent_type === "codex" && row.project === "api" && row.frequent === true),
+      typedDocContainsExecutorPolicy: doc.source === "auto:pressure-provenance-pre-dispatch-compliance-distillation"
+        && String(doc.body || "").includes("agentType=codex")
+        && String(doc.body || "").includes("project=api")
+        && String(doc.body || "").includes("memoryProvenanceUsage")
+        && String(doc.body || "").includes("currentSourceVerified"),
+      recallFindsPostDispatchComplianceMemory: /codex|api|memoryProvenanceUsage|currentSourceVerified/i.test(recallText),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      attribution,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+      archive: {
+        archived_count: archive.archived_count || 0,
+        frequent_attribution_count: archive.frequent_attribution_count || 0,
+      },
+      doc: {
+        relPath: doc.relPath || "",
+        source: doc.source || "",
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureProvenanceFeedbackDispatchPolicySelfTest() {
+  const groupId = `memory-center-pressure-provenance-feedback-dispatch-policy-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  try {
+    const {
+      distillPressureProvenancePreDispatchComplianceToTypedMemory,
+      readGroupTypedMemoryDistillationLedger,
+      getGroupTypedMemoryDir,
+    } = require("../collaboration/group-memory-index");
+    const {
+      buildAgentMemoryContextBundle,
+    } = require("../collaboration/memory");
+    const {
+      buildSelfContainedWorkerHandoff,
+      renderSelfContainedWorkerHandoff,
+    } = require("../../agents/worker-handoff");
+    const {
+      recordWorkerContextPacketAssignmentBindingForCoordinator,
+    } = require("../collaboration/group-orchestrator");
+    const relPath = "pressure-provenance-feedback-policy.md";
+    distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase138-missing-usage",
+          binding_id: "binding-phase138-missing-usage",
+          project: "api",
+          agent_type: "codex",
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          missing_memory_provenance_usage: true,
+          gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "missing memoryProvenanceUsage" }],
+          rel_paths: [relPath],
+        },
+        {
+          groupId,
+          packet_id: "wcp-phase138-current-source-gap",
+          binding_id: "binding-phase138-current-source-gap",
+          project: "api",
+          agent_type: "codex",
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          current_source_verified_gap: true,
+          gaps: [{ code: "receipt_currentSourceVerified", reason: "currentSourceVerified=false" }],
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      frequentThreshold: 2,
+      updatedAt: "2026-07-10T00:40:00.000Z",
+    });
+    const bundle = buildAgentMemoryContextBundle(groupId, "api", "验证 pressure provenance feedback dispatch policy 会注入 WorkerContextPacket", {
+      agentType: "codex",
+      maxTypedMemory: 8,
+    });
+    const handoff = buildSelfContainedWorkerHandoff({
+      group: { id: groupId, name: "Phase 138 Feedback Policy", members: [{ project: "api", agent: "codex" }] },
+      project: "api",
+      task: "验证 pressure provenance feedback dispatch policy 会注入 WorkerContextPacket",
+      agentType: "codex",
+      memory: bundle,
+      traceId: "trace-phase138-feedback-policy",
+      taskId: "task-phase138-feedback-policy",
+    });
+    const rendered = renderSelfContainedWorkerHandoff(handoff);
+    const packet = handoff.worker_context_packet || {};
+    const binding = recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, {
+      project: "api",
+      agentType: "codex",
+      assignmentId: "assignment-phase138-feedback-policy",
+      dispatchKey: "dispatch-phase138-feedback-policy",
+      taskFingerprint: "phase138 feedback policy",
+      worker_context_packet: packet,
+    }) || {};
+    const report = buildWorkerContextPacketPressureProvenanceFeedbackDispatchPolicyReport({
+      groupIds: [groupId],
+      frequentThreshold: 2,
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_feedback_dispatch_policy"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_feedback_dispatch_policy") || {};
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = ledger.pressureProvenancePreDispatchComplianceArchive || {};
+    const policy = packet.pressure_provenance_dispatch_feedback_policy || {};
+    const category = (packet.context_usage?.categories || []).find((item: any) => item.id === "pressure_provenance_dispatch_feedback_policy") || {};
+    const bindingPolicy = binding.worker_context_packet_pressure_provenance_dispatch_feedback_policy || {};
+    const checks = {
+      archiveSurvivesContextBundleDistillation: archive.schema === "ccm-pressure-provenance-pre-dispatch-compliance-distillation-v1"
+        && Number(archive.frequent_attribution_count || 0) >= 1,
+      bundleCarriesFeedbackPolicy: bundle.pressure_provenance_dispatch_feedback_policy?.active === true
+        && String(bundle.rendered_text || "").includes("pressure provenance dispatch feedback policy"),
+      workerPacketCarriesFeedbackPolicy: policy.schema === "ccm-pressure-provenance-pre-dispatch-compliance-dispatch-policy-v1"
+        && policy.active === true
+        && packet.acceptance?.pressure_provenance_feedback_ack_required === true
+        && packet.acceptance?.pressure_provenance_feedback_final_receipt_review_required === true,
+      contextUsageAccountsFeedbackPolicy: category.required === true
+        && category.included === true
+        && String(category.source || "") === "typed-feedback-memory",
+      renderedHandoffShowsFeedbackPolicy: rendered.includes("Pressure provenance dispatch feedback policy")
+        && rendered.includes("memoryProvenanceUsage"),
+      bindingPersistsFeedbackPolicy: bindingPolicy.schema === "ccm-pressure-provenance-pre-dispatch-compliance-dispatch-policy-v1"
+        && binding.worker_context_packet_render_probe?.rendered_flags?.has_pressure_provenance_dispatch_feedback_policy === true,
+      memoryCenterQualityPasses: report.overall?.status === "ok"
+        && Number(report.overall?.frequentAttributionCount || 0) === 1
+        && Number(report.overall?.coveredAttributionCount || 0) === 1
+        && qualityCheck.status === "ok",
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+      policy: {
+        active: policy.active === true,
+        action: policy.action || "",
+        agentType: policy.agentType || policy.agent_type || "",
+        targetProject: policy.targetProject || policy.target_project || "",
+      },
+      binding: {
+        binding_id: binding.binding_id || "",
+        packet_id: binding.worker_context_packet_id || "",
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+    try {
+      const { getGroupTypedMemoryDir } = require("../collaboration/group-memory-index");
+      const dir = getGroupTypedMemoryDir(groupId);
+      if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
+    try {
+      const { getGroupMemoryFile } = require("../collaboration/memory");
+      const groupFile = getGroupMemoryFile(groupId);
+      if (groupFile && fs.existsSync(groupFile)) fs.unlinkSync(groupFile);
+    } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureProvenanceFeedbackRecallRiskGatingSelfTest() {
+  const groupId = `memory-center-pressure-provenance-feedback-recall-risk-gating-selftest-${process.pid}-${Date.now()}`;
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  const targetProject = "api";
+  const agentType = "codex";
+  const riskRelPath = "worker-context-pressure-risk-under-repair.md";
+  const normalRelPath = "worker-context-pressure-normal.md";
+  const repairHints = [{
+    source: "cross_group_pressure_recall_usage_repair",
+    component: "cross_group_pressure_recall_usage",
+    work_item_id: "phase139-pressure-feedback-risk-repair",
+    status: "pending",
+    priority: "high",
+    cross_group_pressure_recall_usage_gap_type: "recommendation_conflict",
+    cross_group_pressure_recall_usage_rel_path: riskRelPath,
+    target_project: targetProject,
+    reason: "selftest disputed pressure memory must be repair-first or downranked when feedback policy is active",
+  }];
+  try {
+    const {
+      buildGroupTypedMemoryRecall,
+      buildPressureProvenancePreDispatchComplianceDispatchPolicy,
+      distillPressureProvenancePreDispatchComplianceToTypedMemory,
+      recordGroupTypedMemoryPressureRecallUsageLedger,
+      renderGroupTypedMemoryRecall,
+      upsertGroupTypedMemoryDocument,
+    } = require("../collaboration/group-memory-index");
+    distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase139-missing-usage",
+          binding_id: "binding-phase139-missing-usage",
+          project: targetProject,
+          agent_type: agentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          missing_memory_provenance_usage: true,
+          gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "missing memoryProvenanceUsage" }],
+          rel_paths: [riskRelPath],
+        },
+        {
+          groupId,
+          packet_id: "wcp-phase139-current-source-gap",
+          binding_id: "binding-phase139-current-source-gap",
+          project: targetProject,
+          agent_type: agentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          current_source_verified_gap: true,
+          gaps: [{ code: "receipt_currentSourceVerified", reason: "currentSourceVerified=false" }],
+          rel_paths: [riskRelPath],
+        },
+      ],
+    }, {
+      frequentThreshold: 2,
+      updatedAt: "2026-07-10T00:55:00.000Z",
+    });
+    upsertGroupTypedMemoryDocument(groupId, {
+      type: "reference",
+      slug: "worker-context-pressure-risk-under-repair",
+      name: "WorkerContextPacket pressure risk under repair",
+      description: "Pressure MEMORY.md with disputed_under_repair provenance requires current-source verification.",
+      source: "selftest:phase139-pressure-feedback-risk-gating",
+      body: [
+        "WorkerContextPacket context_usage pressure memory.",
+        "PHASE139_PRESSURE_RISK_SENTINEL disputed_under_repair repair_work_item_id=phase139-pressure-feedback-risk-repair.",
+        "memoryProvenanceUsage currentSourceVerified must be required before using this risky pressure memory.",
+      ].join("\n"),
+    });
+    upsertGroupTypedMemoryDocument(groupId, {
+      type: "reference",
+      slug: "worker-context-pressure-normal",
+      name: "WorkerContextPacket pressure normal guidance",
+      description: "Normal pressure MEMORY.md without under-repair provenance remains available.",
+      source: "selftest:phase139-pressure-feedback-risk-gating",
+      body: [
+        "WorkerContextPacket context_usage pressure memory.",
+        "PHASE139_PRESSURE_NORMAL_SENTINEL compact_recommended free_tokens autocompact_buffer.",
+        "This normal pressure memory has local_group_evidence and no repair_open marker.",
+      ].join("\n"),
+    });
+    recordGroupTypedMemoryPressureRecallUsageLedger(groupId, {
+      targetProject,
+      taskId: "phase139-pressure-feedback-recall-risk-gating",
+      executionId: "phase139-pressure-feedback-recall-risk-gating",
+      agent: targetProject,
+      generatedAt: "2026-07-10T00:55:01.000Z",
+      rows: [
+        {
+          rel_path: riskRelPath,
+          name: "WorkerContextPacket pressure risk under repair",
+          type: "reference",
+          worker_context_packet_id: "wcp-phase139-risk",
+          pressure_status: "over_budget",
+          usage_state: "used",
+          provenance_status: "disputed_under_repair",
+          repair_work_item_id: "phase139-pressure-feedback-risk-repair",
+          repair_status: "pending",
+          repair_gap_type: "recommendation_conflict",
+          reason: "selftest risky pressure memory was previously surfaced",
+        },
+        {
+          rel_path: normalRelPath,
+          name: "WorkerContextPacket pressure normal guidance",
+          type: "reference",
+          worker_context_packet_id: "wcp-phase139-normal",
+          pressure_status: "over_budget",
+          usage_state: "verified",
+          reason: "selftest normal pressure memory stays useful",
+        },
+      ],
+    });
+    const policy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+      targetProject,
+      agentType,
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T00:55:02.000Z",
+    });
+    const recall = buildGroupTypedMemoryRecall(groupId, "WorkerContextPacket context_usage pressure free_tokens 普通实现任务", {
+      targetProject,
+      forceWorkerContextPressureRecall: true,
+      pressureProvenanceDispatchFeedbackPolicy: policy,
+      workerContextPressureRecallUsageRepairHints: repairHints,
+      workerContextPressure: {
+        status: "over_budget",
+        pressure: 103,
+        reason: "phase139 selftest pressure recall",
+      },
+      max: 8,
+      snippetChars: 320,
+    });
+    const rendered = renderGroupTypedMemoryRecall(recall);
+    const report = buildWorkerContextPacketPressureProvenanceFeedbackRecallRiskGatingReport({
+      groupIds: [groupId],
+      frequentThreshold: 2,
+      workerContextPressureRecallUsageRepairHints: repairHints,
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_feedback_recall_risk_gating"],
+      groupIds: [groupId],
+      refresh: true,
+      frequentThreshold: 2,
+      workerContextPressureRecallUsageRepairHints: repairHints,
+    });
+    const qualityCheck = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_feedback_recall_risk_gating") || {};
+    const recalled = Array.isArray(recall.recalled) ? recall.recalled : [];
+    const diagnostics = Array.isArray(recall.diagnostics) ? recall.diagnostics : [];
+    const normalDoc = recalled.find((doc: any) => doc.relPath === normalRelPath || doc.rel_path === normalRelPath) || {};
+    const riskDoc = recalled.find((doc: any) => doc.relPath === riskRelPath || doc.rel_path === riskRelPath) || {};
+    const riskDiagnostic = diagnostics.find((doc: any) => doc.relPath === riskRelPath || doc.rel_path === riskRelPath) || {};
+    const riskEvidence = riskDoc.relPath ? riskDoc : riskDiagnostic;
+    const riskFeedback = riskEvidence.workerContextPressureFeedbackPolicy || riskEvidence.worker_context_pressure_feedback_policy || {};
+    const scoring = recall.workerContextPressureFeedbackPolicyScoring || {};
+    const checks = {
+      policyActivatesFromFrequentAttribution: policy.active === true
+        && policy.agentType === agentType
+        && policy.targetProject === targetProject,
+      recallScoresFeedbackRisk: scoring.active === true
+        && Number(scoring.risk_doc_count || 0) >= 1
+        && Number(scoring.deprioritized_count || 0) >= 1,
+      riskyPressureMemoryDownranked: riskFeedback.risk_doc === true
+        && Number(riskFeedback.adjustment || 0) < 0
+        && (!!normalDoc.relPath && (!riskDoc.relPath || Number(normalDoc.score || 0) > Number(riskDoc.score || 0))),
+      normalPressureMemoryRemainsAvailable: normalDoc.relPath === normalRelPath
+        && !(normalDoc.workerContextPressureFeedbackPolicy || {}).risk_doc,
+      renderedMentionsFeedbackPolicyGating: rendered.includes("pressure feedback policy gating"),
+      memoryCenterQualityPasses: report.overall?.status === "ok"
+        && Number(report.overall?.riskAttributionCount || 0) === 1
+        && Number(report.overall?.coveredRiskAttributionCount || 0) === 1
+        && qualityCheck.status === "ok",
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      scoring,
+      report: report.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+      risk: {
+        relPath: riskEvidence.relPath || riskEvidence.rel_path || "",
+        score: riskEvidence.score,
+        reason: riskEvidence.reason || "",
+        adjustment: riskFeedback.adjustment || 0,
+        action: riskFeedback.action || "",
+      },
+      normal: {
+        relPath: normalDoc.relPath || "",
+        score: normalDoc.score,
+      },
+    };
+  } finally {
+    try {
+      const {
+        getGroupTypedMemoryDir,
+        getGroupTypedMemoryPressureRecallUsageLedgerFile,
+      } = require("../collaboration/group-memory-index");
+      const dir = getGroupTypedMemoryDir(groupId);
+      if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+      const usageFile = getGroupTypedMemoryPressureRecallUsageLedgerFile(groupId);
+      if (usageFile && fs.existsSync(usageFile)) fs.unlinkSync(usageFile);
+    } catch {}
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureProvenanceFeedbackPolicyRecoverySelfTest() {
+  const groupId = `memory-center-pressure-provenance-feedback-policy-recovery-selftest-${process.pid}-${Date.now()}`;
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  const targetProject = "api";
+  const agentType = "codex";
+  const relPath = "pressure-provenance-feedback-recovery.md";
+  try {
+    const {
+      buildPressureProvenancePreDispatchComplianceDispatchPolicy,
+      distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory,
+      distillPressureProvenancePreDispatchComplianceToTypedMemory,
+      readGroupTypedMemoryDistillationLedger,
+      scanGroupTypedMemoryDocuments,
+    } = require("../collaboration/group-memory-index");
+    const {
+      buildAgentMemoryContextBundle,
+    } = require("../collaboration/memory");
+    distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase140-missing-usage",
+          binding_id: "binding-phase140-missing-usage",
+          project: targetProject,
+          agent_type: agentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          missing_memory_provenance_usage: true,
+          gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "missing memoryProvenanceUsage" }],
+          rel_paths: [relPath],
+        },
+        {
+          groupId,
+          packet_id: "wcp-phase140-current-source-gap",
+          binding_id: "binding-phase140-current-source-gap",
+          project: targetProject,
+          agent_type: agentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          current_source_verified_gap: true,
+          gaps: [{ code: "receipt_currentSourceVerified", reason: "currentSourceVerified=false" }],
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      frequentThreshold: 2,
+      updatedAt: "2026-07-10T01:10:00.000Z",
+    });
+    const activePolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+      targetProject,
+      agentType,
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T01:10:01.000Z",
+    });
+    const recovery = distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase140-recovery-1",
+          binding_id: "binding-phase140-recovery-1",
+          project: targetProject,
+          agent_type: agentType,
+          status: "compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          receipt_row_count: 1,
+          compliant_doc_count: 1,
+          current_source_verified_count: 1,
+          rel_paths: [relPath],
+        },
+        {
+          groupId,
+          packet_id: "wcp-phase140-recovery-2",
+          binding_id: "binding-phase140-recovery-2",
+          project: targetProject,
+          agent_type: agentType,
+          status: "compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          receipt_row_count: 1,
+          compliant_doc_count: 1,
+          current_source_verified_count: 1,
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      updatedAt: "2026-07-10T01:10:02.000Z",
+    });
+    const recoveredPolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+      targetProject,
+      agentType,
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T01:10:03.000Z",
+    });
+    const bundle = buildAgentMemoryContextBundle(groupId, targetProject, "验证 pressure provenance feedback policy recovery 不再永久惩罚", {
+      agentType,
+      maxTypedMemory: 8,
+    });
+    const report = buildWorkerContextPacketPressureProvenanceFeedbackPolicyRecoveryReport({
+      groupIds: [groupId],
+      frequentThreshold: 2,
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_feedback_policy_recovery"],
+      groupIds: [groupId],
+      refresh: true,
+      frequentThreshold: 2,
+    });
+    const qualityCheck = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_feedback_policy_recovery") || {};
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const recoveryArchive = ledger.pressureProvenancePreDispatchComplianceRecoveryArchive || {};
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const recoveryDoc = (docs || []).find((doc: any) => doc.source === "auto:pressure-provenance-compliance-recovery-distillation") || {};
+    const recoveredRow = (recoveredPolicy.policyRows || [])[0] || {};
+    const checks = {
+      policyActiveBeforeRecovery: activePolicy.active === true
+        && Number(activePolicy.frequentViolationAttributionCount || 0) === 1,
+      recoveryArchiveWritten: recoveryArchive.schema === "ccm-pressure-provenance-pre-dispatch-compliance-recovery-distillation-v1"
+        && Number(recoveryArchive.compliant_count || 0) >= 2
+        && Number(recovery.compliantCount || 0) >= 2,
+      typedRecoveryDocWritten: recoveryDoc.source === "auto:pressure-provenance-compliance-recovery-distillation"
+        && String(recoveryDoc.body || "").includes("compliant")
+        && String(recoveryDoc.body || "").includes("Recovery policy"),
+      policyRecoveredBelowThreshold: recoveredPolicy.active === false
+        && recoveredPolicy.action === "monitor_recovered_pressure_memory_provenance_receipt_contract"
+        && Number(recoveredPolicy.recoveredAttributionCount || 0) === 1
+        && recoveredRow.recovered === true
+        && Number(recoveredRow.effective_violation_count || 0) === 0
+        && Number(recoveredRow.recovery_credit || 0) >= 2,
+      bundleDoesNotInjectRecoveredActivePolicy: !bundle.pressure_provenance_dispatch_feedback_policy
+        && !String(bundle.rendered_text || "").includes("pressure provenance dispatch feedback policy：agentType=codex"),
+      memoryCenterQualityPasses: report.overall?.status === "ok"
+        && Number(report.overall?.recoveredAttributionCount || 0) === 1
+        && qualityCheck.status === "ok",
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      activePolicy: {
+        active: activePolicy.active,
+        action: activePolicy.action,
+        frequentViolationAttributionCount: activePolicy.frequentViolationAttributionCount,
+      },
+      recoveredPolicy: {
+        active: recoveredPolicy.active,
+        action: recoveredPolicy.action,
+        recoveredAttributionCount: recoveredPolicy.recoveredAttributionCount,
+        row: recoveredRow,
+      },
+      recovery: {
+        archivedCount: recovery.archivedCount || 0,
+        compliantCount: recovery.compliantCount || 0,
+      },
+      report: report.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+    };
+  } finally {
+    try {
+      const { getGroupTypedMemoryDir } = require("../collaboration/group-memory-index");
+      const dir = getGroupTypedMemoryDir(groupId);
+      if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+    try {
+      const { getGroupMemoryFile } = require("../collaboration/memory");
+      const groupFile = getGroupMemoryFile(groupId);
+      if (groupFile && fs.existsSync(groupFile)) fs.unlinkSync(groupFile);
+    } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureProvenanceFeedbackPolicyRelapseSelfTest() {
+  const groupId = `memory-center-pressure-provenance-feedback-policy-relapse-selftest-${process.pid}-${Date.now()}`;
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  const targetProject = "api";
+  const agentType = "codex";
+  const relPath = "pressure-provenance-feedback-relapse.md";
+  try {
+    const {
+      buildPressureProvenancePreDispatchComplianceDispatchPolicy,
+      distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory,
+      distillPressureProvenancePreDispatchComplianceToTypedMemory,
+      readGroupTypedMemoryDistillationLedger,
+    } = require("../collaboration/group-memory-index");
+    const {
+      buildAgentMemoryContextBundle,
+      getGroupMemoryFile,
+    } = require("../collaboration/memory");
+    distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase141-initial-missing-usage",
+          binding_id: "binding-phase141-initial-missing-usage",
+          project: targetProject,
+          agent_type: agentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          missing_memory_provenance_usage: true,
+          gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "missing memoryProvenanceUsage" }],
+          rel_paths: [relPath],
+        },
+        {
+          groupId,
+          packet_id: "wcp-phase141-initial-current-source-gap",
+          binding_id: "binding-phase141-initial-current-source-gap",
+          project: targetProject,
+          agent_type: agentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          current_source_verified_gap: true,
+          gaps: [{ code: "receipt_currentSourceVerified", reason: "currentSourceVerified=false" }],
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      frequentThreshold: 2,
+      updatedAt: "2026-07-10T01:20:00.000Z",
+    });
+    distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase141-recovery-1",
+          binding_id: "binding-phase141-recovery-1",
+          project: targetProject,
+          agent_type: agentType,
+          status: "compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          receipt_row_count: 1,
+          compliant_doc_count: 1,
+          current_source_verified_count: 1,
+          rel_paths: [relPath],
+        },
+        {
+          groupId,
+          packet_id: "wcp-phase141-recovery-2",
+          binding_id: "binding-phase141-recovery-2",
+          project: targetProject,
+          agent_type: agentType,
+          status: "compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          receipt_row_count: 1,
+          compliant_doc_count: 1,
+          current_source_verified_count: 1,
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      updatedAt: "2026-07-10T01:20:01.000Z",
+    });
+    const recoveredPolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+      targetProject,
+      agentType,
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T01:20:02.000Z",
+    });
+    distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase141-relapse-missing-usage",
+          binding_id: "binding-phase141-relapse-missing-usage",
+          project: targetProject,
+          agent_type: agentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          missing_memory_provenance_usage: true,
+          gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "relapse missing memoryProvenanceUsage" }],
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      frequentThreshold: 2,
+      updatedAt: "2026-07-10T01:20:03.000Z",
+    });
+    const relapsedPolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+      targetProject,
+      agentType,
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T01:20:04.000Z",
+    });
+    const bundle = buildAgentMemoryContextBundle(groupId, targetProject, "验证 recovered pressure provenance attribution relapse 会重新激活 policy", {
+      agentType,
+      maxTypedMemory: 8,
+    });
+    const report = buildWorkerContextPacketPressureProvenanceFeedbackPolicyRelapseReport({
+      groupIds: [groupId],
+      frequentThreshold: 2,
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_feedback_policy_relapse"],
+      groupIds: [groupId],
+      refresh: true,
+      frequentThreshold: 2,
+    });
+    const qualityCheck = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_feedback_policy_relapse") || {};
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const relapseRow = (relapsedPolicy.policyRows || [])[0] || {};
+    const checks = {
+      recoveredBeforeRelapse: recoveredPolicy.active === false
+        && Number(recoveredPolicy.recoveredAttributionCount || 0) === 1,
+      relapsedPolicyReactivates: relapsedPolicy.active === true
+        && relapsedPolicy.action === "reactivate_pressure_memory_provenance_receipt_contract_after_recovery_relapse"
+        && Number(relapsedPolicy.relapsedAttributionCount || 0) === 1,
+      relapsedRowCarriesPostRecoveryEvidence: relapseRow.relapsed === true
+        && Number(relapseRow.post_recovery_violation_count || 0) === 1
+        && String(relapseRow.recovery_streak_broken_at || "").includes("2026-07-10T01:20:03"),
+      bundleInjectsRelapsedPolicy: bundle.pressure_provenance_dispatch_feedback_policy?.active === true
+        && String(bundle.rendered_text || "").includes("恢复后复发=1"),
+      memoryCenterQualityPasses: report.overall?.status === "ok"
+        && Number(report.overall?.relapseAttributionCount || 0) === 1
+        && Number(report.overall?.activeRelapseAttributionCount || 0) === 1
+        && qualityCheck.status === "ok",
+      archivesPreserveRecoveryAndViolationFacts: !!ledger.pressureProvenancePreDispatchComplianceArchive?.schema
+        && !!ledger.pressureProvenancePreDispatchComplianceRecoveryArchive?.schema,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      recoveredPolicy: {
+        active: recoveredPolicy.active,
+        action: recoveredPolicy.action,
+        recoveredAttributionCount: recoveredPolicy.recoveredAttributionCount,
+      },
+      relapsedPolicy: {
+        active: relapsedPolicy.active,
+        action: relapsedPolicy.action,
+        relapsedAttributionCount: relapsedPolicy.relapsedAttributionCount,
+        row: relapseRow,
+      },
+      report: report.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+    };
+  } finally {
+    try {
+      const { getGroupTypedMemoryDir } = require("../collaboration/group-memory-index");
+      const dir = getGroupTypedMemoryDir(groupId);
+      if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+    try {
+      const { getGroupMemoryFile } = require("../collaboration/memory");
+      const groupFile = getGroupMemoryFile(groupId);
+      if (groupFile && fs.existsSync(groupFile)) fs.unlinkSync(groupFile);
+    } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItemsSelfTest() {
+  const groupId = `memory-center-pressure-provenance-feedback-policy-repair-work-items-selftest-${process.pid}-${Date.now()}`;
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const targetProject = "api";
+  const agentType = "codex";
+  const relPath = "pressure-provenance-feedback-repair-work-item.md";
+  try {
+    const {
+      buildPressureProvenancePreDispatchComplianceDispatchPolicy,
+      distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory,
+      distillPressureProvenancePreDispatchComplianceToTypedMemory,
+    } = require("../collaboration/group-memory-index");
+    distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase142-initial-missing-usage",
+          binding_id: "binding-phase142-initial-missing-usage",
+          project: targetProject,
+          agent_type: agentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          missing_memory_provenance_usage: true,
+          gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "missing memoryProvenanceUsage" }],
+          rel_paths: [relPath],
+        },
+        {
+          groupId,
+          packet_id: "wcp-phase142-initial-current-source-gap",
+          binding_id: "binding-phase142-initial-current-source-gap",
+          project: targetProject,
+          agent_type: agentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          current_source_verified_gap: true,
+          gaps: [{ code: "receipt_currentSourceVerified", reason: "currentSourceVerified=false" }],
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      frequentThreshold: 2,
+      updatedAt: "2026-07-10T01:30:00.000Z",
+    });
+    distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase142-recovery-1",
+          binding_id: "binding-phase142-recovery-1",
+          project: targetProject,
+          agent_type: agentType,
+          status: "compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          receipt_row_count: 1,
+          compliant_doc_count: 1,
+          current_source_verified_count: 1,
+          rel_paths: [relPath],
+        },
+        {
+          groupId,
+          packet_id: "wcp-phase142-recovery-2",
+          binding_id: "binding-phase142-recovery-2",
+          project: targetProject,
+          agent_type: agentType,
+          status: "compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          receipt_row_count: 1,
+          compliant_doc_count: 1,
+          current_source_verified_count: 1,
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      updatedAt: "2026-07-10T01:30:01.000Z",
+    });
+    distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase142-relapse-missing-usage",
+          binding_id: "binding-phase142-relapse-missing-usage",
+          project: targetProject,
+          agent_type: agentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          missing_memory_provenance_usage: true,
+          gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "relapse missing memoryProvenanceUsage" }],
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      frequentThreshold: 2,
+      updatedAt: "2026-07-10T01:30:02.000Z",
+    });
+    const relapsedPolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+      targetProject,
+      agentType,
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T01:30:03.000Z",
+    });
+    const repairReport = buildWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItemReport({
+      groupIds: [groupId],
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T01:30:03.000Z",
+    });
+    const repairQuality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_feedback_policy_repair_work_items"],
+      groupIds: [groupId],
+      refresh: true,
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T01:30:03.000Z",
+    });
+    const repairCheck = (repairQuality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_feedback_policy_repair_work_items") || {};
+    const openLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const openRepairItem = (openLedger.items || []).find((item: any) => item.source === "worker_context_pressure_provenance_feedback_policy_repair" && replayRepairWorkItemOpen(item.status)) || {};
+    distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase142-post-relapse-recovery",
+          binding_id: "binding-phase142-post-relapse-recovery",
+          project: targetProject,
+          agent_type: agentType,
+          status: "compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          receipt_row_count: 1,
+          compliant_doc_count: 1,
+          current_source_verified_count: 1,
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      updatedAt: "2026-07-10T01:30:04.000Z",
+    });
+    const recoveredPolicy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+      targetProject,
+      agentType,
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T01:30:05.000Z",
+    });
+    const resolvedReport = buildWorkerContextPacketPressureProvenanceFeedbackPolicyRepairWorkItemReport({
+      groupIds: [groupId],
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T01:30:05.000Z",
+    });
+    const resolvedLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const completedRepairItem = (resolvedLedger.items || []).find((item: any) => (item.id || item.work_item_id) === (openRepairItem.id || openRepairItem.work_item_id)) || {};
+    const checks = {
+      relapsedPolicyIsActionable: relapsedPolicy.active === true
+        && Number(relapsedPolicy.relapsedAttributionCount || 0) === 1,
+      repairReportCreatesOpenItem: repairReport.overall?.status === "ok"
+        && Number(repairReport.overall?.requiredActionCount || 0) === 1
+        && Number(repairReport.overall?.coveredItemCount || 0) === 1
+        && repairCheck.status === "ok",
+      openItemCarriesPressurePolicyMetadata: openRepairItem.source === "worker_context_pressure_provenance_feedback_policy_repair"
+        && openRepairItem.pressure_provenance_relapsed === true
+        && openRepairItem.pressure_provenance_feedback_agent_type === agentType
+        && openRepairItem.target_project === targetProject
+        && replayRepairWorkItemOpen(openRepairItem.status),
+      postRelapseRecoveryDisarmsPolicy: recoveredPolicy.active === false
+        && recoveredPolicy.action === "monitor_recovered_pressure_memory_provenance_receipt_contract",
+      resolvedReportCompletesItem: resolvedReport.overall?.status === "empty"
+        && replayRepairWorkItemStatus(completedRepairItem.status) === "completed"
+        && completedRepairItem.resolutionReason === "pressure_provenance_feedback_policy_recovered_or_no_longer_active",
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      repairReport: repairReport.overall,
+      resolvedReport: resolvedReport.overall,
+      repairCheck: {
+        id: repairCheck.id || "",
+        status: repairCheck.status || "",
+        checked: repairCheck.checked || 0,
+        passed: repairCheck.passed || 0,
+      },
+      openRepairItem: {
+        id: openRepairItem.id || openRepairItem.work_item_id || "",
+        status: replayRepairWorkItemStatus(openRepairItem.status),
+        priority: openRepairItem.priority || "",
+        relapsed: openRepairItem.pressure_provenance_relapsed === true,
+      },
+      completedRepairItem: {
+        id: completedRepairItem.id || completedRepairItem.work_item_id || "",
+        status: replayRepairWorkItemStatus(completedRepairItem.status),
+        resolutionReason: completedRepairItem.resolutionReason || "",
+      },
+    };
+  } finally {
+    try {
+      const { getGroupTypedMemoryDir } = require("../collaboration/group-memory-index");
+      const dir = getGroupTypedMemoryDir(groupId);
+      if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+    try { if (workItemsFile && fs.existsSync(workItemsFile)) fs.unlinkSync(workItemsFile); } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureProvenanceFeedbackComplianceHealthSelfTest() {
+  const groupId = `memory-center-pressure-provenance-feedback-compliance-health-selftest-${process.pid}-${Date.now()}`;
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const targetProject = "api";
+  const agentType = "cursor";
+  const relPath = "pressure-provenance-feedback-compliance-health.md";
+  try {
+    const {
+      distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory,
+      distillPressureProvenancePreDispatchComplianceToTypedMemory,
+    } = require("../collaboration/group-memory-index");
+    distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase143-initial-missing-usage",
+          binding_id: "binding-phase143-initial-missing-usage",
+          project: targetProject,
+          agent_type: agentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          missing_memory_provenance_usage: true,
+          gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "missing memoryProvenanceUsage" }],
+          rel_paths: [relPath],
+        },
+        {
+          groupId,
+          packet_id: "wcp-phase143-initial-current-source-gap",
+          binding_id: "binding-phase143-initial-current-source-gap",
+          project: targetProject,
+          agent_type: agentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          current_source_verified_gap: true,
+          gaps: [{ code: "receipt_currentSourceVerified", reason: "currentSourceVerified=false" }],
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      frequentThreshold: 2,
+      updatedAt: "2026-07-10T02:00:00.000Z",
+    });
+    distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase143-recovery-1",
+          binding_id: "binding-phase143-recovery-1",
+          project: targetProject,
+          agent_type: agentType,
+          status: "compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          receipt_row_count: 1,
+          compliant_doc_count: 1,
+          current_source_verified_count: 1,
+          rel_paths: [relPath],
+        },
+        {
+          groupId,
+          packet_id: "wcp-phase143-recovery-2",
+          binding_id: "binding-phase143-recovery-2",
+          project: targetProject,
+          agent_type: agentType,
+          status: "compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          receipt_row_count: 1,
+          compliant_doc_count: 1,
+          current_source_verified_count: 1,
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      updatedAt: "2026-07-10T02:00:01.000Z",
+    });
+    distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase143-relapse-missing-usage",
+          binding_id: "binding-phase143-relapse-missing-usage",
+          project: targetProject,
+          agent_type: agentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          missing_memory_provenance_usage: true,
+          gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "relapse missing memoryProvenanceUsage" }],
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      frequentThreshold: 2,
+      updatedAt: "2026-07-10T02:00:02.000Z",
+    });
+    const activeReport = buildWorkerContextPacketPressureProvenanceFeedbackComplianceHealthReport({
+      groupIds: [groupId],
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T02:00:03.000Z",
+    });
+    const activeQuality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_feedback_compliance_health"],
+      groupIds: [groupId],
+      refresh: true,
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T02:00:03.000Z",
+    });
+    const activeCheck = (activeQuality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_feedback_compliance_health") || {};
+    const activeGroup = activeReport.groups?.[0] || {};
+    const activeRow = (activeGroup.rows || [])[0] || {};
+    distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase143-post-relapse-recovery",
+          binding_id: "binding-phase143-post-relapse-recovery",
+          project: targetProject,
+          agent_type: agentType,
+          status: "compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          receipt_row_count: 1,
+          compliant_doc_count: 1,
+          current_source_verified_count: 1,
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      updatedAt: "2026-07-10T02:00:04.000Z",
+    });
+    const recoveredReport = buildWorkerContextPacketPressureProvenanceFeedbackComplianceHealthReport({
+      groupIds: [groupId],
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T02:00:05.000Z",
+    });
+    const recoveredQuality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_feedback_compliance_health"],
+      groupIds: [groupId],
+      refresh: true,
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T02:00:05.000Z",
+    });
+    const recoveredCheck = (recoveredQuality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_feedback_compliance_health") || {};
+    const recoveredGroup = recoveredReport.groups?.[0] || {};
+    const recoveredRow = (recoveredGroup.rows || [])[0] || {};
+    const checks = {
+      activeHealthIsCritical: activeReport.overall?.status === "ok"
+        && activeReport.overall?.riskStatus === "critical"
+        && activeRow.health_status === "critical"
+        && activeRow.relapsed === true,
+      activeHealthCarriesDispatchRecommendation: activeRow.dispatch_recommendation === "hold_child_dispatch_until_pressure_provenance_repair",
+      activeHealthCarriesOpenRepairBacklog: Number(activeRow.open_repair_item_count || 0) >= 1
+        && activeRow.repair_backlog_state === "open"
+        && activeCheck.status === "ok",
+      recoveredHealthMonitors: recoveredReport.overall?.status === "ok"
+        && recoveredReport.overall?.riskStatus === "monitor"
+        && recoveredRow.health_status === "monitor"
+        && recoveredRow.recovered === true,
+      recoveredHealthShowsRepairResolved: Number(recoveredRow.open_repair_item_count || 0) === 0
+        && Number(recoveredRow.completed_repair_item_count || 0) >= 1
+        && recoveredRow.repair_backlog_state === "resolved"
+        && recoveredCheck.status === "ok",
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      active: {
+        overall: activeReport.overall,
+        row: {
+          agent_type: activeRow.agent_type || "",
+          project: activeRow.project || "",
+          health_status: activeRow.health_status || "",
+          dispatch_recommendation: activeRow.dispatch_recommendation || "",
+          open_repair_item_count: activeRow.open_repair_item_count || 0,
+          repair_backlog_state: activeRow.repair_backlog_state || "",
+        },
+        check: {
+          id: activeCheck.id || "",
+          status: activeCheck.status || "",
+          checked: activeCheck.checked || 0,
+          passed: activeCheck.passed || 0,
+        },
+      },
+      recovered: {
+        overall: recoveredReport.overall,
+        row: {
+          agent_type: recoveredRow.agent_type || "",
+          project: recoveredRow.project || "",
+          health_status: recoveredRow.health_status || "",
+          dispatch_recommendation: recoveredRow.dispatch_recommendation || "",
+          open_repair_item_count: recoveredRow.open_repair_item_count || 0,
+          completed_repair_item_count: recoveredRow.completed_repair_item_count || 0,
+          repair_backlog_state: recoveredRow.repair_backlog_state || "",
+        },
+        check: {
+          id: recoveredCheck.id || "",
+          status: recoveredCheck.status || "",
+          checked: recoveredCheck.checked || 0,
+          passed: recoveredCheck.passed || 0,
+        },
+      },
+    };
+  } finally {
+    try {
+      const { getGroupTypedMemoryDir } = require("../collaboration/group-memory-index");
+      const dir = getGroupTypedMemoryDir(groupId);
+      if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+    try { if (workItemsFile && fs.existsSync(workItemsFile)) fs.unlinkSync(workItemsFile); } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisorySelfTest() {
+  const groupId = `memory-center-pressure-provenance-feedback-provider-dispatch-advisory-selftest-${process.pid}-${Date.now()}`;
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const targetProject = "api";
+  const riskyAgentType = "codex";
+  const saferAgentType = "cursor";
+  const relPath = "pressure-provenance-provider-dispatch-advisory.md";
+  const providerCandidates = [
+    { groupId, project: targetProject, agent_type: riskyAgentType, configured: true, current: true, source: "selftest-current-config" },
+    { groupId, project: targetProject, agent_type: saferAgentType, configured: false, source: "selftest-alternative-runner" },
+  ];
+  try {
+    const {
+      distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory,
+      distillPressureProvenancePreDispatchComplianceToTypedMemory,
+    } = require("../collaboration/group-memory-index");
+    distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase144-initial-missing-usage",
+          binding_id: "binding-phase144-initial-missing-usage",
+          project: targetProject,
+          agent_type: riskyAgentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          missing_memory_provenance_usage: true,
+          gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "missing memoryProvenanceUsage" }],
+          rel_paths: [relPath],
+        },
+        {
+          groupId,
+          packet_id: "wcp-phase144-initial-current-source-gap",
+          binding_id: "binding-phase144-initial-current-source-gap",
+          project: targetProject,
+          agent_type: riskyAgentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          current_source_verified_gap: true,
+          gaps: [{ code: "receipt_currentSourceVerified", reason: "currentSourceVerified=false" }],
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      frequentThreshold: 2,
+      updatedAt: "2026-07-10T02:30:00.000Z",
+    });
+    distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase144-recovery-1",
+          binding_id: "binding-phase144-recovery-1",
+          project: targetProject,
+          agent_type: riskyAgentType,
+          status: "compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          receipt_row_count: 1,
+          compliant_doc_count: 1,
+          current_source_verified_count: 1,
+          rel_paths: [relPath],
+        },
+        {
+          groupId,
+          packet_id: "wcp-phase144-recovery-2",
+          binding_id: "binding-phase144-recovery-2",
+          project: targetProject,
+          agent_type: riskyAgentType,
+          status: "compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          receipt_row_count: 1,
+          compliant_doc_count: 1,
+          current_source_verified_count: 1,
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      updatedAt: "2026-07-10T02:30:01.000Z",
+    });
+    distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase144-relapse-missing-usage",
+          binding_id: "binding-phase144-relapse-missing-usage",
+          project: targetProject,
+          agent_type: riskyAgentType,
+          status: "non_compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          missing_memory_provenance_usage: true,
+          gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "relapse missing memoryProvenanceUsage" }],
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      frequentThreshold: 2,
+      updatedAt: "2026-07-10T02:30:02.000Z",
+    });
+    const activeHealthReport = buildWorkerContextPacketPressureProvenanceFeedbackComplianceHealthReport({
+      groupIds: [groupId],
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T02:30:03.000Z",
+    });
+    const activeAdvisoryReport = buildWorkerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport({
+      groupIds: [groupId],
+      providerCandidates,
+      complianceHealthReport: activeHealthReport,
+      generatedAt: "2026-07-10T02:30:03.000Z",
+    });
+    const activeQuality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_feedback_provider_dispatch_advisory"],
+      groupIds: [groupId],
+      refresh: true,
+      providerCandidates,
+      complianceHealthReport: activeHealthReport,
+      generatedAt: "2026-07-10T02:30:03.000Z",
+    });
+    const activeCheck = (activeQuality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_feedback_provider_dispatch_advisory") || {};
+    const activeGroup = activeAdvisoryReport.groups?.[0] || {};
+    const activeProject = activeGroup.projects?.[0] || {};
+    const activeRiskyCandidate = (activeProject.candidates || []).find((item: any) => item.agent_type === riskyAgentType) || {};
+    const activeSaferCandidate = (activeProject.candidates || []).find((item: any) => item.agent_type === saferAgentType) || {};
+    distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory(groupId, {
+      packets: [
+        {
+          groupId,
+          packet_id: "wcp-phase144-post-relapse-recovery",
+          binding_id: "binding-phase144-post-relapse-recovery",
+          project: targetProject,
+          agent_type: riskyAgentType,
+          status: "compliant",
+          pre_dispatch_prompted: true,
+          required_doc_count: 1,
+          receipt_row_count: 1,
+          compliant_doc_count: 1,
+          current_source_verified_count: 1,
+          rel_paths: [relPath],
+        },
+      ],
+    }, {
+      updatedAt: "2026-07-10T02:30:04.000Z",
+    });
+    const recoveredHealthReport = buildWorkerContextPacketPressureProvenanceFeedbackComplianceHealthReport({
+      groupIds: [groupId],
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T02:30:05.000Z",
+    });
+    const recoveredAdvisoryReport = buildWorkerContextPacketPressureProvenanceFeedbackProviderDispatchAdvisoryReport({
+      groupIds: [groupId],
+      providerCandidates,
+      complianceHealthReport: recoveredHealthReport,
+      generatedAt: "2026-07-10T02:30:05.000Z",
+    });
+    const recoveredGroup = recoveredAdvisoryReport.groups?.[0] || {};
+    const recoveredProject = recoveredGroup.projects?.[0] || {};
+    const recoveredRiskyCandidate = (recoveredProject.candidates || []).find((item: any) => item.agent_type === riskyAgentType) || {};
+    const checks = {
+      activeAdvisoryWarnsButDoesNotFailWithSaferAlternative: activeAdvisoryReport.overall?.status === "warn"
+        && activeGroup.status === "warn"
+        && activeProject.status === "warn",
+      criticalConfiguredRunnerIsHeld: activeRiskyCandidate.health_status === "critical"
+        && activeRiskyCandidate.dispatch_policy === "hold_until_repair"
+        && activeProject.should_hold_configured_dispatch === true,
+      saferRunnerPreferred: activeProject.preferred_agent_type === saferAgentType
+        && activeSaferCandidate.dispatch_policy === "preferred"
+        && Number(activeProject.safer_alternative_count || 0) >= 1,
+      qualityCheckPassesAdvisoryCoverage: activeCheck.status === "ok"
+        && Number(activeCheck.checked || 0) === 1
+        && Number(activeCheck.passed || 0) === 1,
+      recoveredAdvisoryReturnsToOk: recoveredAdvisoryReport.overall?.status === "ok"
+        && recoveredGroup.status === "ok"
+        && recoveredRiskyCandidate.health_status === "monitor"
+        && recoveredRiskyCandidate.dispatch_policy === "allow_with_receipt_sampling",
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      active: {
+        overall: activeAdvisoryReport.overall,
+        project: {
+          project: activeProject.project || "",
+          status: activeProject.status || "",
+          preferred_agent_type: activeProject.preferred_agent_type || "",
+          safer_alternative_count: activeProject.safer_alternative_count || 0,
+          recommendation: activeProject.recommendation || "",
+        },
+        riskyCandidate: {
+          agent_type: activeRiskyCandidate.agent_type || "",
+          health_status: activeRiskyCandidate.health_status || "",
+          dispatch_policy: activeRiskyCandidate.dispatch_policy || "",
+          open_repair_item_count: activeRiskyCandidate.open_repair_item_count || 0,
+        },
+        saferCandidate: {
+          agent_type: activeSaferCandidate.agent_type || "",
+          health_status: activeSaferCandidate.health_status || "",
+          dispatch_policy: activeSaferCandidate.dispatch_policy || "",
+        },
+        check: {
+          id: activeCheck.id || "",
+          status: activeCheck.status || "",
+          checked: activeCheck.checked || 0,
+          passed: activeCheck.passed || 0,
+        },
+      },
+      recovered: {
+        overall: recoveredAdvisoryReport.overall,
+        project: {
+          project: recoveredProject.project || "",
+          status: recoveredProject.status || "",
+          preferred_agent_type: recoveredProject.preferred_agent_type || "",
+          recommendation: recoveredProject.recommendation || "",
+        },
+        riskyCandidate: {
+          agent_type: recoveredRiskyCandidate.agent_type || "",
+          health_status: recoveredRiskyCandidate.health_status || "",
+          dispatch_policy: recoveredRiskyCandidate.dispatch_policy || "",
+          completed_repair_item_count: recoveredRiskyCandidate.completed_repair_item_count || 0,
+        },
+      },
+    };
+  } finally {
+    try {
+      const { getGroupTypedMemoryDir } = require("../collaboration/group-memory-index");
+      const dir = getGroupTypedMemoryDir(groupId);
+      if (dir && fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+    try { if (workItemsFile && fs.existsSync(workItemsFile)) fs.unlinkSync(workItemsFile); } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchDecisionLedgerSelfTest() {
+  const groupId = `memory-center-pressure-provenance-provider-dispatch-decision-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const targetProject = "api";
+  const agentType = "codex";
+  const activeAdvisory = {
+    schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+    groupId,
+    project: targetProject,
+    agent_type: agentType,
+    health_status: "critical",
+    dispatch_policy: "hold_until_repair",
+    should_hold_dispatch: true,
+    selected_candidate: {
+      schema: "ccm-pressure-provenance-feedback-provider-dispatch-selected-candidate-v1",
+      groupId,
+      project: targetProject,
+      agent_type: agentType,
+      health_status: "critical",
+      dispatch_policy: "hold_until_repair",
+      should_hold_dispatch: true,
+      current_open_repair_item_ids: ["phase146-pressure-provider-repair"],
+    },
+    recommendation: "hold codex/api child-agent dispatch until pressure provenance repair closes",
+  };
+  const recoveredAdvisory = {
+    schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+    groupId,
+    project: targetProject,
+    agent_type: agentType,
+    health_status: "monitor",
+    dispatch_policy: "allow_with_receipt_sampling",
+    should_hold_dispatch: false,
+    selected_candidate: {
+      schema: "ccm-pressure-provenance-feedback-provider-dispatch-selected-candidate-v1",
+      groupId,
+      project: targetProject,
+      agent_type: agentType,
+      health_status: "monitor",
+      dispatch_policy: "allow_with_receipt_sampling",
+      should_hold_dispatch: false,
+    },
+    recommendation: "allow dispatch with receipt sampling after pressure provenance recovery",
+  };
+  const packetFor = (id: string, advisory: any) => ({
+    schema: "ccm-worker-context-packet-v1",
+    packet_id: id,
+    groupId,
+    project: targetProject,
+    agent_type: agentType,
+    task: `phase146 provider dispatch decision ${id}`,
+    memory: {},
+    context_usage: {
+      schema: "ccm-worker-context-usage-v1",
+      packet_id: id,
+      project: targetProject,
+      status: "ok",
+      pressure: 20,
+      total_tokens: 200,
+      max_tokens: 2000,
+      free_tokens: 1680,
+      autocompact_buffer_tokens: 120,
+      categories: [],
+    },
+    pressure_provenance_provider_dispatch_advisory: advisory,
+    acceptance: {
+      pressure_provenance_provider_dispatch_advisory_ack_required: true,
+      pressure_provenance_provider_dispatch_hold_required: advisory.should_hold_dispatch === true,
+    },
+  });
+  const gateFor = (packet: any, advisory: any, blocked: boolean) => ({
+    schema: "ccm-worker-context-pre-dispatch-gate-v1",
+    gate_id: `worker-context-pre-dispatch:${packet.packet_id}`,
+    groupId,
+    project: targetProject,
+    worker_context_packet_id: packet.packet_id,
+    pressure_status: "ok",
+    dispatch_ready: !blocked,
+    dispatchReady: !blocked,
+    blocked,
+    provider_dispatch_hold: blocked,
+    pressure_provenance_provider_dispatch_advisory: advisory,
+    repair_source: blocked ? "worker_context_pressure_provenance_feedback_provider_dispatch_advisory" : "",
+    next_step: blocked ? "repair_pressure_provenance_provider_before_child_dispatch" : "dispatch_child_agent",
+    reason: blocked ? "Pressure provenance provider dispatch hold for phase146 selftest." : "Provider recovered; dispatch with receipt sampling.",
+  });
+  try {
+    const {
+      recordWorkerContextPacketAssignmentBindingForCoordinator,
+    } = require("../collaboration/group-orchestrator");
+    const activePacket = packetFor("wcp-phase146-decision-active", activeAdvisory);
+    const activeGate = gateFor(activePacket, activeAdvisory, true);
+    recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, {
+      scopeId: groupId,
+      project: targetProject,
+      agentType,
+      assignmentId: "assignment-phase146-decision-active",
+      dispatchKey: "dispatch-phase146-decision-active",
+      taskFingerprint: "phase146 provider decision active",
+      worker_context_packet: activePacket,
+      worker_context_pre_dispatch_gate: activeGate,
+      dispatch_ready: false,
+    });
+    const recoveredPacket = packetFor("wcp-phase146-decision-recovered", recoveredAdvisory);
+    const recoveredGate = gateFor(recoveredPacket, recoveredAdvisory, false);
+    recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, {
+      scopeId: groupId,
+      project: targetProject,
+      agentType,
+      assignmentId: "assignment-phase146-decision-recovered",
+      dispatchKey: "dispatch-phase146-decision-recovered",
+      taskFingerprint: "phase146 provider decision recovered",
+      worker_context_packet: recoveredPacket,
+      worker_context_pre_dispatch_gate: recoveredGate,
+      dispatch_ready: true,
+    });
+    const report = buildWorkerContextPacketPressureProvenanceProviderDispatchDecisionLedgerReport({
+      groupIds: [groupId],
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_provider_dispatch_decision_ledger"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const check = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_provider_dispatch_decision_ledger") || {};
+    const group = report.groups?.[0] || {};
+    const activeCheck = (group.checks || []).find((item: any) => item.assignment_id === "assignment-phase146-decision-active") || {};
+    const recoveredCheck = (group.checks || []).find((item: any) => item.assignment_id === "assignment-phase146-decision-recovered") || {};
+    const checks = {
+      reportCoversBothDecisions: report.overall?.status === "ok"
+        && Number(report.overall.checkedDecisionCount || 0) === 2
+        && Number(report.overall.coveredDecisionCount || 0) === 2,
+      activeDecisionRequiresHold: activeCheck.action === "hold_until_repair"
+        && activeCheck.expected_action === "hold_until_repair"
+        && activeCheck.provider_dispatch_hold === true
+        && activeCheck.covered === true,
+      recoveredDecisionRequiresReceiptSampling: recoveredCheck.action === "dispatch_with_receipt_sampling"
+        && recoveredCheck.expected_action === "dispatch_with_receipt_sampling"
+        && recoveredCheck.covered === true,
+      qualityCheckPasses: check.status === "ok"
+        && Number(check.checked || 0) === 2
+        && Number(check.passed || 0) === 2,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      active: {
+        action: activeCheck.action || "",
+        expected_action: activeCheck.expected_action || "",
+        covered: activeCheck.covered === true,
+      },
+      recovered: {
+        action: recoveredCheck.action || "",
+        expected_action: recoveredCheck.expected_action || "",
+        covered: recoveredCheck.covered === true,
+      },
+      check: {
+        id: check.id || "",
+        status: check.status || "",
+        checked: check.checked || 0,
+        passed: check.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideReceiptSelfTest() {
+  const groupId = `memory-center-pressure-provenance-provider-dispatch-override-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const targetProject = "api";
+  const agentType = "codex";
+  const advisory = {
+    schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+    groupId,
+    project: targetProject,
+    agent_type: agentType,
+    health_status: "critical",
+    dispatch_policy: "hold_until_repair",
+    should_hold_dispatch: true,
+    selected_candidate: {
+      schema: "ccm-pressure-provenance-feedback-provider-dispatch-selected-candidate-v1",
+      groupId,
+      project: targetProject,
+      agent_type: agentType,
+      health_status: "critical",
+      dispatch_policy: "hold_until_repair",
+      should_hold_dispatch: true,
+      current_open_repair_item_ids: ["phase147-pressure-provider-repair"],
+    },
+    recommendation: "hold codex/api child-agent dispatch until pressure provenance repair closes",
+  };
+  const overrideReceipt = {
+    schema: "ccm-pressure-provenance-provider-dispatch-override-receipt-v1",
+    override_id: "provider-dispatch-override:phase147-selftest",
+    valid: true,
+    approved: true,
+    approved_by: "local-user",
+    risk_accepted: true,
+    acknowledges_repair_required: true,
+    reason: "Phase 147 Memory Center selftest accepts temporary provider risk and requires follow-up repair.",
+    project: targetProject,
+    agent_type: agentType,
+    override_action: "allow_once",
+    approved_at: "2026-07-10T03:50:00.000Z",
+  };
+  const packet = {
+    schema: "ccm-worker-context-packet-v1",
+    packet_id: "wcp-phase147-override",
+    groupId,
+    project: targetProject,
+    agent_type: agentType,
+    task: "phase147 provider dispatch override receipt",
+    memory: {},
+    context_usage: {
+      schema: "ccm-worker-context-usage-v1",
+      packet_id: "wcp-phase147-override",
+      project: targetProject,
+      status: "ok",
+      pressure: 20,
+      total_tokens: 200,
+      max_tokens: 2000,
+      free_tokens: 1680,
+      autocompact_buffer_tokens: 120,
+      categories: [],
+    },
+    pressure_provenance_provider_dispatch_advisory: advisory,
+    acceptance: {
+      pressure_provenance_provider_dispatch_advisory_ack_required: true,
+      pressure_provenance_provider_dispatch_hold_required: true,
+    },
+  };
+  const gate = {
+    schema: "ccm-worker-context-pre-dispatch-gate-v1",
+    gate_id: "worker-context-pre-dispatch:phase147-override",
+    groupId,
+    project: targetProject,
+    worker_context_packet_id: packet.packet_id,
+    pressure_status: "ok",
+    dispatch_ready: true,
+    dispatchReady: true,
+    blocked: false,
+    provider_dispatch_hold: true,
+    provider_dispatch_hold_blocked: false,
+    provider_dispatch_hold_overridden: true,
+    provider_dispatch_override_receipt: overrideReceipt,
+    provider_dispatch_override_required_followup_repair: true,
+    pressure_provenance_provider_dispatch_advisory: advisory,
+    repair_source: "",
+    next_step: "dispatch_child_agent_with_provider_override_receipt",
+    reason: "Pressure provenance provider dispatch hold overridden by approved receipt provider-dispatch-override:phase147-selftest; follow-up repair/recovery remains required.",
+  };
+  try {
+    const {
+      recordWorkerContextPacketAssignmentBindingForCoordinator,
+    } = require("../collaboration/group-orchestrator");
+    recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, {
+      scopeId: groupId,
+      project: targetProject,
+      agentType,
+      assignmentId: "assignment-phase147-override",
+      dispatchKey: "dispatch-phase147-override",
+      taskFingerprint: "phase147 provider override",
+      provider_dispatch_override: overrideReceipt,
+      worker_context_packet: packet,
+      worker_context_pre_dispatch_gate: gate,
+      dispatch_ready: true,
+    });
+    const overrideReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideReceiptReport({
+      groupIds: [groupId],
+    });
+    const decisionReport = buildWorkerContextPacketPressureProvenanceProviderDispatchDecisionLedgerReport({
+      groupIds: [groupId],
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_provider_dispatch_override_receipts"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const check = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_provider_dispatch_override_receipts") || {};
+    const overrideGroup = overrideReport.groups?.[0] || {};
+    const overrideCheck = overrideGroup.checks?.[0] || {};
+    const decisionGroup = decisionReport.groups?.[0] || {};
+    const decisionCheck = decisionGroup.checks?.[0] || {};
+    const checks = {
+      overrideReportPasses: overrideReport.overall?.status === "ok"
+        && Number(overrideReport.overall.checkedOverrideCount || 0) === 1
+        && Number(overrideReport.overall.coveredOverrideCount || 0) === 1,
+      overrideCheckRequiresUserRiskReceipt: overrideCheck.covered === true
+        && overrideCheck.receipt_valid === true
+        && overrideCheck.approved_by === "local-user",
+      decisionLedgerTreatsOverrideAsDispatch: decisionReport.overall?.status === "ok"
+        && decisionCheck.expected_action === "dispatch_with_provider_override"
+        && decisionCheck.action === "dispatch_with_provider_override"
+        && decisionCheck.override_receipt_valid === true,
+      qualityCheckPasses: check.status === "ok"
+        && Number(check.checked || 0) === 1
+        && Number(check.passed || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: overrideReport.overall,
+      decision: {
+        action: decisionCheck.action || "",
+        expected_action: decisionCheck.expected_action || "",
+        override_receipt_valid: decisionCheck.override_receipt_valid === true,
+      },
+      check: {
+        id: check.id || "",
+        status: check.status || "",
+        checked: check.checked || 0,
+        passed: check.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupSelfTest() {
+  const groupId = `memory-center-pressure-provenance-provider-dispatch-override-followup-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const targetProject = "api";
+  const agentType = "codex";
+  const advisory = {
+    schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+    groupId,
+    project: targetProject,
+    agent_type: agentType,
+    health_status: "critical",
+    dispatch_policy: "hold_until_repair",
+    should_hold_dispatch: true,
+    selected_candidate: {
+      schema: "ccm-pressure-provenance-feedback-provider-dispatch-selected-candidate-v1",
+      groupId,
+      project: targetProject,
+      agent_type: agentType,
+      health_status: "critical",
+      dispatch_policy: "hold_until_repair",
+      should_hold_dispatch: true,
+      current_open_repair_item_ids: ["phase148-pressure-provider-repair"],
+    },
+  };
+  const overrideReceipt = {
+    schema: "ccm-pressure-provenance-provider-dispatch-override-receipt-v1",
+    override_id: "provider-dispatch-override:phase148-selftest",
+    valid: true,
+    approved: true,
+    approved_by: "local-user",
+    risk_accepted: true,
+    acknowledges_repair_required: true,
+    reason: "Phase 148 Memory Center selftest accepts temporary provider risk and requires completion follow-up.",
+    project: targetProject,
+    agent_type: agentType,
+    override_action: "allow_once",
+    approved_at: "2026-07-10T04:10:00.000Z",
+  };
+  const packet = {
+    schema: "ccm-worker-context-packet-v1",
+    packet_id: "wcp-phase148-override-followup",
+    groupId,
+    project: targetProject,
+    agent_type: agentType,
+    task: "phase148 provider dispatch override follow-up",
+    memory: {},
+    context_usage: {
+      schema: "ccm-worker-context-usage-v1",
+      packet_id: "wcp-phase148-override-followup",
+      project: targetProject,
+      status: "ok",
+      pressure: 20,
+      total_tokens: 200,
+      max_tokens: 2000,
+      free_tokens: 1680,
+      autocompact_buffer_tokens: 120,
+      categories: [],
+    },
+    pressure_provenance_provider_dispatch_advisory: advisory,
+    acceptance: {
+      pressure_provenance_provider_dispatch_advisory_ack_required: true,
+      pressure_provenance_provider_dispatch_hold_required: true,
+    },
+  };
+  const gate = {
+    schema: "ccm-worker-context-pre-dispatch-gate-v1",
+    gate_id: "worker-context-pre-dispatch:phase148-override-followup",
+    groupId,
+    project: targetProject,
+    worker_context_packet_id: packet.packet_id,
+    pressure_status: "ok",
+    dispatch_ready: true,
+    dispatchReady: true,
+    blocked: false,
+    provider_dispatch_hold: true,
+    provider_dispatch_hold_blocked: false,
+    provider_dispatch_hold_overridden: true,
+    provider_dispatch_override_receipt: overrideReceipt,
+    provider_dispatch_override_required_followup_repair: true,
+    pressure_provenance_provider_dispatch_advisory: advisory,
+    repair_source: "",
+    next_step: "dispatch_child_agent_with_provider_override_receipt",
+    reason: "Pressure provenance provider dispatch hold overridden by approved receipt provider-dispatch-override:phase148-selftest; follow-up repair/recovery remains required.",
+  };
+  try {
+    const {
+      recordWorkerContextPacketAssignmentBindingForCoordinator,
+      recordWorkerContextProviderDispatchOverrideCompletionForCoordinator,
+    } = require("../collaboration/group-orchestrator");
+    const binding = recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, {
+      scopeId: groupId,
+      project: targetProject,
+      agentType,
+      assignmentId: "assignment-phase148-override-followup",
+      dispatchKey: "dispatch-phase148-override-followup",
+      taskFingerprint: "phase148 provider override followup",
+      provider_dispatch_override: overrideReceipt,
+      worker_context_packet: packet,
+      worker_context_pre_dispatch_gate: gate,
+      dispatch_ready: true,
+    });
+    const receipt = {
+      status: "done",
+      summary: "phase148 Memory Center override follow-up receipt",
+      memoryProvenanceUsage: [{
+        relPath: "pressure-provider-dispatch-override-followup.md",
+        usageState: "verified",
+        repairStatus: "completed",
+        repairGapType: "provider_dispatch_override_followup",
+        currentSourceVerified: true,
+        reason: "selftest verified current source after provider override dispatch",
+      }],
+    };
+    const completion = recordWorkerContextProviderDispatchOverrideCompletionForCoordinator(groupId, {
+      assignment_id: "assignment-phase148-override-followup",
+      dispatch_key: "dispatch-phase148-override-followup",
+      worker_context_packet_id: packet.packet_id,
+      task_id: "task-phase148-override-followup",
+      worker_handoff_id: "handoff-phase148-override-followup",
+      task_agent_session_id: "tas-phase148-override-followup",
+      native_session_id: "native-phase148-override-followup",
+      execution_id: "execution-phase148-override-followup",
+      memory_context_snapshot_id: "snapshot-phase148-override-followup",
+      memory_context_snapshot_checksum: "snapshot-checksum-phase148-override-followup",
+      receipt_status: "done",
+      receipt,
+    }, { at: "2026-07-10T04:11:00.000Z" });
+    const report = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReport({
+      groupIds: [groupId],
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_provider_dispatch_override_followups"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const check = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_provider_dispatch_override_followups") || {};
+    const group = report.groups?.[0] || {};
+    const row = group.checks?.[0] || {};
+    const workItemLedger = readGroupCompactBoundaryReplayRepairWorkItems(groupId);
+    const workItem = (workItemLedger.items || []).find((item: any) => (item.work_item_id || item.id) === binding?.worker_context_provider_dispatch_override_followup_repair?.work_item_id) || {};
+    const checks = {
+      bindingCreatedFollowupWorkItem: !!binding?.worker_context_provider_dispatch_override_followup_repair?.work_item_id
+        && workItem.source === "worker_context_pressure_provenance_provider_dispatch_override_followup",
+      completionClosesFollowup: completion?.completion_ok === true
+        && completion?.followup_repair_work_item_completion?.closed === 1
+        && replayRepairWorkItemStatus(workItem.status) === "completed",
+      followupReportPasses: report.overall?.status === "ok"
+        && Number(report.overall.checkedOverrideDispatchCount || 0) === 1
+        && Number(report.overall.coveredOverrideDispatchCount || 0) === 1,
+      reportRowShowsVerifiedCompletion: row.covered === true
+        && row.completionOk === true
+        && row.workItemClosed === true
+        && row.memory_provenance_usage_count === 1
+        && row.current_source_verified_count === 1,
+      qualityCheckPasses: check.status === "ok"
+        && Number(check.checked || 0) === 1
+        && Number(check.passed || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      row: {
+        followup_work_item_id: row.followup_work_item_id || "",
+        completion_id: row.completion_id || "",
+        covered: row.covered === true,
+      },
+      check: {
+        id: check.id || "",
+        status: check.status || "",
+        checked: check.checked || 0,
+        passed: check.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupTypedMemorySelfTest() {
+  const groupId = `memory-center-pressure-provenance-provider-dispatch-override-followup-typed-memory-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(groupId);
+  const targetProject = "api";
+  const agentType = "codex";
+  let typedDir = "";
+  const advisory = {
+    schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+    groupId,
+    project: targetProject,
+    agent_type: agentType,
+    health_status: "critical",
+    dispatch_policy: "hold_until_repair",
+    should_hold_dispatch: true,
+    selected_candidate: {
+      schema: "ccm-pressure-provenance-feedback-provider-dispatch-selected-candidate-v1",
+      groupId,
+      project: targetProject,
+      agent_type: agentType,
+      health_status: "critical",
+      dispatch_policy: "hold_until_repair",
+      should_hold_dispatch: true,
+      current_open_repair_item_ids: ["phase149-pressure-provider-repair"],
+    },
+  };
+  const overrideReceipt = {
+    schema: "ccm-pressure-provenance-provider-dispatch-override-receipt-v1",
+    override_id: "provider-dispatch-override:phase149-selftest",
+    valid: true,
+    approved: true,
+    approved_by: "local-user",
+    risk_accepted: true,
+    acknowledges_repair_required: true,
+    reason: "Phase 149 typed memory selftest accepts temporary provider risk and requires verified follow-up memory.",
+    project: targetProject,
+    agent_type: agentType,
+    override_action: "allow_once",
+    approved_at: "2026-07-10T04:20:00.000Z",
+  };
+  const packet = {
+    schema: "ccm-worker-context-packet-v1",
+    packet_id: "wcp-phase149-override-followup-typed-memory",
+    groupId,
+    project: targetProject,
+    agent_type: agentType,
+    task: "phase149 provider dispatch override follow-up typed memory",
+    memory: {},
+    context_usage: {
+      schema: "ccm-worker-context-usage-v1",
+      packet_id: "wcp-phase149-override-followup-typed-memory",
+      project: targetProject,
+      status: "ok",
+      pressure: 20,
+      total_tokens: 200,
+      max_tokens: 2000,
+      free_tokens: 1680,
+      autocompact_buffer_tokens: 120,
+      categories: [],
+    },
+    pressure_provenance_provider_dispatch_advisory: advisory,
+    acceptance: {
+      pressure_provenance_provider_dispatch_advisory_ack_required: true,
+      pressure_provenance_provider_dispatch_hold_required: true,
+    },
+  };
+  const gate = {
+    schema: "ccm-worker-context-pre-dispatch-gate-v1",
+    gate_id: "worker-context-pre-dispatch:phase149-override-followup-typed-memory",
+    groupId,
+    project: targetProject,
+    worker_context_packet_id: packet.packet_id,
+    pressure_status: "ok",
+    dispatch_ready: true,
+    dispatchReady: true,
+    blocked: false,
+    provider_dispatch_hold: true,
+    provider_dispatch_hold_blocked: false,
+    provider_dispatch_hold_overridden: true,
+    provider_dispatch_override_receipt: overrideReceipt,
+    provider_dispatch_override_required_followup_repair: true,
+    pressure_provenance_provider_dispatch_advisory: advisory,
+    repair_source: "",
+    next_step: "dispatch_child_agent_with_provider_override_receipt",
+    reason: "Pressure provenance provider dispatch hold overridden by approved receipt provider-dispatch-override:phase149-selftest; follow-up typed memory remains required.",
+  };
+  try {
+    const {
+      buildGroupTypedMemoryRecall,
+      getGroupTypedMemoryDir,
+      readGroupTypedMemoryDistillationLedger,
+      scanGroupTypedMemoryDocuments,
+    } = require("../collaboration/group-memory-index");
+    const {
+      recordWorkerContextPacketAssignmentBindingForCoordinator,
+      recordWorkerContextProviderDispatchOverrideCompletionForCoordinator,
+    } = require("../collaboration/group-orchestrator");
+    typedDir = getGroupTypedMemoryDir(groupId);
+    const binding = recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, {
+      scopeId: groupId,
+      project: targetProject,
+      agentType,
+      assignmentId: "assignment-phase149-override-followup-typed-memory",
+      dispatchKey: "dispatch-phase149-override-followup-typed-memory",
+      taskFingerprint: "phase149 provider override followup typed memory",
+      provider_dispatch_override: overrideReceipt,
+      worker_context_packet: packet,
+      worker_context_pre_dispatch_gate: gate,
+      dispatch_ready: true,
+    });
+    const receipt = {
+      status: "done",
+      summary: "phase149 Memory Center override follow-up typed memory receipt",
+      memoryProvenanceUsage: [{
+        relPath: "pressure-provider-dispatch-override-followup-typed-memory.md",
+        usageState: "verified",
+        repairStatus: "completed",
+        repairGapType: "provider_dispatch_override_followup",
+        currentSourceVerified: true,
+        reason: "PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_TYPED_MEMORY_SENTINEL verified current source after provider override dispatch.",
+      }],
+    };
+    const completion = recordWorkerContextProviderDispatchOverrideCompletionForCoordinator(groupId, {
+      assignment_id: "assignment-phase149-override-followup-typed-memory",
+      dispatch_key: "dispatch-phase149-override-followup-typed-memory",
+      worker_context_packet_id: packet.packet_id,
+      task_id: "task-phase149-override-followup-typed-memory",
+      worker_handoff_id: "handoff-phase149-override-followup-typed-memory",
+      task_agent_session_id: "tas-phase149-override-followup-typed-memory",
+      native_session_id: "native-phase149-override-followup-typed-memory",
+      execution_id: "execution-phase149-override-followup-typed-memory",
+      memory_context_snapshot_id: "snapshot-phase149-override-followup-typed-memory",
+      memory_context_snapshot_checksum: "snapshot-checksum-phase149-override-followup-typed-memory",
+      receipt_status: "done",
+      receipt,
+    }, { at: "2026-07-10T04:21:00.000Z" });
+    const report = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupTypedMemoryReport({
+      groupIds: [groupId],
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_provider_dispatch_override_followup_typed_memory"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const check = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_typed_memory") || {};
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const recall = buildGroupTypedMemoryRecall(groupId, "PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_TYPED_MEMORY_SENTINEL pressure-provider-dispatch-override-followup-typed-memory.md", {
+      disableLedger: true,
+      forceMemory: true,
+      max: 8,
+    });
+    const archiveRows = typedLedger.pressureProvenanceProviderDispatchOverrideFollowupArchive?.rows || [];
+    const recallText = JSON.stringify(recall.recalled || []);
+    const group = report.groups?.[0] || {};
+    const checks = {
+      completionRecordedVerifiedFollowup: completion?.completion_ok === true
+        && completion?.memory_provenance_usage_count === 1
+        && completion?.current_source_verified_count === 1,
+      typedArchiveCapturesCompletedOverride: typedLedger.pressureProvenanceProviderDispatchOverrideFollowupArchive?.archived_count === 1
+        && typedLedger.pressureProvenanceProviderDispatchOverrideFollowupArchive?.completed_count === 1
+        && archiveRows.some((row: any) => row.all_current_source_verified === true
+          && row.followup_work_item_id === binding?.worker_context_provider_dispatch_override_followup_repair?.work_item_id),
+      typedFeedbackDocWritten: docs.some((doc: any) => doc.relPath === "provider-dispatch-override-followup-recall.md" && doc.type === "feedback"),
+      recallProbeFindsTypedRepairMemory: recallText.includes("PROVIDER_DISPATCH_OVERRIDE_FOLLOWUP_TYPED_MEMORY_SENTINEL")
+        && recallText.includes("provider-dispatch-override-followup-recall.md"),
+      reportCoversTypedMemoryDistillation: report.overall?.status === "ok"
+        && Number(report.overall.completedOverrideFollowupCount || 0) === 1
+        && Number(report.overall.archivedOverrideFollowupCount || 0) === 1
+        && group.recallProbeCovered === true,
+      qualityCheckPasses: check.status === "ok"
+        && Number(check.checked || 0) === 1
+        && Number(check.passed || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      typedArchive: {
+        archived_count: typedLedger.pressureProvenanceProviderDispatchOverrideFollowupArchive?.archived_count || 0,
+        completed_count: typedLedger.pressureProvenanceProviderDispatchOverrideFollowupArchive?.completed_count || 0,
+        attribution_count: typedLedger.pressureProvenanceProviderDispatchOverrideFollowupArchive?.attribution_count || 0,
+      },
+      recalled: recall.recalled.map((item: any) => item.relPath),
+      check: {
+        id: check.id || "",
+        status: check.status || "",
+        checked: check.checked || 0,
+        passed: check.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (typedDir) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicySelfTest() {
+  const groupId = `memory-center-pressure-provider-override-followup-pre-dispatch-policy-selftest-${process.pid}-${Date.now()}`;
+  let typedDir = "";
+  const targetProject = "api";
+  const agentType = "codex";
+  const relPath = "pressure-provider-dispatch-override-followup-pre-dispatch-policy.md";
+  try {
+    const {
+      buildPressureProvenancePreDispatchComplianceDispatchPolicy,
+      distillPressureProvenancePreDispatchComplianceToTypedMemory,
+      distillProviderDispatchOverrideFollowupToTypedMemory,
+      getGroupTypedMemoryDir,
+      readGroupTypedMemoryDistillationLedger,
+    } = require("../collaboration/group-memory-index");
+    typedDir = getGroupTypedMemoryDir(groupId);
+    distillPressureProvenancePreDispatchComplianceToTypedMemory(groupId, {
+      packets: [{
+        groupId,
+        packet_id: "wcp-phase150-mcc-initial-missing-usage",
+        binding_id: "binding-phase150-mcc-initial-missing-usage",
+        project: targetProject,
+        agent_type: agentType,
+        status: "non_compliant",
+        pre_dispatch_prompted: true,
+        required_doc_count: 1,
+        missing_memory_provenance_usage: true,
+        gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "initial missing memoryProvenanceUsage" }],
+        rel_paths: [relPath],
+      }],
+    }, {
+      frequentThreshold: 2,
+      updatedAt: "2026-07-10T04:40:00.000Z",
+    });
+    distillProviderDispatchOverrideFollowupToTypedMemory(groupId, {
+      rows: [{
+        groupId,
+        project: targetProject,
+        agent_type: agentType,
+        binding_id: "binding-phase150-mcc-provider-override-followup",
+        assignment_id: "assignment-phase150-mcc-provider-override-followup",
+        dispatch_key: "dispatch-phase150-mcc-provider-override-followup",
+        worker_context_packet_id: "wcp-phase150-mcc-provider-override-followup",
+        worker_context_provider_dispatch_decision: {
+          schema: "ccm-worker-context-provider-dispatch-decision-v1",
+          action: "dispatch_with_provider_override",
+          decision_id: "decision-phase150-mcc-provider-override-followup",
+          project: targetProject,
+          agent_type: agentType,
+        },
+        worker_context_provider_dispatch_override_receipt: {
+          schema: "ccm-pressure-provenance-provider-dispatch-override-receipt-v1",
+          override_id: "provider-dispatch-override:phase150-mcc-pre-dispatch-policy",
+          valid: true,
+          approved: true,
+          approved_by: "local-user",
+          risk_accepted: true,
+          acknowledges_repair_required: true,
+          reason: "Phase 150 Memory Center policy selftest repaired provider override history.",
+        },
+        worker_context_provider_dispatch_override_followup_repair: {
+          work_item_id: "work-phase150-mcc-provider-override-followup",
+        },
+        worker_context_provider_dispatch_override_completion: {
+          schema: "ccm-worker-context-provider-dispatch-override-completion-v1",
+          completion_id: "completion-phase150-mcc-provider-override-followup",
+          status: "completed",
+          completion_ok: true,
+          project: targetProject,
+          agent_type: agentType,
+          binding_id: "binding-phase150-mcc-provider-override-followup",
+          assignment_id: "assignment-phase150-mcc-provider-override-followup",
+          dispatch_key: "dispatch-phase150-mcc-provider-override-followup",
+          worker_context_packet_id: "wcp-phase150-mcc-provider-override-followup",
+          decision_id: "decision-phase150-mcc-provider-override-followup",
+          override_id: "provider-dispatch-override:phase150-mcc-pre-dispatch-policy",
+          followup_work_item_id: "work-phase150-mcc-provider-override-followup",
+          task_id: "task-phase150-mcc-provider-override-followup",
+          task_agent_session_id: "tas-phase150-mcc-provider-override-followup",
+          execution_id: "execution-phase150-mcc-provider-override-followup",
+          receipt_status: "done",
+          memory_provenance_usage_count: 1,
+          current_source_verified_count: 1,
+          receipt: {
+            status: "done",
+            memoryProvenanceUsage: [{
+              relPath,
+              usageState: "verified",
+              repairStatus: "completed",
+              repairGapType: "provider_dispatch_override_followup",
+              currentSourceVerified: true,
+              reason: "PROVIDER_OVERRIDE_FOLLOWUP_PRE_DISPATCH_POLICY_SENTINEL repaired provider override history.",
+            }],
+          },
+          reason: "verified provider override follow-up completion",
+          at: "2026-07-10T04:41:00.000Z",
+        },
+      }],
+    }, {
+      reason: "phase150-mcc-provider-override-followup-pre-dispatch-policy",
+      updatedAt: "2026-07-10T04:41:00.000Z",
+    });
+    const policy = buildPressureProvenancePreDispatchComplianceDispatchPolicy(groupId, {
+      targetProject,
+      agentType,
+      frequentThreshold: 2,
+      generatedAt: "2026-07-10T04:41:30.000Z",
+    });
+    const report = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupPreDispatchPolicyReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-10T04:41:30.000Z",
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_provider_dispatch_override_followup_pre_dispatch_policy"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const check = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_pre_dispatch_policy") || {};
+    const typedLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const policyRow = (policy.policyRows || [])[0] || {};
+    const probe = report.groups?.[0]?.probes?.[0] || {};
+    const checks = {
+      typedArchiveHasOverrideFollowupAttribution: typedLedger.pressureProvenanceProviderDispatchOverrideFollowupArchive?.attribution_count === 1
+        && typedLedger.pressureProvenanceProviderDispatchOverrideFollowupArchive?.attributions?.[0]?.completed_count === 1,
+      policyConsumesOverrideFollowupArchive: policy.providerOverrideFollowupRepairedAttributionCount === 1
+        && policyRow.provider_override_followup_repaired === true
+        && Number(policyRow.provider_override_followup_repaired_count || 0) === 1
+        && policyRow.provider_override_followup_last_completed_at === "2026-07-10T04:41:00.000Z",
+      reportCoversPreDispatchPolicyConsumption: report.overall?.status === "ok"
+        && Number(report.overall.providerOverrideFollowupAttributionCount || 0) === 1
+        && Number(report.overall.coveredProviderOverrideFollowupAttributionCount || 0) === 1
+        && probe.covered === true,
+      qualityCheckPasses: check.status === "ok"
+        && Number(check.checked || 0) === 1
+        && Number(check.passed || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      policy: {
+        action: policy.action || "",
+        providerOverrideFollowupRepairedAttributionCount: policy.providerOverrideFollowupRepairedAttributionCount || 0,
+        rowProviderOverrideFollowupRepaired: policyRow.provider_override_followup_repaired === true,
+      },
+      report: report.overall,
+      check: {
+        id: check.id || "",
+        status: check.status || "",
+        checked: check.checked || 0,
+        passed: check.passed || 0,
+      },
+    };
+  } finally {
+    try { if (typedDir) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractSelfTest() {
+  const groupId = `memory-center-pressure-provider-override-followup-receipt-contract-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const targetProject = "api";
+  const agentType = "codex";
+  try {
+    const { buildWorkerContextPacket, renderWorkerContextPacket } = require("../../agents/runtime-kernel");
+    const { recordWorkerContextPacketAssignmentBindingForCoordinator } = require("../collaboration/group-orchestrator");
+    const advisory = {
+      schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+      groupId,
+      project: targetProject,
+      agent_type: agentType,
+      health_status: "monitor",
+      dispatch_policy: "allow_with_receipt_sampling",
+      should_hold_dispatch: false,
+      selected_candidate: {
+        schema: "ccm-pressure-provenance-feedback-provider-dispatch-selected-candidate-v1",
+        groupId,
+        project: targetProject,
+        agent_type: agentType,
+        health_status: "monitor",
+        dispatch_policy: "allow_with_receipt_sampling",
+        should_hold_dispatch: false,
+        provider_override_followup_repaired: true,
+        provider_override_followup_repaired_count: 1,
+        provider_override_followup_memory_provenance_usage_count: 1,
+        provider_override_followup_current_source_verified_count: 1,
+        provider_override_followup_last_completed_at: "2026-07-10T04:51:00.000Z",
+        provider_override_followup_fresh_after_last_violation: true,
+        provider_override_followup_rel_paths: ["pressure-provider-dispatch-override-followup-receipt-contract.md"],
+        provider_override_followup_work_item_ids: ["work-phase151-provider-override-followup"],
+        provider_override_followup_override_ids: ["provider-dispatch-override:phase151-mcc"],
+      },
+    };
+    const packet = buildWorkerContextPacket({
+      group: { id: groupId, members: [{ project: targetProject }] },
+      project: targetProject,
+      agentType,
+      task: "Phase 151 provider override follow-up receipt contract selftest.",
+      pressureProvenanceProviderDispatchAdvisory: advisory,
+      contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+    });
+    const rendered = renderWorkerContextPacket(packet);
+    const binding = recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, {
+      scopeId: groupId,
+      project: targetProject,
+      agentType,
+      assignmentId: "assignment-phase151-provider-override-followup-contract",
+      dispatchKey: "dispatch-phase151-provider-override-followup-contract",
+      taskFingerprint: "phase151 provider override followup receipt contract",
+      worker_context_packet: packet,
+      dispatch_ready: true,
+    }, { at: "2026-07-10T04:52:00.000Z" }) || {};
+    const report = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-10T04:52:01.000Z",
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const check = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract") || {};
+    const contract = packet.pressure_provenance_provider_dispatch_override_followup_receipt_contract || {};
+    const category = (packet.context_usage?.categories || []).find((item: any) => item.id === "pressure_provenance_provider_dispatch_override_followup_receipt_contract") || {};
+    const checks = {
+      packetCarriesReceiptContract: contract.schema === "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-contract-v1"
+        && contract.active === true
+        && contract.rel_paths?.includes("pressure-provider-dispatch-override-followup-receipt-contract.md"),
+      packetAcceptanceRequiresSamplingReceipt: packet.acceptance?.pressure_provenance_provider_dispatch_override_followup_sampling_required === true
+        && packet.acceptance?.pressure_provenance_provider_dispatch_override_followup_receipt_required === true
+        && packet.acceptance?.provider_dispatch_override_followup_history_reverification_required === true
+        && packet.acceptance?.memory_provenance_usage_required === true,
+      packetUsageAndRenderExposeContract: category.required === true
+        && Number(category.tokens || 0) > 0
+        && rendered.includes("Provider dispatch override follow-up receipt contract")
+        && rendered.includes("providerDispatchOverrideFollowupHistoryReverified"),
+      bindingPersistsContractProbe: binding.worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract?.active === true
+        && binding.worker_context_packet_render_probe?.rendered_flags?.has_pressure_provenance_provider_dispatch_override_followup_receipt_contract === true,
+      reportCoversReceiptContract: report.overall?.status === "ok"
+        && Number(report.overall.checkedPacketCount || 0) === 1
+        && Number(report.overall.coveredPacketCount || 0) === 1
+        && Number(report.overall.failedPacketCount || 0) === 0,
+      qualityCheckPasses: check.status === "ok"
+        && Number(check.checked || 0) === 1
+        && Number(check.passed || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: report.overall,
+      check: {
+        id: check.id || "",
+        status: check.status || "",
+        checked: check.checked || 0,
+        passed: check.passed || 0,
+      },
+      contract: {
+        active: contract.active === true,
+        rel_paths: contract.rel_paths || [],
+        followup_work_item_ids: contract.followup_work_item_ids || [],
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationSelfTest() {
+  const groupId = `memory-center-pressure-provider-override-followup-receipt-contract-validation-selftest-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
+  const targetProject = "api";
+  const agentType = "codex";
+  const relPath = "pressure-provider-dispatch-override-followup-receipt-validation.md";
+  const followupWorkItemId = "work-phase152-mcc-provider-override-followup";
+  const overrideId = "provider-dispatch-override:phase152-mcc";
+  try {
+    const { buildWorkerContextPacket } = require("../../agents/runtime-kernel");
+    const {
+      recordWorkerContextPacketAssignmentBindingForCoordinator,
+      recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator,
+    } = require("../collaboration/group-orchestrator");
+    const advisory = {
+      schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+      groupId,
+      project: targetProject,
+      agent_type: agentType,
+      health_status: "monitor",
+      dispatch_policy: "allow_with_receipt_sampling",
+      should_hold_dispatch: false,
+      selected_candidate: {
+        schema: "ccm-pressure-provenance-feedback-provider-dispatch-selected-candidate-v1",
+        groupId,
+        project: targetProject,
+        agent_type: agentType,
+        health_status: "monitor",
+        dispatch_policy: "allow_with_receipt_sampling",
+        should_hold_dispatch: false,
+        provider_override_followup_repaired: true,
+        provider_override_followup_repaired_count: 1,
+        provider_override_followup_memory_provenance_usage_count: 1,
+        provider_override_followup_current_source_verified_count: 1,
+        provider_override_followup_last_completed_at: "2026-07-10T05:10:00.000Z",
+        provider_override_followup_fresh_after_last_violation: true,
+        provider_override_followup_rel_paths: [relPath],
+        provider_override_followup_work_item_ids: [followupWorkItemId],
+        provider_override_followup_override_ids: [overrideId],
+      },
+    };
+    const packet = buildWorkerContextPacket({
+      group: { id: groupId, members: [{ project: targetProject }] },
+      project: targetProject,
+      agentType,
+      task: "Phase 152 Memory Center provider override follow-up receipt contract validation selftest.",
+      pressureProvenanceProviderDispatchAdvisory: advisory,
+      contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+    });
+    const binding = recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, {
+      scopeId: groupId,
+      project: targetProject,
+      agentType,
+      assignmentId: "assignment-phase152-mcc-provider-override-followup-validation",
+      dispatchKey: "dispatch-phase152-mcc-provider-override-followup-validation",
+      taskFingerprint: "phase152 mcc provider override followup receipt validation",
+      worker_context_packet: packet,
+      dispatch_ready: true,
+    }, { at: "2026-07-10T05:10:01.000Z" }) || {};
+    const failedValidation = recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(groupId, {
+      binding_id: binding.binding_id,
+      worker_context_packet_id: packet.packet_id,
+      task_id: "task-phase152-mcc-provider-override-followup-validation",
+      task_agent_session_id: "tas-phase152-mcc-provider-override-followup-validation",
+      execution_id: "execution-phase152-mcc-provider-override-followup-validation-failed",
+      receipt_status: "done",
+      receipt: {
+        status: "done",
+        memoryProvenanceUsage: [{
+          relPath,
+          usageState: "used",
+          repairStatus: "completed",
+          repairGapType: "provider_dispatch_override_followup",
+          currentSourceVerified: true,
+          reason: "missing provider override id and history reverified flag",
+        }],
+      },
+    }, { at: "2026-07-10T05:10:02.000Z" });
+    const failedReport = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-10T05:10:02.500Z",
+    });
+    const passedValidation = recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(groupId, {
+      binding_id: binding.binding_id,
+      worker_context_packet_id: packet.packet_id,
+      task_id: "task-phase152-mcc-provider-override-followup-validation",
+      task_agent_session_id: "tas-phase152-mcc-provider-override-followup-validation",
+      execution_id: "execution-phase152-mcc-provider-override-followup-validation-passed",
+      receipt_status: "done",
+      receipt: {
+        status: "done",
+        memoryProvenanceUsage: [{
+          relPath,
+          usageState: "verified",
+          repairStatus: "completed",
+          repairGapType: "provider_dispatch_override_followup",
+          repairWorkItemId: followupWorkItemId,
+          providerDispatchOverrideId: overrideId,
+          currentSourceVerified: true,
+          providerDispatchOverrideFollowupHistoryReverified: true,
+          reason: "Phase 152 Memory Center selftest reverified provider override follow-up repaired history.",
+        }],
+      },
+    }, { at: "2026-07-10T05:10:03.000Z" });
+    const report = buildWorkerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContractValidationReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-10T05:10:04.000Z",
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract_validation"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const check = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract_validation") || {};
+    const checks = {
+      failedReceiptIsDetected: failedValidation?.status === "failed"
+        && failedReport.overall?.status === "fail"
+        && Number(failedReport.overall.failedValidationCount || 0) === 1,
+      passedReceiptSatisfiesContract: passedValidation?.status === "passed"
+        && passedValidation?.contract_satisfied === true
+        && passedValidation?.covered_rel_path_count === 1
+        && passedValidation?.covered_followup_work_item_count === 1
+        && passedValidation?.covered_override_id_count === 1,
+      reportCoversValidation: report.overall?.status === "ok"
+        && Number(report.overall.checkedPacketCount || 0) === 1
+        && Number(report.overall.passedValidationCount || 0) === 1
+        && Number(report.overall.failedValidationCount || 0) === 0,
+      qualityCheckPasses: check.status === "ok"
+        && Number(check.checked || 0) === 1
+        && Number(check.passed || 0) === 1,
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      failedReport: failedReport.overall,
+      report: report.overall,
+      check: {
+        id: check.id || "",
+        status: check.status || "",
+        checked: check.checked || 0,
+        passed: check.passed || 0,
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketCrossGroupPressureRecallUsageSelfTest() {
+  const sourceGroupId = `memory-center-cross-pressure-source-${process.pid}-${Date.now()}`;
+  const targetGroupId = `memory-center-cross-pressure-target-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(targetGroupId);
+  const sourceTypedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(sourceGroupId));
+  const targetTypedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(targetGroupId));
+  const targetProject = "phase129-pressure-project";
+  try {
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId: targetGroupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T23:40:00.000Z",
+      bindingCount: 1,
+      entries: [{
+        schema: "ccm-worker-context-packet-assignment-binding-v1",
+        binding_id: "binding-cross-pressure-usage-selftest",
+        groupId: targetGroupId,
+        source: "worker_context_packet_pre_dispatch_gate",
+        project: targetProject,
+        assignment_id: "assignment-cross-pressure-usage-selftest",
+        dispatch_key: "dispatch-cross-pressure-usage-selftest",
+        worker_context_packet_id: "wcp-cross-pressure-usage-selftest",
+        worker_context_packet_context_usage: {
+          schema: "ccm-worker-context-usage-v1",
+          packet_id: "wcp-cross-pressure-usage-selftest",
+          project: targetProject,
+          status: "over_budget",
+          pressure: 116,
+          total_tokens: 1160,
+          max_tokens: 1000,
+          free_tokens: -280,
+          autocompact_buffer_tokens: 120,
+        },
+        should_create_real_task: false,
+        at: "2026-07-09T23:40:00.000Z",
+      }],
+    });
+    const {
+      recordGroupTypedMemoryPressureRecallUsageLedger,
+    } = require("../collaboration/group-memory-index");
+    const sourceRecord = recordGroupTypedMemoryPressureRecallUsageLedger(sourceGroupId, {
+      targetProject,
+      taskId: "cross-pressure-usage-mcc-source-task",
+      executionId: "cross-pressure-usage-mcc-source-execution",
+      agent: "frontend",
+      generatedAt: "2026-07-09T23:40:01.000Z",
+      rows: [
+        {
+          rel_path: "worker-context-compact-strategy-memory.md",
+          name: "WorkerContextPacket Compact Strategy Memory",
+          type: "reference",
+          worker_context_packet_id: "wcp-cross-pressure-source-used",
+          pressure_status: "over_budget",
+          usage_state: "used",
+          reason: "selftest: another group used compact strategy pressure memory for target project",
+        },
+        {
+          rel_path: "worker-context-compact-strategy-memory.md",
+          name: "WorkerContextPacket Compact Strategy Memory",
+          type: "reference",
+          worker_context_packet_id: "wcp-cross-pressure-source-verified",
+          pressure_status: "over_budget",
+          usage_state: "verified",
+          reason: "selftest: another group verified compact strategy pressure memory for target project",
+        },
+      ],
+    });
+    const assistReport = buildWorkerContextPacketCrossGroupPressureRecallUsageReport({
+      groupIds: [targetGroupId],
+      crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
+      nowMs: Date.parse("2026-07-09T23:40:02.000Z"),
+    });
+    const assistQuality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_cross_group_pressure_recall_usage"],
+      groupIds: [targetGroupId],
+      crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
+      nowMs: Date.parse("2026-07-09T23:40:02.000Z"),
+      refresh: true,
+    });
+    const assistCheck = (assistQuality.checks || []).find((item: any) => item.id === "worker_context_packet_cross_group_pressure_recall_usage") || {};
+    const assistGroup = (assistReport.groups || []).find((row: any) => row.groupId === targetGroupId) || {};
+    const assistProject = (assistGroup.projects || []).find((row: any) => row.targetProject === targetProject) || {};
+
+    const localRecord = recordGroupTypedMemoryPressureRecallUsageLedger(targetGroupId, {
+      targetProject,
+      taskId: "cross-pressure-usage-mcc-local-task",
+      executionId: "cross-pressure-usage-mcc-local-execution",
+      agent: "frontend",
+      generatedAt: "2026-07-09T23:40:03.000Z",
+      rows: [
+        {
+          rel_path: "worker-context-compact-strategy-memory.md",
+          name: "WorkerContextPacket Compact Strategy Memory",
+          type: "reference",
+          worker_context_packet_id: "wcp-cross-pressure-local-ignored-1",
+          pressure_status: "over_budget",
+          usage_state: "ignored",
+          reason: "selftest: local group ignored compact strategy pressure memory",
+        },
+        {
+          rel_path: "worker-context-compact-strategy-memory.md",
+          name: "WorkerContextPacket Compact Strategy Memory",
+          type: "reference",
+          worker_context_packet_id: "wcp-cross-pressure-local-ignored-2",
+          pressure_status: "over_budget",
+          usage_state: "ignored",
+          reason: "selftest: local group ignored compact strategy pressure memory again",
+        },
+      ],
+    });
+    const conflictReport = buildWorkerContextPacketCrossGroupPressureRecallUsageReport({
+      groupIds: [targetGroupId],
+      crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
+      nowMs: Date.parse("2026-07-09T23:40:04.000Z"),
+    });
+    const conflictQuality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_cross_group_pressure_recall_usage"],
+      groupIds: [targetGroupId],
+      crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
+      nowMs: Date.parse("2026-07-09T23:40:04.000Z"),
+      refresh: true,
+    });
+    const conflictCheck = (conflictQuality.checks || []).find((item: any) => item.id === "worker_context_packet_cross_group_pressure_recall_usage") || {};
+    const conflictGroup = (conflictReport.groups || []).find((row: any) => row.groupId === targetGroupId) || {};
+    const conflictProject = (conflictGroup.projects || []).find((row: any) => row.targetProject === targetProject) || {};
+    const checks = {
+      sourceLedgerCreatesCrossGroupEvidence: sourceRecord?.recorded_count === 2,
+      targetWithoutLocalLedgerUsesCrossGroupAssist: assistReport.overall?.status === "ok"
+        && assistCheck.status === "ok"
+        && assistProject.mode === "cross_group_project_assist"
+        && Number(assistProject.crossGroupSupplementCount || 0) >= 1
+        && Number(assistProject.sourceGroupCount || 0) === 1
+        && assistProject.supplementRows?.some((row: any) => row.rel_path === "worker-context-compact-strategy-memory.md" && row.recommendation === "promote_pressure_recall"),
+      localConflictIsAudited: localRecord?.recorded_count === 2
+        && conflictReport.overall?.status === "warn"
+        && Number(conflictReport.overall?.conflictCount || 0) >= 1
+        && conflictProject.mode === "local_first"
+        && Number(conflictProject.conflictCount || 0) >= 1
+        && conflictCheck.status === "fail"
+        && (conflictCheck.gaps || []).some((gap: any) => /local deprioritize_pressure_recall but cross-group promote_pressure_recall/.test(gap.reason || "")),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      assist: {
+        overall: assistReport.overall,
+        project: assistProject,
+        quality: { status: assistCheck.status || "", checked: assistCheck.checked || 0, passed: assistCheck.passed || 0 },
+      },
+      conflict: {
+        overall: conflictReport.overall,
+        project: conflictProject,
+        quality: { status: conflictCheck.status || "", checked: conflictCheck.checked || 0, passed: conflictCheck.passed || 0, gaps: conflictCheck.gaps || [] },
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    for (const dir of [sourceTypedDir, targetTypedDir]) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketCrossGroupPressureRecallUsageRepairWorkItemsSelfTest() {
+  const sourceGroupId = `memory-center-cross-pressure-repair-source-${process.pid}-${Date.now()}`;
+  const targetGroupId = `memory-center-cross-pressure-repair-target-${process.pid}-${Date.now()}`;
+  const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(targetGroupId);
+  const workItemsFile = getGroupCompactBoundaryReplayRepairWorkItemsFile(targetGroupId);
+  const sourceTypedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(sourceGroupId));
+  const targetTypedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(targetGroupId));
+  const targetProject = "phase130-pressure-project";
+  try {
+    writeJsonAtomic(bindingFile, {
+      schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+      version: 1,
+      groupId: targetGroupId,
+      file: bindingFile,
+      updatedAt: "2026-07-09T23:55:00.000Z",
+      bindingCount: 1,
+      entries: [{
+        schema: "ccm-worker-context-packet-assignment-binding-v1",
+        binding_id: "binding-cross-pressure-repair-selftest",
+        groupId: targetGroupId,
+        source: "worker_context_packet_pre_dispatch_gate",
+        project: targetProject,
+        assignment_id: "assignment-cross-pressure-repair-selftest",
+        dispatch_key: "dispatch-cross-pressure-repair-selftest",
+        worker_context_packet_id: "wcp-cross-pressure-repair-selftest",
+        worker_context_packet_context_usage: {
+          schema: "ccm-worker-context-usage-v1",
+          packet_id: "wcp-cross-pressure-repair-selftest",
+          project: targetProject,
+          status: "over_budget",
+          pressure: 118,
+          total_tokens: 1180,
+          max_tokens: 1000,
+          free_tokens: -300,
+          autocompact_buffer_tokens: 120,
+        },
+        should_create_real_task: false,
+        at: "2026-07-09T23:55:00.000Z",
+      }],
+    });
+    const {
+      recordGroupTypedMemoryPressureRecallUsageLedger,
+    } = require("../collaboration/group-memory-index");
+    recordGroupTypedMemoryPressureRecallUsageLedger(sourceGroupId, {
+      targetProject,
+      taskId: "cross-pressure-repair-source-task",
+      executionId: "cross-pressure-repair-source-execution",
+      agent: targetProject,
+      generatedAt: "2026-07-09T23:55:01.000Z",
+      rows: [
+        {
+          rel_path: "worker-context-compact-strategy-memory.md",
+          name: "WorkerContextPacket Compact Strategy Memory",
+          type: "reference",
+          worker_context_packet_id: "wcp-cross-pressure-repair-source-used",
+          pressure_status: "over_budget",
+          usage_state: "used",
+          reason: "selftest: source group used compact strategy pressure memory",
+        },
+        {
+          rel_path: "worker-context-compact-strategy-memory.md",
+          name: "WorkerContextPacket Compact Strategy Memory",
+          type: "reference",
+          worker_context_packet_id: "wcp-cross-pressure-repair-source-verified",
+          pressure_status: "over_budget",
+          usage_state: "verified",
+          reason: "selftest: source group verified compact strategy pressure memory",
+        },
+      ],
+    });
+    recordGroupTypedMemoryPressureRecallUsageLedger(targetGroupId, {
+      targetProject,
+      taskId: "cross-pressure-repair-local-task",
+      executionId: "cross-pressure-repair-local-execution",
+      agent: targetProject,
+      generatedAt: "2026-07-09T23:55:02.000Z",
+      rows: [
+        {
+          rel_path: "worker-context-compact-strategy-memory.md",
+          name: "WorkerContextPacket Compact Strategy Memory",
+          type: "reference",
+          worker_context_packet_id: "wcp-cross-pressure-repair-local-ignored-1",
+          pressure_status: "over_budget",
+          usage_state: "ignored",
+          reason: "selftest: target group ignored compact strategy pressure memory",
+        },
+        {
+          rel_path: "worker-context-compact-strategy-memory.md",
+          name: "WorkerContextPacket Compact Strategy Memory",
+          type: "reference",
+          worker_context_packet_id: "wcp-cross-pressure-repair-local-ignored-2",
+          pressure_status: "over_budget",
+          usage_state: "ignored",
+          reason: "selftest: target group ignored compact strategy pressure memory again",
+        },
+      ],
+    });
+    const pressureReport = buildWorkerContextPacketCrossGroupPressureRecallUsageReport({
+      groupIds: [targetGroupId],
+      crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
+      nowMs: Date.parse("2026-07-09T23:55:03.000Z"),
+    });
+    const repairReport = buildWorkerContextPacketCrossGroupPressureRecallUsageRepairWorkItemReport({
+      groupIds: [targetGroupId],
+      crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
+      crossGroupPressureRecallUsageReport: pressureReport,
+      generatedAt: "2026-07-09T23:55:04.000Z",
+    });
+    const repairQuality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_cross_group_pressure_recall_usage_repair_work_items"],
+      groupIds: [targetGroupId],
+      crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
+      refresh: true,
+    });
+    const repairCheck = (repairQuality.checks || []).find((item: any) => item.id === "worker_context_packet_cross_group_pressure_recall_usage_repair_work_items") || {};
+    const ledger = readGroupCompactBoundaryReplayRepairWorkItems(targetGroupId);
+    const repairItems = (ledger.items || []).filter((item: any) => item.source === "cross_group_pressure_recall_usage_repair");
+    const repairItem = repairItems[0] || {};
+    const candidates = buildReplayRepairMainAgentDispatchCandidates(targetGroupId);
+    const candidate = (candidates.candidates || []).find((item: any) => item.work_item_id === repairItem.id || item.work_item_id === repairItem.work_item_id) || {};
+    const claim = updateCompactBoundaryReplayRepairWorkItem({
+      groupId: targetGroupId,
+      itemId: repairItem.id || repairItem.work_item_id,
+      action: "claim",
+      owner: "group-main-agent",
+      reason: "主 Agent 认领跨群聊 pressure memory 冲突修复",
+      at: "2026-07-09T23:55:05.000Z",
+    });
+    const completed = updateCompactBoundaryReplayRepairWorkItem({
+      groupId: targetGroupId,
+      itemId: repairItem.id || repairItem.work_item_id,
+      action: "complete",
+      owner: "group-main-agent",
+      reason: "已确认本群聊 local-first，跨群聊经验只保留为背景提示",
+      at: "2026-07-09T23:55:06.000Z",
+    });
+    const finalLedger = readGroupCompactBoundaryReplayRepairWorkItems(targetGroupId);
+    const finalItem = (finalLedger.items || []).find((item: any) => item.id === repairItem.id) || {};
+    const checks = {
+      pressureReportFindsConflict: pressureReport.overall?.status === "warn"
+        && Number(pressureReport.overall?.conflictCount || 0) >= 1,
+      repairReportCreatesCoveredWorkItem: repairReport.overall?.status === "ok"
+        && Number(repairReport.overall?.requiredActionCount || 0) === 1
+        && Number(repairReport.overall?.openItemCount || 0) === 1
+        && repairCheck.status === "ok",
+      repairItemCarriesPressureContext: repairItem.source === "cross_group_pressure_recall_usage_repair"
+        && repairItem.component === "cross_group_pressure_recall_usage"
+        && repairItem.target_project === targetProject
+        && repairItem.cross_group_pressure_recall_usage_gap_type === "recommendation_conflict"
+        && repairItem.local_recommendation === "deprioritize_pressure_recall"
+        && repairItem.cross_group_recommendation === "promote_pressure_recall",
+      repairItemSurfacesAsMainAgentCandidate: candidates.candidateCount >= 1
+        && candidate.source === "cross_group_pressure_recall_usage_repair"
+        && candidate.shouldCreateRealTask === false
+        && /cross-group pressure recall usage|pressure memory/i.test(`${candidate.instruction || ""}\n${candidate.subject || ""}`),
+      existingStateMachineHandlesRepairItem: claim.item?.status === "in_progress"
+        && completed.item?.status === "completed"
+        && finalItem.status === "completed"
+        && finalItem.history?.some((entry: any) => entry.action === "claim")
+        && finalItem.history?.some((entry: any) => entry.action === "complete"),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      pressure: pressureReport.overall,
+      repair: repairReport.overall,
+      repairItem: {
+        id: repairItem.id || "",
+        status: repairItem.status || "",
+        priority: repairItem.priority || "",
+        target_project: repairItem.target_project || "",
+        local_recommendation: repairItem.local_recommendation || "",
+        cross_group_recommendation: repairItem.cross_group_recommendation || "",
+      },
+      candidate: {
+        id: candidate.candidate_id || "",
+        source: candidate.source || "",
+        recommendedAction: candidate.recommendedAction || "",
+      },
+    };
+  } finally {
+    for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    for (const dir of [sourceTypedDir, targetTypedDir]) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
 export function runMemoryCenterWorkerContextPacketPreDispatchGateSelfTest() {
   const groupId = `memory-center-worker-context-pre-dispatch-gate-selftest-${process.pid}-${Date.now()}`;
   const bindingFile = getGroupReplayRepairDispatchBindingLedgerFile(groupId);
@@ -22104,6 +31976,171 @@ export function runMemoryCenterWorkerContextPacketCompactStrategyMemorySelfTest(
   }
 }
 
+export function runMemoryCenterWorkerContextPacketCompactStrategyTypedMemorySelfTest() {
+  const groupId = `memory-center-worker-context-compact-strategy-typed-memory-selftest-${process.pid}-${Date.now()}`;
+  const outcomeFile = getGroupWorkerContextCompactOutcomeLedgerFile(groupId);
+  const strategyFile = getGroupWorkerContextCompactStrategyMemoryFile(groupId);
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  try {
+    const dependencyPolicy = {
+      schema: "ccm-worker-context-partial-compact-policy-v1",
+      method: "usage_top_category_pressure",
+      selected_categories: ["dependencies"],
+      skipped_categories: ["constraints_and_documents"],
+      max_categories: 1,
+      fallback_used: false,
+    };
+    const constraintsPolicy = {
+      schema: "ccm-worker-context-partial-compact-policy-v1",
+      method: "usage_top_category_pressure",
+      selected_categories: ["constraints_and_documents"],
+      skipped_categories: ["dependencies"],
+      max_categories: 1,
+      fallback_used: false,
+    };
+    writeJsonAtomic(outcomeFile, {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId,
+      file: outcomeFile,
+      updatedAt: "2026-07-09T20:50:02.000Z",
+      entries: [
+        {
+          schema: "ccm-worker-context-compact-outcome-entry-v1",
+          outcome_id: "wcco-center-strategy-typed-dependency",
+          group_id: groupId,
+          assignment_id: "assignment-center-strategy-typed-dependency",
+          retry_id: "retry-center-strategy-typed-dependency",
+          hook_run_id: "hook-center-strategy-typed-dependency",
+          project: "api",
+          method: "metadata_partial_compact",
+          status: "recovered",
+          dispatch_ready: true,
+          from_total_tokens: 7800,
+          retry_total_tokens: 2500,
+          from_free_tokens: -4200,
+          retry_free_tokens: 1200,
+          token_delta: 5300,
+          free_token_delta: 5400,
+          partial_compact: true,
+          task_compacted: false,
+          task_hash_unchanged: true,
+          partial_compaction_categories: ["dependencies"],
+          partial_compact_policy: dependencyPolicy,
+          partial_omitted_chars: 19000,
+          distillation_candidate: true,
+          at: "2026-07-09T20:50:01.000Z",
+        },
+        {
+          schema: "ccm-worker-context-compact-outcome-entry-v1",
+          outcome_id: "wcco-center-strategy-typed-constraints",
+          group_id: groupId,
+          assignment_id: "assignment-center-strategy-typed-constraints",
+          retry_id: "retry-center-strategy-typed-constraints",
+          hook_run_id: "hook-center-strategy-typed-constraints",
+          project: "api",
+          method: "metadata_partial_compact",
+          status: "blocked",
+          dispatch_ready: false,
+          from_total_tokens: 7600,
+          retry_total_tokens: 7500,
+          from_free_tokens: -3900,
+          retry_free_tokens: -3800,
+          token_delta: 100,
+          free_token_delta: 100,
+          partial_compact: true,
+          task_compacted: false,
+          task_hash_unchanged: true,
+          partial_compaction_categories: ["constraints_and_documents"],
+          partial_compact_policy: constraintsPolicy,
+          partial_omitted_chars: 700,
+          distillation_candidate: true,
+          at: "2026-07-09T20:50:02.000Z",
+        },
+      ],
+    });
+    const strategyReport = buildWorkerContextPacketCompactStrategyMemoryReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T20:50:03.000Z",
+    });
+    const typedReport = buildWorkerContextPacketCompactStrategyTypedMemoryReport({
+      groupIds: [groupId],
+      strategyReport,
+      generatedAt: "2026-07-09T20:50:04.000Z",
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_compact_strategy_typed_memory"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_compact_strategy_typed_memory") || {};
+    const {
+      buildGroupTypedMemoryRecall,
+      readGroupTypedMemoryDistillationLedger,
+      scanGroupTypedMemoryDocuments,
+    } = require("../collaboration/group-memory-index");
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const referenceDoc = (docs || []).find((item: any) => item.relPath === "worker-context-compact-strategy-memory.md") || {};
+    const cautionDoc = (docs || []).find((item: any) => item.relPath === "worker-context-compact-strategy-cautions.md") || {};
+    const recall = buildGroupTypedMemoryRecall(groupId, "COMPACT_STRATEGY_TYPED_MEMORY metadata_partial_compact dependencies free_token_delta task_hash_unchanged constraints_and_documents", {
+      disableLedger: true,
+      forceMemory: true,
+      max: 8,
+    });
+    const recallText = [
+      ...(Array.isArray(recall.recalled) ? recall.recalled : []),
+      ...(Array.isArray(recall.entries) ? recall.entries : []),
+      ...(Array.isArray(recall.selected) ? recall.selected : []),
+      ...(Array.isArray(recall.docs) ? recall.docs : []),
+    ].map((item: any) => `${item.relPath || ""}\n${item.name || ""}\n${item.body || ""}\n${item.snippet || ""}\n${item.text || ""}`).join("\n");
+    const archive = ledger.compactStrategyArchive || {};
+    const referenceText = String(referenceDoc.body || "");
+    const cautionText = String(cautionDoc.body || "");
+    const checks = {
+      strategyReportReady: strategyReport.overall?.status === "ok"
+        && Number(strategyReport.overall?.distilledOutcomeCount || 0) === 2
+        && Number(strategyReport.overall?.strategyMemoryCount || 0) === 1,
+      typedMemoryReportPasses: typedReport.overall?.status === "ok"
+        && Number(typedReport.overall?.typedDocCount || 0) >= 2
+        && Number(typedReport.overall?.archivedOutcomeCount || 0) === 2
+        && Number(typedReport.overall?.recallMatchCount || 0) >= 1,
+      qualityCheckExposesTypedMemory: qualityCheck.status === "ok"
+        && Number(qualityCheck.passed || 0) === 1,
+      ledgerArchivesCompactStrategy: archive.schema === "ccm-compact-strategy-typed-memory-distillation-v1"
+        && Number(archive.outcome_count || 0) === 2
+        && Number(archive.category_count || 0) >= 2
+        && (archive.preferred_categories || []).includes("dependencies")
+        && Number(archive.blocked_outcome_count || 0) === 1,
+      referenceDocContainsStrategy: referenceText.includes("WorkerContextPacket Compact Strategy Memory")
+        && referenceText.includes("dependencies")
+        && referenceText.includes("free_token_delta")
+        && referenceText.includes("task_hash_unchanged"),
+      cautionDocContainsBlockedCategory: cautionText.includes("WorkerContextPacket Compact Strategy Cautions")
+        && cautionText.includes("constraints_and_documents")
+        && cautionText.includes("blocked"),
+      recallFindsCompactStrategyMemory: /worker-context-compact-strategy-memory\.md|metadata_partial_compact|free_token_delta|task_hash_unchanged/i.test(recallText),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: typedReport.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+      docs: [referenceDoc, cautionDoc].filter((item: any) => item.relPath).map((item: any) => ({ relPath: item.relPath, source: item.source, type: item.type })),
+    };
+  } finally {
+    for (const file of [outcomeFile, `${outcomeFile}.bak`, strategyFile, `${strategyFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
+  }
+}
+
 export function runMemoryCenterWorkerContextPacketPtlEmergencyDowngradeSelfTest() {
   const groupId = `memory-center-worker-context-ptl-emergency-downgrade-selftest-${process.pid}-${Date.now()}`;
   const outcomeFile = getGroupWorkerContextCompactOutcomeLedgerFile(groupId);
@@ -22197,6 +32234,136 @@ export function runMemoryCenterWorkerContextPacketPtlEmergencyDowngradeSelfTest(
     for (const file of [outcomeFile, `${outcomeFile}.bak`, strategyFile, `${strategyFile}.bak`, ptlFile, `${ptlFile}.bak`]) {
       try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
     }
+  }
+}
+
+export function runMemoryCenterWorkerContextPacketPtlEmergencyTypedMemorySelfTest() {
+  const groupId = `memory-center-worker-context-ptl-emergency-typed-memory-selftest-${process.pid}-${Date.now()}`;
+  const outcomeFile = getGroupWorkerContextCompactOutcomeLedgerFile(groupId);
+  const strategyFile = getGroupWorkerContextCompactStrategyMemoryFile(groupId);
+  const ptlFile = getGroupWorkerContextPtlEmergencyHintFile(groupId);
+  const typedDir = path.join(CCM_DIR, "group-memory-md", sidecarFileId(groupId));
+  try {
+    const policy = {
+      schema: "ccm-worker-context-partial-compact-policy-v1",
+      method: "usage_top_category_pressure",
+      selected_categories: ["constraints_and_documents"],
+      skipped_categories: ["dependencies"],
+      max_categories: 1,
+      fallback_used: false,
+    };
+    writeJsonAtomic(outcomeFile, {
+      schema: "ccm-worker-context-compact-outcome-ledger-v1",
+      version: 1,
+      groupId,
+      file: outcomeFile,
+      updatedAt: "2026-07-09T21:30:03.000Z",
+      entries: [0, 1, 2].map((index: number) => ({
+        schema: "ccm-worker-context-compact-outcome-entry-v1",
+        outcome_id: `wcco-center-ptl-typed-blocked-${index}`,
+        group_id: groupId,
+        assignment_id: `assignment-center-ptl-typed-blocked-${index}`,
+        method: "metadata_partial_compact_then_deterministic_head_tail_critical_lines",
+        status: "blocked",
+        dispatch_ready: false,
+        from_total_tokens: 8800 + index,
+        retry_total_tokens: 7600 + index,
+        from_free_tokens: -5200,
+        retry_free_tokens: -4000,
+        token_delta: 1200,
+        free_token_delta: 1200,
+        partial_compact: true,
+        task_compacted: index === 2,
+        task_hash_unchanged: index !== 2,
+        partial_compaction_categories: ["constraints_and_documents"],
+        partial_compact_policy: policy,
+        partial_omitted_chars: 1500,
+        distillation_candidate: true,
+        at: `2026-07-09T21:30:0${index}.000Z`,
+      })),
+    });
+    const ptlReport = buildWorkerContextPacketPtlEmergencyDowngradeReport({
+      groupIds: [groupId],
+      generatedAt: "2026-07-09T21:30:04.000Z",
+    });
+    const typedReport = buildWorkerContextPacketPtlEmergencyTypedMemoryReport({
+      groupIds: [groupId],
+      ptlReport,
+      generatedAt: "2026-07-09T21:30:05.000Z",
+    });
+    const quality = buildMemoryQualityReport({
+      checkIds: ["worker_context_packet_ptl_emergency_typed_memory"],
+      groupIds: [groupId],
+      refresh: true,
+    });
+    const qualityCheck = (quality.checks || []).find((item: any) => item.id === "worker_context_packet_ptl_emergency_typed_memory") || {};
+    const {
+      buildGroupTypedMemoryRecall,
+      readGroupTypedMemoryDistillationLedger,
+      scanGroupTypedMemoryDocuments,
+    } = require("../collaboration/group-memory-index");
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const doc = (docs || []).find((item: any) => item.relPath === "worker-context-ptl-emergency-downgrade.md") || {};
+    const recall = buildGroupTypedMemoryRecall(groupId, "PTL_EMERGENCY_TYPED_MEMORY maxTaskChars maxRenderedChars repeated compact failure task_compacted blocked outcomes", {
+      disableLedger: true,
+      forceMemory: true,
+      max: 8,
+    });
+    const recallText = [
+      ...(Array.isArray(recall.recalled) ? recall.recalled : []),
+      ...(Array.isArray(recall.entries) ? recall.entries : []),
+      ...(Array.isArray(recall.selected) ? recall.selected : []),
+      ...(Array.isArray(recall.docs) ? recall.docs : []),
+    ].map((item: any) => `${item.relPath || ""}\n${item.name || ""}\n${item.body || ""}\n${item.snippet || ""}\n${item.text || ""}`).join("\n");
+    const archive = ledger.ptlEmergencyArchive || {};
+    const docText = String(doc.body || "");
+    const checks = {
+      ptlReportReady: ptlReport.overall?.status === "ok"
+        && Number(ptlReport.overall?.engagedCount || 0) === 1
+        && Number(ptlReport.overall?.criticalCount || 0) === 1
+        && Number(ptlReport.overall?.blockedOutcomeCount || 0) === 3,
+      typedMemoryReportPasses: typedReport.overall?.status === "ok"
+        && Number(typedReport.overall?.typedDocCount || 0) === 1
+        && Number(typedReport.overall?.blockedOutcomeCount || 0) >= 3
+        && Number(typedReport.overall?.recallMatchCount || 0) >= 1,
+      qualityCheckExposesTypedMemory: qualityCheck.status === "ok"
+        && Number(qualityCheck.passed || 0) === 1,
+      ledgerArchivesPtlEmergency: archive.schema === "ccm-ptl-emergency-typed-memory-distillation-v1"
+        && archive.engaged === true
+        && archive.emergency_level === "critical"
+        && Number(archive.blocked_outcome_count || 0) >= 3
+        && Number(archive.task_compacted_blocked_count || 0) >= 1,
+      typedDocContainsEmergencyBudgets: docText.includes("PTL Emergency Downgrade")
+        && docText.includes("maxTaskChars=1400")
+        && docText.includes("memory.maxRenderedChars=900")
+        && docText.includes("metadata.maxCategories=1"),
+      typedDocContainsFailureSignals: docText.includes("Blocked outcomes")
+        && docText.includes("task_compacted=true")
+        && docText.includes("constraints_and_documents"),
+      recallFindsPtlEmergencyDiscipline: /worker-context-ptl-emergency-downgrade\.md|PTL emergency|maxTaskChars|maxRenderedChars|task_compacted/i.test(recallText),
+    };
+    return {
+      pass: Object.values(checks).every(Boolean),
+      checks,
+      report: typedReport.overall,
+      qualityCheck: {
+        id: qualityCheck.id || "",
+        status: qualityCheck.status || "",
+        checked: qualityCheck.checked || 0,
+        passed: qualityCheck.passed || 0,
+      },
+      doc: {
+        relPath: doc.relPath || "",
+        source: doc.source || "",
+        type: doc.type || "",
+      },
+    };
+  } finally {
+    for (const file of [outcomeFile, `${outcomeFile}.bak`, strategyFile, `${strategyFile}.bak`, ptlFile, `${ptlFile}.bak`]) {
+      try { if (file && fs.existsSync(file)) fs.unlinkSync(file); } catch {}
+    }
+    try { if (fs.existsSync(typedDir)) fs.rmSync(typedDir, { recursive: true, force: true }); } catch {}
   }
 }
 

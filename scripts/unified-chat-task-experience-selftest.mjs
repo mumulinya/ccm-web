@@ -339,6 +339,8 @@ const projectCard = projectExecutionTaskCard({
   fileChanges: { count: 1, files: [{ path: 'src/Login.vue', statusText: '修改' }] },
 }, 'demo')
 checks.projectExecutionUsesUnifiedCard = projectCard?.version === 1 && projectCard?.phase === 'completed' && projectCard?.delivery?.files?.includes('src/Login.vue')
+  && projectCard?.delivery?.headline === '项目执行成员已提交可验收结果。'
+  && projectCard?.next_action === '可以查看交付总结、验证结果和风险提示'
 checks.projectExecutionShowsChangeSummary = projectCard?.change_summary?.schema === 'ccm-main-agent-change-summary-v1'
   && projectCard?.change_summary?.files?.some(file => file.path === 'src/Login.vue')
 checks.projectExecutionShowsPlanAlignment = projectCard?.plan_alignment?.schema === 'ccm-main-agent-plan-alignment-v1'
@@ -365,6 +367,9 @@ checks.projectDoneWithoutVerificationDoesNotPassAcceptance = weakProjectDoneCard
   && weakProjectDoneCard?.delivery?.headline?.includes('补齐验证或验收')
   && weakProjectDoneCard?.user_handoff?.status === 'needs_attention'
   && weakProjectDoneCard?.next_action?.includes('补齐验证或验收')
+checks.projectDoneWithoutVerificationHandoffUsesNeutralGapCopy = weakProjectDoneCard?.user_handoff?.status_label === '待补齐'
+  && weakProjectDoneCard?.user_handoff?.summary_cards?.some(item => item.id === 'attention' && String(item.value || '').includes('待补齐'))
+  && !weakProjectDoneCard?.user_handoff?.headline?.includes('需要处理')
 
 checks.naturalPhaseLabels = taskPhasePresentation('waiting_confirmation').label === '需要你确认'
 

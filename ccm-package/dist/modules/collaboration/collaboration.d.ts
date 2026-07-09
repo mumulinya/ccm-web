@@ -30,6 +30,7 @@ export declare function runCollaborationUxSelfTest(): {
         globalMissionHandoffComplete: boolean;
         globalMissionQueuedMessageHasContext: boolean;
         globalDirectDispatchCompletionSyncReady: boolean;
+        globalDirectDispatchWeakAcceptanceNotSynced: boolean;
         globalDirectDispatchCompletionMessageFriendly: boolean;
         globalDirectDispatchContinuationSyncReady: boolean;
         globalDirectDispatchContinuationMessageFriendly: boolean;
@@ -42,6 +43,7 @@ export declare function runCollaborationUxSelfTest(): {
         independentReviewGapDraftGuidesReviewer: boolean;
         independentReviewFailedGapDraftRoutesRework: boolean;
         liveTodoPlanVisible: boolean;
+        groupWeakAcceptanceOnlyStaysInReview: boolean;
         workItemsVisible: boolean;
         workItemSelfTestPasses: boolean;
         workerHandoffSelfTestPasses: boolean;
@@ -155,6 +157,7 @@ export declare function runCollaborationUxSelfTest(): {
         acknowledgementHasCleanPunctuation: boolean;
         dispatchLaunchSummaryVisible: boolean;
         dispatchLaunchSummaryHidesProtocol: boolean;
+        dispatchLaunchSummaryDoneTargetStaysReviewing: boolean;
         followupClassification: boolean;
         qualityFollowupContinuationDecision: boolean;
         followupDetection: boolean;
@@ -11562,6 +11565,23 @@ export declare function runMemoryDispatchGateReceiptValidationSelfTest(): {
         };
     };
 };
+export declare function runPressureMemoryProvenanceReceiptUsageSelfTest(): {
+    pass: boolean;
+    checks: {
+        receiptParserKeepsStructuredProvenance: boolean;
+        collectionPrefersStructuredProvenance: boolean;
+        ledgerPersistsProvenance: boolean;
+        statsAggregateProvenance: boolean;
+    };
+    receipt: {
+        memoryProvenanceUsage: any;
+    };
+    rows: any[];
+    ledger: {
+        entry: any;
+        stat: any;
+    };
+};
 export declare function runTaskAgentMemoryContextSnapshotReceiptValidationSelfTest(): {
     pass: boolean;
     checks: {
@@ -12500,6 +12520,10 @@ export declare function runCoordinatorReworkProtocolSelfTest(): {
         nativeTestAgentReportBecomesIndependentReviewReceipt: boolean;
         nativeTestAgentReceiptConsumesVerdictArtifact: boolean;
         nativeFailedTestAgentReceiptRequestsRework: boolean;
+        nativeTestAgentUnknownCoverageReportBlocksWithoutVerdictArtifact: boolean;
+        nativeTestAgentUnknownCoverageVisibleOutputDoesNotAccept: boolean;
+        nativeTestAgentNotVerifiedCoverageReportRequestsReworkWithoutVerdictArtifact: boolean;
+        nativeTestAgentNotVerifiedCoverageVisibleOutputShowsRework: boolean;
         nativeFailedTestAgentVisibleOutputShowsReworkPath: boolean;
         nativeFailedTestAgentVisibleOutputHidesRawVerdict: boolean;
         nativeTestAgentOutputCarriesReceiptAndArtifacts: boolean;
@@ -12927,6 +12951,10 @@ export declare function runCollaborationProtocolSelfTest(): {
             nativeTestAgentReportBecomesIndependentReviewReceipt: boolean;
             nativeTestAgentReceiptConsumesVerdictArtifact: boolean;
             nativeFailedTestAgentReceiptRequestsRework: boolean;
+            nativeTestAgentUnknownCoverageReportBlocksWithoutVerdictArtifact: boolean;
+            nativeTestAgentUnknownCoverageVisibleOutputDoesNotAccept: boolean;
+            nativeTestAgentNotVerifiedCoverageReportRequestsReworkWithoutVerdictArtifact: boolean;
+            nativeTestAgentNotVerifiedCoverageVisibleOutputShowsRework: boolean;
             nativeFailedTestAgentVisibleOutputShowsReworkPath: boolean;
             nativeFailedTestAgentVisibleOutputHidesRawVerdict: boolean;
             nativeTestAgentOutputCarriesReceiptAndArtifacts: boolean;

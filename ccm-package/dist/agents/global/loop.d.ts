@@ -282,6 +282,9 @@ export declare function runGlobalAgentLoopSelfTest(): Promise<{
         failedReviewBlocksFalseCompletion: boolean;
         failedReviewShowsReworkNextAction: boolean;
         failedReviewKeepsTodoActive: any;
+        testAgentFailureSummaryBlocksFalseCompletion: boolean;
+        testAgentSummaryOnlyCoverageGapBlocksFalseCompletion: boolean;
+        testAgentWeakAcceptanceSummaryNeedsConfirmation: boolean;
         workchainQualityRequiresProtocolSanitizer: boolean;
         workchainVisibleProtocolLeakSanitized: boolean;
         legacyCompletionReplySanitizesVisibleSummary: boolean;
@@ -301,6 +304,7 @@ export declare function runGlobalAgentLoopSelfTest(): Promise<{
         workchainQualityFailureUserTextAvoidsFalseDone: boolean;
         workchainQualityFailureKeepsTodoActive: boolean;
         workchainQualityFailureReplyShowsMissingItems: boolean;
+        workchainGenericCompletionFallbackAvoidsFalseDone: boolean;
         workchainWeakAcceptanceOnlyBlocksFalseCompletion: boolean;
         traceInTechnical: boolean;
         progressCheckpointsVisible: boolean;
@@ -347,6 +351,7 @@ export declare function runGlobalAgentLoopSelfTest(): Promise<{
         weakPassedReviewPrimarySummaryAvoidsOptimisticHeadline: boolean;
         incompleteVerificationResultDoneBlocksCompletion: boolean;
         noVerificationEvidenceDoneBlocksCompletion: boolean;
+        bareDoneQualityRequiresEvidence: boolean;
         failedFinalSummaryQualityRequiresPlanGapNextAction: boolean;
         cancelledReportHasStopSummary: boolean;
         legacyProtocolTextSanitized: boolean;
@@ -393,6 +398,7 @@ export declare function runGlobalAgentLoopSelfTest(): Promise<{
     ordinaryAnswerDoesNotShowDeliveryReport: boolean;
     globalDispatchLaunchSummaryVisible: boolean;
     globalDispatchLaunchSummaryStreamsLive: boolean;
+    globalDispatchLaunchSummaryDoesNotCallDoneTargetCompleted: boolean;
     globalAutoPlanModeStreamsLive: boolean;
     globalAutoPlanModeHasExecutionFollowup: boolean;
     globalOrdinaryAnswerHasNoPlanModeEvent: boolean;

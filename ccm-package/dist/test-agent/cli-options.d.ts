@@ -3,6 +3,12 @@ export interface TestAgentCliOptions {
     workOrderPath: string;
     handoffPath: string;
     verifyArtifactsPath: string;
+    selfTestMatrix: boolean;
+    selfTestNames: string[];
+    selfTestPattern?: string;
+    selfTestTimeoutMs?: number;
+    selfTestStopOnFailure?: boolean;
+    selfTestModulePath?: string;
     help: boolean;
     validateOnly: boolean;
     planOnly: boolean;

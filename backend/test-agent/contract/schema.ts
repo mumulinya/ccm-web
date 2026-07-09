@@ -579,10 +579,64 @@ const requiredCheckCoverageSchema = z.object({
   missingReason: optionalString,
 }).passthrough();
 
+const requiredCheckSummaryItemSchema = z.object({
+  check: z.string(),
+  status: z.enum(["verified", "not_verified", "unknown"]),
+  evidence: stringList,
+  missingReason: optionalString,
+}).passthrough();
+
+const requiredCheckSummarySchema = z.object({
+  total: z.number().int().nonnegative(),
+  statusCounts: z.object({
+    verified: z.number().int().nonnegative(),
+    not_verified: z.number().int().nonnegative(),
+    unknown: z.number().int().nonnegative(),
+  }).passthrough(),
+  verified: z.array(requiredCheckSummaryItemSchema),
+  notVerified: z.array(requiredCheckSummaryItemSchema),
+  unknown: z.array(requiredCheckSummaryItemSchema),
+}).passthrough();
+
 const acceptanceCoverageSchema = z.object({
   criterion: z.string(),
   status: z.enum(["verified", "not_verified", "unknown"]),
   evidence: stringList,
+  matchStrength: z.enum(["direct", "token", "fallback", "none"]).optional(),
+  matchScore: z.number().optional(),
+  evidenceSource: z.enum(["matched_evidence", "single_criterion_report_status", "none"]).optional(),
+}).passthrough();
+
+const acceptanceSummaryItemSchema = z.object({
+  criterion: z.string(),
+  status: z.enum(["verified", "not_verified", "unknown"]),
+  evidence: stringList,
+  matchStrength: z.enum(["direct", "token", "fallback", "none"]).optional(),
+  matchScore: z.number().optional(),
+  evidenceSource: z.enum(["matched_evidence", "single_criterion_report_status", "none"]).optional(),
+}).passthrough();
+
+const acceptanceSummarySchema = z.object({
+  total: z.number().int().nonnegative(),
+  statusCounts: z.object({
+    verified: z.number().int().nonnegative(),
+    not_verified: z.number().int().nonnegative(),
+    unknown: z.number().int().nonnegative(),
+  }).passthrough(),
+  matchStrengthCounts: z.object({
+    direct: z.number().int().nonnegative(),
+    token: z.number().int().nonnegative(),
+    fallback: z.number().int().nonnegative(),
+    none: z.number().int().nonnegative(),
+  }).passthrough(),
+  evidenceSourceCounts: z.object({
+    matched_evidence: z.number().int().nonnegative(),
+    single_criterion_report_status: z.number().int().nonnegative(),
+    none: z.number().int().nonnegative(),
+  }).passthrough(),
+  verified: z.array(acceptanceSummaryItemSchema),
+  notVerified: z.array(acceptanceSummaryItemSchema),
+  unknown: z.array(acceptanceSummaryItemSchema),
 }).passthrough();
 
 const browserNetworkSummarySchema = z.object({
@@ -633,6 +687,55 @@ const browserInteractionSummarySchema = z.object({
   failedSteps: z.array(browserInteractionSummaryStepSchema),
 }).passthrough();
 
+const browserProviderGapSchema = z.object({
+  provider: z.string(),
+  project: optionalString,
+  check: z.string(),
+  kind: z.enum(["action", "assertion", "provider"]),
+  step: optionalString,
+  category: z.enum(["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]),
+  reason: z.string(),
+  recommendation: z.string(),
+}).passthrough();
+
+const browserProviderSummaryItemSchema = z.object({
+  provider: z.string(),
+  label: optionalString,
+  preferred: z.boolean(),
+  available: z.boolean(),
+  selected: z.boolean(),
+  attempted: z.boolean(),
+  resultCount: z.number().int().nonnegative(),
+  passed: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  blocked: z.number().int().nonnegative(),
+  skipped: z.number().int().nonnegative(),
+  reason: optionalString,
+  tools: stringList.optional(),
+  diagnostics: z.record(z.any()).optional(),
+}).passthrough();
+
+const browserProviderSummarySchema = z.object({
+  preferred: z.string(),
+  status: z.enum(["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]),
+  selectedProvider: optionalString,
+  availableProviders: stringList,
+  attemptedProviders: stringList,
+  fallbackUsed: z.boolean(),
+  items: z.array(browserProviderSummaryItemSchema),
+}).passthrough();
+
+const failureSummarySchema = z.object({
+  type: z.enum(["issue", "server", "command", "http", "browser", "required_check", "acceptance"]),
+  project: optionalString,
+  title: z.string(),
+  status: z.enum(["failed", "blocked", "not_verified", "unknown"]),
+  reason: z.string(),
+  evidence: stringList.optional(),
+  nextAction: optionalString,
+  diagnostics: stringList.optional(),
+}).passthrough();
+
 export const TestAgentReportContractSchema = z.object({
   schema: z.literal(TEST_AGENT_CONTRACT_IDS.report),
   agent: z.literal("test-agent"),
@@ -655,6 +758,9 @@ export const TestAgentReportContractSchema = z.object({
   browserToolCalls: z.array(z.object({ status: z.enum(["passed", "failed"]) }).passthrough()),
   browserNetworkSummary: z.array(browserNetworkSummarySchema).optional(),
   browserInteractionSummary: z.array(browserInteractionSummarySchema).optional(),
+  browserProviderSummary: browserProviderSummarySchema.optional(),
+  browserProviderGaps: z.array(browserProviderGapSchema).optional(),
+  failureSummary: z.array(failureSummarySchema).optional(),
   requiredCheckCoverage: z.array(requiredCheckCoverageSchema),
   acceptanceCoverage: z.array(acceptanceCoverageSchema),
   evidence: z.array(evidenceSchema),
@@ -686,6 +792,8 @@ export const TestAgentVerdictContractSchema = z.object({
   unknownRequiredChecks: z.array(requiredCheckCoverageSchema),
   failedAcceptanceCriteria: z.array(acceptanceCoverageSchema),
   unknownAcceptanceCriteria: z.array(acceptanceCoverageSchema),
+  requiredCheckSummary: requiredCheckSummarySchema,
+  acceptanceSummary: acceptanceSummarySchema,
   blockedReasons: stringList,
   risks: stringList,
   nextActions: stringList,
@@ -700,10 +808,14 @@ export const TestAgentVerdictContractSchema = z.object({
     browserFailedActions: z.number().optional(),
     browserAssertions: z.number().optional(),
     browserFailedAssertions: z.number().optional(),
+    browserProviderGaps: z.number().optional(),
     artifacts: z.number(),
   }).passthrough(),
   browserNetworkSummary: z.array(browserNetworkSummarySchema).optional(),
   browserInteractionSummary: z.array(browserInteractionSummarySchema).optional(),
+  browserProviderSummary: browserProviderSummarySchema.optional(),
+  browserProviderGaps: z.array(browserProviderGapSchema).optional(),
+  failureSummary: z.array(failureSummarySchema).optional(),
   keyEvidence: z.array(evidenceSchema),
   artifacts: z.object({
     artifactDir: z.string(),

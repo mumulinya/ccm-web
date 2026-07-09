@@ -128,6 +128,26 @@ function stringList(values: any[]) {
   return [...new Set((values || []).map(value => typeof value === "string" ? value : value?.path || value?.file || value?.command || value?.name || JSON.stringify(value)).filter(Boolean))];
 }
 
+function globalMissionSummaryRows(mission: any) {
+  return Array.isArray(mission?.mission_summary?.children) ? mission.mission_summary.children : [];
+}
+
+function globalMissionReportChildGatePassed(row: any) {
+  return row?.gate_passed === true
+    && row?.strong_acceptance_passed !== false
+    && row?.acceptance_evidence_status !== "weak"
+    && row?.acceptance_evidence_status !== "missing";
+}
+
+function globalMissionReportAllChildrenGatePassed(mission: any, children: any[]) {
+  const rows = globalMissionSummaryRows(mission);
+  if (!children.length || mission?.mission_summary?.all_passed !== true || !mission?.delivery_summary?.acceptance_gate_passed) return false;
+  return children.every((child: any) => {
+    const row = rows.find((item: any) => item.task_id === child.id);
+    return globalMissionReportChildGatePassed(row);
+  });
+}
+
 export function buildGlobalMissionFinalReport(snapshot: any) {
   const mission = snapshot?.mission || {};
   const children = Array.isArray(snapshot?.children) ? snapshot.children : [];
@@ -135,9 +155,10 @@ export function buildGlobalMissionFinalReport(snapshot: any) {
   const verification = stringList(children.flatMap((child: any) => child.delivery_summary?.verification_executed || child.receipt?.verification || []));
   const failedVerification = stringList(children.flatMap((child: any) => child.delivery_summary?.verification_failed || []));
   const blockers = stringList(children.flatMap((child: any) => [...(child.delivery_summary?.blockers || []), ...(child.delivery_summary?.needs || [])]));
-  const mergeCommits = stringList((mission.mission_summary?.children || []).flatMap((child: any) => child.merge_commits || []));
+  const missionRows = globalMissionSummaryRows(mission);
+  const mergeCommits = stringList(missionRows.flatMap((child: any) => child.merge_commits || []));
   const rejectedTargets = stringList((mission.mission_plan?.rejected || []).map((item: any) => item.reason || item.target?.name || item.target?.project || item.target?.group_id));
-  const allPassed = mission.delivery_summary?.acceptance_gate_passed === true && children.length > 0;
+  const allPassed = globalMissionReportAllChildrenGatePassed(mission, children);
   const risks = stringList([...failedVerification, ...blockers, ...rejectedTargets]);
   return {
     status: allPassed ? "completed" : "incomplete",
@@ -149,7 +170,7 @@ export function buildGlobalMissionFinalReport(snapshot: any) {
       task_id: child.id,
       target: child.mission_target?.name || child.target_project || child.group_id || "",
       summary: child.delivery_summary?.headline || child.receipt?.summary || child.status_detail || child.result || "",
-      gate_passed: (mission.mission_summary?.children || []).find((row: any) => row.task_id === child.id)?.gate_passed === true,
+      gate_passed: globalMissionReportChildGatePassed(missionRows.find((row: any) => row.task_id === child.id)),
     })),
     files_modified: modifiedFiles,
     verification_results: verification,
@@ -157,7 +178,17 @@ export function buildGlobalMissionFinalReport(snapshot: any) {
     risks,
     remaining_items: allPassed ? [] : stringList([
       ...blockers,
-      ...children.filter((child: any) => child.status !== "done").map((child: any) => `${child.mission_target?.name || child.target_project || child.id}: ${child.status_detail || child.status}`),
+      ...children.filter((child: any) => {
+        const row = missionRows.find((item: any) => item.task_id === child.id);
+        return child.status !== "done" || !globalMissionReportChildGatePassed(row);
+      }).map((child: any) => {
+        const row = missionRows.find((item: any) => item.task_id === child.id);
+        const target = child.mission_target?.name || child.target_project || child.group_id || child.id;
+        if (child.status === "done" && !globalMissionReportChildGatePassed(row)) {
+          return `${target}: 等待真实验证或复核证据`;
+        }
+        return `${target}: ${child.status_detail || child.status}`;
+      }),
     ]),
     acceptance_gate_passed: allPassed,
     generated_at: new Date().toISOString(),
@@ -209,14 +240,14 @@ export function startGlobalMissionSupervisor(input: any) {
     incidents: [],
   });
   saveRecord(record);
-  appendTraceEvent(record.trace_id, { id: `${record.id}:started`, type: "mission.supervisor_started", status: "ok", task_id: record.mission_id, message: "全局任务持久监工已启动", data: { supervisor_id: record.id, global_run_id: record.global_run_id } });
+  appendTraceEvent(record.trace_id, { id: `${record.id}:started`, type: "mission.supervisor_started", status: "ok", task_id: record.mission_id, message: "全局任务持续跟进已启动", data: { supervisor_id: record.id, global_run_id: record.global_run_id } });
   if (schedulerRuntime && input.defer_check !== true && input.deferCheck !== true) void checkGlobalMissionSupervisorNow(record.id, schedulerRuntime);
   return record;
 }
 
 export async function checkGlobalMissionSupervisorNow(id: string, runtime: GlobalMissionSupervisorRuntime) {
   const record = getGlobalMissionSupervisor(id);
-  if (!record) throw new Error("全局任务监工不存在");
+  if (!record) throw new Error("全局任务跟进记录不存在");
   if (!["monitoring", "waiting_user"].includes(record.status) || activeChecks.has(record.id)) return record;
   activeChecks.add(record.id);
   try {
@@ -254,11 +285,12 @@ export async function checkGlobalMissionSupervisorNow(id: string, runtime: Globa
           id: child.id,
           target_type: child.mission_target?.type || child.assign_type || "",
           target: child.mission_target?.name || child.target_project || child.group_id || "",
-          status: child.status,
+          status: missionRow.display_status || (child.status === "done" && !globalMissionReportChildGatePassed(missionRow) ? "reviewing" : child.status),
           status_detail: child.status_detail || "",
           dependencies: child.mission_dependencies || child.mission_target?.depends_on || [],
           receipt_status: child.receipt?.status || missionRow.receipt_status || "",
-          gate_passed: missionRow.gate_passed === true,
+          gate_passed: globalMissionReportChildGatePassed(missionRow),
+          acceptance_evidence_status: missionRow.acceptance_evidence_status || "",
           actual_file_change_count: Number(missionRow.actual_file_change_count || child.delivery_summary?.actual_file_change_count || 0),
           verification_count: Number(missionRow.verification_count || child.delivery_summary?.verification_executed?.length || 0),
           verification_failed: child.delivery_summary?.verification_failed || [],
@@ -314,18 +346,18 @@ export async function checkGlobalMissionSupervisorNow(id: string, runtime: Globa
 
 export async function controlGlobalMissionSupervisor(id: string, operation: string, runtime: GlobalMissionSupervisorRuntime, payload: any = {}) {
   const record = getGlobalMissionSupervisor(id);
-  if (!record) throw new Error("全局任务监工不存在");
+  if (!record) throw new Error("全局任务跟进记录不存在");
   const op = String(operation || "").toLowerCase();
   const now = nowIso(runtime);
   if (op === "check_now") return checkGlobalMissionSupervisorNow(record.id, runtime);
   if (op === "archive") {
-    if (["monitoring", "waiting_user"].includes(record.status)) throw new Error("运行中的监工不能直接归档，请先暂停、取消或人工接管");
+    if (["monitoring", "waiting_user"].includes(record.status)) throw new Error("运行中的持续跟进不能直接归档，请先暂停、取消或人工接管");
     atomicWrite(STORE_FILE, { version: 1, records: loadStore().filter(item => item.id !== record.id) });
-    appendTraceEvent(record.trace_id, { id: `${record.id}:archived:${now}`, type: "mission.supervisor_archived", status: "info", task_id: record.mission_id, message: "全局任务监工记录已归档" });
+    appendTraceEvent(record.trace_id, { id: `${record.id}:archived:${now}`, type: "mission.supervisor_archived", status: "info", task_id: record.mission_id, message: "全局任务跟进记录已归档" });
     return { ...record, archived: true, archived_at: now } as any;
   }
-  if (!["pause", "resume", "cancel", "takeover", "update_goal"].includes(op)) throw new Error(`不支持的监工操作：${operation}`);
-  if (["completed", "failed", "cancelled"].includes(record.status)) throw new Error("监工已进入终态，不能再修改；请创建新的全局任务");
+  if (!["pause", "resume", "cancel", "takeover", "update_goal"].includes(op)) throw new Error(`不支持的持续跟进操作：${operation}`);
+  if (["completed", "failed", "cancelled"].includes(record.status)) throw new Error("持续跟进已进入终态，不能再修改；请创建新的全局任务");
   await runtime.controlMission(record.mission_id, op, payload);
   if (op === "pause") { record.status = "paused"; record.phase = "paused"; }
   if (op === "resume") { record.status = "monitoring"; record.phase = "supervising"; record.next_check_at = now; }
@@ -355,7 +387,7 @@ export async function controlGlobalMissionSupervisor(id: string, operation: stri
   record.updated_at = now;
   record.actions = [...record.actions, { at: now, type: `user_${op}`, payload: { reason: payload.reason || "", goal_changed: op === "update_goal" } }].slice(-100);
   saveRecord(record);
-  appendTraceEvent(record.trace_id, { id: `${record.id}:control:${op}:${now}`, type: `mission.supervisor_${op}`, status: op === "cancel" ? "warning" : "info", task_id: record.mission_id, message: `用户执行监工操作：${op}` });
+  appendTraceEvent(record.trace_id, { id: `${record.id}:control:${op}:${now}`, type: `mission.supervisor_${op}`, status: op === "cancel" ? "warning" : "info", task_id: record.mission_id, message: `用户调整持续跟进：${op}` });
   if (record.status === "monitoring") void checkGlobalMissionSupervisorNow(record.id, runtime);
   return record;
 }
@@ -400,10 +432,19 @@ export function runGlobalMissionSupervisorSelfTest() {
     mission: {
       business_goal: "测试异步交付",
       delivery_summary: { acceptance_gate_passed: true },
-      mission_summary: { children: [{ task_id: "child-1", gate_passed: true, merge_commits: ["abc123"] }] },
+      mission_summary: { all_passed: true, children: [{ task_id: "child-1", gate_passed: true, merge_commits: ["abc123"] }] },
       mission_plan: { rejected: [] },
     },
     children: [{ id: "child-1", status: "done", target_project: "demo", receipt: { summary: "完成", filesChanged: ["src/a.ts"], verification: ["npm test"] }, delivery_summary: { headline: "完成", actual_file_changes: ["src/a.ts"], verification_executed: ["npm test"], blockers: [], needs: [] } }],
+  });
+  const weakReport = buildGlobalMissionFinalReport({
+    mission: {
+      business_goal: "弱验收测试",
+      delivery_summary: { acceptance_gate_passed: true },
+      mission_summary: { all_passed: true, children: [{ task_id: "weak-child", gate_passed: true, acceptance_evidence_status: "weak" }] },
+      mission_plan: { rejected: [] },
+    },
+    children: [{ id: "weak-child", status: "done", target_project: "demo", delivery_summary: { headline: "仅有验收结论", acceptance: ["验收结论：已通过"], blockers: [], needs: [] } }],
   });
   const checks = {
     completedOnlyWithGate: report.completed === true,
@@ -411,6 +452,7 @@ export function runGlobalMissionSupervisorSelfTest() {
     fixedVerificationSection: report.verification_results.includes("npm test"),
     mergeTracked: report.merge_commits.includes("abc123"),
     noFalseCompletion: buildGlobalMissionFinalReport({ mission: { business_goal: "x", delivery_summary: { acceptance_gate_passed: false } }, children: [] }).completed === false,
+    globalMissionSupervisorWeakChildNotCompleted: weakReport.completed === false && weakReport.remaining_items.some((item: string) => /真实验证|复核证据/.test(item)),
   };
   return { pass: Object.values(checks).every(Boolean), checks, report };
 }
@@ -425,7 +467,7 @@ export async function runGlobalMissionSupervisorAsyncSelfTest() {
         mission: {
           id: missionId,
           status: "done",
-          business_goal: "异步监工 E2E",
+          business_goal: "持续跟进 E2E",
           delivery_summary: { acceptance_gate_passed: true },
           mission_summary: { all_passed: true, children: [{ task_id: "child", gate_passed: true, merge_commits: ["e2e-commit"] }] },
           mission_plan: { rejected: [] },
@@ -433,7 +475,7 @@ export async function runGlobalMissionSupervisorAsyncSelfTest() {
         children: [{ id: "child", status: "done", target_project: "sandbox", receipt: { status: "done", summary: "恢复后完成", filesChanged: ["src/e2e.ts"], verification: ["npm test"] }, delivery_summary: { headline: "恢复后完成", actual_file_changes: ["src/e2e.ts"], verification_executed: ["npm test"], verification_failed: [], blockers: [], needs: [] } }],
       }
     : {
-        mission: { id: missionId, status: "in_progress", business_goal: "异步监工 E2E", delivery_summary: { acceptance_gate_passed: false }, mission_summary: { all_passed: false, children: [{ task_id: "child", gate_passed: false }] }, mission_plan: { rejected: [] } },
+        mission: { id: missionId, status: "in_progress", business_goal: "持续跟进 E2E", delivery_summary: { acceptance_gate_passed: false }, mission_summary: { all_passed: false, children: [{ task_id: "child", gate_passed: false }] }, mission_plan: { rejected: [] } },
         children: [{ id: "child", status: phase === "failed" ? "failed" : "pending", target_project: "sandbox", status_detail: phase === "failed" ? "执行器异常" : "恢复排队" }],
       };
   const runtime: GlobalMissionSupervisorRuntime = {
@@ -450,7 +492,7 @@ export async function runGlobalMissionSupervisorAsyncSelfTest() {
     controlMission: (_id, operation) => { controlCalls.push(operation); return { success: true }; },
     onCompleted: (_record, report) => { completedReports.push(report); },
   };
-  const record = startGlobalMissionSupervisor({ mission_id: missionId, trace_id: `trace_${missionId}`, business_goal: "异步监工 E2E", source: "self-test", poll_interval_ms: 2_000, defer_check: true });
+  const record = startGlobalMissionSupervisor({ mission_id: missionId, trace_id: `trace_${missionId}`, business_goal: "持续跟进 E2E", source: "self-test", poll_interval_ms: 2_000, defer_check: true });
   try {
     const recovery = await checkGlobalMissionSupervisorNow(record.id, runtime);
     const reloaded = getGlobalMissionSupervisor(record.id);

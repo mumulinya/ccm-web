@@ -12195,6 +12195,222 @@ export declare const TestAgentReportContractSchema: z.ZodObject<{
             error: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">>, "many">;
     }, z.ZodTypeAny, "passthrough">>, "many">>;
+    browserProviderSummary: z.ZodOptional<z.ZodObject<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>>;
+    browserProviderGaps: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, z.ZodTypeAny, "passthrough">>, "many">>;
+    failureSummary: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, z.ZodTypeAny, "passthrough">>, "many">>;
     requiredCheckCoverage: z.ZodArray<z.ZodObject<{
         check: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
@@ -12215,14 +12431,23 @@ export declare const TestAgentReportContractSchema: z.ZodObject<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">>, "many">;
     evidence: z.ZodArray<z.ZodObject<{
         type: z.ZodString;
@@ -12533,6 +12758,222 @@ export declare const TestAgentReportContractSchema: z.ZodObject<{
             error: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">>, "many">;
     }, z.ZodTypeAny, "passthrough">>, "many">>;
+    browserProviderSummary: z.ZodOptional<z.ZodObject<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>>;
+    browserProviderGaps: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, z.ZodTypeAny, "passthrough">>, "many">>;
+    failureSummary: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, z.ZodTypeAny, "passthrough">>, "many">>;
     requiredCheckCoverage: z.ZodArray<z.ZodObject<{
         check: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
@@ -12553,14 +12994,23 @@ export declare const TestAgentReportContractSchema: z.ZodObject<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">>, "many">;
     evidence: z.ZodArray<z.ZodObject<{
         type: z.ZodString;
@@ -12871,6 +13321,222 @@ export declare const TestAgentReportContractSchema: z.ZodObject<{
             error: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">>, "many">;
     }, z.ZodTypeAny, "passthrough">>, "many">>;
+    browserProviderSummary: z.ZodOptional<z.ZodObject<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>>;
+    browserProviderGaps: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, z.ZodTypeAny, "passthrough">>, "many">>;
+    failureSummary: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, z.ZodTypeAny, "passthrough">>, "many">>;
     requiredCheckCoverage: z.ZodArray<z.ZodObject<{
         check: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
@@ -12891,14 +13557,23 @@ export declare const TestAgentReportContractSchema: z.ZodObject<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">>, "many">;
     evidence: z.ZodArray<z.ZodObject<{
         type: z.ZodString;
@@ -12991,28 +13666,567 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">>, "many">;
     unknownAcceptanceCriteria: z.ZodArray<z.ZodObject<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">>, "many">;
+    requiredCheckSummary: z.ZodObject<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>;
+    acceptanceSummary: z.ZodObject<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        matchStrengthCounts: z.ZodObject<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        evidenceSourceCounts: z.ZodObject<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        matchStrengthCounts: z.ZodObject<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        evidenceSourceCounts: z.ZodObject<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        matchStrengthCounts: z.ZodObject<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        evidenceSourceCounts: z.ZodObject<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>;
     blockedReasons: z.ZodArray<z.ZodString, "many">;
     risks: z.ZodArray<z.ZodString, "many">;
     nextActions: z.ZodArray<z.ZodString, "many">;
@@ -13027,6 +14241,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
         browserFailedActions: z.ZodOptional<z.ZodNumber>;
         browserAssertions: z.ZodOptional<z.ZodNumber>;
         browserFailedAssertions: z.ZodOptional<z.ZodNumber>;
+        browserProviderGaps: z.ZodOptional<z.ZodNumber>;
         artifacts: z.ZodNumber;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         commands: z.ZodRecord<z.ZodString, z.ZodNumber>;
@@ -13039,6 +14254,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
         browserFailedActions: z.ZodOptional<z.ZodNumber>;
         browserAssertions: z.ZodOptional<z.ZodNumber>;
         browserFailedAssertions: z.ZodOptional<z.ZodNumber>;
+        browserProviderGaps: z.ZodOptional<z.ZodNumber>;
         artifacts: z.ZodNumber;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         commands: z.ZodRecord<z.ZodString, z.ZodNumber>;
@@ -13051,6 +14267,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
         browserFailedActions: z.ZodOptional<z.ZodNumber>;
         browserAssertions: z.ZodOptional<z.ZodNumber>;
         browserFailedAssertions: z.ZodOptional<z.ZodNumber>;
+        browserProviderGaps: z.ZodOptional<z.ZodNumber>;
         artifacts: z.ZodNumber;
     }, z.ZodTypeAny, "passthrough">>;
     browserNetworkSummary: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -13270,6 +14487,222 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
             detail: z.ZodOptional<z.ZodString>;
             error: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>, "many">>;
+    browserProviderSummary: z.ZodOptional<z.ZodObject<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>>;
+    browserProviderGaps: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, z.ZodTypeAny, "passthrough">>, "many">>;
+    failureSummary: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     }, z.ZodTypeAny, "passthrough">>, "many">>;
     keyEvidence: z.ZodArray<z.ZodObject<{
         type: z.ZodString;
@@ -13362,28 +14795,567 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">>, "many">;
     unknownAcceptanceCriteria: z.ZodArray<z.ZodObject<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">>, "many">;
+    requiredCheckSummary: z.ZodObject<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>;
+    acceptanceSummary: z.ZodObject<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        matchStrengthCounts: z.ZodObject<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        evidenceSourceCounts: z.ZodObject<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        matchStrengthCounts: z.ZodObject<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        evidenceSourceCounts: z.ZodObject<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        matchStrengthCounts: z.ZodObject<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        evidenceSourceCounts: z.ZodObject<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>;
     blockedReasons: z.ZodArray<z.ZodString, "many">;
     risks: z.ZodArray<z.ZodString, "many">;
     nextActions: z.ZodArray<z.ZodString, "many">;
@@ -13398,6 +15370,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
         browserFailedActions: z.ZodOptional<z.ZodNumber>;
         browserAssertions: z.ZodOptional<z.ZodNumber>;
         browserFailedAssertions: z.ZodOptional<z.ZodNumber>;
+        browserProviderGaps: z.ZodOptional<z.ZodNumber>;
         artifacts: z.ZodNumber;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         commands: z.ZodRecord<z.ZodString, z.ZodNumber>;
@@ -13410,6 +15383,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
         browserFailedActions: z.ZodOptional<z.ZodNumber>;
         browserAssertions: z.ZodOptional<z.ZodNumber>;
         browserFailedAssertions: z.ZodOptional<z.ZodNumber>;
+        browserProviderGaps: z.ZodOptional<z.ZodNumber>;
         artifacts: z.ZodNumber;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         commands: z.ZodRecord<z.ZodString, z.ZodNumber>;
@@ -13422,6 +15396,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
         browserFailedActions: z.ZodOptional<z.ZodNumber>;
         browserAssertions: z.ZodOptional<z.ZodNumber>;
         browserFailedAssertions: z.ZodOptional<z.ZodNumber>;
+        browserProviderGaps: z.ZodOptional<z.ZodNumber>;
         artifacts: z.ZodNumber;
     }, z.ZodTypeAny, "passthrough">>;
     browserNetworkSummary: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -13641,6 +15616,222 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
             detail: z.ZodOptional<z.ZodString>;
             error: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>, "many">>;
+    browserProviderSummary: z.ZodOptional<z.ZodObject<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>>;
+    browserProviderGaps: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, z.ZodTypeAny, "passthrough">>, "many">>;
+    failureSummary: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     }, z.ZodTypeAny, "passthrough">>, "many">>;
     keyEvidence: z.ZodArray<z.ZodObject<{
         type: z.ZodString;
@@ -13733,28 +15924,567 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">>, "many">;
     unknownAcceptanceCriteria: z.ZodArray<z.ZodObject<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         criterion: z.ZodString;
         status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
         evidence: z.ZodArray<z.ZodString, "many">;
+        matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+        matchScore: z.ZodOptional<z.ZodNumber>;
+        evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
     }, z.ZodTypeAny, "passthrough">>, "many">;
+    requiredCheckSummary: z.ZodObject<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            check: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            missingReason: z.ZodOptional<z.ZodString>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>;
+    acceptanceSummary: z.ZodObject<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        matchStrengthCounts: z.ZodObject<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        evidenceSourceCounts: z.ZodObject<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        matchStrengthCounts: z.ZodObject<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        evidenceSourceCounts: z.ZodObject<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        total: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            verified: z.ZodNumber;
+            not_verified: z.ZodNumber;
+            unknown: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        matchStrengthCounts: z.ZodObject<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            direct: z.ZodNumber;
+            token: z.ZodNumber;
+            fallback: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        evidenceSourceCounts: z.ZodObject<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            matched_evidence: z.ZodNumber;
+            single_criterion_report_status: z.ZodNumber;
+            none: z.ZodNumber;
+        }, z.ZodTypeAny, "passthrough">>;
+        verified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        notVerified: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+        unknown: z.ZodArray<z.ZodObject<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            criterion: z.ZodString;
+            status: z.ZodEnum<["verified", "not_verified", "unknown"]>;
+            evidence: z.ZodArray<z.ZodString, "many">;
+            matchStrength: z.ZodOptional<z.ZodEnum<["direct", "token", "fallback", "none"]>>;
+            matchScore: z.ZodOptional<z.ZodNumber>;
+            evidenceSource: z.ZodOptional<z.ZodEnum<["matched_evidence", "single_criterion_report_status", "none"]>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>;
     blockedReasons: z.ZodArray<z.ZodString, "many">;
     risks: z.ZodArray<z.ZodString, "many">;
     nextActions: z.ZodArray<z.ZodString, "many">;
@@ -13769,6 +16499,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
         browserFailedActions: z.ZodOptional<z.ZodNumber>;
         browserAssertions: z.ZodOptional<z.ZodNumber>;
         browserFailedAssertions: z.ZodOptional<z.ZodNumber>;
+        browserProviderGaps: z.ZodOptional<z.ZodNumber>;
         artifacts: z.ZodNumber;
     }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
         commands: z.ZodRecord<z.ZodString, z.ZodNumber>;
@@ -13781,6 +16512,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
         browserFailedActions: z.ZodOptional<z.ZodNumber>;
         browserAssertions: z.ZodOptional<z.ZodNumber>;
         browserFailedAssertions: z.ZodOptional<z.ZodNumber>;
+        browserProviderGaps: z.ZodOptional<z.ZodNumber>;
         artifacts: z.ZodNumber;
     }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
         commands: z.ZodRecord<z.ZodString, z.ZodNumber>;
@@ -13793,6 +16525,7 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
         browserFailedActions: z.ZodOptional<z.ZodNumber>;
         browserAssertions: z.ZodOptional<z.ZodNumber>;
         browserFailedAssertions: z.ZodOptional<z.ZodNumber>;
+        browserProviderGaps: z.ZodOptional<z.ZodNumber>;
         artifacts: z.ZodNumber;
     }, z.ZodTypeAny, "passthrough">>;
     browserNetworkSummary: z.ZodOptional<z.ZodArray<z.ZodObject<{
@@ -14012,6 +16745,222 @@ export declare const TestAgentVerdictContractSchema: z.ZodObject<{
             detail: z.ZodOptional<z.ZodString>;
             error: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>, "many">>;
+    browserProviderSummary: z.ZodOptional<z.ZodObject<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        preferred: z.ZodString;
+        status: z.ZodEnum<["not_required", "provider_none", "ready", "used", "blocked", "unavailable"]>;
+        selectedProvider: z.ZodOptional<z.ZodString>;
+        availableProviders: z.ZodArray<z.ZodString, "many">;
+        attemptedProviders: z.ZodArray<z.ZodString, "many">;
+        fallbackUsed: z.ZodBoolean;
+        items: z.ZodArray<z.ZodObject<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+            provider: z.ZodString;
+            label: z.ZodOptional<z.ZodString>;
+            preferred: z.ZodBoolean;
+            available: z.ZodBoolean;
+            selected: z.ZodBoolean;
+            attempted: z.ZodBoolean;
+            resultCount: z.ZodNumber;
+            passed: z.ZodNumber;
+            failed: z.ZodNumber;
+            blocked: z.ZodNumber;
+            skipped: z.ZodNumber;
+            reason: z.ZodOptional<z.ZodString>;
+            tools: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+            diagnostics: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodAny>>;
+        }, z.ZodTypeAny, "passthrough">>, "many">;
+    }, z.ZodTypeAny, "passthrough">>>;
+    browserProviderGaps: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        provider: z.ZodString;
+        project: z.ZodOptional<z.ZodString>;
+        check: z.ZodString;
+        kind: z.ZodEnum<["action", "assertion", "provider"]>;
+        step: z.ZodOptional<z.ZodString>;
+        category: z.ZodEnum<["unsupported_action", "unsupported_assertion", "missing_tool", "provider_unavailable", "provider_capability_gap"]>;
+        reason: z.ZodString;
+        recommendation: z.ZodString;
+    }, z.ZodTypeAny, "passthrough">>, "many">>;
+    failureSummary: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, "passthrough", z.ZodTypeAny, z.objectOutputType<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+    }, z.ZodTypeAny, "passthrough">, z.objectInputType<{
+        type: z.ZodEnum<["issue", "server", "command", "http", "browser", "required_check", "acceptance"]>;
+        project: z.ZodOptional<z.ZodString>;
+        title: z.ZodString;
+        status: z.ZodEnum<["failed", "blocked", "not_verified", "unknown"]>;
+        reason: z.ZodString;
+        evidence: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+        nextAction: z.ZodOptional<z.ZodString>;
+        diagnostics: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     }, z.ZodTypeAny, "passthrough">>, "many">>;
     keyEvidence: z.ZodArray<z.ZodObject<{
         type: z.ZodString;

@@ -30,6 +30,13 @@ export declare function runTestAgentWorkOrderNormalizationSelfTest(): {
         issues: import("./types").WorkOrderIssue[];
     };
 };
+export declare function runTestAgentSelfTestMatrixSelfTest(): Promise<{
+    pass: boolean;
+    discovered: string[];
+    report: import("./self-test-matrix").TestAgentSelfTestMatrixReport;
+    timeoutReport: import("./self-test-matrix").TestAgentSelfTestMatrixReport;
+    summary: string;
+}>;
 export declare function runTestAgentHandoffBuilderSelfTest(): {
     pass: boolean;
     built: import("./work-order-builder").TestAgentBuiltWorkOrder;
@@ -76,7 +83,42 @@ export declare function runTestAgentVerdictSelfTest(): Promise<{
     verdict: any;
     validation: import("./contract").TestAgentVerdictContractValidation;
     manifest: any;
+    cliSummary: string;
+    markdown: string;
 }>;
+export declare function runTestAgentFailureSummarySelfTest(): {
+    pass: boolean;
+    report: import("./types").TestAgentReport;
+    verdict: import("./types").TestAgentVerdict;
+    markdown: string;
+    reportValidation: import("./contract").TestAgentReportContractValidation;
+    verdictValidation: import("./contract").TestAgentVerdictContractValidation;
+};
+export declare function runTestAgentBrowserProviderGapSummarySelfTest(): {
+    pass: boolean;
+    report: import("./types").TestAgentReport;
+    verdict: import("./types").TestAgentVerdict;
+    uploadGap: import("./types").BrowserProviderGapItem;
+    networkGap: import("./types").BrowserProviderGapItem;
+    cliSummary: string;
+    markdown: string;
+    reportValidation: import("./contract").TestAgentReportContractValidation;
+    verdictValidation: import("./contract").TestAgentVerdictContractValidation;
+};
+export declare function runTestAgentAcceptanceSummarySelfTest(): {
+    pass: boolean;
+    report: import("./types").TestAgentReport;
+    verdict: import("./types").TestAgentVerdict;
+    byCriterion: {
+        [k: string]: import("./types").AcceptanceCoverageItem;
+    };
+    fallbackCoverage: import("./types").AcceptanceCoverageItem[];
+    fallbackSummary: import("./types").TestAgentAcceptanceSummary;
+    cliSummary: string;
+    markdown: string;
+    reportValidation: import("./contract").TestAgentReportContractValidation;
+    verdictValidation: import("./contract").TestAgentVerdictContractValidation;
+};
 export declare function runTestAgentArtifactManifestSelfTest(): Promise<{
     pass: boolean;
     report: import("./types").TestAgentReport;
@@ -97,6 +139,14 @@ export declare function runTestAgentMcpScreenshotArtifactSelfTest(): Promise<{
     verification: import("./artifact-verifier").TestAgentArtifactVerification;
     blank: import("./artifact-verifier").TestAgentArtifactVerification;
     tampered: import("./artifact-verifier").TestAgentArtifactVerification;
+}>;
+export declare function runTestAgentMcpFailureScreenshotSelfTest(): Promise<{
+    pass: boolean;
+    report: import("./types").TestAgentReport;
+    manifest: any;
+    verification: import("./artifact-verifier").TestAgentArtifactVerification;
+    calls: any[];
+    screenshotPath: string;
 }>;
 export declare function runTestAgentBrowserEvidenceArtifactSelfTest(): Promise<{
     pass: boolean;
@@ -121,6 +171,8 @@ export declare function runTestAgentExecutionPlanSelfTest(): Promise<{
     validation: import("./contract").TestAgentWorkOrderContractValidation;
     plan: import("./execution-plan").TestAgentExecutionPlan;
     summary: string;
+    providerWarningPlan: import("./execution-plan").TestAgentExecutionPlan;
+    providerWarningSummary: string;
     cliResult: {
         exitCode: number;
     };
@@ -151,6 +203,549 @@ export declare function runTestAgentAutoBrowserSmokeSelfTest(): Promise<{
     calls: any[];
     autoCheck: import("./types").BrowserCheckSpec;
     derivedAssertions: import("./browser/acceptance-derived-checks").AcceptanceDerivedBrowserAssertion[];
+}>;
+export declare function runTestAgentBrowserCheckSourceMetadataSelfTest(): {
+    pass: boolean;
+    autoCheck: import("./types").BrowserCheckSpec;
+    pathCheck: import("./types").BrowserCheckSpec;
+    formCheck: import("./types").BrowserCheckSpec;
+    invalidFormCheck: import("./types").BrowserCheckSpec;
+    dialogCheck: import("./types").BrowserCheckSpec;
+    downloadCheck: import("./types").BrowserCheckSpec;
+    uploadCheck: import("./types").BrowserCheckSpec;
+    repeatedClickCheck: import("./types").BrowserCheckSpec;
+    keyboardCheck: import("./types").BrowserCheckSpec;
+    clickCheck: import("./types").BrowserCheckSpec;
+    hoverCheck: import("./types").BrowserCheckSpec;
+    scrollCheck: import("./types").BrowserCheckSpec;
+    responsiveCheck: import("./types").BrowserCheckSpec;
+    generatedChecks: import("./types").BrowserCheckSpec[];
+};
+export declare function runTestAgentAcceptanceDialogFlowSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    dialogChecks?: undefined;
+    generatedChecks?: undefined;
+    report?: undefined;
+    dialogLogText?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    dialogChecks: import("./types").BrowserCheckSpec[];
+    generatedChecks: import("./types").BrowserCheckSpec[];
+    report: import("./types").TestAgentReport;
+    dialogLogText: string;
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceKeyboardFlowSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    keyboardChecks?: undefined;
+    generatedChecks?: undefined;
+    report?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    keyboardChecks: import("./types").BrowserCheckSpec[];
+    generatedChecks: import("./types").BrowserCheckSpec[];
+    report: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceHoverFlowSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    hoverChecks?: undefined;
+    generatedChecks?: undefined;
+    report?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    hoverChecks: import("./types").BrowserCheckSpec[];
+    generatedChecks: import("./types").BrowserCheckSpec[];
+    report: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceScrollFlowSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    scrollChecks?: undefined;
+    layoutOnlyScrollChecks?: undefined;
+    generatedChecks?: undefined;
+    report?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    scrollChecks: import("./types").BrowserCheckSpec[];
+    layoutOnlyScrollChecks: import("./types").BrowserCheckSpec[];
+    generatedChecks: import("./types").BrowserCheckSpec[];
+    report: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceRepeatedClickSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    repeatedChecks?: undefined;
+    generatedChecks?: undefined;
+    report?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    repeatedChecks: import("./types").BrowserCheckSpec[];
+    generatedChecks: import("./types").BrowserCheckSpec[];
+    report: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceChineseRepeatedClickSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    repeatedChecks?: undefined;
+    generatedChecks?: undefined;
+    report?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    repeatedChecks: import("./types").BrowserCheckSpec[];
+    generatedChecks: import("./types").BrowserCheckSpec[];
+    report: import("./types").TestAgentReport;
+    reason?: undefined;
 }>;
 export declare function runTestAgentBlankPageSmokeSelfTest(): Promise<{
     pass: boolean;
@@ -407,7 +1002,268 @@ export declare function runTestAgentAcceptancePathGroupingSelfTest(): Promise<{
     pathChecks: import("./types").BrowserCheckSpec[];
     reason?: undefined;
 }>;
+export declare function runTestAgentAcceptanceResponsiveViewportSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    report?: undefined;
+    responsiveChecks?: undefined;
+    generatedChecks?: undefined;
+} | {
+    pass: boolean;
+    report: import("./types").TestAgentReport;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    responsiveChecks: import("./types").BrowserCheckSpec[];
+    generatedChecks: import("./types").BrowserCheckSpec[];
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceChineseResponsiveViewportSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    report?: undefined;
+    responsiveChecks?: undefined;
+    generatedChecks?: undefined;
+} | {
+    pass: boolean;
+    report: import("./types").TestAgentReport;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    responsiveChecks: import("./types").BrowserCheckSpec[];
+    generatedChecks: import("./types").BrowserCheckSpec[];
+    reason?: undefined;
+}>;
 export declare function runTestAgentAcceptanceDownloadFlowSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    report?: undefined;
+    downloadChecks?: undefined;
+    downloadArtifact?: undefined;
+} | {
+    pass: boolean;
+    report: import("./types").TestAgentReport;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    downloadChecks: import("./types").BrowserCheckSpec[];
+    downloadArtifact: import("./types").BrowserEvidenceArtifact;
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceChineseDownloadFlowSelfTest(): Promise<{
     pass: boolean;
     availability: {
         available: boolean;
@@ -579,7 +1435,519 @@ export declare function runTestAgentAcceptanceUploadFlowSelfTest(): Promise<{
     uploadChecks: import("./types").BrowserCheckSpec[];
     reason?: undefined;
 }>;
+export declare function runTestAgentAcceptanceChineseUploadFlowSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    report?: undefined;
+    uploadChecks?: undefined;
+} | {
+    pass: boolean;
+    report: import("./types").TestAgentReport;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    uploadChecks: import("./types").BrowserCheckSpec[];
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceClickFlowSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    report?: undefined;
+    clickChecks?: undefined;
+    markdown?: undefined;
+} | {
+    pass: boolean;
+    report: import("./types").TestAgentReport;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    clickChecks: import("./types").BrowserCheckSpec[];
+    markdown: string;
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceChineseClickFlowSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    report?: undefined;
+    clickChecks?: undefined;
+} | {
+    pass: boolean;
+    report: import("./types").TestAgentReport;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    clickChecks: import("./types").BrowserCheckSpec[];
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceClickNavigationFlowSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    report?: undefined;
+    clickChecks?: undefined;
+} | {
+    pass: boolean;
+    report: import("./types").TestAgentReport;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    clickChecks: import("./types").BrowserCheckSpec[];
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceMultiClickFlowSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    report?: undefined;
+    clickChecks?: undefined;
+} | {
+    pass: boolean;
+    report: import("./types").TestAgentReport;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    clickChecks: import("./types").BrowserCheckSpec[];
+    reason?: undefined;
+}>;
 export declare function runTestAgentAcceptanceFormFlowSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    report?: undefined;
+    flowChecks?: undefined;
+} | {
+    pass: boolean;
+    report: import("./types").TestAgentReport;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    flowChecks: import("./types").BrowserCheckSpec[];
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceChineseFormFlowSelfTest(): Promise<{
     pass: boolean;
     availability: {
         available: boolean;
@@ -1004,6 +2372,93 @@ export declare function runTestAgentAcceptanceRedirectFormFlowSelfTest(): Promis
     flowChecks: import("./types").BrowserCheckSpec[];
     reason?: undefined;
 }>;
+export declare function runTestAgentAcceptanceInvalidFormAdversarialSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    flowChecks?: undefined;
+    generatedChecks?: undefined;
+    report?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    flowChecks: import("./types").BrowserCheckSpec[];
+    generatedChecks: import("./types").BrowserCheckSpec[];
+    report: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
 export declare function runTestAgentAcceptanceRefreshPersistenceFormFlowSelfTest(): Promise<{
     pass: boolean;
     availability: {
@@ -1170,6 +2625,95 @@ export declare function runTestAgentPlaywrightUrlIncludesWaitSelfTest(): Promise
             launchFallbackErrors?: undefined;
         };
     };
+    reason?: undefined;
+}>;
+export declare function runTestAgentPlaywrightFailureScreenshotSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    report?: undefined;
+    manifest?: undefined;
+    verification?: undefined;
+    screenshotPath?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    report: import("./types").TestAgentReport;
+    manifest: any;
+    verification: import("./artifact-verifier").TestAgentArtifactVerification;
+    screenshotPath: string;
     reason?: undefined;
 }>;
 export declare function runTestAgentBrowserUrlTitleAssertionSelfTest(): Promise<{
@@ -1434,6 +2978,186 @@ export declare function runTestAgentBrowserNetworkStateActionSelfTest(): Promise
     reason?: undefined;
 }>;
 export declare function runTestAgentBrowserAccessibilityAssertionSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    passReport?: undefined;
+    failReport?: undefined;
+    mcpReport?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    passReport: import("./types").TestAgentReport;
+    failReport: import("./types").TestAgentReport;
+    mcpReport: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
+export declare function runTestAgentBrowserAccessibilitySnapshotArtifactSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    report?: undefined;
+    manifest?: undefined;
+    verification?: undefined;
+    accessibilityArtifact?: undefined;
+    accessibilityPreview?: undefined;
+    reportValidation?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    report: import("./types").TestAgentReport;
+    manifest: any;
+    verification: import("./artifact-verifier").TestAgentArtifactVerification;
+    accessibilityArtifact: import("./types").BrowserEvidenceArtifact;
+    accessibilityPreview: string;
+    reportValidation: import("./contract").TestAgentReportContractValidation;
+    reason?: undefined;
+}>;
+export declare function runTestAgentBrowserAriaStateAssertionSelfTest(): Promise<{
     pass: boolean;
     availability: {
         available: boolean;
@@ -1954,6 +3678,441 @@ export declare function runTestAgentAcceptanceDerivedChecksSelfTest(): {
     derived: import("./browser/acceptance-derived-checks").AcceptanceDerivedBrowserAssertion[];
     autoCheck: import("./types").BrowserCheckSpec;
 };
+export declare function runTestAgentAcceptanceDerivedAccessibilitySelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    derived?: undefined;
+    generatedChecks?: undefined;
+    report?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    derived: import("./browser/acceptance-derived-checks").AcceptanceDerivedBrowserAssertion[];
+    generatedChecks: import("./types").BrowserCheckSpec[];
+    report: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceDerivedStorageAssertionSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    derived?: undefined;
+    generatedChecks?: undefined;
+    report?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    derived: import("./browser/acceptance-derived-checks").AcceptanceDerivedBrowserAssertion[];
+    generatedChecks: import("./types").BrowserCheckSpec[];
+    report: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceDerivedCookieAssertionSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    derived?: undefined;
+    generatedChecks?: undefined;
+    report?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    derived: import("./browser/acceptance-derived-checks").AcceptanceDerivedBrowserAssertion[];
+    generatedChecks: import("./types").BrowserCheckSpec[];
+    report: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceDerivedNetworkAssertionSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    derived?: undefined;
+    generatedChecks?: undefined;
+    report?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    derived: import("./browser/acceptance-derived-checks").AcceptanceDerivedBrowserAssertion[];
+    generatedChecks: import("./types").BrowserCheckSpec[];
+    report: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
+export declare function runTestAgentAcceptanceDerivedNegativeUiSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    derived?: undefined;
+    generatedChecks?: undefined;
+    report?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    derived: import("./browser/acceptance-derived-checks").AcceptanceDerivedBrowserAssertion[];
+    generatedChecks: import("./types").BrowserCheckSpec[];
+    report: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
 export declare function runTestAgentSemanticLocatorSelfTest(): {
     pass: boolean;
     actionPlans: import("./browser/semantic-locator").SemanticLocatorPlan[];
@@ -1963,9 +4122,92 @@ export declare function runTestAgentSemanticLocatorSelfTest(): {
 export declare function runTestAgentBrowserStateSelfTest(): {
     pass: boolean;
     actionTypes: ("fill" | "check" | "goto" | "click" | "doubleClick" | "rightClick" | "selectOption" | "uncheck" | "uploadFile" | "dragTo" | "setClipboard" | "setCookie" | "clearCookies" | "setLocalStorage" | "setSessionStorage" | "clearStorage" | "setOffline" | "setOnline" | "hover" | "focus" | "typeText" | "press" | "scroll" | "openApplication" | "requestAccess" | "reload" | "goBack" | "goForward" | "waitForSelector" | "waitForText" | "waitForUrl" | "waitForTimeout" | "evaluate")[];
-    assertionTypes: ("text" | "enabled" | "disabled" | "checked" | "visible" | "notVisible" | "focused" | "notFocused" | "notChecked" | "selectedValue" | "selectedTextIncludes" | "inputValueEquals" | "inputValueIncludes" | "attributeEquals" | "attributeIncludes" | "computedStyleEquals" | "computedStyleIncludes" | "elementCountEquals" | "elementCountAtLeast" | "elementCountAtMost" | "dialogAppeared" | "dialogMessageIncludes" | "dialogTypeEquals" | "popupOpened" | "popupUrlIncludes" | "popupTextIncludes" | "popupTitleIncludes" | "tableRowIncludes" | "tableCellTextIncludes" | "tableCellTextEquals" | "clipboardTextEquals" | "clipboardTextIncludes" | "elementScreenshotNotBlank" | "textOrder" | "urlEquals" | "urlIncludes" | "urlNotIncludes" | "titleEquals" | "titleIncludes" | "titleNotIncludes" | "elementTextIncludes" | "accessibleNameEquals" | "accessibleNameIncludes" | "accessibleDescriptionEquals" | "accessibleDescriptionIncludes" | "ariaSnapshotIncludes" | "inViewport" | "pageNotBlank" | "noHorizontalOverflow" | "onlineState" | "browserOnline" | "browserOffline" | "cookieExists" | "cookieValueIncludes" | "networkNoErrors" | "networkRequest" | "networkRequestIncludes" | "networkRequestNot" | "networkRequestNotIncludes" | "networkResponse" | "networkResponseIncludes" | "networkResponseNot" | "networkResponseNotIncludes" | "downloadedFile" | "consoleIncludes" | "consoleNotIncludes" | "consoleNoErrors" | "consoleNoWarnings" | "jsTruthy" | "jsEquals" | "localStorageEquals" | "localStorageIncludes" | "sessionStorageEquals" | "sessionStorageIncludes")[];
+    assertionTypes: ("text" | "enabled" | "disabled" | "checked" | "present" | "visible" | "notVisible" | "notPresent" | "focused" | "notFocused" | "notChecked" | "selectedValue" | "selectedTextIncludes" | "inputValueEquals" | "inputValueIncludes" | "attributeEquals" | "attributeIncludes" | "computedStyleEquals" | "computedStyleIncludes" | "elementCountEquals" | "elementCountAtLeast" | "elementCountAtMost" | "dialogAppeared" | "dialogMessageIncludes" | "dialogTypeEquals" | "popupOpened" | "popupUrlIncludes" | "popupTextIncludes" | "popupTitleIncludes" | "tableRowIncludes" | "tableCellTextIncludes" | "tableCellTextEquals" | "clipboardTextEquals" | "clipboardTextIncludes" | "elementScreenshotNotBlank" | "textOrder" | "urlEquals" | "urlIncludes" | "urlNotIncludes" | "titleEquals" | "titleIncludes" | "titleNotIncludes" | "elementTextIncludes" | "accessibleNameEquals" | "accessibleNameIncludes" | "accessibleDescriptionEquals" | "accessibleDescriptionIncludes" | "ariaSnapshotIncludes" | "ariaExpanded" | "ariaCollapsed" | "ariaPressed" | "ariaNotPressed" | "ariaSelected" | "ariaNotSelected" | "ariaInvalid" | "ariaValid" | "ariaRequired" | "ariaNotRequired" | "inViewport" | "pageNotBlank" | "noHorizontalOverflow" | "onlineState" | "browserOnline" | "browserOffline" | "cookieExists" | "cookieValueEquals" | "cookieValueIncludes" | "networkNoErrors" | "networkRequest" | "networkRequestIncludes" | "networkRequestNot" | "networkRequestNotIncludes" | "networkResponse" | "networkResponseIncludes" | "networkResponseNot" | "networkResponseNotIncludes" | "downloadedFile" | "consoleIncludes" | "consoleNotIncludes" | "consoleNoErrors" | "consoleNoWarnings" | "jsTruthy" | "jsEquals" | "localStorageEquals" | "localStorageIncludes" | "sessionStorageEquals" | "sessionStorageIncludes")[];
     issues: import("./types").WorkOrderIssue[];
 };
+export declare function runTestAgentBrowserScriptWaitAssertionSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    report?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    report: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
 export declare function runTestAgentBrowserSelectStateSelfTest(): Promise<{
     pass: boolean;
     availability: {
@@ -2302,6 +4544,93 @@ export declare function runTestAgentBrowserFocusStateSelfTest(): Promise<{
     };
     passReport: import("./types").TestAgentReport;
     failReport: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
+export declare function runTestAgentBrowserPresenceAssertionSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    passReport?: undefined;
+    failReport?: undefined;
+    mcpReport?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    passReport: import("./types").TestAgentReport;
+    failReport: import("./types").TestAgentReport;
+    mcpReport: import("./types").TestAgentReport;
     reason?: undefined;
 }>;
 export declare function runTestAgentBrowserElementCountSelfTest(): Promise<{
@@ -2733,6 +5062,174 @@ export declare function runTestAgentBrowserDragToActionSelfTest(): Promise<{
     };
     passReport: import("./types").TestAgentReport;
     failReport: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
+export declare function runTestAgentBrowserHoverActionSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    passReport?: undefined;
+    failReport?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    passReport: import("./types").TestAgentReport;
+    failReport: import("./types").TestAgentReport;
+    reason?: undefined;
+}>;
+export declare function runTestAgentBrowserHistoryNavigationActionSelfTest(): Promise<{
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    reason: string;
+    report?: undefined;
+} | {
+    pass: boolean;
+    availability: {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser?: undefined;
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+            launchAttempts?: undefined;
+        };
+    } | {
+        available: boolean;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            channel: any;
+            launchAttempt: string;
+            launchFallbackErrors: string[];
+            launchAttempts?: undefined;
+        };
+        reason?: undefined;
+    } | {
+        available: boolean;
+        reason: string;
+        diagnostics: {
+            packageAvailable: boolean;
+            launchChecked: boolean;
+            browser: string;
+            launchAttempts: string[];
+            channel?: undefined;
+            launchAttempt?: undefined;
+            launchFallbackErrors?: undefined;
+        };
+    };
+    report: import("./types").TestAgentReport;
     reason?: undefined;
 }>;
 export declare function runTestAgentBrowserScrollActionSelfTest(): Promise<{
@@ -4264,7 +6761,12 @@ export declare function runTestAgentPlaywrightNoHorizontalOverflowSelfTest(): Pr
 export declare function runTestAgentBrowserPreflightSelfTest(): Promise<{
     pass: boolean;
     report: import("./types").TestAgentReport;
+    verdict: import("./types").TestAgentVerdict;
     preflight: any[];
+    providerSummary: import("./types").BrowserProviderSummary;
+    cliSummary: string;
+    reportValidation: import("./contract").TestAgentReportContractValidation;
+    verdictValidation: import("./contract").TestAgentVerdictContractValidation;
 }>;
 export declare function runTestAgentPlaywrightRealBrowserSelfTest(): Promise<{
     pass: boolean;
@@ -4763,13 +7265,84 @@ export declare function runTestAgentPlaywrightAvailabilitySelfTest(): Promise<{
 export declare function runTestAgentRequiredCheckCoverageSelfTest(): Promise<{
     pass: boolean;
     report: import("./types").TestAgentReport;
+    genericBrowserCoverage: import("./types").RequiredCheckCoverageItem[];
+    networkBrowserCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedNetworkBrowserCoverage: import("./types").RequiredCheckCoverageItem[];
+    genericAccessibilityCoverage: import("./types").RequiredCheckCoverageItem[];
+    accessibilityBrowserCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedAccessibilityCoverage: import("./types").RequiredCheckCoverageItem[];
+    genericConsoleWarningCoverage: import("./types").RequiredCheckCoverageItem[];
+    warningFreeConsoleCoverage: import("./types").RequiredCheckCoverageItem[];
+    warningConsoleCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedWarningAssertionCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedConsoleErrorCoverage: import("./types").RequiredCheckCoverageItem[];
+    computerUseConsoleCoverage: import("./types").RequiredCheckCoverageItem[];
+    genericInteractionCoverage: import("./types").RequiredCheckCoverageItem[];
+    dialogInteractionCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedDialogInteractionCoverage: import("./types").RequiredCheckCoverageItem[];
+    popupInteractionCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedPopupInteractionCoverage: import("./types").RequiredCheckCoverageItem[];
+    genericTransferCoverage: import("./types").RequiredCheckCoverageItem[];
+    uploadTransferCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedUploadTransferCoverage: import("./types").RequiredCheckCoverageItem[];
+    downloadTransferCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedDownloadTransferCoverage: import("./types").RequiredCheckCoverageItem[];
+    genericInputCoverage: import("./types").RequiredCheckCoverageItem[];
+    clipboardInputCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedClipboardInputCoverage: import("./types").RequiredCheckCoverageItem[];
+    focusInputCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedFocusInputCoverage: import("./types").RequiredCheckCoverageItem[];
+    keyboardInputCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedKeyboardInputCoverage: import("./types").RequiredCheckCoverageItem[];
+    genericVisualLayoutCoverage: import("./types").RequiredCheckCoverageItem[];
+    visualAssertionCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedVisualAssertionCoverage: import("./types").RequiredCheckCoverageItem[];
+    layoutAssertionCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedLayoutAssertionCoverage: import("./types").RequiredCheckCoverageItem[];
+    genericUiStructureCoverage: import("./types").RequiredCheckCoverageItem[];
+    formFlowCoverage: import("./types").RequiredCheckCoverageItem[];
+    formStateCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedFormStateCoverage: import("./types").RequiredCheckCoverageItem[];
+    tableCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedTableCoverage: import("./types").RequiredCheckCoverageItem[];
+    listCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedListCoverage: import("./types").RequiredCheckCoverageItem[];
+    textOrderCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedTextOrderCoverage: import("./types").RequiredCheckCoverageItem[];
+    genericPageStateCoverage: import("./types").RequiredCheckCoverageItem[];
+    urlTitleNavigationCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedUrlTitleNavigationCoverage: import("./types").RequiredCheckCoverageItem[];
+    attributeCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedAttributeCoverage: import("./types").RequiredCheckCoverageItem[];
+    networkStateCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedNetworkStateCoverage: import("./types").RequiredCheckCoverageItem[];
+    presenceCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedPresenceCoverage: import("./types").RequiredCheckCoverageItem[];
+    genericInteractionActionCoverage: import("./types").RequiredCheckCoverageItem[];
+    hoverInteractionActionCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedHoverInteractionActionCoverage: import("./types").RequiredCheckCoverageItem[];
+    dragInteractionActionCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedDragInteractionActionCoverage: import("./types").RequiredCheckCoverageItem[];
+    scrollInteractionActionCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedScrollInteractionActionCoverage: import("./types").RequiredCheckCoverageItem[];
+    historyInteractionActionCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedHistoryInteractionActionCoverage: import("./types").RequiredCheckCoverageItem[];
+    genericScriptWaitCoverage: import("./types").RequiredCheckCoverageItem[];
+    scriptCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedScriptCoverage: import("./types").RequiredCheckCoverageItem[];
+    waitCoverage: import("./types").RequiredCheckCoverageItem[];
+    failedWaitCoverage: import("./types").RequiredCheckCoverageItem[];
 }>;
 export declare function runTestAgentCliSelfTest(): Promise<{
-    pass: any;
+    pass: boolean;
     parsed: import("./cli-options").TestAgentCliParseResult;
     handoffParsed: import("./cli-options").TestAgentCliParseResult;
     invalid: import("./cli-options").TestAgentCliParseResult;
     invalidHandoffCombo: import("./cli-options").TestAgentCliParseResult;
+    selfTestMatrixParsed: import("./cli-options").TestAgentCliParseResult;
+    invalidSelfTestMatrixCombo: import("./cli-options").TestAgentCliParseResult;
+    invalidSelfTestTimeout: import("./cli-options").TestAgentCliParseResult;
+    invalidSelfTestSelector: import("./cli-options").TestAgentCliParseResult;
     validateResult: {
         exitCode: number;
     };
@@ -4788,11 +7361,19 @@ export declare function runTestAgentCliSelfTest(): Promise<{
     warningHandoffResult: {
         exitCode: number;
     };
+    selfTestMatrixResult: {
+        exitCode: number;
+    };
+    failingSelfTestMatrixResult: {
+        exitCode: number;
+    };
     validationSummary: string;
     reportSummary: string;
     handoffReportSummary: string;
     invalidHandoffError: string;
     warningHandoffValidation: any;
+    selfTestMatrixSummary: string;
+    failingSelfTestMatrixJson: any;
 }>;
 export declare function runTestAgentContractSelfTest(): {
     pass: boolean;

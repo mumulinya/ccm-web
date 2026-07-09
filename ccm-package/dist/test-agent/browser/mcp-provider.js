@@ -39,6 +39,7 @@ const path = __importStar(require("path"));
 const utils_1 = require("../utils");
 const mcp_adapters_1 = require("./mcp-adapters");
 const evidence_artifacts_1 = require("./evidence-artifacts");
+const mcp_failure_screenshots_1 = require("./mcp-failure-screenshots");
 const provider_types_1 = require("./provider-types");
 const screenshot_artifacts_1 = require("./screenshot-artifacts");
 const shared_1 = require("./shared");
@@ -85,6 +86,7 @@ async function runMcpCheck(context, tools, project, check, index) {
     const consoleMessages = [];
     const networkRequests = [];
     const adapter = (0, mcp_adapters_1.createMcpBrowserAdapter)(tools, (toolName, input) => callTool(context, toolName, input));
+    const normalScreenshotRequested = check.screenshot !== false;
     if (!adapter) {
         return {
             provider: "mcp",
@@ -106,6 +108,7 @@ async function runMcpCheck(context, tools, project, check, index) {
             browserArtifacts,
             adversarial: check.adversarial === true,
             probeType: check.probeType || check.probe_type,
+            context: check.context,
             error: "No supported MCP browser adapter matched the available tools.",
         };
     }
@@ -147,7 +150,7 @@ async function runMcpCheck(context, tools, project, check, index) {
         if (pageErrors.length) {
             steps.push({ kind: "assertion", name: `${adapter.id}:pageText`, status: "failed", error: pageErrors.slice(0, 3).join(" | ") });
         }
-        if (check.screenshot !== false) {
+        if (normalScreenshotRequested) {
             try {
                 const captures = await adapter.captureScreenshot(name);
                 screenshots.push(...(0, screenshot_artifacts_1.writeMcpScreenshotArtifacts)({
@@ -171,6 +174,20 @@ async function runMcpCheck(context, tools, project, check, index) {
             catch (error) {
                 screenshots.push(`screenshot failed: ${error.message || String(error)}`);
             }
+        }
+        const failedStep = steps.find(step => step.status === "failed");
+        if (failedStep && !normalScreenshotRequested) {
+            const failureCapture = await (0, mcp_failure_screenshots_1.captureMcpFailureScreenshot)({
+                adapter,
+                artifactDir: context.workOrder.options.artifactDir,
+                projectName: project.name,
+                checkName: name,
+                index,
+                failedStep,
+                collectBrowserArtifacts: context.workOrder.options.collectBrowserArtifacts,
+            });
+            screenshots.push(...failureCapture.screenshots);
+            browserArtifacts.push(...failureCapture.browserArtifacts);
         }
         pageSnapshots.push(...writeMcpPageSnapshot(context.workOrder.options.artifactDir, project.name, name, index, pageText));
         const telemetryLogs = writeMcpTelemetryLogs({
@@ -205,9 +222,23 @@ async function runMcpCheck(context, tools, project, check, index) {
             ...telemetryLogs,
             adversarial: check.adversarial === true,
             probeType: check.probeType || check.probe_type,
+            context: check.context,
         };
     }
     catch (error) {
+        if (adapter && !normalScreenshotRequested) {
+            const failureCapture = await (0, mcp_failure_screenshots_1.captureMcpFailureScreenshot)({
+                adapter,
+                artifactDir: context.workOrder.options.artifactDir,
+                projectName: project.name,
+                checkName: name,
+                index,
+                failedStep: steps.find(step => step.status === "failed"),
+                collectBrowserArtifacts: context.workOrder.options.collectBrowserArtifacts,
+            });
+            screenshots.push(...failureCapture.screenshots);
+            browserArtifacts.push(...failureCapture.browserArtifacts);
+        }
         return {
             provider: "mcp",
             project: project.name,
@@ -236,6 +267,7 @@ async function runMcpCheck(context, tools, project, check, index) {
             }),
             adversarial: check.adversarial === true,
             probeType: check.probeType || check.probe_type,
+            context: check.context,
             error: error.message || String(error),
         };
     }

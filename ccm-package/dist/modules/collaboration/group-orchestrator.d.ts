@@ -502,6 +502,162 @@ export declare function runWorkerContextCompactStrategyMemorySelfTest(): {
         };
     };
 };
+export declare function runWorkerContextPartialCompactPressureRecallUsageStrategySelfTest(): {
+    pass: boolean;
+    checks: {
+        strategyMemoryPrefersDependencies: boolean;
+        baselineStillFollowsTokenPressure: boolean;
+        usageLedgerPromotesCompactStrategyMemory: boolean;
+        pressureUsageFeedbackChangesPolicy: boolean;
+        renderedShowsPressureUsageBias: boolean;
+    };
+    baselinePolicy: {
+        method: string;
+        selected_categories: any;
+    };
+    biasedPolicy: {
+        method: string;
+        selected_categories: any;
+        pressure_recall_usage_strategy_bias: {
+            schema: string;
+            active: boolean;
+            reason: string;
+            category_adjustment_cap: number;
+            summary_source: any;
+            source_group_count: number;
+            suppressed?: undefined;
+            stale?: undefined;
+            rel_path?: undefined;
+            recommendation?: undefined;
+            weighted_used_count?: undefined;
+            weighted_verified_count?: undefined;
+            weighted_ignored_count?: undefined;
+            weighted_mentioned_count?: undefined;
+            weighted_total_count?: undefined;
+            stale_count?: undefined;
+            fresh_count?: undefined;
+            avg_decay_weight?: undefined;
+            trust_score?: undefined;
+            summary_ledger_file?: undefined;
+            source_groups?: undefined;
+        } | {
+            schema: string;
+            active: boolean;
+            suppressed: boolean;
+            stale: boolean;
+            rel_path: any;
+            recommendation: string;
+            weighted_used_count: number;
+            weighted_verified_count: number;
+            weighted_ignored_count: number;
+            weighted_mentioned_count: number;
+            weighted_total_count: number;
+            stale_count: number;
+            fresh_count: number;
+            avg_decay_weight: number;
+            trust_score: number;
+            category_adjustment_cap: number;
+            reason: string;
+            summary_ledger_file: any;
+            summary_source: any;
+            source_group_count: number;
+            source_groups: any;
+        };
+        candidates: any;
+    };
+    usageSummary: {
+        weighted_totals: any;
+        aging: any;
+    };
+};
+export declare function runWorkerContextPartialCompactCrossGroupPressureRecallUsageStrategySelfTest(): {
+    pass: boolean;
+    checks: {
+        targetHasNoLocalUsageLedger: boolean;
+        strategyMemoryStillPrefersDependencies: boolean;
+        baselineStillFollowsTokenPressure: boolean;
+        sourceLedgerFeedsCrossGroupSummary: boolean;
+        crossGroupUsageChangesPolicy: boolean;
+        targetProjectIsolationBlocksWrongProjectStrategyBias: boolean;
+    };
+    crossGroupSummary: {
+        source_group_count: number;
+        entry_count: number;
+        weighted_totals: any;
+    };
+    baselinePolicy: {
+        method: string;
+        selected_categories: any;
+    };
+    crossBiasedPolicy: {
+        method: string;
+        selected_categories: any;
+        pressure_recall_usage_strategy_bias: {
+            schema: string;
+            active: boolean;
+            reason: string;
+            category_adjustment_cap: number;
+            summary_source: any;
+            source_group_count: number;
+            suppressed?: undefined;
+            stale?: undefined;
+            rel_path?: undefined;
+            recommendation?: undefined;
+            weighted_used_count?: undefined;
+            weighted_verified_count?: undefined;
+            weighted_ignored_count?: undefined;
+            weighted_mentioned_count?: undefined;
+            weighted_total_count?: undefined;
+            stale_count?: undefined;
+            fresh_count?: undefined;
+            avg_decay_weight?: undefined;
+            trust_score?: undefined;
+            summary_ledger_file?: undefined;
+            source_groups?: undefined;
+        } | {
+            schema: string;
+            active: boolean;
+            suppressed: boolean;
+            stale: boolean;
+            rel_path: any;
+            recommendation: string;
+            weighted_used_count: number;
+            weighted_verified_count: number;
+            weighted_ignored_count: number;
+            weighted_mentioned_count: number;
+            weighted_total_count: number;
+            stale_count: number;
+            fresh_count: number;
+            avg_decay_weight: number;
+            trust_score: number;
+            category_adjustment_cap: number;
+            reason: string;
+            summary_ledger_file: any;
+            summary_source: any;
+            source_group_count: number;
+            source_groups: any;
+        };
+        pressure_recall_usage_summary: {
+            schema: any;
+            source: any;
+            ledger_file: any;
+            target_project: any;
+            source_group_count: number;
+            source_groups: any;
+            weighted_totals: any;
+            aging: {
+                stale_entry_count: any;
+                fresh_entry_count: any;
+                stale_memory_count: any;
+            };
+        };
+        candidates: any;
+    };
+    wrongProjectPolicy: {
+        method: string;
+        selected_categories: any;
+    };
+};
 export declare function runWorkerContextPtlEmergencyDowngradeSelfTest(): {
     pass: boolean;
     checks: {
@@ -542,6 +698,158 @@ export declare function runWorkerContextIgnoreMemoryPolicySelfTest(): {
     binding: {
         memory_policy_ignored: boolean;
         render_probe_ignored: boolean;
+    };
+};
+export declare function runWorkerContextPressureProvenanceProviderDispatchGateSelfTest(): {
+    pass: boolean;
+    checks: {
+        packetCarriesProviderAdvisory: boolean;
+        usageCategorizesProviderAdvisory: boolean;
+        gateBlocksProviderHold: boolean;
+        renderedShowsProviderAdvisory: boolean;
+        bindingPersistsProviderAdvisory: boolean;
+        recoveryDisarmsProviderHold: boolean;
+    };
+    gate: {
+        dispatch_ready: boolean;
+        provider_dispatch_hold: boolean;
+        repair_source: string;
+        reason: string;
+    };
+    advisory: {
+        health_status: any;
+        dispatch_policy: any;
+        should_hold_dispatch: boolean;
+    };
+    recovered: {
+        dispatch_ready: boolean;
+        provider_dispatch_hold: boolean;
+        health_status: any;
+        dispatch_policy: any;
+    };
+};
+export declare function runWorkerContextPressureProvenanceProviderDispatchOverrideFollowupPreDispatchMemorySelfTest(): {
+    pass: boolean;
+    checks: {
+        repairedHistoryFeedsProviderAdvisory: boolean;
+        repairedHistoryAllowsSamplingNotHold: boolean;
+        preDispatchGateCarriesRepairedHistory: any;
+        activeRelapseStillWinsOverHistory: boolean;
+        holdDecisionStillRequiresRepair: boolean;
+    };
+    repaired: {
+        health_status: any;
+        dispatch_policy: any;
+        provider_override_followup_repaired: boolean;
+        action: string;
+        dispatch_ready: boolean;
+    };
+    relapsed: {
+        health_status: any;
+        dispatch_policy: any;
+        provider_override_followup_repaired: boolean;
+        provider_override_followup_fresh_after_last_violation: boolean;
+        action: string;
+        dispatch_ready: boolean;
+    };
+};
+export declare function runWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationSelfTest(): {
+    pass: boolean;
+    checks: {
+        invalidReceiptFailsContract: boolean;
+        validReceiptPassesContract: boolean;
+        ledgerPersistsFinalValidation: boolean;
+        ledgerCountersTrackValidation: boolean;
+    };
+    invalid: {
+        status: string;
+        gaps: any[];
+    };
+    valid: {
+        status: string;
+        contract_satisfied: boolean;
+        covered_rel_path_count: number;
+        covered_followup_work_item_count: number;
+        covered_override_id_count: number;
+    };
+};
+export declare function runWorkerContextPressureProvenanceProviderDispatchDecisionLedgerSelfTest(): {
+    pass: boolean;
+    checks: {
+        activeAssignmentStoresDecision: boolean;
+        activeDecisionHoldsCriticalProvider: boolean;
+        activeNeedsPressureRepair: any;
+        bindingLedgerPersistsDecision: boolean;
+        recoveredDecisionAllowsReceiptSampling: boolean;
+        ledgerCountersTrackProviderDecisions: boolean;
+    };
+    active: {
+        action: any;
+        dispatch_ready: any;
+        provider_dispatch_hold: any;
+        health_status: any;
+        reason: any;
+    };
+    recovered: {
+        action: any;
+        dispatch_ready: any;
+        requires_receipt_sampling: boolean;
+        health_status: any;
+    };
+    ledger: {
+        providerDispatchDecisionCount: any;
+        providerDispatchHoldDecisionCount: any;
+        providerDispatchReadyDecisionCount: any;
+    };
+};
+export declare function runWorkerContextPressureProvenanceProviderDispatchOverrideReceiptSelfTest(): {
+    pass: boolean;
+    checks: {
+        invalidOverrideDoesNotBypassHold: boolean;
+        validOverrideDispatchesOnce: boolean;
+        validDecisionCarriesOverrideReceipt: boolean;
+        bindingLedgerPersistsOverride: boolean;
+        ledgerCountersTrackOverride: boolean;
+    };
+    invalid: {
+        action: any;
+        dispatch_ready: any;
+        override_valid: boolean;
+        gaps: any;
+    };
+    valid: {
+        action: any;
+        dispatch_ready: any;
+        override_valid: boolean;
+        next_step: any;
+    };
+    ledger: {
+        providerDispatchDecisionCount: any;
+        providerDispatchHoldDecisionCount: any;
+        providerDispatchOverrideDecisionCount: any;
+    };
+};
+export declare function runWorkerContextPressureProvenanceProviderDispatchOverrideCompletionSelfTest(): {
+    pass: boolean;
+    checks: {
+        overrideDispatchCreatesFollowupWorkItem: boolean;
+        completionRequiresVerifiedMemoryProvenanceUsage: boolean;
+        bindingLedgerPersistsCompletion: boolean;
+        followupRepairWorkItemClosed: boolean;
+    };
+    followup: {
+        work_item_id: any;
+        before_status: string;
+        after_status: string;
+    };
+    completion: {
+        status: any;
+        completion_ok: boolean;
+        memory_provenance_usage_count: any;
+        current_source_verified_count: any;
+    };
+    ledger: {
+        providerDispatchOverrideCompletionCount: any;
     };
 };
 export declare function buildCodedCoordinatorSummary(group: any, outputs: string[]): {
@@ -642,46 +950,44 @@ export declare function readWorkerContextPtlEmergencyHintForCoordinator(groupId:
 export declare function readWorkerContextCompactOutcomeLedgerForCoordinator(groupId: string): any;
 export declare function readReplayRepairDispatchPlanLedgerForCoordinator(groupId: string): any;
 export declare function readReplayRepairDispatchBindingLedgerForCoordinator(groupId: string): any;
-export declare function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId: string, assignment?: any, options?: any): {
+export declare function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId: string, assignment?: any, options?: any): any;
+export declare function recordWorkerContextProviderDispatchOverrideCompletionForCoordinator(groupId: string, input?: any, options?: any): any;
+export declare function readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId: string): any;
+export declare function recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(groupId: string, input?: any, options?: any): {
     schema: string;
-    binding_id: string;
-    groupId: string;
-    source: string;
+    validation_id: string;
+    groupId: any;
     project: any;
+    agent_type: any;
+    binding_id: any;
     assignment_id: any;
     dispatch_key: any;
-    task_fingerprint: any;
     worker_context_packet_id: any;
-    worker_context_packet_context_usage: any;
-    worker_context_packet_memory_policy: any;
-    worker_context_packet_acceptance: any;
-    worker_context_packet_compaction_retry: any;
-    worker_context_packet_partial_compaction: any;
-    worker_context_packet_partial_compact_policy: any;
-    worker_context_packet_compact_hook_run_id: any;
-    worker_context_packet_memory_reinjection_proof: any;
-    worker_context_pre_dispatch_gate: any;
-    dispatch_ready: boolean;
-    dispatchReady: boolean;
-    worker_context_packet_render_probe: {
-        packet_id: any;
-        rendered_flags: {
-            has_context_usage_budget: boolean;
-            has_worker_context_packet: boolean;
-            has_platform_memory: boolean;
-            has_memory_policy: boolean;
-            has_memory_ignored_policy: boolean;
-            has_memory_reinjection_proof: boolean;
-            has_memory_compaction_hash: boolean;
-            has_memory_context_compact_marker: boolean;
-            has_partial_compaction: boolean;
-        };
-        rendered_excerpt: string;
-    };
-    should_create_real_task: boolean;
+    task_id: any;
+    worker_handoff_id: any;
+    task_agent_session_id: any;
+    native_session_id: any;
+    execution_id: any;
+    receipt_status: string;
+    receipt: any;
+    contract: any;
+    contract_required: boolean;
+    contract_satisfied: boolean;
+    status: string;
+    memory_provenance_usage_count: number;
+    provider_override_followup_reverified_row_count: number;
+    current_source_verified_count: number;
+    contract_row_count: number;
+    required_rel_path_count: number;
+    covered_rel_path_count: number;
+    required_followup_work_item_count: number;
+    covered_followup_work_item_count: number;
+    required_override_id_count: number;
+    covered_override_id_count: number;
+    gaps: any[];
+    reason: string;
     at: string;
 };
-export declare function readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId: string): any;
 export declare function recordReplayRepairDispatchBriefTimelineBinding(groupId: string, input?: any, options?: any): any;
 export declare function recordReplayRepairDispatchBriefAssignmentBinding(groupId: string, assignment?: any, match?: any, options?: any): {
     schema: string;
@@ -699,6 +1005,8 @@ export declare function recordReplayRepairDispatchBriefAssignmentBinding(groupId
     source_worker_context_packet_binding_id: any;
     source_worker_context_packet_memory_policy_reason: any;
     worker_context_packet_context_usage: any;
+    worker_context_provider_dispatch_decision: any;
+    worker_context_provider_dispatch_override_receipt: any;
     proof_entry_id: any;
     request_patch_checksum: any;
     provider_reproof_status: any;
@@ -766,6 +1074,9 @@ export declare function buildReplayRepairDispatchBriefForCoordinator(groupId: st
     binding_id: any;
     assignment_id: any;
     dispatch_key: any;
+    pressure_memory_provenance_gap_codes: any;
+    pressure_memory_provenance_repair_work_item_ids: any;
+    pressure_memory_provenance_rel_paths: any;
     provider_reproof_status: any;
     provider_reproof_reason: any;
     reproof_candidate_id: any;

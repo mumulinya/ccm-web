@@ -112,6 +112,7 @@ exports.runGroupGlobalAgentMemorySemanticArbitrationSelfTest = runGroupGlobalAge
 exports.runGroupGlobalAgentMemoryCrossGroupSuppressionContextSelfTest = runGroupGlobalAgentMemoryCrossGroupSuppressionContextSelfTest;
 exports.runGroupGlobalAgentMemoryCrossGroupSuppressionFreshnessSelfTest = runGroupGlobalAgentMemoryCrossGroupSuppressionFreshnessSelfTest;
 exports.runGroupTypedMemoryContextSelfTest = runGroupTypedMemoryContextSelfTest;
+exports.runGroupTypedMemoryContextPressureRepairProvenanceSelfTest = runGroupTypedMemoryContextPressureRepairProvenanceSelfTest;
 exports.buildGroupContextPacket = buildGroupContextPacket;
 exports.findLatestWorkerLedger = findLatestWorkerLedger;
 exports.appendWorkerLedger = appendWorkerLedger;
@@ -406,6 +407,9 @@ function readGroupReplayRepairDispatchCandidatesSummary(groupId, limit = 12) {
                 binding_id: item.binding_id || item.worker_context_packet_binding_id || "",
                 assignment_id: item.assignment_id || "",
                 dispatch_key: item.dispatch_key || "",
+                pressure_memory_provenance_gap_codes: item.pressure_memory_provenance_gap_codes || [],
+                pressure_memory_provenance_repair_work_item_ids: item.pressure_memory_provenance_repair_work_item_ids || [],
+                pressure_memory_provenance_rel_paths: item.pressure_memory_provenance_rel_paths || [],
                 request_telemetry_status: item.request_telemetry_status || "",
                 request_telemetry_session_status: item.request_telemetry_session_status || "",
                 request_telemetry_dispatch_status: item.request_telemetry_dispatch_status || "",
@@ -5903,6 +5907,93 @@ async function runGroupMemoryAutoCompactionSelfTest() {
         catch { }
     }
 }
+function pressureMemoryProvenanceDisciplineStatus(value) {
+    return String(value || "").trim().toLowerCase();
+}
+function pressureMemoryProvenanceDisciplineUnderRepair(value = {}) {
+    const provenance = pressureMemoryProvenanceDisciplineStatus(value.provenance_status || value.provenanceStatus);
+    return provenance === "disputed_under_repair"
+        || provenance === "stale_evidence_under_repair"
+        || !!String(value.repair_work_item_id || value.repairWorkItemId || value.work_item_id || value.workItemId || "").trim()
+        || value.repair_open === true
+        || value.repairOpen === true;
+}
+function buildPressureMemoryProvenanceReceiptDiscipline(input = {}, options = {}) {
+    const recall = input.recall || input.typedMemoryRecall || input.typed_memory_recall || input || {};
+    const recalled = [
+        ...(Array.isArray(recall.recalled) ? recall.recalled : []),
+        ...(Array.isArray(recall.docs) ? recall.docs : []),
+        ...(Array.isArray(recall.entries) ? recall.entries : []),
+        ...(Array.isArray(recall.diagnostics) ? recall.diagnostics : []),
+    ];
+    const rows = [];
+    const seen = new Set();
+    for (const doc of recalled) {
+        const matches = [
+            ...(Array.isArray(doc.workerContextPressureUsage?.matched) ? doc.workerContextPressureUsage.matched : []),
+            ...(Array.isArray(doc.worker_context_pressure_usage?.matched) ? doc.worker_context_pressure_usage.matched : []),
+            ...(Array.isArray(doc.pressure_usage_matches || doc.pressureUsageMatches) ? (doc.pressure_usage_matches || doc.pressureUsageMatches) : []),
+        ];
+        const candidates = matches.length ? matches : [doc];
+        for (const match of candidates) {
+            const provenanceStatus = pressureMemoryProvenanceDisciplineStatus(match.provenance_status || match.provenanceStatus || doc.provenance_status || doc.provenanceStatus);
+            const repairWorkItemId = String(match.repair_work_item_id || match.repairWorkItemId || doc.repair_work_item_id || doc.repairWorkItemId || "").trim();
+            const repairStatus = pressureMemoryProvenanceDisciplineStatus(match.repair_status || match.repairStatus || doc.repair_status || doc.repairStatus || "pending");
+            const repairGapType = String(match.repair_gap_type || match.repairGapType || doc.repair_gap_type || doc.repairGapType || "pressure_repair_provenance").trim();
+            const requiresReceipt = doc.requires_memory_provenance_usage === true
+                || doc.requiresMemoryProvenanceUsage === true
+                || pressureMemoryProvenanceDisciplineUnderRepair(match)
+                || pressureMemoryProvenanceDisciplineUnderRepair(doc);
+            if (!requiresReceipt && !provenanceStatus && !repairWorkItemId)
+                continue;
+            const relPath = String(match.rel_path || match.relPath || doc.relPath || doc.rel_path || "").trim();
+            const name = String(match.name || doc.name || relPath || "pressure MEMORY.md").trim();
+            const key = `${relPath.toLowerCase()}|${name.toLowerCase()}|${repairWorkItemId.toLowerCase()}|${provenanceStatus}`;
+            if (seen.has(key))
+                continue;
+            seen.add(key);
+            rows.push({
+                relPath,
+                rel_path: relPath,
+                name,
+                targetProject: String(match.target_project || match.targetProject || doc.targetProject || doc.target_project || options.targetProject || options.target_project || "").trim(),
+                pressureStatus: String(doc.pressure_status || doc.pressureStatus || recall.pressure_status || recall.pressureStatus || options.pressureStatus || options.pressure_status || "").trim(),
+                provenanceStatus: provenanceStatus || "under_repair",
+                provenance_status: provenanceStatus || "under_repair",
+                repairWorkItemId,
+                repair_work_item_id: repairWorkItemId,
+                repairStatus,
+                repair_status: repairStatus,
+                repairGapType,
+                repair_gap_type: repairGapType,
+                currentSourceVerifiedRequired: ["disputed_under_repair", "stale_evidence_under_repair", "under_repair"].includes(provenanceStatus || "under_repair") || !!repairWorkItemId,
+            });
+        }
+    }
+    const limitedRows = rows.slice(0, Math.max(1, Number(options.maxRows || options.max_rows || 8)));
+    const exampleRows = limitedRows.slice(0, 4).map((row) => ({
+        relPath: row.relPath || row.name || "unknown",
+        usageState: "used",
+        provenanceStatus: row.provenanceStatus || "under_repair",
+        repairWorkItemId: row.repairWorkItemId || "unknown",
+        repairStatus: row.repairStatus || "pending",
+        repairGapType: row.repairGapType || "pressure_repair_provenance",
+        currentSourceVerified: true,
+    }));
+    return {
+        schema: "ccm-pressure-memory-provenance-receipt-pre-dispatch-discipline-v1",
+        version: 1,
+        active: limitedRows.length > 0,
+        source: "typed_memory_pressure_repair_provenance",
+        targetProject: String(options.targetProject || options.target_project || "").trim(),
+        generatedAt: String(options.generatedAt || options.generated_at || new Date().toISOString()),
+        docCount: limitedRows.length,
+        requiredFields: ["relPath", "usageState", "provenanceStatus", "repairWorkItemId", "repairStatus", "repairGapType", "currentSourceVerified"],
+        currentSourceVerifiedRule: "used/verified disputed_under_repair or stale_evidence_under_repair pressure memory requires currentSourceVerified=true",
+        rows: limitedRows,
+        exampleRows,
+    };
+}
 function buildAgentMemoryContextBundle(groupId, targetProject, task = "", options = {}) {
     const project = normalizeAgentMemoryProject(targetProject);
     const ignoreMemory = (0, group_memory_index_1.shouldIgnoreGroupMemoryRequest)(task, options);
@@ -6002,6 +6093,56 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         targetProject: project,
         candidates: postCompactReinjectionGate?.candidates || [],
     });
+    const typedMemoryPressureRecallOptions = {
+        groupMemory: memory,
+        workerContextPacketContextUsage: options.workerContextPacketContextUsage
+            || options.worker_context_packet_context_usage
+            || options.contextUsage
+            || options.context_usage
+            || null,
+        workerContextPressure: options.workerContextPressure
+            || options.worker_context_pressure
+            || options.contextPressure
+            || options.context_pressure
+            || memory.compaction?.contextPressureWarning
+            || memory.compaction?.context_pressure_warning
+            || memory.compaction?.compactWarning
+            || memory.compaction?.compact_warning
+            || memory.messageCompression?.contextPressureWarning
+            || memory.messageCompression?.context_pressure_warning
+            || null,
+        compactStrategyPressure: options.compactStrategyPressure
+            || options.compact_strategy_pressure
+            || memory.compaction?.compactStrategyDecision
+            || memory.compaction?.compact_strategy_decision
+            || memory.compactBoundary?.compactStrategyDecision
+            || memory.compactBoundary?.compact_strategy_decision
+            || memory.messageCompression?.compactStrategyDecision
+            || memory.messageCompression?.compact_strategy_decision
+            || null,
+        ptlEmergency: options.ptlEmergency
+            || options.ptl_emergency
+            || memory.compaction?.ptlEmergency
+            || memory.compaction?.ptl_emergency
+            || memory.compactBoundary?.ptlEmergency
+            || memory.compactBoundary?.ptl_emergency
+            || memory.compactBoundary?.post_compact_restore?.ptlEmergency
+            || memory.compactBoundary?.post_compact_restore?.ptl_emergency
+            || null,
+        contextCompactionRetry: options.contextCompactionRetry || options.context_compaction_retry || null,
+        crossGroupPressureRecallUsageGroupIds: options.crossGroupPressureRecallUsageGroupIds
+            || options.cross_group_pressure_recall_usage_group_ids
+            || options.crossGroupIds
+            || options.cross_group_ids,
+        maxCrossGroupPressureRecallUsageGroups: options.maxCrossGroupPressureRecallUsageGroups
+            || options.max_cross_group_pressure_recall_usage_groups,
+        disableCrossGroupPressureRecallUsage: options.disableCrossGroupPressureRecallUsage
+            || options.disable_cross_group_pressure_recall_usage,
+        workerContextPressureRecallUsageRepairHints: options.workerContextPressureRecallUsageRepairHints
+            || options.worker_context_pressure_recall_usage_repair_hints,
+        disablePressureRecallUsageRepairHints: options.disablePressureRecallUsageRepairHints
+            || options.disable_pressure_recall_usage_repair_hints,
+    };
     const typedLogDistillation = (0, group_memory_index_1.distillGroupMessagesToTypedMemory)(groupId, allMessages, memory, {
         reason: "context_bundle",
         maxMessages: options.distillMaxMessages || options.distill_max_messages,
@@ -6049,11 +6190,23 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
     ].map((item) => String(item || "").replace(/^Skill\s*[:：]\s*/i, "")).filter(Boolean).slice(-12);
     const ledgerAlreadySurfaced = (0, group_memory_index_1.getAlreadySurfacedGroupTypedMemory)(groupId, project);
     const explicitAlreadySurfaced = options.alreadySurfacedMemory || options.already_surfaced_memory || [];
+    const preliminaryPressureProvenanceDispatchFeedbackPolicy = (0, group_memory_index_1.buildPressureProvenancePreDispatchComplianceDispatchPolicy)(groupId, {
+        targetProject: project,
+        agentType: options.agentType || options.agent_type || "unknown",
+        generatedAt,
+        frequentThreshold: options.pressureProvenanceFeedbackFrequentThreshold || options.pressure_provenance_feedback_frequent_threshold,
+        recoveryCreditPerCompliant: options.pressureProvenanceFeedbackRecoveryCreditPerCompliant || options.pressure_provenance_feedback_recovery_credit_per_compliant,
+        disablePressureProvenanceFeedbackRecovery: options.disablePressureProvenanceFeedbackRecovery || options.disable_pressure_provenance_feedback_recovery,
+        disabled: options.disablePressureProvenanceFeedbackDispatchPolicy || options.disable_pressure_provenance_feedback_dispatch_policy,
+    });
     const typedMemoryRecall = (0, group_memory_index_1.buildGroupTypedMemoryRecall)(groupId, [task, memory.goal, project].filter(Boolean).join("\n"), {
         alreadySurfaced: [...ledgerAlreadySurfaced, ...explicitAlreadySurfaced],
         recentTools,
         targetPaths: typedMemoryTargetPaths,
+        targetProject: project,
         postCompactCandidateUsage,
+        pressureProvenanceDispatchFeedbackPolicy: preliminaryPressureProvenanceDispatchFeedbackPolicy,
+        ...typedMemoryPressureRecallOptions,
         max: Number(options.maxTypedMemory || options.max_typed_memory || 5),
     });
     const globalAgentMemoryRecall = buildChildGlobalAgentMemoryContext([task, memory.goal, memory.currentPhase, project].filter(Boolean).join("\n"), {
@@ -6093,10 +6246,24 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
             alreadySurfaced: [...ledgerAlreadySurfaced, ...explicitAlreadySurfaced],
             recentTools,
             targetPaths: typedMemoryTargetPaths,
+            targetProject: project,
             postCompactCandidateUsage,
+            pressureProvenanceDispatchFeedbackPolicy: preliminaryPressureProvenanceDispatchFeedbackPolicy,
+            ...typedMemoryPressureRecallOptions,
             max: Number(options.maxTypedMemory || options.max_typed_memory || 5),
         })
         : typedMemoryRecall;
+    const pressureMemoryProvenanceReceiptDiscipline = buildPressureMemoryProvenanceReceiptDiscipline({ recall: effectiveTypedMemoryRecall }, { targetProject: project, generatedAt });
+    const pressureProvenanceDispatchFeedbackPolicy = (0, group_memory_index_1.buildPressureProvenancePreDispatchComplianceDispatchPolicy)(groupId, {
+        targetProject: project,
+        agentType: options.agentType || options.agent_type || "unknown",
+        generatedAt,
+        pressureMemoryProvenanceReceiptDiscipline,
+        frequentThreshold: options.pressureProvenanceFeedbackFrequentThreshold || options.pressure_provenance_feedback_frequent_threshold,
+        recoveryCreditPerCompliant: options.pressureProvenanceFeedbackRecoveryCreditPerCompliant || options.pressure_provenance_feedback_recovery_credit_per_compliant,
+        disablePressureProvenanceFeedbackRecovery: options.disablePressureProvenanceFeedbackRecovery || options.disable_pressure_provenance_feedback_recovery,
+        disabled: options.disablePressureProvenanceFeedbackDispatchPolicy || options.disable_pressure_provenance_feedback_dispatch_policy,
+    });
     const typedMemoryLedger = (0, group_memory_index_1.recordGroupTypedMemoryRecall)(groupId, project, effectiveTypedMemoryRecall, [task, memory.goal, project].filter(Boolean).join("\n"));
     const sourceManifest = buildGroupMemorySourceManifest(groupId, {
         generatedAt,
@@ -6200,6 +6367,8 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
         task_query: compactMemoryText(task, 900),
         generated_at: generatedAt,
         session_binding: sessionBinding,
+        pressure_memory_provenance_receipt_discipline: pressureMemoryProvenanceReceiptDiscipline.active ? pressureMemoryProvenanceReceiptDiscipline : null,
+        pressure_provenance_dispatch_feedback_policy: pressureProvenanceDispatchFeedbackPolicy.active ? pressureProvenanceDispatchFeedbackPolicy : null,
         memory_policy: {
             priority: "platform_group_memory_over_third_party_cli_session",
             use: "must_consider",
@@ -6280,6 +6449,8 @@ function buildAgentMemoryContextBundle(groupId, targetProject, task = "", option
                 loadPlan: effectiveTypedMemoryLoadPlan,
                 targetPaths: typedMemoryTargetPaths,
                 recall: effectiveTypedMemoryRecall,
+                pressureProvenanceReceiptDiscipline: pressureMemoryProvenanceReceiptDiscipline.active ? pressureMemoryProvenanceReceiptDiscipline : null,
+                pressureProvenanceDispatchFeedbackPolicy: pressureProvenanceDispatchFeedbackPolicy.active ? pressureProvenanceDispatchFeedbackPolicy : null,
                 ledger: {
                     file: typedMemoryLedger.file,
                     alreadySurfaced: ledgerAlreadySurfaced.slice(-20),
@@ -6406,6 +6577,11 @@ function renderGroupMemoryContextBundle(bundle) {
     const replayRepairLedger = bundle.replay_repair_ledger || bundle.replayRepairLedger || compaction.replayRepairLedger || compaction.replay_repair_ledger || {};
     const replayRepairWorkItems = bundle.replay_repair_work_items || bundle.replayRepairWorkItems || compaction.replayRepairWorkItems || compaction.replay_repair_work_items || {};
     const replayRepairDispatchCandidates = bundle.replay_repair_dispatch_candidates || bundle.replayRepairDispatchCandidates || compaction.replayRepairDispatchCandidates || compaction.replay_repair_dispatch_candidates || {};
+    const pressureProvenanceDispatchFeedbackPolicy = bundle.pressure_provenance_dispatch_feedback_policy
+        || bundle.pressureProvenanceDispatchFeedbackPolicy
+        || typedMemory.pressureProvenanceDispatchFeedbackPolicy
+        || typedMemory.pressure_provenance_dispatch_feedback_policy
+        || {};
     const sessionMemory = bundle.session_memory || bundle.sessionMemory || compaction.sessionMemory || compaction.session_memory || {};
     const toolContinuity = bundle.tool_continuity || bundle.toolContinuity || compaction.toolContinuity || compaction.tool_continuity || {};
     const compactStrategyDecision = compaction.compactStrategyDecision
@@ -6434,6 +6610,20 @@ function renderGroupMemoryContextBundle(bundle) {
     const compactFileReferenceReadPlanFreshness = bundle.compact_file_reference_read_plan_freshness || bundle.compactFileReferenceReadPlanFreshness || {};
     const compactFileReferenceReadPlanRevalidationGate = bundle.compact_file_reference_read_plan_revalidation_gate || bundle.compactFileReferenceReadPlanRevalidationGate || {};
     const compactFileReferenceAccess = bundle.compact_file_reference_access || bundle.compactFileReferenceAccess || {};
+    const pressureMemoryProvenanceReceiptDiscipline = bundle.pressure_memory_provenance_receipt_discipline
+        || bundle.pressureMemoryProvenanceReceiptDiscipline
+        || typedMemory.pressureProvenanceReceiptDiscipline
+        || typedMemory.pressure_provenance_receipt_discipline
+        || buildPressureMemoryProvenanceReceiptDiscipline({ recall: typedMemory.recall || {} }, { targetProject: bundle.target_project || "" });
+    const typedPressureRepairMatches = Array.isArray(pressureMemoryProvenanceReceiptDiscipline.rows)
+        ? pressureMemoryProvenanceReceiptDiscipline.rows.slice(0, 4).map((row) => ({
+            relPath: row.relPath || row.rel_path || "",
+            status: row.repairStatus || row.repair_status || "pending",
+            gapType: row.repairGapType || row.repair_gap_type || "gap",
+            workItemId: row.repairWorkItemId || row.repair_work_item_id || "",
+            provenanceStatus: row.provenanceStatus || row.provenance_status || "",
+        }))
+        : [];
     if (bundle.memory_policy?.ignored === true) {
         return [
             "子 Agent 受控记忆包（平台生成，本轮用户要求忽略记忆）：",
@@ -6453,6 +6643,28 @@ function renderGroupMemoryContextBundle(bundle) {
         "- 记忆边界：你每轮执行都可能是新的第三方 CLI 会话；必须把本包当作当前任务上下文，不要假定 Claude Code/Cursor/Codex 内部 session 记得旧群聊。",
         "- 上下文策略：旧消息已被 CCM 压缩为摘要；近期消息保留原文窗口；本包如附带“压缩前原文证据”，该证据优先于摘要。",
     ];
+    if (typedPressureRepairMatches.length) {
+        const primary = typedPressureRepairMatches[0];
+        lines.push(`- pressure repair ${primary.gapType}:${primary.status}：typed MEMORY.md pressure provenance under repair；docs=${typedPressureRepairMatches.map((item) => item.relPath).filter(Boolean).join(",") || "unknown"}；work_item=${primary.workItemId || "unknown"}；provenance=${primary.provenanceStatus || "under_repair"}。`);
+        lines.push("- pressure provenance pre-dispatch discipline：CCM_AGENT_RECEIPT.memoryProvenanceUsage 必须逐条声明 relPath、usageState、provenanceStatus、repairWorkItemId、repairStatus、repairGapType、currentSourceVerified；使用 disputed/stale-under-repair 记忆时必须先重读/核验当前源并声明 currentSourceVerified=true。");
+        const examples = Array.isArray(pressureMemoryProvenanceReceiptDiscipline.exampleRows) ? pressureMemoryProvenanceReceiptDiscipline.exampleRows : [];
+        if (examples.length) {
+            lines.push(`- memoryProvenanceUsage 示例：${compactMemoryText(JSON.stringify(examples.slice(0, 2)), 900)}`);
+        }
+    }
+    if (pressureProvenanceDispatchFeedbackPolicy?.active === true) {
+        const rows = Array.isArray(pressureProvenanceDispatchFeedbackPolicy.policyRows) ? pressureProvenanceDispatchFeedbackPolicy.policyRows : [];
+        const primary = rows[0] || {};
+        const recoveryHint = Number(primary.recovery_credit || 0) > 0
+            ? `；恢复抵扣=${primary.recovery_credit || 0}；有效违约=${primary.effective_violation_count ?? primary.violation_count ?? 0}`
+            : "";
+        const relapseHint = primary.relapsed ? `；恢复后复发=${primary.post_recovery_violation_count || 0}` : "";
+        lines.push(`- pressure provenance dispatch feedback policy：agentType=${pressureProvenanceDispatchFeedbackPolicy.agentType || "unknown"}；project=${pressureProvenanceDispatchFeedbackPolicy.targetProject || bundle.target_project || "unknown"}；severity=${pressureProvenanceDispatchFeedbackPolicy.severity || "medium"}；历史违约=${primary.violation_count || 0}${recoveryHint}${relapseHint}；action=${pressureProvenanceDispatchFeedbackPolicy.action || "strengthen_pressure_memory_provenance_receipt_contract"}。`);
+        lines.push("- 派发反馈要求：该执行器/项目历史上收到 pre-dispatch pressure provenance discipline 后仍遗漏过 memoryProvenanceUsage 或 currentSourceVerified；本轮 ACK 必须确认回执合同，最终 CCM_AGENT_RECEIPT 必须包含 memoryProvenanceUsage（无 pressure 记忆也要说明为空/未使用原因），主 Agent 关闭前必须复核。");
+        if (Array.isArray(pressureProvenanceDispatchFeedbackPolicy.gapCodes) && pressureProvenanceDispatchFeedbackPolicy.gapCodes.length) {
+            lines.push(`- 历史来源回执缺口：${pressureProvenanceDispatchFeedbackPolicy.gapCodes.slice(0, 6).join("、")}。`);
+        }
+    }
     if (sessionBinding.schema) {
         lines.push(`- 子 Agent 会话绑定：binding=${sessionBinding.binding_id || ""}；task=${sessionBinding.task_id || "unknown"}；session=${sessionBinding.task_agent_session_id || "unbound"}；native=${sessionBinding.native_session_id || "pending"}；turn=${sessionBinding.turn || 0}；executor=${sessionBinding.agent_type || "unknown"}；回执中的记忆使用声明应绑定本任务会话。`);
     }
@@ -6749,6 +6961,8 @@ function renderGroupMemoryContextBundle(bundle) {
                 candidate.worker_context_packet_id ? `packet=${candidate.worker_context_packet_id}` : "",
                 candidate.worker_context_packet_binding_id ? `packetBinding=${candidate.worker_context_packet_binding_id}` : "",
                 candidate.worker_context_packet_memory_policy_reason ? `memoryPolicy=${candidate.worker_context_packet_memory_policy_reason}` : "",
+                Array.isArray(candidate.pressure_memory_provenance_rel_paths) && candidate.pressure_memory_provenance_rel_paths.length ? `pressureDocs=${candidate.pressure_memory_provenance_rel_paths.slice(0, 4).join(",")}` : "",
+                Array.isArray(candidate.pressure_memory_provenance_repair_work_item_ids) && candidate.pressure_memory_provenance_repair_work_item_ids.length ? `pressureRepair=${candidate.pressure_memory_provenance_repair_work_item_ids.slice(0, 4).join(",")}` : "",
                 candidate.request_telemetry_source ? `source=${candidate.request_telemetry_source}` : "",
                 candidate.request_telemetry_session_status ? `session=${candidate.request_telemetry_session_status}` : "",
                 candidate.request_telemetry_dispatch_status ? `dispatch=${candidate.request_telemetry_dispatch_status}` : "",
@@ -6878,6 +7092,9 @@ function renderGroupMemoryContextBundle(bundle) {
     const typedMemoryText = (0, group_memory_index_1.renderGroupTypedMemoryRecall)(typedMemory.recall);
     if (typedMemoryText)
         lines.push(typedMemoryText);
+    if (typedMemory.recall?.workerContextPressureScoring?.active && Number(typedMemory.recall?.workerContextPressureScoring?.boosted_count || 0) > 0) {
+        lines.push("- 上下文压力召回回执：本轮如使用或忽略 pressure recall typed MEMORY.md，CCM_AGENT_RECEIPT.memoryUsed/memoryIgnored 必须引用对应 relPath 或说明未使用原因。");
+    }
     if (groupState.summaryText)
         lines.push(`- 群聊压缩摘要：\n${compactPreserveLines(groupState.summaryText, 3200)}`);
     const addList = (title, items, mapper, limit = 6) => {
@@ -7097,6 +7314,37 @@ function buildGlobalGroupMemoryContext(query = "", options = {}) {
         const recall = (0, group_memory_index_1.buildGroupTypedMemoryRecall)(group.id, recallQuery, {
             alreadySurfaced,
             targetPaths: typedMemoryTargetPaths,
+            targetProject: options.targetProject || options.target_project || "",
+            groupMemory: memory,
+            workerContextPressure: options.workerContextPressure
+                || options.worker_context_pressure
+                || options.contextPressure
+                || options.context_pressure
+                || memory.compaction?.contextPressureWarning
+                || memory.compaction?.context_pressure_warning
+                || memory.compaction?.compactWarning
+                || memory.compaction?.compact_warning
+                || memory.messageCompression?.contextPressureWarning
+                || memory.messageCompression?.context_pressure_warning
+                || null,
+            compactStrategyPressure: options.compactStrategyPressure
+                || options.compact_strategy_pressure
+                || memory.compaction?.compactStrategyDecision
+                || memory.compaction?.compact_strategy_decision
+                || memory.compactBoundary?.compactStrategyDecision
+                || memory.compactBoundary?.compact_strategy_decision
+                || memory.messageCompression?.compactStrategyDecision
+                || memory.messageCompression?.compact_strategy_decision
+                || null,
+            ptlEmergency: options.ptlEmergency
+                || options.ptl_emergency
+                || memory.compaction?.ptlEmergency
+                || memory.compaction?.ptl_emergency
+                || memory.compactBoundary?.ptlEmergency
+                || memory.compactBoundary?.ptl_emergency
+                || memory.compactBoundary?.post_compact_restore?.ptlEmergency
+                || memory.compactBoundary?.post_compact_restore?.ptl_emergency
+                || null,
             max: maxTypedMemory,
             snippetChars: Number(options.snippetChars || options.snippet_chars || 650),
         });
@@ -9174,6 +9422,152 @@ function runGroupTypedMemoryContextSelfTest() {
     }
     finally {
         for (const file of [messageFile, `${messageFile}.bak`, memoryFile, `${memoryFile}.bak`, reloadFile, dispatchFile]) {
+            try {
+                fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runGroupTypedMemoryContextPressureRepairProvenanceSelfTest() {
+    const groupId = `typed-memory-context-pressure-repair-${process.pid}-${Date.now().toString(36)}`;
+    const targetProject = "phase131-pressure-project";
+    const messageFile = getGroupMessagesFileHint(groupId);
+    const memoryFile = getGroupMemoryFile(groupId);
+    const typedDir = (0, group_memory_index_1.getGroupTypedMemoryDir)(groupId);
+    const reloadFile = getGroupMemoryReloadLedgerFile(groupId);
+    const dispatchFile = getGroupPostCompactDispatchLedgerFile(groupId);
+    const repairFile = getGroupReplayRepairWorkItemsFile(groupId);
+    try {
+        (0, storage_1.saveGroupMessages)(groupId, [{
+                id: "phase131-1",
+                role: "user",
+                target: "coordinator",
+                content: "继续 WorkerContextPacket pressure repair provenance 下发测试。",
+            }]);
+        saveGroupMemory(groupId, {
+            goal: "验证 pressure recall repair provenance 进入子 Agent 上下文",
+            persistentRequirements: [{ messageId: "phase131-1", text: "pressure repair provenance must be visible to child Agent sessions." }],
+            decisions: [],
+            factAnchors: [],
+            compaction: {},
+        });
+        (0, group_memory_index_1.upsertGroupTypedMemoryDocument)(groupId, {
+            type: "feedback",
+            slug: "worker-context-usage-pressure-discipline",
+            name: "WorkerContextPacket context usage pressure discipline",
+            description: "Child Agent context must show when this pressure memory is disputed under repair.",
+            source: "selftest:context-pressure-repair-provenance",
+            body: [
+                "PRESSURE_CONTEXT_REPAIR_BUNDLE_SENTINEL",
+                "When this memory appears with pressure repair provenance, verify current packet budget before applying it.",
+            ].join("\n"),
+        });
+        (0, group_memory_index_1.recordGroupTypedMemoryPressureRecallUsageLedger)(groupId, {
+            targetProject,
+            taskId: "phase131-pressure-context-task",
+            executionId: "phase131-pressure-context-execution",
+            agent: targetProject,
+            generatedAt: "2026-07-09T23:59:00.000Z",
+            rows: [
+                { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-phase131-context-ignored-1" },
+                { rel_path: "worker-context-usage-pressure-discipline.md", name: "WorkerContextPacket context usage pressure discipline", usage_state: "ignored", pressure_status: "over_budget", worker_context_packet_id: "wcp-phase131-context-ignored-2" },
+            ],
+        });
+        writeJsonAtomic(repairFile, {
+            schema: "ccm-compact-boundary-replay-repair-work-items-v1",
+            version: 1,
+            groupId,
+            file: repairFile,
+            items: [{
+                    id: "cgpru-context-repair-provenance-selftest",
+                    work_item_id: "cgpru-context-repair-provenance-selftest",
+                    source: "cross_group_pressure_recall_usage_repair",
+                    component: "cross_group_pressure_recall_usage",
+                    status: "pending",
+                    priority: "high",
+                    target_project: targetProject,
+                    repair_target: "worker-context-usage-pressure-discipline.md",
+                    cross_group_pressure_recall_usage_gap_type: "recommendation_conflict",
+                    cross_group_pressure_recall_usage_rel_path: "worker-context-usage-pressure-discipline.md",
+                    cross_group_pressure_recall_usage_reason: "selftest: pressure memory disputed before child Agent dispatch",
+                    local_recommendation: "deprioritize_pressure_recall",
+                    cross_group_recommendation: "promote_pressure_recall",
+                    source_group_count: 1,
+                    source_groups: [{ groupId: "phase131-source-group", entry_count: 2 }],
+                    shouldCreateRealTask: false,
+                    updatedAt: "2026-07-09T23:59:10.000Z",
+                }],
+            stats: { total: 1, openItemCount: 1, pendingCount: 1 },
+            updatedAt: "2026-07-09T23:59:10.000Z",
+        });
+        const contextUsage = {
+            schema: "ccm-worker-context-usage-v1",
+            packet_id: "wcp-phase131-context",
+            project: targetProject,
+            status: "over_budget",
+            pressure: 113,
+            total_tokens: 101_700,
+            max_tokens: 90_000,
+            free_tokens: -24_700,
+            autocompact_buffer_tokens: 13_000,
+        };
+        const bundle = buildAgentMemoryContextBundle(groupId, targetProject, "继续 WorkerContextPacket over_budget PRESSURE_CONTEXT_REPAIR_BUNDLE_SENTINEL", {
+            workerContextPacketContextUsage: contextUsage,
+            maxTypedMemory: 8,
+            minKeepTokens: 1,
+        });
+        const recall = bundle.group_state?.typedMemory?.recall || {};
+        const doc = (recall.recalled || []).find((item) => item.relPath === "worker-context-usage-pressure-discipline.md")
+            || (recall.diagnostics || []).find((item) => item.relPath === "worker-context-usage-pressure-discipline.md")
+            || {};
+        const { buildWorkerContextPacket, renderWorkerContextPacket } = require("../../agents/runtime-kernel");
+        const packet = buildWorkerContextPacket({
+            group: { id: groupId, name: "phase131-pressure-repair", members: [{ project: targetProject }] },
+            project: targetProject,
+            task: "继续 WorkerContextPacket over_budget PRESSURE_CONTEXT_REPAIR_BUNDLE_SENTINEL",
+            memory: bundle,
+            contextUsageOptions: { maxTokens: 90_000 },
+        });
+        const renderedPacket = renderWorkerContextPacket(packet);
+        const discipline = bundle.pressure_memory_provenance_receipt_discipline || {};
+        const checks = {
+            bundleRecallCarriesRepair: Number(recall.workerContextPressureUsageScoring?.repair_matched_count || 0) >= 1
+                && doc.workerContextPressureUsage?.matched?.some((match) => match.repair_work_item_id === "cgpru-context-repair-provenance-selftest"
+                    && match.provenance_status === "disputed_under_repair"),
+            bundleRenderedTextCarriesRepair: String(bundle.rendered_text || "").includes("pressure repair recommendation_conflict:pending")
+                && String(bundle.rendered_text || "").includes("PRESSURE_CONTEXT_REPAIR_BUNDLE_SENTINEL")
+                && String(bundle.rendered_text || "").includes("memoryProvenanceUsage 示例")
+                && String(bundle.rendered_text || "").includes("repairStatus")
+                && String(bundle.rendered_text || "").includes("repairGapType"),
+            bundleCarriesPreDispatchDiscipline: discipline.schema === "ccm-pressure-memory-provenance-receipt-pre-dispatch-discipline-v1"
+                && discipline.active === true
+                && Number(discipline.docCount || 0) >= 1
+                && (discipline.requiredFields || []).includes("repairStatus")
+                && (discipline.requiredFields || []).includes("repairGapType")
+                && JSON.stringify(discipline.exampleRows || []).includes("currentSourceVerified"),
+            workerContextPacketCarriesRepairMemory: renderedPacket.includes("pressure repair recommendation_conflict:pending")
+                && renderedPacket.includes("Pressure memory provenance receipt discipline")
+                && renderedPacket.includes("Example CCM_AGENT_RECEIPT.memoryProvenanceUsage")
+                && packet.acceptance?.memory_provenance_usage_required === true
+                && packet.pressure_memory_provenance_receipt_discipline?.schema === "ccm-pressure-memory-provenance-receipt-pre-dispatch-discipline-v1"
+                && renderedPacket.includes("平台记忆")
+                && packet.context_usage?.categories?.some((item) => item.id === "group_memory_rendered" && Number(item.tokens || 0) > 0)
+                && packet.context_usage?.categories?.some((item) => item.id === "pressure_memory_provenance_receipt_discipline" && item.required === true && Number(item.tokens || 0) > 0),
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            scoring: recall.workerContextPressureUsageScoring || null,
+            renderedExcerpt: String(renderedPacket || "").slice(0, 1800),
+        };
+    }
+    finally {
+        for (const file of [messageFile, `${messageFile}.bak`, memoryFile, `${memoryFile}.bak`, reloadFile, dispatchFile, repairFile, `${repairFile}.bak`]) {
             try {
                 fs.unlinkSync(file);
             }

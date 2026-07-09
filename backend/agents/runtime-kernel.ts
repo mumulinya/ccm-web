@@ -99,6 +99,277 @@ function renderWorkerPacketMemory(memory: any) {
   return [`平台记忆：${schema}`, compactMemory(memory)].join("\n");
 }
 
+function extractPressureMemoryProvenanceReceiptDiscipline(memory: any = {}, fallback: any = null) {
+  const candidate = fallback
+    || memory?.pressure_memory_provenance_receipt_discipline
+    || memory?.pressureMemoryProvenanceReceiptDiscipline
+    || memory?.group_state?.typedMemory?.pressureProvenanceReceiptDiscipline
+    || memory?.group_state?.typed_memory?.pressure_provenance_receipt_discipline
+    || memory?.typedMemory?.pressureProvenanceReceiptDiscipline
+    || null;
+  if (!candidate?.schema) return null;
+  const rows = Array.isArray(candidate.rows) ? candidate.rows : [];
+  const exampleRows = Array.isArray(candidate.exampleRows || candidate.example_rows) ? (candidate.exampleRows || candidate.example_rows) : [];
+  return {
+    ...candidate,
+    active: candidate.active === true || rows.length > 0,
+    rows,
+    exampleRows,
+  };
+}
+
+function renderPressureMemoryProvenanceReceiptDiscipline(discipline: any = {}) {
+  if (!discipline?.schema || discipline.active === false) return "";
+  const rows = Array.isArray(discipline.rows) ? discipline.rows.slice(0, 6) : [];
+  const examples = Array.isArray(discipline.exampleRows || discipline.example_rows)
+    ? (discipline.exampleRows || discipline.example_rows).slice(0, 3)
+    : [];
+  return [
+    `Pressure memory provenance receipt discipline：docs=${discipline.docCount || rows.length || 0}；source=${discipline.source || "typed_memory_pressure_repair_provenance"}`,
+    "- CCM_AGENT_RECEIPT.memoryProvenanceUsage is required for every surfaced pressure repair MEMORY.md row.",
+    "- Required fields: relPath, usageState, provenanceStatus, repairWorkItemId, repairStatus, repairGapType, currentSourceVerified.",
+    "- If usageState is used/verified for disputed_under_repair or stale_evidence_under_repair memory, reread or verify the current source first and set currentSourceVerified=true.",
+    ...rows.map((row: any) => [
+      `- relPath=${row.relPath || row.rel_path || row.name || "unknown"}`,
+      `provenanceStatus=${row.provenanceStatus || row.provenance_status || "under_repair"}`,
+      `repairWorkItemId=${row.repairWorkItemId || row.repair_work_item_id || "unknown"}`,
+      `repairStatus=${row.repairStatus || row.repair_status || "pending"}`,
+      `repairGapType=${row.repairGapType || row.repair_gap_type || "pressure_repair_provenance"}`,
+    ].join("；")),
+    examples.length ? `- Example CCM_AGENT_RECEIPT.memoryProvenanceUsage=${JSON.stringify(examples)}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function extractPressureProvenanceDispatchFeedbackPolicy(memory: any = {}, fallback: any = null) {
+  const candidate = fallback
+    || memory?.pressure_provenance_dispatch_feedback_policy
+    || memory?.pressureProvenanceDispatchFeedbackPolicy
+    || memory?.group_state?.typedMemory?.pressureProvenanceDispatchFeedbackPolicy
+    || memory?.group_state?.typed_memory?.pressure_provenance_dispatch_feedback_policy
+    || memory?.typedMemory?.pressureProvenanceDispatchFeedbackPolicy
+    || null;
+  if (!candidate?.schema) return null;
+  const policyRows = Array.isArray(candidate.policyRows || candidate.policy_rows)
+    ? (candidate.policyRows || candidate.policy_rows)
+    : [];
+  const active = candidate.active === true
+    ? true
+    : candidate.active === false
+      ? false
+      : policyRows.length > 0 && candidate.disabled !== true;
+  return {
+    ...candidate,
+    active,
+    policyRows,
+  };
+}
+
+function renderPressureProvenanceDispatchFeedbackPolicy(policy: any = {}) {
+  if (!policy?.schema || policy.active === false) return "";
+  const rows = Array.isArray(policy.policyRows || policy.policy_rows)
+    ? (policy.policyRows || policy.policy_rows).slice(0, 4)
+    : [];
+  const fields = Array.isArray(policy.requiredReceiptFields || policy.required_receipt_fields)
+    ? (policy.requiredReceiptFields || policy.required_receipt_fields)
+    : [];
+  return [
+    `Pressure provenance dispatch feedback policy：agentType=${policy.agentType || policy.agent_type || "unknown"}；project=${policy.targetProject || policy.target_project || "unknown"}；severity=${policy.severity || "medium"}；action=${policy.action || "strengthen_pressure_memory_provenance_receipt_contract"}`,
+    "- This executor/project has historical post-dispatch pressure provenance receipt violations; ACK must acknowledge memoryProvenanceUsage and final receipts must be reviewed before closing.",
+    fields.length ? `- Required receipt fields: ${fields.join(", ")}.` : "",
+    policy.closeGate ? `- Close gate: ${policy.closeGate || policy.close_gate}.` : "",
+    ...rows.map((row: any) => [
+      `- historical agentType=${row.agent_type || row.agentType || "unknown"}`,
+      `project=${row.project || "unknown"}`,
+      `violations=${row.violation_count || row.violationCount || 0}`,
+      Number(row.recovery_credit || row.recoveryCredit || 0) > 0 ? `recoveryCredit=${row.recovery_credit || row.recoveryCredit || 0}` : "",
+      (row.effective_violation_count ?? row.effectiveViolationCount) !== undefined ? `effectiveViolations=${row.effective_violation_count ?? row.effectiveViolationCount}` : "",
+      row.relapsed === true ? `relapsed=true` : "",
+      Number(row.post_recovery_violation_count || row.postRecoveryViolationCount || 0) > 0 ? `postRecoveryViolations=${row.post_recovery_violation_count || row.postRecoveryViolationCount || 0}` : "",
+      `missingMemoryProvenanceUsage=${row.missing_memory_provenance_usage_count || row.missingMemoryProvenanceUsageCount || 0}`,
+      `currentSourceVerifiedGap=${row.current_source_verified_gap_count || row.currentSourceVerifiedGapCount || 0}`,
+    ].filter(Boolean).join("；")),
+  ].filter(Boolean).join("\n");
+}
+
+function extractPressureProvenanceProviderDispatchAdvisory(memory: any = {}, fallback: any = null) {
+  const candidate = fallback
+    || memory?.pressure_provenance_provider_dispatch_advisory
+    || memory?.pressureProvenanceProviderDispatchAdvisory
+    || memory?.pressure_provenance_feedback_provider_dispatch_advisory
+    || memory?.pressureProvenanceFeedbackProviderDispatchAdvisory
+    || memory?.group_state?.typedMemory?.pressureProvenanceProviderDispatchAdvisory
+    || memory?.group_state?.typed_memory?.pressure_provenance_provider_dispatch_advisory
+    || memory?.typedMemory?.pressureProvenanceProviderDispatchAdvisory
+    || null;
+  if (!candidate?.schema) return null;
+  const selected = candidate.selected_candidate || candidate.selectedCandidate || candidate.current_candidate || candidate.currentCandidate || candidate;
+  const dispatchPolicy = String(selected.dispatch_policy || selected.dispatchPolicy || candidate.dispatch_policy || candidate.dispatchPolicy || "");
+  return {
+    ...candidate,
+    selected_candidate: selected,
+    dispatch_policy: dispatchPolicy || "normal_dispatch",
+    should_hold_dispatch: candidate.should_hold_dispatch === true
+      || candidate.shouldHoldDispatch === true
+      || selected.should_hold_dispatch === true
+      || selected.shouldHoldDispatch === true
+      || dispatchPolicy === "hold_until_repair",
+  };
+}
+
+function renderPressureProvenanceProviderDispatchAdvisory(advisory: any = {}) {
+  if (!advisory?.schema) return "";
+  const selected = advisory.selected_candidate || advisory.selectedCandidate || advisory.current_candidate || advisory.currentCandidate || advisory;
+  const alternatives = Array.isArray(advisory.safer_alternatives || advisory.saferAlternatives)
+    ? (advisory.safer_alternatives || advisory.saferAlternatives).slice(0, 4)
+    : [];
+  const openRepairIds = Array.isArray(selected.current_open_repair_item_ids || selected.currentOpenRepairItemIds)
+    ? (selected.current_open_repair_item_ids || selected.currentOpenRepairItemIds).slice(0, 6)
+    : [];
+  return [
+    `Pressure provenance provider dispatch advisory：agentType=${selected.agent_type || selected.agentType || advisory.agent_type || advisory.agentType || "unknown"}；project=${selected.project || advisory.project || "unknown"}；health=${selected.health_status || selected.healthStatus || advisory.health_status || advisory.healthStatus || "unknown"}；policy=${selected.dispatch_policy || selected.dispatchPolicy || advisory.dispatch_policy || advisory.dispatchPolicy || "normal_dispatch"}`,
+    advisory.should_hold_dispatch === true || advisory.shouldHoldDispatch === true || selected.dispatch_policy === "hold_until_repair" || selected.dispatchPolicy === "hold_until_repair"
+      ? "- Pre-dispatch hold: do not launch this child-agent runner until pressure provenance repair/recovery closes the critical state."
+      : "",
+    selected.dispatch_recommendation || selected.dispatchRecommendation ? `- Recommendation: ${selected.dispatch_recommendation || selected.dispatchRecommendation}.` : "",
+    Number(selected.effective_violation_count || selected.effectiveViolationCount || 0) > 0 ? `- effectiveViolations=${selected.effective_violation_count || selected.effectiveViolationCount || 0}; recoveryCredit=${selected.recovery_credit || selected.recoveryCredit || 0}; relapsed=${selected.relapsed === true}.` : "",
+    openRepairIds.length ? `- Open repair work items: ${openRepairIds.join(", ")}.` : "",
+    alternatives.length ? `- Safer alternatives: ${alternatives.map((item: any) => `${item.agent_type || item.agentType || "unknown"}(${item.health_status || item.healthStatus || "healthy"})`).join(", ")}.` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function providerOverrideFollowupStringList(value: any, limit = 8) {
+  const raw = Array.isArray(value)
+    ? value
+    : value === undefined || value === null || value === "" ? [] : [value];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const text = String(item || "").trim();
+    const key = text.toLowerCase();
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function extractPressureProvenanceProviderDispatchOverrideFollowupReceiptContract(memory: any = {}, fallback: any = null, advisoryInput: any = null) {
+  const direct = fallback
+    || memory?.pressure_provenance_provider_dispatch_override_followup_receipt_contract
+    || memory?.pressureProvenanceProviderDispatchOverrideFollowupReceiptContract
+    || memory?.group_state?.typedMemory?.pressureProvenanceProviderDispatchOverrideFollowupReceiptContract
+    || memory?.group_state?.typed_memory?.pressure_provenance_provider_dispatch_override_followup_receipt_contract
+    || null;
+  const advisory = extractPressureProvenanceProviderDispatchAdvisory(memory, advisoryInput);
+  const selected = advisory?.selected_candidate || advisory?.selectedCandidate || advisory || {};
+  const dispatchPolicy = String(
+    selected.dispatch_policy
+    || selected.dispatchPolicy
+    || advisory?.dispatch_policy
+    || advisory?.dispatchPolicy
+    || direct?.dispatch_policy
+    || direct?.dispatchPolicy
+    || ""
+  ).trim();
+  const repaired = direct?.active === true
+    || direct?.provider_override_followup_repaired === true
+    || direct?.providerOverrideFollowupRepaired === true
+    || selected.provider_override_followup_repaired === true
+    || selected.providerOverrideFollowupRepaired === true;
+  const shouldHold = advisory?.should_hold_dispatch === true
+    || advisory?.shouldHoldDispatch === true
+    || selected.should_hold_dispatch === true
+    || selected.shouldHoldDispatch === true
+    || dispatchPolicy === "hold_until_repair";
+  const samplingPolicy = dispatchPolicy === "allow_with_receipt_sampling"
+    || direct?.sampling_required === true
+    || direct?.samplingRequired === true;
+  const active = repaired && !shouldHold && samplingPolicy;
+  if (!active && !direct?.schema) return null;
+  const relPaths = providerOverrideFollowupStringList(
+    direct?.rel_paths || direct?.relPaths || selected.provider_override_followup_rel_paths || selected.providerOverrideFollowupRelPaths,
+    12
+  );
+  const workItemIds = providerOverrideFollowupStringList(
+    direct?.followup_work_item_ids || direct?.followupWorkItemIds || selected.provider_override_followup_work_item_ids || selected.providerOverrideFollowupWorkItemIds,
+    12
+  );
+  const overrideIds = providerOverrideFollowupStringList(
+    direct?.override_ids || direct?.overrideIds || selected.provider_override_followup_override_ids || selected.providerOverrideFollowupOverrideIds,
+    12
+  );
+  const exampleRows = relPaths.slice(0, 3).map((relPath, index) => ({
+    relPath,
+    usageState: "verified",
+    repairStatus: "completed",
+    repairGapType: "provider_dispatch_override_followup",
+    repairWorkItemId: workItemIds[index] || workItemIds[0] || "",
+    currentSourceVerified: true,
+    providerDispatchOverrideFollowupHistoryReverified: true,
+    providerDispatchOverrideId: overrideIds[index] || overrideIds[0] || "",
+  }));
+  return {
+    schema: "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-contract-v1",
+    version: 1,
+    active,
+    source: direct?.source || "typed-feedback:provider-dispatch-override-followup-repaired-history",
+    agent_type: direct?.agent_type || direct?.agentType || selected.agent_type || selected.agentType || advisory?.agent_type || advisory?.agentType || "unknown",
+    project: direct?.project || selected.project || advisory?.project || "unknown",
+    health_status: direct?.health_status || direct?.healthStatus || selected.health_status || selected.healthStatus || advisory?.health_status || advisory?.healthStatus || "",
+    dispatch_policy: dispatchPolicy || "allow_with_receipt_sampling",
+    sampling_required: active,
+    receipt_required: active,
+    memory_provenance_usage_required: active,
+    current_source_verification_required: active,
+    provider_override_followup_repaired: repaired,
+    provider_override_followup_repaired_count: Number(direct?.provider_override_followup_repaired_count || direct?.providerOverrideFollowupRepairedCount || selected.provider_override_followup_repaired_count || selected.providerOverrideFollowupRepairedCount || 0),
+    provider_override_followup_memory_provenance_usage_count: Number(direct?.provider_override_followup_memory_provenance_usage_count || direct?.providerOverrideFollowupMemoryProvenanceUsageCount || selected.provider_override_followup_memory_provenance_usage_count || selected.providerOverrideFollowupMemoryProvenanceUsageCount || 0),
+    provider_override_followup_current_source_verified_count: Number(direct?.provider_override_followup_current_source_verified_count || direct?.providerOverrideFollowupCurrentSourceVerifiedCount || selected.provider_override_followup_current_source_verified_count || selected.providerOverrideFollowupCurrentSourceVerifiedCount || 0),
+    provider_override_followup_last_completed_at: direct?.provider_override_followup_last_completed_at || direct?.providerOverrideFollowupLastCompletedAt || selected.provider_override_followup_last_completed_at || selected.providerOverrideFollowupLastCompletedAt || "",
+    provider_override_followup_fresh_after_last_violation: direct?.provider_override_followup_fresh_after_last_violation === true
+      || direct?.providerOverrideFollowupFreshAfterLastViolation === true
+      || selected.provider_override_followup_fresh_after_last_violation === true
+      || selected.providerOverrideFollowupFreshAfterLastViolation === true,
+    rel_paths: relPaths,
+    followup_work_item_ids: workItemIds,
+    override_ids: overrideIds,
+    required_receipt_fields: [
+      "memoryProvenanceUsage",
+      "relPath",
+      "usageState",
+      "repairStatus",
+      "repairGapType",
+      "currentSourceVerified",
+      "providerDispatchOverrideFollowupHistoryReverified",
+      "providerDispatchOverrideId",
+    ],
+    exampleRows,
+  };
+}
+
+function renderPressureProvenanceProviderDispatchOverrideFollowupReceiptContract(contract: any = {}) {
+  if (!contract?.schema || contract.active === false) return "";
+  const relPaths = providerOverrideFollowupStringList(contract.rel_paths || contract.relPaths, 8);
+  const workItemIds = providerOverrideFollowupStringList(contract.followup_work_item_ids || contract.followupWorkItemIds, 8);
+  const overrideIds = providerOverrideFollowupStringList(contract.override_ids || contract.overrideIds, 8);
+  const fields = providerOverrideFollowupStringList(contract.required_receipt_fields || contract.requiredReceiptFields, 12);
+  const examples = Array.isArray(contract.exampleRows || contract.example_rows)
+    ? (contract.exampleRows || contract.example_rows).slice(0, 3)
+    : [];
+  return [
+    `Provider dispatch override follow-up receipt contract：agentType=${contract.agent_type || contract.agentType || "unknown"}；project=${contract.project || "unknown"}；policy=${contract.dispatch_policy || contract.dispatchPolicy || "allow_with_receipt_sampling"}；repaired=${contract.provider_override_followup_repaired_count || contract.providerOverrideFollowupRepairedCount || 0}`,
+    "- This child-agent dispatch is allowed with receipt sampling because previous provider override follow-up repair was verified. Recheck current source evidence before relying on that repaired history.",
+    "- Final CCM_AGENT_RECEIPT must include memoryProvenanceUsage rows for the repaired-history evidence it uses, with currentSourceVerified=true.",
+    "- Set providerDispatchOverrideFollowupHistoryReverified=true on each relevant memoryProvenanceUsage row.",
+    fields.length ? `- Required receipt fields: ${fields.join(", ")}.` : "",
+    relPaths.length ? `- Reverify relPath: ${relPaths.join(", ")}.` : "",
+    workItemIds.length ? `- Follow-up work items: ${workItemIds.join(", ")}.` : "",
+    overrideIds.length ? `- Override ids: ${overrideIds.join(", ")}.` : "",
+    examples.length ? `- Example CCM_AGENT_RECEIPT.memoryProvenanceUsage=${JSON.stringify(examples)}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 function normalizeWorkerMemoryPolicy(input: any = {}, memory: any = null) {
   const raw = input.memoryPolicy || input.memory_policy || (memory && typeof memory === "object" ? (memory.memory_policy || memory.memoryPolicy) : null) || {};
   const ignored = raw.ignored === true || raw.ignore === true || raw.use === "must_not_use_group_memory";
@@ -292,6 +563,23 @@ export function buildWorkerContextUsage(packet: any = {}, options: any = {}) {
   const memory = packet?.memory || null;
   const memoryPolicy = packet?.memory_policy || packet?.memoryPolicy || normalizeWorkerMemoryPolicy({}, memory);
   const memoryRendered = renderWorkerPacketMemory(memory);
+  const pressureMemoryProvenanceReceiptDiscipline = extractPressureMemoryProvenanceReceiptDiscipline(
+    memory,
+    packet?.pressure_memory_provenance_receipt_discipline || packet?.pressureMemoryProvenanceReceiptDiscipline || null
+  );
+  const pressureProvenanceDispatchFeedbackPolicy = extractPressureProvenanceDispatchFeedbackPolicy(
+    memory,
+    packet?.pressure_provenance_dispatch_feedback_policy || packet?.pressureProvenanceDispatchFeedbackPolicy || null
+  );
+  const pressureProvenanceProviderDispatchAdvisory = extractPressureProvenanceProviderDispatchAdvisory(
+    memory,
+    packet?.pressure_provenance_provider_dispatch_advisory || packet?.pressureProvenanceProviderDispatchAdvisory || null
+  );
+  const pressureProvenanceProviderDispatchOverrideFollowupReceiptContract = extractPressureProvenanceProviderDispatchOverrideFollowupReceiptContract(
+    memory,
+    packet?.pressure_provenance_provider_dispatch_override_followup_receipt_contract || packet?.pressureProvenanceProviderDispatchOverrideFollowupReceiptContract || null,
+    pressureProvenanceProviderDispatchAdvisory
+  );
   const categories = [
     workerContextUsageCategory("worker_packet_envelope", "Worker packet envelope", {
       packet_id: packet?.packet_id || "",
@@ -308,6 +596,10 @@ export function buildWorkerContextUsage(packet: any = {}, options: any = {}) {
     workerContextUsageCategory("memory_policy", "Memory policy", memoryPolicy, { source: "memory-policy", required: memoryPolicy.ignored === true }),
     workerContextUsageCategory("group_memory_rendered", "Group memory rendered context", memoryRendered, { source: memory?.schema || "memory-context", required: !!memory }),
     workerContextUsageCategory("typed_memory_recall", "Typed MEMORY.md recall", memory?.typedMemoryRecall || memory?.typed_memory_recall || memory?.typed_memory || memory?.typedMemory || "", { source: "typed-memory" }),
+    workerContextUsageCategory("pressure_memory_provenance_receipt_discipline", "Pressure memory provenance receipt discipline", pressureMemoryProvenanceReceiptDiscipline || "", { source: "typed-memory-pressure-provenance", required: pressureMemoryProvenanceReceiptDiscipline?.active === true }),
+    workerContextUsageCategory("pressure_provenance_dispatch_feedback_policy", "Pressure provenance dispatch feedback policy", pressureProvenanceDispatchFeedbackPolicy || "", { source: "typed-feedback-memory", required: pressureProvenanceDispatchFeedbackPolicy?.active === true }),
+    workerContextUsageCategory("pressure_provenance_provider_dispatch_advisory", "Pressure provenance provider dispatch advisory", pressureProvenanceProviderDispatchAdvisory || "", { source: "typed-feedback-memory", required: pressureProvenanceProviderDispatchAdvisory?.should_hold_dispatch === true }),
+    workerContextUsageCategory("pressure_provenance_provider_dispatch_override_followup_receipt_contract", "Provider dispatch override follow-up receipt contract", pressureProvenanceProviderDispatchOverrideFollowupReceiptContract || "", { source: "typed-feedback-memory", required: pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active === true }),
     workerContextUsageCategory("global_memory", "Global memory recall", memory?.globalAgentMemoryRecall || memory?.global_agent_memory_recall || memory?.global_memory || memory?.globalMemory || "", { source: "global-agent-memory" }),
     workerContextUsageCategory("replay_repair_dispatch_briefs", "Replay repair dispatch briefs", packet?.replay_repair_dispatch_briefs || [], { source: "replay-repair", required: Array.isArray(packet?.replay_repair_dispatch_briefs) && packet.replay_repair_dispatch_briefs.length > 0 }),
     workerContextUsageCategory("contract_injections", "Contract injections", packet?.contract_injections || [], { source: "contract-injection" }),
@@ -498,6 +790,8 @@ export function buildWorkerContextPacket(input: {
   project: string;
   task: string;
   analysis?: any;
+  agentType?: string;
+  agent_type?: string;
   traceId?: string;
   taskId?: string;
   dependencies?: any[];
@@ -505,6 +799,14 @@ export function buildWorkerContextPacket(input: {
   replayRepairDispatchBriefs?: any[];
   memory?: any;
   memoryPolicy?: any;
+  pressureMemoryProvenanceReceiptDiscipline?: any;
+  pressure_memory_provenance_receipt_discipline?: any;
+  pressureProvenanceDispatchFeedbackPolicy?: any;
+  pressure_provenance_dispatch_feedback_policy?: any;
+  pressureProvenanceProviderDispatchAdvisory?: any;
+  pressure_provenance_provider_dispatch_advisory?: any;
+  pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?: any;
+  pressure_provenance_provider_dispatch_override_followup_receipt_contract?: any;
   verification?: any;
   contextUsageOptions?: any;
 }) {
@@ -512,10 +814,32 @@ export function buildWorkerContextPacket(input: {
   const contractInjections = Array.isArray(input.contractInjections) ? input.contractInjections : [];
   const replayRepairDispatchBriefs = Array.isArray(input.replayRepairDispatchBriefs) ? input.replayRepairDispatchBriefs : [];
   const memoryPolicy = normalizeWorkerMemoryPolicy(input, input.memory || null);
+  const pressureMemoryProvenanceReceiptDiscipline = extractPressureMemoryProvenanceReceiptDiscipline(
+    input.memory || null,
+    input.pressureMemoryProvenanceReceiptDiscipline || input.pressure_memory_provenance_receipt_discipline || null
+  );
+  const pressureProvenanceDispatchFeedbackPolicy = extractPressureProvenanceDispatchFeedbackPolicy(
+    input.memory || null,
+    input.pressureProvenanceDispatchFeedbackPolicy || input.pressure_provenance_dispatch_feedback_policy || null
+  );
+  const pressureProvenanceProviderDispatchAdvisory = extractPressureProvenanceProviderDispatchAdvisory(
+    input.memory || null,
+    input.pressureProvenanceProviderDispatchAdvisory || input.pressure_provenance_provider_dispatch_advisory || null
+  );
+  const pressureProvenanceProviderDispatchOverrideFollowupReceiptContract = extractPressureProvenanceProviderDispatchOverrideFollowupReceiptContract(
+    input.memory || null,
+    input.pressureProvenanceProviderDispatchOverrideFollowupReceiptContract
+      || input.pressure_provenance_provider_dispatch_override_followup_receipt_contract
+      || null,
+    pressureProvenanceProviderDispatchAdvisory
+  );
+  const agentType = String(input.agentType || input.agent_type || "").trim();
   const packet: any = {
-    packet_id: `wcp_${hash([input.project, input.task, input.traceId, contractInjections, replayRepairDispatchBriefs], 14)}`,
+    packet_id: `wcp_${hash([input.project, input.task, input.traceId, agentType, contractInjections, replayRepairDispatchBriefs, pressureProvenanceDispatchFeedbackPolicy?.active ? pressureProvenanceDispatchFeedbackPolicy : null, pressureProvenanceProviderDispatchAdvisory?.schema ? pressureProvenanceProviderDispatchAdvisory : null, pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active ? pressureProvenanceProviderDispatchOverrideFollowupReceiptContract : null], 14)}`,
     version: 1,
     project: input.project,
+    agent_type: agentType,
+    agentType,
     task_id: input.taskId || "",
     trace_id: input.traceId || "",
     group: { id: input.group?.id || "", name: input.group?.name || "", members: groupMembers },
@@ -559,6 +883,10 @@ export function buildWorkerContextPacket(input: {
     })),
     memory: input.memory || null,
     memory_policy: memoryPolicy,
+    pressure_memory_provenance_receipt_discipline: pressureMemoryProvenanceReceiptDiscipline?.active ? pressureMemoryProvenanceReceiptDiscipline : null,
+    pressure_provenance_dispatch_feedback_policy: pressureProvenanceDispatchFeedbackPolicy?.active ? pressureProvenanceDispatchFeedbackPolicy : null,
+    pressure_provenance_provider_dispatch_advisory: pressureProvenanceProviderDispatchAdvisory?.schema ? pressureProvenanceProviderDispatchAdvisory : null,
+    pressure_provenance_provider_dispatch_override_followup_receipt_contract: pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active ? pressureProvenanceProviderDispatchOverrideFollowupReceiptContract : null,
     verification: input.verification || null,
     acceptance: {
       ack_required_before_implementation: true,
@@ -568,6 +896,16 @@ export function buildWorkerContextPacket(input: {
       memory_ignored_receipt_required: memoryPolicy.ignored === true,
       contract_injection_receipt_required: contractInjections.length > 0,
       replay_repair_dispatch_brief_receipt_required: replayRepairDispatchBriefs.length > 0,
+      memory_provenance_usage_required: pressureMemoryProvenanceReceiptDiscipline?.active === true
+        || pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active === true,
+      pressure_memory_provenance_receipt_required: pressureMemoryProvenanceReceiptDiscipline?.active === true,
+      pressure_provenance_feedback_ack_required: pressureProvenanceDispatchFeedbackPolicy?.active === true,
+      pressure_provenance_feedback_final_receipt_review_required: pressureProvenanceDispatchFeedbackPolicy?.active === true,
+      pressure_provenance_provider_dispatch_advisory_ack_required: pressureProvenanceProviderDispatchAdvisory?.schema ? true : false,
+      pressure_provenance_provider_dispatch_hold_required: pressureProvenanceProviderDispatchAdvisory?.should_hold_dispatch === true,
+      pressure_provenance_provider_dispatch_override_followup_sampling_required: pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active === true,
+      pressure_provenance_provider_dispatch_override_followup_receipt_required: pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active === true,
+      provider_dispatch_override_followup_history_reverification_required: pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?.active === true,
     },
   };
   return refreshWorkerContextPacketUsage(packet, input.contextUsageOptions || {});
@@ -612,6 +950,22 @@ export function renderWorkerContextPacket(packet: any) {
     : [];
   const memoryText = renderWorkerPacketMemory(packet?.memory || null);
   const memoryPolicyText = renderWorkerMemoryPolicy(packet?.memory_policy || packet?.memoryPolicy || null);
+  const pressureMemoryProvenanceReceiptDisciplineText = renderPressureMemoryProvenanceReceiptDiscipline(
+    extractPressureMemoryProvenanceReceiptDiscipline(packet?.memory || null, packet?.pressure_memory_provenance_receipt_discipline || packet?.pressureMemoryProvenanceReceiptDiscipline || null)
+  );
+  const pressureProvenanceDispatchFeedbackPolicyText = renderPressureProvenanceDispatchFeedbackPolicy(
+    extractPressureProvenanceDispatchFeedbackPolicy(packet?.memory || null, packet?.pressure_provenance_dispatch_feedback_policy || packet?.pressureProvenanceDispatchFeedbackPolicy || null)
+  );
+  const pressureProvenanceProviderDispatchAdvisoryText = renderPressureProvenanceProviderDispatchAdvisory(
+    extractPressureProvenanceProviderDispatchAdvisory(packet?.memory || null, packet?.pressure_provenance_provider_dispatch_advisory || packet?.pressureProvenanceProviderDispatchAdvisory || null)
+  );
+  const pressureProvenanceProviderDispatchOverrideFollowupReceiptContractText = renderPressureProvenanceProviderDispatchOverrideFollowupReceiptContract(
+    extractPressureProvenanceProviderDispatchOverrideFollowupReceiptContract(
+      packet?.memory || null,
+      packet?.pressure_provenance_provider_dispatch_override_followup_receipt_contract || packet?.pressureProvenanceProviderDispatchOverrideFollowupReceiptContract || null,
+      packet?.pressure_provenance_provider_dispatch_advisory || packet?.pressureProvenanceProviderDispatchAdvisory || null
+    )
+  );
   const retry = packet?.context_compaction_retry || packet?.contextCompactionRetry || null;
   const memoryProof = packet?.memory_reinjection_proof || packet?.memoryReinjectionProof || null;
   const partialCompaction = retry?.partial_compaction || retry?.partialCompaction || null;
@@ -623,6 +977,7 @@ export function renderWorkerContextPacket(packet: any) {
     : Array.isArray(partialCompaction?.preserved_fields) ? partialCompaction.preserved_fields.length : 0;
   const partialCompactPolicy = retry?.partial_compact_policy || retry?.partialCompactPolicy || partialCompaction?.partial_compact_policy || partialCompaction?.partialCompactPolicy || null;
   const compactStrategyMemory = partialCompactPolicy?.compact_strategy_memory || partialCompactPolicy?.compactStrategyMemory || retry?.compact_strategy_memory || retry?.compactStrategyMemory || null;
+  const pressureRecallUsageBias = partialCompactPolicy?.pressure_recall_usage_strategy_bias || partialCompactPolicy?.pressureRecallUsageStrategyBias || null;
   const ptlEmergencyHint = retry?.ptl_emergency_hint || retry?.ptlEmergencyHint || null;
   const memoryProofText = memoryProof?.schema ? [
     `Memory reinjection proof：${memoryProof.status || "unknown"}；memory_hash=${memoryProof.packet_memory_hash || ""}；rendered_hash=${memoryProof.rendered_memory_hash || ""}`,
@@ -638,6 +993,7 @@ export function renderWorkerContextPacket(packet: any) {
     partialCompaction?.schema ? `- partial_compaction=${partialCompactionCategories.join(",") || partialCompaction.category || ""}; omitted_chars=${partialCompaction.omitted_chars || 0}; preserved_fields=${partialCompactionPreservedFieldCount}` : "",
     partialCompactPolicy?.schema ? `- partial_compact_policy=${(partialCompactPolicy.selected_categories || []).join(",")}; skipped=${(partialCompactPolicy.skipped_categories || []).join(",")}` : "",
     compactStrategyMemory?.schema ? `- compact_strategy_memory=${compactStrategyMemory.strategy_id || "outcome-ledger"}; preferred=${(compactStrategyMemory.preferred_categories || []).join(",")}` : "",
+    pressureRecallUsageBias?.schema ? `- pressure_recall_usage_bias=${pressureRecallUsageBias.recommendation || "neutral"}; trust=${pressureRecallUsageBias.trust_score || 0}; adjustment_cap=${pressureRecallUsageBias.category_adjustment_cap || 0}` : "",
     ptlEmergencyHint?.schema && ptlEmergencyHint.engaged === true ? `- ptl_emergency_downgrade=${ptlEmergencyHint.emergency_level || "warning"}; reason=${ptlEmergencyHint.reason || "repeated compact failure"}` : "",
     retry.preserved_receipt_contract === true ? "- preserved receipt/proof identifiers and acceptance contract." : "",
   ].filter(Boolean).join("\n") : "";
@@ -655,6 +1011,10 @@ export function renderWorkerContextPacket(packet: any) {
     Array.isArray(packet?.constraints) && packet.constraints.length ? `用户约束：\n- ${packet.constraints.join("\n- ")}` : "",
     memoryPolicyText,
     memoryText,
+    pressureMemoryProvenanceReceiptDisciplineText,
+    pressureProvenanceDispatchFeedbackPolicyText,
+    pressureProvenanceProviderDispatchAdvisoryText,
+    pressureProvenanceProviderDispatchOverrideFollowupReceiptContractText,
     memoryProofText,
     retryText,
     renderWorkerContextUsage(packet?.context_usage || null),
@@ -816,5 +1176,75 @@ export function runWorkerContextUsageSelfTest() {
       free_tokens: packet.context_usage?.free_tokens,
       top_categories: packet.context_usage?.top_categories,
     },
+  };
+}
+
+export function runWorkerContextProviderDispatchOverrideFollowupReceiptContractSelfTest() {
+  const advisory = {
+    schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+    groupId: "runtime-provider-override-followup-contract",
+    project: "api",
+    agent_type: "codex",
+    health_status: "monitor",
+    dispatch_policy: "allow_with_receipt_sampling",
+    should_hold_dispatch: false,
+    selected_candidate: {
+      schema: "ccm-pressure-provenance-feedback-provider-dispatch-selected-candidate-v1",
+      groupId: "runtime-provider-override-followup-contract",
+      project: "api",
+      agent_type: "codex",
+      health_status: "monitor",
+      dispatch_policy: "allow_with_receipt_sampling",
+      should_hold_dispatch: false,
+      provider_override_followup_repaired: true,
+      provider_override_followup_repaired_count: 1,
+      provider_override_followup_memory_provenance_usage_count: 1,
+      provider_override_followup_current_source_verified_count: 1,
+      provider_override_followup_last_completed_at: "2026-07-10T04:31:00.000Z",
+      provider_override_followup_fresh_after_last_violation: true,
+      provider_override_followup_rel_paths: ["pressure-provider-dispatch-override-followup-pre-dispatch-memory.md"],
+      provider_override_followup_work_item_ids: ["work-provider-override-followup-runtime"],
+      provider_override_followup_override_ids: ["provider-dispatch-override:runtime"],
+    },
+  };
+  const packet = buildWorkerContextPacket({
+    group: { id: "runtime-provider-override-followup-contract", members: [{ project: "api" }] },
+    project: "api",
+    agentType: "codex",
+    task: "验证 provider override follow-up repaired-history sampling contract。",
+    pressureProvenanceProviderDispatchAdvisory: advisory,
+    contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+  });
+  const rendered = renderWorkerContextPacket(packet);
+  const categories = new Map((packet.context_usage?.categories || []).map((item: any) => [item.id, item]));
+  const contract = packet.pressure_provenance_provider_dispatch_override_followup_receipt_contract || {};
+  const checks = {
+    packetCarriesContract: contract.schema === "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-contract-v1"
+      && contract.active === true
+      && contract.provider_override_followup_repaired === true
+      && contract.sampling_required === true,
+    acceptanceRequiresSamplingReceipt: packet.acceptance?.pressure_provenance_provider_dispatch_override_followup_sampling_required === true
+      && packet.acceptance?.pressure_provenance_provider_dispatch_override_followup_receipt_required === true
+      && packet.acceptance?.provider_dispatch_override_followup_history_reverification_required === true
+      && packet.acceptance?.memory_provenance_usage_required === true,
+    usageCategorizesContract: Number((categories.get("pressure_provenance_provider_dispatch_override_followup_receipt_contract") as any)?.tokens || 0) > 0
+      && (categories.get("pressure_provenance_provider_dispatch_override_followup_receipt_contract") as any)?.required === true,
+    renderedShowsContract: rendered.includes("Provider dispatch override follow-up receipt contract")
+      && rendered.includes("providerDispatchOverrideFollowupHistoryReverified")
+      && rendered.includes("pressure-provider-dispatch-override-followup-pre-dispatch-memory.md")
+      && rendered.includes("work-provider-override-followup-runtime"),
+    advisoryDoesNotHold: packet.pressure_provenance_provider_dispatch_advisory?.should_hold_dispatch === false
+      && packet.acceptance?.pressure_provenance_provider_dispatch_hold_required === false,
+  };
+  return {
+    pass: Object.values(checks).every(Boolean),
+    checks,
+    contract: {
+      schema: contract.schema || "",
+      active: contract.active === true,
+      rel_paths: contract.rel_paths || [],
+      followup_work_item_ids: contract.followup_work_item_ids || [],
+    },
+    acceptance: packet.acceptance,
   };
 }

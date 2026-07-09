@@ -1,5 +1,9 @@
+import { sanitizeUserFacingPlanText } from '../utils/agentDisplay.js'
+
 export const compactStatusText = (value, max = 80) => {
-  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  const raw = String(value || '').replace(/\s+/g, ' ').trim()
+  if (!raw) return ''
+  const text = sanitizeUserFacingPlanText(raw, '状态已整理。', max)
   return text.length > max ? text.slice(0, max) + '...' : text
 }
 
@@ -19,7 +23,7 @@ export const mainDecisionTone = (decision) => {
   return 'idle'
 }
 
-export const mainDecisionNextStep = (decision) => decision?.decision?.dispatch_policy?.nextStep || decision?.verify?.conclusion || '等待下一条消息'
+export const mainDecisionNextStep = (decision) => compactStatusText(decision?.decision?.dispatch_policy?.nextStep || decision?.verify?.conclusion || '等待下一条消息', 120)
 
 export const mainDecisionActionSummary = (decision) => {
   const actions = decision?.decision?.selected_actions || []

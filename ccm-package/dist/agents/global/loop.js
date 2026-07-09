@@ -88,9 +88,9 @@ exports.GLOBAL_AGENT_TOOL_SPECS = [
     { name: "query_group_memory", description: "查询多个群聊的压缩记忆、typed MEMORY.md 召回、质量状态和原始来源路径。", required: ["query"], risk: "read" },
     { name: "manage_global_memory", description: "查询状态、压缩、重建、启用或禁用全局 Agent 长期记忆；变更操作必须提供 reason。", required: ["operation"], risk: args => String(args?.operation || "").toLowerCase() === "status" ? "read" : ["disable", "rebuild"].includes(String(args?.operation || "").toLowerCase()) ? "high" : "write" },
     { name: "inspect_mission", description: "查询全局开发任务及子任务交付状态。", required: ["id"], risk: "read" },
-    { name: "inspect_supervision", description: "查询异步任务监工、恢复动作、交付门禁和等待人工事项。", required: ["id"], risk: "read" },
+    { name: "inspect_supervision", description: "查询长期任务跟进、恢复动作、交付验收和等待人工事项。", required: ["id"], risk: "read" },
     { name: "orchestrate_development", description: "创建跨项目开发任务并持久派发给真实群聊或项目 Agent。", required: ["business_goal", "targets"], risk: "write" },
-    { name: "manage_supervision", description: "暂停、恢复、立即检查、修改目标、取消、归档或人工接管异步任务监工。", required: ["id", "operation"], risk: args => ["cancel", "archive"].includes(String(args?.operation || "").toLowerCase()) ? "high" : "write" },
+    { name: "manage_supervision", description: "暂停、恢复、立即检查、修改目标、取消、归档或人工接管长期任务跟进。", required: ["id", "operation"], risk: args => ["cancel", "archive"].includes(String(args?.operation || "").toLowerCase()) ? "high" : "write" },
     { name: "create_task", description: "创建并派发单群聊开发任务。", required: ["title", "business_goal", "group_id"], risk: "write" },
     { name: "send_project_cmd", description: "让指定项目 Agent 执行代码调查、修改或验证。", required: ["project", "message"], risk: "write" },
     { name: "send_group_cmd", description: "向指定群聊主 Agent 下发协作任务。", required: ["group_id", "message"], risk: "write" },
@@ -216,9 +216,9 @@ function getGlobalToolUserLabel(toolName) {
         query_group_memory: "查询群聊记忆",
         manage_global_memory: "管理全局记忆",
         inspect_mission: "查询全局任务",
-        inspect_supervision: "查询监工状态",
+        inspect_supervision: "查询持续跟进状态",
         orchestrate_development: "创建跨项目开发任务",
-        manage_supervision: "管理异步监工",
+        manage_supervision: "管理持续跟进",
         create_task: "创建开发任务",
         send_project_cmd: "发送项目执行指令",
         send_group_cmd: "发送协作群指令",
@@ -852,7 +852,7 @@ function buildGlobalDispatchRow(input) {
         agent,
         role: sanitizeGlobalDispatchVisibleText(input.role, "执行成员", 80),
         task,
-        reason: sanitizeGlobalDispatchVisibleText(input.reason, "我已根据当前目标完成派发。", 180),
+        reason: sanitizeGlobalDispatchVisibleText(input.reason, "我已根据当前目标整理派发。", 180),
         depends_on: (input.dependsOn || []).map(normalizeDispatchDependency).filter(Boolean).slice(0, 4),
         status: input.status || "dispatched",
         status_label: input.statusLabel || "已派发",
@@ -860,6 +860,19 @@ function buildGlobalDispatchRow(input) {
 }
 function isGlobalDispatchTool(name) {
     return GLOBAL_DISPATCH_TOOL_NAMES.includes(String(name || ""));
+}
+function normalizeGlobalDispatchLaunchRowStatus(target = {}, fallback = "dispatched") {
+    if (target?.queued === true)
+        return { status: "queued", label: "已入队" };
+    const raw = String(target?.status || fallback || "").toLowerCase();
+    if (["done", "completed", "complete", "success", "succeeded", "ok"].includes(raw)) {
+        return { status: "reviewing", label: "已回传结果，待验收" };
+    }
+    if (["running", "in_progress", "executing"].includes(raw))
+        return { status: "running", label: "执行中" };
+    if (["failed", "error", "blocked"].includes(raw))
+        return { status: "failed", label: "执行异常" };
+    return { status: raw || "dispatched", label: "已派发" };
 }
 function buildGlobalDispatchLaunchSummary(run, status, stepsOverride) {
     const rows = [];
@@ -878,7 +891,7 @@ function buildGlobalDispatchLaunchSummary(run, status, stepsOverride) {
             targets.forEach((target, index) => {
                 const targetType = String(target.type || target.target_type || (target.group_id || target.groupId ? "group" : "project")).toLowerCase();
                 const agent = target.name || target.project || target.group_id || target.groupId || target.id || target.target || `target-${index + 1}`;
-                const statusLabel = target.queued ? "已入队" : target.status === "done" || target.status === "completed" ? "已完成" : "已派发";
+                const rowStatus = normalizeGlobalDispatchLaunchRowStatus(target);
                 const row = buildGlobalDispatchRow({
                     id: `global-dispatch-${toolName}-${index}-${agent}`,
                     kind: targetType === "group" ? "group" : "project",
@@ -886,8 +899,8 @@ function buildGlobalDispatchLaunchSummary(run, status, stepsOverride) {
                     role: targetType === "group" ? "群聊主 Agent" : "项目 Agent",
                     task: target.task || target.message || baseTask,
                     reason: target.reason || "全局主 Agent 已创建跨项目开发任务，并交给目标执行方处理。",
-                    status: target.status || (target.queued ? "queued" : "dispatched"),
-                    statusLabel,
+                    status: rowStatus.status,
+                    statusLabel: rowStatus.label,
                     dependsOn: target.depends_on || target.dependsOn || target.dependencies || [],
                 });
                 if (row)
@@ -920,8 +933,8 @@ function buildGlobalDispatchLaunchSummary(run, status, stepsOverride) {
                 role: "项目 Agent",
                 task: baseTask,
                 reason: "全局主 Agent 判断该需求适合由这个项目 Agent 直接处理。",
-                status: status === "completed" ? "completed" : "dispatched",
-                statusLabel: status === "completed" ? "已执行" : "已派发",
+                status: status === "completed" ? "reviewing" : "dispatched",
+                statusLabel: status === "completed" ? "已回传结果，待验收" : "已派发",
             });
             if (row)
                 rows.push(row);
@@ -975,7 +988,7 @@ function emitGlobalDispatchLaunchProgress(runtime, run, step) {
             schema: "ccm-main-agent-live-checkpoint-v1",
             id: `${run.id}:dispatch-launch:${step.index}`,
             label: dispatchLaunchSummary.title || "已派发的工作",
-            detail: dispatchLaunchSummary.headline || "我已完成派发，正在跟踪后续结果。",
+            detail: dispatchLaunchSummary.headline || "派发已发出，正在跟踪后续结果。",
             status: "done",
             phase: "dispatching",
             at: nowIso(runtime),
@@ -1190,10 +1203,10 @@ function buildGlobalDisplayStreamFromWorkchain(workchain) {
             selected_actions: ["dispatch_child_agent", "read_child_agent_receipts", "generate_final_reply"],
             dispatch_policy: {
                 action: "delegate",
-                reason: dispatchLaunchSummary.headline || "我已完成派发。",
+                reason: dispatchLaunchSummary.headline || "派发已发出。",
                 nextStep: dispatchLaunchSummary.next_action || "等待下游执行目标更新结果。",
             },
-            reason: dispatchLaunchSummary.headline || "我已完成派发。",
+            reason: dispatchLaunchSummary.headline || "派发已发出。",
         },
         display_stream: null,
         dispatch_launch_summary: dispatchLaunchSummary,
@@ -1265,7 +1278,7 @@ function completeRun(run, runtime, status, reply, error = "") {
         run.status = "supervising";
         run.phase = "execute";
         run.supervision_state = run.supervision_state || "monitoring";
-        run.final_reply = "全局任务已派发，持久监工正在跟踪执行与验收。\n\n这只是已受理和监督中，不代表任务已经完成。只有文件变更、验证和交付验收都通过后，才会发送最终交付报告。";
+        run.final_reply = "全局任务已派发，我会持续跟进执行与验收。\n\n这只是已受理和跟进中，不代表任务已经完成。只有文件变更、验证和交付验收都通过后，才会发送最终交付报告。";
         run.workchain = buildGlobalRunWorkchain(run, "supervising", run.final_reply, null);
         run.display_stream = buildGlobalDisplayStreamFromWorkchain(run.workchain);
         run.error = "";
@@ -1376,15 +1389,15 @@ async function continueLoop(run, runtime) {
                 run.status = "paused";
                 run.updated_at = nowIso(runtime);
                 saveRun(run, runtime.persist !== false);
-                (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:paused:${run.updated_at}`, type: "global_agent.paused", status: "warning", message: "全局 Agent 运行已暂停" });
-                emit(runtime, { type: "paused", reply: "全局 Agent 运行已暂停。" }, run);
+                (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:paused:${run.updated_at}`, type: "global_agent.paused", status: "warning", message: "我已暂停这次运行" });
+                emit(runtime, { type: "paused", reply: "我已暂停这次运行。" }, run);
                 return run;
             }
             const now = runtime.now ? runtime.now() : Date.now();
             if (now > Date.parse(run.deadline_at))
-                return completeRun(run, runtime, "failed", "全局 Agent 已达到执行时间上限，已安全停止。", "deadline_exceeded");
+                return completeRun(run, runtime, "failed", "本次运行已达到执行时间上限，我已安全停止。", "deadline_exceeded");
             if (run.steps.length >= run.max_steps)
-                return completeRun(run, runtime, "failed", "全局 Agent 已达到最大步骤数，已停止以避免死循环。", "step_budget_exceeded");
+                return completeRun(run, runtime, "failed", "本次运行已达到最大步骤数，我已停止以避免死循环。", "step_budget_exceeded");
             let decision;
             const decisionStarted = now;
             try {
@@ -1395,7 +1408,7 @@ async function continueLoop(run, runtime) {
             catch (error) {
                 const fallback = runtime.fallbackDecision ? await runtime.fallbackDecision(run, error) : null;
                 if (!fallback)
-                    return completeRun(run, runtime, "failed", `全局 Agent 无法形成可靠决策：${error?.message || error}`, error?.message || String(error));
+                    return completeRun(run, runtime, "failed", `我暂时无法形成可靠决策：${error?.message || error}`, error?.message || String(error));
                 decision = normalizeDecision(fallback);
             }
             run.phase = decision.state;
@@ -1487,11 +1500,11 @@ async function continueLoop(run, runtime) {
                         parts.push(`风险：\n- ${completion.risks.join("\n- ")}`);
                     if (includeDeliveryDetails && completion.next_action)
                         parts.push(`下一步：${completion.next_action}`);
-                    (0, runtime_1.markGlobalAgentToolTodo)(run, "", "done", "全局 Agent 本轮回复完成");
+                    (0, runtime_1.markGlobalAgentToolTodo)(run, "", "done", "本轮回复已整理");
                     return completeRun(run, runtime, "completed", parts.filter(Boolean).join("\n\n"));
                 }
                 (0, runtime_1.markGlobalAgentToolTodo)(run, "", "blocked", "非终态决策缺少工具");
-                return completeRun(run, runtime, "failed", "全局 Agent 给出了非终态决策但没有选择工具，已停止。", "non_terminal_without_tool");
+                return completeRun(run, runtime, "failed", "当前决策还没有可执行动作，我已停止并保留排障信息。", "non_terminal_without_tool");
             }
             let args;
             let risk;
@@ -2000,7 +2013,7 @@ function pauseGlobalAgentRun(id) {
     run.confirmation_summary = null;
     run.updated_at = new Date().toISOString();
     saveRun(run, !volatileRuns.has(id));
-    (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:paused:${run.updated_at}`, type: "global_agent.paused", status: "warning", message: "全局 Agent 运行已暂停" });
+    (0, reliability_ledger_1.appendTraceEvent)(run.trace_id, { id: `${run.id}:paused:${run.updated_at}`, type: "global_agent.paused", status: "warning", message: "我已暂停这次运行" });
     return run;
 }
 function cancelGlobalAgentRun(id) {
@@ -2223,6 +2236,22 @@ async function runGlobalAgentLoopSelfTest() {
     const clarifiedDispatchSummary = clarified.display_stream?.dispatch_launch_summary || clarified.display_stream?.dispatchLaunchSummary || null;
     const supervisedDispatchEvent = supervisedEvents.find(event => event.type === "dispatch_launch_summary");
     const clarifiedDispatchEvent = clarifiedEvents.find(event => event.type === "dispatch_launch_summary");
+    const completedTargetDispatchSummary = buildGlobalDispatchLaunchSummary({
+        steps: [{
+                index: 0,
+                state: "completed",
+                tool: {
+                    name: "orchestrate_development",
+                    arguments: {
+                        business_goal: "同步旧任务状态",
+                        targets: [{ type: "project", project: "legacy-web", status: "done" }],
+                    },
+                },
+                observation: {},
+            }],
+        original_user_message: "同步旧任务状态",
+        user_message: "同步旧任务状态",
+    }, "running");
     const dispatchSummaryText = JSON.stringify({ supervisedDispatchSummary, clarifiedDispatchSummary });
     const globalWaitingSummaryText = JSON.stringify({
         qualityClarification: waiting.clarification_summary,
@@ -2309,6 +2338,9 @@ async function runGlobalAgentLoopSelfTest() {
             && supervised.display_stream?.main_agent_decision?.dispatch_launch_summary?.rows?.length >= 1,
         globalDispatchLaunchSummaryStreamsLive: supervisedDispatchEvent?.dispatch_launch_summary?.schema === "ccm-main-agent-dispatch-launch-summary-v1"
             && supervisedDispatchEvent?.progress_checkpoint?.label === "已派发的工作",
+        globalDispatchLaunchSummaryDoesNotCallDoneTargetCompleted: completedTargetDispatchSummary?.rows?.[0]?.status === "reviewing"
+            && completedTargetDispatchSummary?.rows?.[0]?.status_label === "已回传结果，待验收"
+            && !JSON.stringify(completedTargetDispatchSummary).includes("已完成"),
         globalAutoPlanModeStreamsLive: supervisedEvents.some(event => event.type === "plan_mode_ready"
             && event.plan_mode?.schema === "ccm-global-main-agent-plan-mode-v1"
             && event.plan_mode?.auto_continue === true

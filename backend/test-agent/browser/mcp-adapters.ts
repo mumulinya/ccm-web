@@ -21,6 +21,7 @@ import {
   waitForAbsentBrowserConsoleLine,
   waitForBrowserConsoleLine,
 } from "./console-assertions";
+import { isBrowserAriaStateAssertion } from "./aria-state-assertions";
 import { browserTargetDetail } from "./semantic-locator";
 
 export type McpBrowserAdapterId = "playwright-mcp" | "claude-in-chrome" | "chrome-devtools" | "computer-use";
@@ -433,6 +434,9 @@ async function assertWithText(adapterName: string, assertion: BrowserAssertionSp
   ) {
     return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot compute precise accessible name/description from TestAgent; use Playwright for this assertion.`);
   }
+  if (isBrowserAriaStateAssertion(assertion)) {
+    return step("assertion", `${adapterName}:${assertion.type}`, "failed", browserTargetDetail(assertion), `MCP ${adapterName} cannot verify ARIA DOM state attributes from TestAgent; use Playwright for this assertion.`);
+  }
   if (assertion.type === "textOrder") {
     return assertTextOrderFromPageText(adapterName, assertion, signals.pageText);
   }
@@ -454,7 +458,7 @@ async function assertWithText(adapterName: string, assertion: BrowserAssertionSp
   if (assertion.type === "onlineState" || assertion.type === "browserOnline" || assertion.type === "browserOffline") {
     return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot verify browser offline/online network emulation state from TestAgent; use Playwright for this assertion.`);
   }
-  if (assertion.type === "cookieExists" || assertion.type === "cookieValueIncludes") {
+  if (assertion.type === "cookieExists" || assertion.type === "cookieValueEquals" || assertion.type === "cookieValueIncludes") {
     return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot verify browser cookies from TestAgent; use Playwright for this assertion.`);
   }
   if (assertion.type === "clipboardTextEquals" || assertion.type === "clipboardTextIncludes") {
@@ -476,6 +480,21 @@ async function assertWithText(adapterName: string, assertion: BrowserAssertionSp
     return !signals.pageText.includes(expectedHidden)
       ? step("assertion", `${adapterName}:notVisible`, "passed", expectedHidden)
       : step("assertion", `${adapterName}:notVisible`, "failed", expectedHidden, `Target "${expectedHidden}" is still present in page text.`);
+  }
+  if (assertion.type === "present" || assertion.type === "notPresent") {
+    const expectedText = String(assertion.text || assertion.value || assertion.name || "").trim();
+    if (!expectedText) {
+      return step("assertion", `${adapterName}:${assertion.type}`, "failed", browserTargetDetail(assertion), `MCP ${adapterName} cannot verify selector-only DOM presence without DOM access; use Playwright for this assertion.`);
+    }
+    const found = signals.pageText.includes(expectedText);
+    if (assertion.type === "present") {
+      return found
+        ? step("assertion", `${adapterName}:present`, "passed", expectedText)
+        : step("assertion", `${adapterName}:present`, "failed", expectedText, `Expected page snapshot/text to include "${expectedText}".`);
+    }
+    return !found
+      ? step("assertion", `${adapterName}:notPresent`, "passed", expectedText)
+      : step("assertion", `${adapterName}:notPresent`, "failed", expectedText, `Expected page snapshot/text not to include "${expectedText}".`);
   }
   if (assertion.type === "focused" || assertion.type === "notFocused") {
     return step("assertion", `${adapterName}:${assertion.type}`, "failed", "", `MCP ${adapterName} cannot verify focus state without DOM activeElement access; use Playwright for this assertion.`);
@@ -1169,6 +1188,7 @@ class ComputerUseAdapter implements McpBrowserAdapter {
       || assertion.type === "accessibleDescriptionEquals"
       || assertion.type === "accessibleDescriptionIncludes"
       || assertion.type === "ariaSnapshotIncludes"
+      || isBrowserAriaStateAssertion(assertion)
       || assertion.type === "networkNoErrors"
       || assertion.type === "networkRequest"
       || assertion.type === "networkResponse"
@@ -1183,7 +1203,7 @@ class ComputerUseAdapter implements McpBrowserAdapter {
       || assertion.type === "popupTextIncludes"
       || assertion.type === "popupTitleIncludes"
     ) {
-      return this.unsupported("assertion", assertion.type, "Computer Use MCP does not expose console, network, offline/online emulation, or popup page telemetry.");
+      return this.unsupported("assertion", assertion.type, "Computer Use MCP does not expose console, network, offline/online emulation, accessibility/ARIA DOM state, or popup page telemetry.");
     }
     return this.unsupported("assertion", assertion.type, "Computer Use MCP cannot read DOM/page text; use screenshot evidence or a browser-native provider for this assertion.");
   }

@@ -41,7 +41,7 @@ function sanitizeDeliveryUserTerminology(value: string) {
   );
 }
 
-export function sanitizeMainAgentDeliveryText(value: any, fallback = "本轮处理已完成。", max = 260) {
+export function sanitizeMainAgentDeliveryText(value: any, fallback = "处理结果已整理，是否可验收以验证详情为准。", max = 260) {
   let text = compactDeliveryText(value, max);
   if (!text) text = fallback;
   if (INTERNAL_DELIVERY_TEXT_PATTERN.test(text)) {
@@ -1453,7 +1453,7 @@ function collectDeliveryAcceptance(input: MainAgentDeliveryReportInput, status: 
   if (passed === true && !(status === "failed" && blockingRisk)) items.push("最终验收：已通过");
   else if (passed === true && status === "failed" && blockingRisk) items.push("最终验收：未通过，仍需处理缺口");
   else if (passed === false) items.push("最终验收：未通过，仍需处理缺口");
-  else if (status === "done") items.push(verification.length || !risks.length ? "最终验收：已完成交付复核" : "最终验收：仍有风险需要复核");
+  else if (status === "done") items.push(verification.length && !risks.length ? "最终验收：已完成交付复核" : "最终验收：待核对验证明细");
   else if (status === "failed") items.push("最终验收：未通过，原因已整理在未完成原因里");
   else if (status === "cancelled") items.push("最终验收：任务已停止，未继续验收");
   else items.push("最终验收：仍在等待最终复核");
@@ -1520,7 +1520,7 @@ function collectDeliveryCompleted(input: MainAgentDeliveryReportInput, files: st
   if (!result.length && files.length) result.push(`已整理 ${files.length} 个文件变更。`);
   if (!result.length && verification.length) result.push(`已完成 ${verification.length} 项检查。`);
   if (result.length) return result;
-  return ["本轮处理已经完成，结果已整理给你。"];
+  return ["交付结果已整理，是否可验收以验证详情和最终总结为准。"];
 }
 
 function collectDeliveryNextAction(input: MainAgentDeliveryReportInput, status: MainAgentDeliveryStatus, risks: string[], planReview: string[] = []) {
@@ -1608,7 +1608,7 @@ function deliveryPrimarySectionEmpty(status: MainAgentDeliveryStatus) {
   if (status === "failed") return "任务没有完成，未完成原因已整理到风险与待确认。";
   if (status === "cancelled") return "任务已停止，没有继续执行。";
   if (status === "waiting") return "任务仍在处理中。";
-  return "本轮处理已完成。";
+  return "交付结果已整理，是否可验收以验证详情和最终总结为准。";
 }
 
 function deliveryRiskSectionEmpty(status: MainAgentDeliveryStatus) {
@@ -1626,7 +1626,7 @@ function hasFalseDoneVisibleTextForStatus(status: MainAgentDeliveryStatus, text:
   return /状态[:：]\s*已完成|任务已完成|任务交付完成|本轮处理已经完成|最终验收[:：]\s*已通过|下一步[:：]?\s*可以查看改动详情|可以查看改动详情，或继续补充新的要求/i.test(text);
 }
 
-function buildDeliveryFinalSummaryQuality(status: MainAgentDeliveryStatus, sections: any[], nextAction: string[], options: { acceptedFeedback?: string[]; visiblePayloads?: any[] } = {}) {
+function buildDeliveryFinalSummaryQuality(status: MainAgentDeliveryStatus, sections: any[], nextAction: string[], options: { acceptedFeedback?: string[]; visiblePayloads?: any[]; doneEvidencePresent?: boolean } = {}) {
   const requiredSections = status === "done"
     ? ["completed", "plan_review", "scope", "verification", "verification_evidence", "acceptance", "risks", "next_action"]
     : status === "waiting"
@@ -1681,6 +1681,12 @@ function buildDeliveryFinalSummaryQuality(status: MainAgentDeliveryStatus, secti
       label: "未完成状态不含已完成口径",
       passed: !hasFalseDoneVisibleTextForStatus(status, combinedVisibleText),
     });
+  } else {
+    checks.push({
+      id: "done_evidence_present",
+      label: "完成状态有交付证据",
+      passed: options.doneEvidencePresent === true,
+    });
   }
   const planReviewItems = sections.find(item => item?.id === "plan_review")?.items || [];
   const planReviewText = uniqueDeliveryLines(planReviewItems).join("；");
@@ -1715,6 +1721,24 @@ function buildDeliveryFinalSummaryQuality(status: MainAgentDeliveryStatus, secti
   };
 }
 
+function hasConcreteDoneDeliveryEvidence(
+  completed: string[],
+  files: string[],
+  verification: string[],
+  verificationEvidence: any,
+  independentReview: string[],
+) {
+  const meaningfulCompleted = uniqueDeliveryStrings(completed).some(item => !/交付结果已整理|是否可验收|任务没有完成|任务仍在处理中|任务已停止|当前状态已经整理/i.test(item));
+  const verificationReady = verificationEvidence?.status === "ready"
+    || Number(verificationEvidence?.executed_count || 0) > 0
+    || Number(verificationEvidence?.external_runner_count || 0) > 0
+    || verification.some(item => deliveryVerificationSuccessText(item) && !deliveryVerificationFailureText(item));
+  return meaningfulCompleted
+    || files.length > 0
+    || verificationReady
+    || independentReview.length > 0;
+}
+
 function buildDeliveryPickupSummary(
   input: MainAgentDeliveryReportInput,
   status: MainAgentDeliveryStatus,
@@ -1743,7 +1767,7 @@ function buildDeliveryPickupSummary(
     title: done ? "回来继续看这里" : failed ? "恢复处理时先看这里" : cancelled ? "任务停止记录" : "当前接续提示",
     status,
     status_label: done ? "已完成" : failed ? "未完成" : cancelled ? "已停止" : "处理中",
-    headline: completed[0] || (done ? "这项任务已经完成，我已整理交付结果。" : failed ? "这项任务没有完成，未完成原因已整理。" : cancelled ? "这项任务已停止。" : "这项任务仍在处理中。"),
+    headline: completed[0] || (done ? "交付结果已整理，建议先核对验证和验收详情。" : failed ? "这项任务没有完成，未完成原因已整理。" : cancelled ? "这项任务已停止。" : "这项任务仍在处理中。"),
     current_state: done
       ? "可以直接查看完成内容、涉及范围和验证结果；原始执行记录在技术详情里。"
       : failed
@@ -1794,7 +1818,7 @@ function buildDeliveryCompletionCard(
     surface: input.surface,
     status,
     status_label: deliveryStatusLabel(status),
-    headline: highlights[0] || (done ? "任务已完成，交付结果已经整理。" : failed ? "任务没有完成，未完成原因已经整理。" : cancelled ? "任务已停止，当前状态已经整理。" : "任务仍在处理中。"),
+    headline: highlights[0] || (done ? "交付结果已整理，建议核对验证和验收详情。" : failed ? "任务没有完成，未完成原因已经整理。" : cancelled ? "任务已停止，当前状态已经整理。" : "任务仍在处理中。"),
     metrics: [
       { id: "status", label: "状态", value: deliveryStatusLabel(status), tone: done ? "success" : failed ? "danger" : cancelled ? "muted" : "warning" },
       { id: "scope", label: "涉及范围", value: files.length ? `${files.length} 个文件` : "未检测到文件变更", detail: files.slice(0, 2).join("；") },
@@ -1964,7 +1988,8 @@ export function buildMainAgentDeliveryReport(input: MainAgentDeliveryReportInput
   const completionCard = buildDeliveryCompletionCard(input, status, completed, files, verification, verificationEvidence, acceptance, independentReview, risks, nextAction);
   const userHandoff = buildDeliveryUserHandoff(input, status, completed, planReview, files, verification, acceptance, independentReview, risks, nextAction);
   const acceptedFeedbackForQuality = collectDeliveryAcceptedFeedbackForQuality(input);
-  const headline = completed[0] || (status === "done" ? "任务已完成。" : "任务已处理。");
+  const doneEvidencePresent = status !== "done" || hasConcreteDoneDeliveryEvidence(completed, files, verification, verificationEvidence, independentReview);
+  const headline = completed[0] || (status === "done" ? "交付结果已整理，是否可验收以验证详情为准。" : "任务已处理。");
   const sections = [
     buildDeliverySection("completed", deliveryPrimarySectionTitle(status), completed, deliveryPrimarySectionEmpty(status)),
     buildDeliverySection("plan_review", "计划回顾", planReview, "暂无单独计划记录；我已按交付证据整理结果。"),
@@ -1980,6 +2005,7 @@ export function buildMainAgentDeliveryReport(input: MainAgentDeliveryReportInput
   const finalSummaryQuality = buildDeliveryFinalSummaryQuality(status, sections, nextAction, {
     acceptedFeedback: acceptedFeedbackForQuality,
     visiblePayloads: [completionCard, pickupSummary, userHandoff],
+    doneEvidencePresent,
   });
   const header = `【${deliveryTitle(status)}】`;
   const intro = [
@@ -2306,6 +2332,12 @@ export function runMainAgentDeliveryReportSelfTest() {
     summary: { headline: "CCM_AGENT_RECEIPT done receipt-status raw payload 回执已完成", verification_executed: ["npm test"], acceptance_gate_passed: true },
     executed: true,
   });
+  const bareDone = buildMainAgentDeliveryReport({
+    surface: "global",
+    status: "done",
+    title: "整理空白交付",
+    executed: true,
+  });
   const structuredLeakQuality = buildDeliveryFinalSummaryQuality("done", [
     buildDeliverySection("completed", "完成内容", ["已完成"], "已完成"),
     buildDeliverySection("plan_review", "计划回顾", ["已按计划完成"], "已按计划完成"),
@@ -2484,6 +2516,13 @@ export function runMainAgentDeliveryReportSelfTest() {
       && noVerificationEvidenceDone.next_action?.includes("补齐失败、未完成、缺失或不足的验证证据")
       && noVerificationEvidenceDone.headline?.includes("任务没有完成")
       && !noVerificationEvidenceDone.markdown.includes("状态：已完成"),
+    bareDoneQualityRequiresEvidence: bareDone.status === "done"
+      && bareDone.final_summary_quality?.passed === false
+      && bareDone.final_summary_quality?.checks?.some((item: any) => item.id === "done_evidence_present" && item.passed === false)
+      && bareDone.headline?.includes("是否可验收")
+      && bareDone.sections?.find((item: any) => item.id === "completed")?.items?.[0]?.includes("是否可验收")
+      && bareDone.completion_card?.headline?.includes("是否可验收")
+      && !bareDone.completion_card?.headline?.includes("任务已完成"),
     failedFinalSummaryQualityRequiresPlanGapNextAction: failed.final_summary_quality?.passed === true
       && failed.final_summary_quality?.checks?.some((item: any) => item.id === "plan_gap_next_action" && item.passed === true && item.label === "计划缺口下一步"),
     cancelledReportHasStopSummary: cancelled.markdown.includes("停止说明")
@@ -2497,5 +2536,5 @@ export function runMainAgentDeliveryReportSelfTest() {
     legacyProtocolTextSanitized: !INTERNAL_DELIVERY_TEXT_PATTERN.test(legacy.markdown) && legacy.markdown.includes("结果说明") && !legacy.markdown.includes("raw payload"),
     noInternalLeak: !INTERNAL_DELIVERY_TEXT_PATTERN.test(group.markdown) && !INTERNAL_DELIVERY_TEXT_PATTERN.test(global.markdown),
   };
-  return { pass: Object.values(checks).every(Boolean), checks, group, global, failed, cancelled, legacy, structuredLeakQuality, falseDoneFailedQuality, failedIndependentReviewEvidenceOnlyDone, failedVerificationResultDone, partialIndependentReviewDone, weakPassedIndependentReviewDone, incompleteVerificationResultDone, noVerificationEvidenceDone };
+  return { pass: Object.values(checks).every(Boolean), checks, group, global, failed, cancelled, legacy, bareDone, structuredLeakQuality, falseDoneFailedQuality, failedIndependentReviewEvidenceOnlyDone, failedVerificationResultDone, partialIndependentReviewDone, weakPassedIndependentReviewDone, incompleteVerificationResultDone, noVerificationEvidenceDone };
 }

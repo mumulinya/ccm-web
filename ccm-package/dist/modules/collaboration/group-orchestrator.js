@@ -67,8 +67,16 @@ exports.runWorkerContextMetadataPartialCompactionRetrySelfTest = runWorkerContex
 exports.runWorkerContextMetadataPartialCompactPolicySelfTest = runWorkerContextMetadataPartialCompactPolicySelfTest;
 exports.runWorkerContextCompactOutcomeLedgerSelfTest = runWorkerContextCompactOutcomeLedgerSelfTest;
 exports.runWorkerContextCompactStrategyMemorySelfTest = runWorkerContextCompactStrategyMemorySelfTest;
+exports.runWorkerContextPartialCompactPressureRecallUsageStrategySelfTest = runWorkerContextPartialCompactPressureRecallUsageStrategySelfTest;
+exports.runWorkerContextPartialCompactCrossGroupPressureRecallUsageStrategySelfTest = runWorkerContextPartialCompactCrossGroupPressureRecallUsageStrategySelfTest;
 exports.runWorkerContextPtlEmergencyDowngradeSelfTest = runWorkerContextPtlEmergencyDowngradeSelfTest;
 exports.runWorkerContextIgnoreMemoryPolicySelfTest = runWorkerContextIgnoreMemoryPolicySelfTest;
+exports.runWorkerContextPressureProvenanceProviderDispatchGateSelfTest = runWorkerContextPressureProvenanceProviderDispatchGateSelfTest;
+exports.runWorkerContextPressureProvenanceProviderDispatchOverrideFollowupPreDispatchMemorySelfTest = runWorkerContextPressureProvenanceProviderDispatchOverrideFollowupPreDispatchMemorySelfTest;
+exports.runWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationSelfTest = runWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationSelfTest;
+exports.runWorkerContextPressureProvenanceProviderDispatchDecisionLedgerSelfTest = runWorkerContextPressureProvenanceProviderDispatchDecisionLedgerSelfTest;
+exports.runWorkerContextPressureProvenanceProviderDispatchOverrideReceiptSelfTest = runWorkerContextPressureProvenanceProviderDispatchOverrideReceiptSelfTest;
+exports.runWorkerContextPressureProvenanceProviderDispatchOverrideCompletionSelfTest = runWorkerContextPressureProvenanceProviderDispatchOverrideCompletionSelfTest;
 exports.buildCodedCoordinatorSummary = buildCodedCoordinatorSummary;
 exports.runLlmCoordinatorSummary = runLlmCoordinatorSummary;
 exports.runLlmCoordinatorReview = runLlmCoordinatorReview;
@@ -80,7 +88,9 @@ exports.readWorkerContextCompactOutcomeLedgerForCoordinator = readWorkerContextC
 exports.readReplayRepairDispatchPlanLedgerForCoordinator = readReplayRepairDispatchPlanLedgerForCoordinator;
 exports.readReplayRepairDispatchBindingLedgerForCoordinator = readReplayRepairDispatchBindingLedgerForCoordinator;
 exports.recordWorkerContextPacketAssignmentBindingForCoordinator = recordWorkerContextPacketAssignmentBindingForCoordinator;
+exports.recordWorkerContextProviderDispatchOverrideCompletionForCoordinator = recordWorkerContextProviderDispatchOverrideCompletionForCoordinator;
 exports.readReplayRepairDispatchTimelineBindingLedgerForCoordinator = readReplayRepairDispatchTimelineBindingLedgerForCoordinator;
+exports.recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator = recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator;
 exports.recordReplayRepairDispatchBriefTimelineBinding = recordReplayRepairDispatchBriefTimelineBinding;
 exports.recordReplayRepairDispatchBriefAssignmentBinding = recordReplayRepairDispatchBriefAssignmentBinding;
 exports.buildReplayRepairDispatchBriefForCoordinator = buildReplayRepairDispatchBriefForCoordinator;
@@ -1134,6 +1144,16 @@ function inferCodedExecutionPlan(message, analysis, routed) {
 function buildAssignment(member, task, reason = "", dependsOn = "", options = {}) {
     const groupId = String(options.group?.id || options.groupId || options.group_id || "").trim();
     const project = String(member?.project || "").trim();
+    const agentType = String(member?.agentType || member?.agent_type || member?.agent || member?.executor || member?.runner || options.agentType || options.agent_type || "unknown").trim() || "unknown";
+    const providerDispatchOverride = member?.providerDispatchOverride
+        || member?.provider_dispatch_override
+        || member?.pressureProvenanceProviderDispatchOverride
+        || member?.pressure_provenance_provider_dispatch_override
+        || options.providerDispatchOverride
+        || options.provider_dispatch_override
+        || options.pressureProvenanceProviderDispatchOverride
+        || options.pressure_provenance_provider_dispatch_override
+        || null;
     const taskText = String(task || "").trim();
     const taskFingerprint = compactText(taskText, 240).toLowerCase().replace(/[`*_#>\[\]{}()（）【】]+/g, " ").replace(/[，。；、,.;:：\-—\s]+/g, " ").trim().slice(0, 220);
     const dispatchKey = [groupId || "conversation", "coordinator", project || "unknown", taskFingerprint].filter(Boolean).join("|");
@@ -1148,6 +1168,10 @@ function buildAssignment(member, task, reason = "", dependsOn = "", options = {}
         attempt: 1,
         sourceProject: "coordinator",
         scopeId: groupId || "conversation",
+        agentType,
+        agent_type: agentType,
+        provider_dispatch_override: providerDispatchOverride,
+        providerDispatchOverride: providerDispatchOverride,
     };
     const briefMatch = groupId ? findReplayRepairDispatchBriefForAssignment(groupId, baseAssignment) : null;
     const replayRepairDispatchBriefs = briefMatch?.brief ? [{
@@ -1179,6 +1203,13 @@ function buildAssignment(member, task, reason = "", dependsOn = "", options = {}
     const retryResult = maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment, dependsOn, replayRepairDispatchBriefs, initialWorkerContextPacket, initialPreDispatchGate, options);
     const workerContextPacket = retryResult.packet;
     const preDispatchGate = retryResult.gate;
+    const providerDispatchDecision = buildWorkerContextProviderDispatchDecisionForCoordinator(baseAssignment, workerContextPacket, preDispatchGate);
+    const needs = preDispatchGate.dispatch_ready === false
+        ? [
+            preDispatchGate.provider_dispatch_hold === true ? "先完成 pressure provenance provider repair/recovery，再启动第三方子 Agent 会话" : "",
+            preDispatchGate.pressure_status === "over_budget" ? "先压缩 WorkerContextPacket 到预算内，再启动第三方子 Agent 会话" : "",
+        ].filter(Boolean)
+        : [];
     const assignment = {
         ...baseAssignment,
         task: retryResult.task,
@@ -1190,7 +1221,9 @@ function buildAssignment(member, task, reason = "", dependsOn = "", options = {}
         worker_context_pre_dispatch_gate: preDispatchGate,
         workerContextPreDispatchGate: preDispatchGate,
         blockers: preDispatchGate.dispatch_ready === false ? [preDispatchGate.reason] : [],
-        needs: preDispatchGate.dispatch_ready === false ? ["先压缩 WorkerContextPacket 到预算内，再启动第三方子 Agent 会话"] : [],
+        needs,
+        worker_context_provider_dispatch_decision: providerDispatchDecision,
+        provider_dispatch_decision: providerDispatchDecision,
         worker_context_packet: workerContextPacket,
     };
     if (groupId)
@@ -2682,6 +2715,436 @@ function runWorkerContextCompactStrategyMemorySelfTest() {
         }
     }
 }
+function runWorkerContextPartialCompactPressureRecallUsageStrategySelfTest() {
+    const groupId = `worker-context-partial-compact-pressure-usage-strategy-selftest-${process.pid}-${Date.now()}`;
+    const outcomeFile = getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId);
+    const strategyFile = getWorkerContextCompactStrategyMemoryFileForCoordinator(groupId);
+    const usageFile = (0, group_memory_index_1.getGroupTypedMemoryPressureRecallUsageLedgerFile)(groupId);
+    try {
+        const dependencyPolicy = {
+            schema: "ccm-worker-context-partial-compact-policy-v1",
+            method: "usage_top_category_pressure",
+            selected_categories: ["dependencies"],
+            skipped_categories: ["constraints_and_documents"],
+            max_categories: 1,
+            fallback_used: false,
+        };
+        const constraintsPolicy = {
+            schema: "ccm-worker-context-partial-compact-policy-v1",
+            method: "usage_top_category_pressure",
+            selected_categories: ["constraints_and_documents"],
+            skipped_categories: ["dependencies"],
+            max_categories: 1,
+            fallback_used: false,
+        };
+        writeJsonAtomicForCoordinator(outcomeFile, {
+            schema: "ccm-worker-context-compact-outcome-ledger-v1",
+            version: 1,
+            groupId,
+            file: outcomeFile,
+            updatedAt: "2026-07-09T22:10:02.000Z",
+            entries: [
+                {
+                    schema: "ccm-worker-context-compact-outcome-entry-v1",
+                    outcome_id: "wcco-pressure-usage-strategy-dependencies",
+                    group_id: groupId,
+                    assignment_id: "assignment-pressure-usage-strategy-dependencies",
+                    method: "metadata_partial_compact",
+                    status: "recovered",
+                    dispatch_ready: true,
+                    from_total_tokens: 7600,
+                    retry_total_tokens: 2500,
+                    from_free_tokens: -3800,
+                    retry_free_tokens: 1300,
+                    token_delta: 5100,
+                    free_token_delta: 5100,
+                    partial_compact: true,
+                    task_compacted: false,
+                    task_hash_unchanged: true,
+                    partial_compaction_categories: ["dependencies"],
+                    partial_compact_policy: dependencyPolicy,
+                    partial_omitted_chars: 21000,
+                    distillation_candidate: true,
+                    at: "2026-07-09T22:10:01.000Z",
+                },
+                {
+                    schema: "ccm-worker-context-compact-outcome-entry-v1",
+                    outcome_id: "wcco-pressure-usage-strategy-constraints",
+                    group_id: groupId,
+                    assignment_id: "assignment-pressure-usage-strategy-constraints",
+                    method: "metadata_partial_compact",
+                    status: "blocked",
+                    dispatch_ready: false,
+                    from_total_tokens: 7600,
+                    retry_total_tokens: 7400,
+                    from_free_tokens: -3800,
+                    retry_free_tokens: -3600,
+                    token_delta: 200,
+                    free_token_delta: 200,
+                    partial_compact: true,
+                    task_compacted: false,
+                    task_hash_unchanged: true,
+                    partial_compaction_categories: ["constraints_and_documents"],
+                    partial_compact_policy: constraintsPolicy,
+                    partial_omitted_chars: 900,
+                    distillation_candidate: true,
+                    at: "2026-07-09T22:10:02.000Z",
+                },
+            ],
+        });
+        const strategy = readWorkerContextCompactStrategyMemoryForCoordinator(groupId);
+        const packet = {
+            packet_id: "wcp-pressure-usage-strategy-selftest",
+            project: "frontend",
+            task: "验证 pressure recall usage feedback 会影响 partial compact policy category selection。",
+            constraints: Array.from({ length: 10 }, (_, index) => `PRESSURE_USAGE_POLICY constraint ${index}: ${"文档约束 ".repeat(120)}`),
+            document_findings: Array.from({ length: 8 }, (_, index) => `docs/pressure-policy-${index}.md: ${"验收依据 ".repeat(120)}`),
+            dependencies: [{ project: "backend", reason: "PRESSURE_USAGE_POLICY dependency should be compacted by learned strategy", dependency_id: "dep-pressure-usage-policy" }],
+            contract_injections: [],
+            context_usage: {
+                schema: "ccm-worker-context-usage-v1",
+                top_categories: [
+                    { id: "constraints_and_documents", tokens: 1000, chars: 3000 },
+                    { id: "dependencies", tokens: 900, chars: 2700 },
+                ],
+            },
+        };
+        const baselinePolicy = buildWorkerContextMetadataPartialCompactPolicyForCoordinator(packet, {
+            maxCategories: 1,
+            compactOutcomeStrategyMemory: strategy,
+            disablePressureRecallUsageStrategy: true,
+        });
+        const usageRecord = (0, group_memory_index_1.recordGroupTypedMemoryPressureRecallUsageLedger)(groupId, {
+            targetProject: "frontend",
+            taskId: "pressure-usage-strategy-task",
+            executionId: "pressure-usage-strategy-execution",
+            agent: "frontend",
+            generatedAt: "2026-07-09T22:10:03.000Z",
+            rows: [
+                {
+                    rel_path: "worker-context-compact-strategy-memory.md",
+                    name: "WorkerContextPacket Compact Strategy Memory",
+                    type: "reference",
+                    worker_context_packet_id: "wcp-pressure-usage-strategy-selftest",
+                    pressure_status: "over_budget",
+                    usage_state: "used",
+                    direct_reference: true,
+                    reason: "selftest: compact strategy pressure memory selected the recovered dependency compaction strategy",
+                },
+                {
+                    rel_path: "worker-context-compact-strategy-memory.md",
+                    name: "WorkerContextPacket Compact Strategy Memory",
+                    type: "reference",
+                    worker_context_packet_id: "wcp-pressure-usage-strategy-selftest-verified",
+                    pressure_status: "over_budget",
+                    usage_state: "verified",
+                    reason: "selftest: dependency strategy was verified as recovery path",
+                },
+            ],
+        });
+        const usageSummary = (0, group_memory_index_1.buildGroupTypedMemoryPressureRecallUsageSummary)(groupId, {
+            targetProject: "frontend",
+            nowMs: Date.parse("2026-07-09T22:10:04.000Z"),
+        });
+        const biasedPolicy = buildWorkerContextMetadataPartialCompactPolicyForCoordinator(packet, {
+            maxCategories: 1,
+            compactOutcomeStrategyMemory: strategy,
+            pressureRecallUsageSummary: usageSummary,
+        });
+        const dependencyCandidate = (biasedPolicy.candidates || []).find((item) => item.category === "dependencies") || {};
+        const rendered = (0, runtime_kernel_1.renderWorkerContextPacket)({
+            ...packet,
+            group: { id: groupId, name: "", members: ["frontend"] },
+            goal: "pressure recall usage strategy selftest",
+            memory: null,
+            acceptance: {},
+            context_compaction_retry: {
+                schema: "ccm-worker-context-compaction-retry-v1",
+                status: "recovered",
+                method: "metadata_partial_compact",
+                partial_compact_policy: biasedPolicy,
+                partial_compaction: {
+                    schema: "ccm-worker-context-metadata-partial-compaction-v1",
+                    category: "worker_context_metadata",
+                    categories: biasedPolicy.selected_categories,
+                    omitted_chars: 21000,
+                    preserved_fields: ["dependency.project", "dependency.reason"],
+                    partial_compact_policy: biasedPolicy,
+                },
+                preserved_receipt_contract: true,
+            },
+        });
+        const checks = {
+            strategyMemoryPrefersDependencies: strategy.preferred_categories?.[0] === "dependencies",
+            baselineStillFollowsTokenPressure: baselinePolicy.selected_categories?.[0] === "constraints_and_documents"
+                && baselinePolicy.method === "usage_top_category_pressure_with_outcome_strategy",
+            usageLedgerPromotesCompactStrategyMemory: usageRecord?.recorded_count === 2
+                && usageSummary.weighted_totals?.used === 1
+                && usageSummary.weighted_totals?.verified === 1
+                && (usageSummary.useful_pressure_memories || []).some((item) => item.rel_path === "worker-context-compact-strategy-memory.md"),
+            pressureUsageFeedbackChangesPolicy: biasedPolicy.method === "usage_top_category_pressure_with_outcome_strategy_and_pressure_recall_usage"
+                && biasedPolicy.selected_categories?.[0] === "dependencies"
+                && biasedPolicy.pressure_recall_usage_strategy_bias?.active === true
+                && Number(dependencyCandidate.pressure_recall_usage_adjustment || 0) > 0
+                && Number(dependencyCandidate.selection_score || 0) > 1000,
+            renderedShowsPressureUsageBias: rendered.includes("partial_compact_policy=dependencies")
+                && rendered.includes("compact_strategy_memory=")
+                && rendered.includes("pressure_recall_usage_bias=promote_pressure_recall"),
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            baselinePolicy: {
+                method: baselinePolicy.method || "",
+                selected_categories: baselinePolicy.selected_categories || [],
+            },
+            biasedPolicy: {
+                method: biasedPolicy.method || "",
+                selected_categories: biasedPolicy.selected_categories || [],
+                pressure_recall_usage_strategy_bias: biasedPolicy.pressure_recall_usage_strategy_bias || null,
+                candidates: biasedPolicy.candidates || [],
+            },
+            usageSummary: {
+                weighted_totals: usageSummary.weighted_totals || {},
+                aging: usageSummary.aging || {},
+            },
+        };
+    }
+    finally {
+        for (const file of [
+            outcomeFile,
+            `${outcomeFile}.bak`,
+            strategyFile,
+            `${strategyFile}.bak`,
+            usageFile,
+            `${usageFile}.bak`,
+        ]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+    }
+}
+function runWorkerContextPartialCompactCrossGroupPressureRecallUsageStrategySelfTest() {
+    const sourceGroupId = `worker-context-partial-compact-cross-pressure-source-${process.pid}-${Date.now()}`;
+    const targetGroupId = `worker-context-partial-compact-cross-pressure-target-${process.pid}-${Date.now()}`;
+    const outcomeFile = getWorkerContextCompactOutcomeLedgerFileForCoordinator(targetGroupId);
+    const strategyFile = getWorkerContextCompactStrategyMemoryFileForCoordinator(targetGroupId);
+    const sourceUsageFile = (0, group_memory_index_1.getGroupTypedMemoryPressureRecallUsageLedgerFile)(sourceGroupId);
+    const targetUsageFile = (0, group_memory_index_1.getGroupTypedMemoryPressureRecallUsageLedgerFile)(targetGroupId);
+    try {
+        const dependencyPolicy = {
+            schema: "ccm-worker-context-partial-compact-policy-v1",
+            method: "usage_top_category_pressure",
+            selected_categories: ["dependencies"],
+            skipped_categories: ["constraints_and_documents"],
+            max_categories: 1,
+            fallback_used: false,
+        };
+        const constraintsPolicy = {
+            schema: "ccm-worker-context-partial-compact-policy-v1",
+            method: "usage_top_category_pressure",
+            selected_categories: ["constraints_and_documents"],
+            skipped_categories: ["dependencies"],
+            max_categories: 1,
+            fallback_used: false,
+        };
+        writeJsonAtomicForCoordinator(outcomeFile, {
+            schema: "ccm-worker-context-compact-outcome-ledger-v1",
+            version: 1,
+            groupId: targetGroupId,
+            file: outcomeFile,
+            updatedAt: "2026-07-09T23:20:02.000Z",
+            entries: [
+                {
+                    schema: "ccm-worker-context-compact-outcome-entry-v1",
+                    outcome_id: "wcco-cross-pressure-usage-strategy-dependencies",
+                    group_id: targetGroupId,
+                    assignment_id: "assignment-cross-pressure-usage-strategy-dependencies",
+                    method: "metadata_partial_compact",
+                    status: "recovered",
+                    dispatch_ready: true,
+                    from_total_tokens: 7600,
+                    retry_total_tokens: 2500,
+                    from_free_tokens: -3800,
+                    retry_free_tokens: 1300,
+                    token_delta: 5100,
+                    free_token_delta: 5100,
+                    partial_compact: true,
+                    task_compacted: false,
+                    task_hash_unchanged: true,
+                    partial_compaction_categories: ["dependencies"],
+                    partial_compact_policy: dependencyPolicy,
+                    partial_omitted_chars: 21000,
+                    distillation_candidate: true,
+                    at: "2026-07-09T23:20:01.000Z",
+                },
+                {
+                    schema: "ccm-worker-context-compact-outcome-entry-v1",
+                    outcome_id: "wcco-cross-pressure-usage-strategy-constraints",
+                    group_id: targetGroupId,
+                    assignment_id: "assignment-cross-pressure-usage-strategy-constraints",
+                    method: "metadata_partial_compact",
+                    status: "blocked",
+                    dispatch_ready: false,
+                    from_total_tokens: 7600,
+                    retry_total_tokens: 7400,
+                    from_free_tokens: -3800,
+                    retry_free_tokens: -3600,
+                    token_delta: 200,
+                    free_token_delta: 200,
+                    partial_compact: true,
+                    task_compacted: false,
+                    task_hash_unchanged: true,
+                    partial_compaction_categories: ["constraints_and_documents"],
+                    partial_compact_policy: constraintsPolicy,
+                    partial_omitted_chars: 900,
+                    distillation_candidate: true,
+                    at: "2026-07-09T23:20:02.000Z",
+                },
+            ],
+        });
+        const strategy = readWorkerContextCompactStrategyMemoryForCoordinator(targetGroupId);
+        const packet = {
+            packet_id: "wcp-cross-pressure-usage-strategy-selftest",
+            project: "frontend",
+            task: "验证跨群聊 pressure recall usage feedback 会影响 partial compact policy category selection。",
+            constraints: Array.from({ length: 10 }, (_, index) => `CROSS_PRESSURE_USAGE_POLICY constraint ${index}: ${"文档约束 ".repeat(120)}`),
+            document_findings: Array.from({ length: 8 }, (_, index) => `docs/cross-pressure-policy-${index}.md: ${"验收依据 ".repeat(120)}`),
+            dependencies: [{ project: "backend", reason: "CROSS_PRESSURE_USAGE_POLICY dependency should be compacted by learned strategy", dependency_id: "dep-cross-pressure-usage-policy" }],
+            contract_injections: [],
+            context_usage: {
+                schema: "ccm-worker-context-usage-v1",
+                top_categories: [
+                    { id: "constraints_and_documents", tokens: 1000, chars: 3000 },
+                    { id: "dependencies", tokens: 900, chars: 2700 },
+                ],
+            },
+        };
+        const baselinePolicy = buildWorkerContextMetadataPartialCompactPolicyForCoordinator(packet, {
+            maxCategories: 1,
+            compactOutcomeStrategyMemory: strategy,
+            disablePressureRecallUsageStrategy: true,
+        });
+        const sourceRecord = (0, group_memory_index_1.recordGroupTypedMemoryPressureRecallUsageLedger)(sourceGroupId, {
+            targetProject: "frontend",
+            taskId: "cross-pressure-usage-strategy-task",
+            executionId: "cross-pressure-usage-strategy-execution",
+            agent: "frontend",
+            generatedAt: "2026-07-09T23:20:03.000Z",
+            rows: [
+                {
+                    rel_path: "worker-context-compact-strategy-memory.md",
+                    name: "WorkerContextPacket Compact Strategy Memory",
+                    type: "reference",
+                    worker_context_packet_id: "wcp-cross-pressure-usage-strategy-used",
+                    pressure_status: "over_budget",
+                    usage_state: "used",
+                    direct_reference: true,
+                    reason: "selftest: another group used compact strategy pressure memory for the same frontend project",
+                },
+                {
+                    rel_path: "worker-context-compact-strategy-memory.md",
+                    name: "WorkerContextPacket Compact Strategy Memory",
+                    type: "reference",
+                    worker_context_packet_id: "wcp-cross-pressure-usage-strategy-verified",
+                    pressure_status: "over_budget",
+                    usage_state: "verified",
+                    reason: "selftest: another group verified the dependency strategy recovery path",
+                },
+            ],
+        });
+        const crossGroupSummary = (0, group_memory_index_1.buildGroupTypedMemoryPressureRecallUsageProjectSummary)(targetGroupId, {
+            targetProject: "frontend",
+            nowMs: Date.parse("2026-07-09T23:20:04.000Z"),
+            groupIds: [sourceGroupId],
+        });
+        const crossBiasedPolicy = buildWorkerContextMetadataPartialCompactPolicyForCoordinator(packet, {
+            groupId: targetGroupId,
+            targetProject: "frontend",
+            nowMs: Date.parse("2026-07-09T23:20:04.000Z"),
+            maxCategories: 1,
+            compactOutcomeStrategyMemory: strategy,
+            crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
+        });
+        const wrongProjectPolicy = buildWorkerContextMetadataPartialCompactPolicyForCoordinator(packet, {
+            groupId: targetGroupId,
+            targetProject: "api",
+            nowMs: Date.parse("2026-07-09T23:20:04.000Z"),
+            maxCategories: 1,
+            compactOutcomeStrategyMemory: strategy,
+            crossGroupPressureRecallUsageGroupIds: [sourceGroupId],
+        });
+        const dependencyCandidate = (crossBiasedPolicy.candidates || []).find((item) => item.category === "dependencies") || {};
+        const checks = {
+            targetHasNoLocalUsageLedger: !fs.existsSync(targetUsageFile),
+            strategyMemoryStillPrefersDependencies: strategy.preferred_categories?.[0] === "dependencies",
+            baselineStillFollowsTokenPressure: baselinePolicy.selected_categories?.[0] === "constraints_and_documents"
+                && baselinePolicy.method === "usage_top_category_pressure_with_outcome_strategy",
+            sourceLedgerFeedsCrossGroupSummary: sourceRecord?.recorded_count === 2
+                && crossGroupSummary.source === "cross_group_project_pressure_recall_usage"
+                && crossGroupSummary.source_group_count === 1
+                && crossGroupSummary.entry_count === 2
+                && (crossGroupSummary.useful_pressure_memories || []).some((item) => item.rel_path === "worker-context-compact-strategy-memory.md"),
+            crossGroupUsageChangesPolicy: crossBiasedPolicy.method === "usage_top_category_pressure_with_outcome_strategy_and_pressure_recall_usage"
+                && crossBiasedPolicy.selected_categories?.[0] === "dependencies"
+                && crossBiasedPolicy.pressure_recall_usage_strategy_bias?.active === true
+                && crossBiasedPolicy.pressure_recall_usage_strategy_bias?.summary_source === "cross_group_project_pressure_recall_usage"
+                && crossBiasedPolicy.pressure_recall_usage_strategy_bias?.source_group_count === 1
+                && crossBiasedPolicy.pressure_recall_usage_summary?.source === "cross_group_project_pressure_recall_usage"
+                && crossBiasedPolicy.pressure_recall_usage_summary?.source_group_count === 1
+                && Number(dependencyCandidate.pressure_recall_usage_adjustment || 0) > 0
+                && Number(dependencyCandidate.selection_score || 0) > 1000,
+            targetProjectIsolationBlocksWrongProjectStrategyBias: wrongProjectPolicy.selected_categories?.[0] === "constraints_and_documents"
+                && wrongProjectPolicy.method === "usage_top_category_pressure_with_outcome_strategy"
+                && !wrongProjectPolicy.pressure_recall_usage_strategy_bias,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            crossGroupSummary: {
+                source_group_count: crossGroupSummary.source_group_count || 0,
+                entry_count: crossGroupSummary.entry_count || 0,
+                weighted_totals: crossGroupSummary.weighted_totals || {},
+            },
+            baselinePolicy: {
+                method: baselinePolicy.method || "",
+                selected_categories: baselinePolicy.selected_categories || [],
+            },
+            crossBiasedPolicy: {
+                method: crossBiasedPolicy.method || "",
+                selected_categories: crossBiasedPolicy.selected_categories || [],
+                pressure_recall_usage_strategy_bias: crossBiasedPolicy.pressure_recall_usage_strategy_bias || null,
+                pressure_recall_usage_summary: crossBiasedPolicy.pressure_recall_usage_summary || null,
+                candidates: crossBiasedPolicy.candidates || [],
+            },
+            wrongProjectPolicy: {
+                method: wrongProjectPolicy.method || "",
+                selected_categories: wrongProjectPolicy.selected_categories || [],
+            },
+        };
+    }
+    finally {
+        for (const file of [
+            outcomeFile,
+            `${outcomeFile}.bak`,
+            strategyFile,
+            `${strategyFile}.bak`,
+            sourceUsageFile,
+            `${sourceUsageFile}.bak`,
+            targetUsageFile,
+            `${targetUsageFile}.bak`,
+        ]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+    }
+}
 function runWorkerContextPtlEmergencyDowngradeSelfTest() {
     const groupId = `worker-context-ptl-emergency-downgrade-selftest-${process.pid}-${Date.now()}`;
     const outcomeFile = getWorkerContextCompactOutcomeLedgerFileForCoordinator(groupId);
@@ -2899,6 +3362,1172 @@ function runWorkerContextIgnoreMemoryPolicySelfTest() {
             }
             catch { }
         }
+    }
+}
+function runWorkerContextPressureProvenanceProviderDispatchGateSelfTest() {
+    const groupId = `worker-context-pressure-provenance-provider-dispatch-gate-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+    const typedDir = (0, group_memory_index_1.getGroupTypedMemoryDir)(groupId);
+    const targetProject = "api";
+    const agentType = "codex";
+    const relPath = "pressure-provider-dispatch-gate.md";
+    try {
+        const group = normalizeGroupOrchestrator({
+            id: groupId,
+            members: [
+                { project: "coordinator", role: "coordinator" },
+                { project: targetProject, agent: agentType },
+            ],
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceToTypedMemory)(groupId, {
+            packets: [
+                {
+                    groupId,
+                    packet_id: "wcp-phase145-initial-missing-usage",
+                    binding_id: "binding-phase145-initial-missing-usage",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "non_compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    missing_memory_provenance_usage: true,
+                    gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "missing memoryProvenanceUsage" }],
+                    rel_paths: [relPath],
+                },
+                {
+                    groupId,
+                    packet_id: "wcp-phase145-initial-current-source-gap",
+                    binding_id: "binding-phase145-initial-current-source-gap",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "non_compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    current_source_verified_gap: true,
+                    gaps: [{ code: "receipt_currentSourceVerified", reason: "currentSourceVerified=false" }],
+                    rel_paths: [relPath],
+                },
+            ],
+        }, {
+            frequentThreshold: 2,
+            updatedAt: "2026-07-10T03:00:00.000Z",
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory)(groupId, {
+            packets: [
+                {
+                    groupId,
+                    packet_id: "wcp-phase145-recovery-1",
+                    binding_id: "binding-phase145-recovery-1",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    receipt_row_count: 1,
+                    compliant_doc_count: 1,
+                    current_source_verified_count: 1,
+                    rel_paths: [relPath],
+                },
+                {
+                    groupId,
+                    packet_id: "wcp-phase145-recovery-2",
+                    binding_id: "binding-phase145-recovery-2",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    receipt_row_count: 1,
+                    compliant_doc_count: 1,
+                    current_source_verified_count: 1,
+                    rel_paths: [relPath],
+                },
+            ],
+        }, {
+            updatedAt: "2026-07-10T03:00:01.000Z",
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceToTypedMemory)(groupId, {
+            packets: [
+                {
+                    groupId,
+                    packet_id: "wcp-phase145-relapse-missing-usage",
+                    binding_id: "binding-phase145-relapse-missing-usage",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "non_compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    missing_memory_provenance_usage: true,
+                    gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "relapse missing memoryProvenanceUsage" }],
+                    rel_paths: [relPath],
+                },
+            ],
+        }, {
+            frequentThreshold: 2,
+            updatedAt: "2026-07-10T03:00:02.000Z",
+        });
+        const baseAssignment = {
+            project: targetProject,
+            agentType,
+            task: "验证 pressure provenance provider dispatch gate 会阻断复发 runner。",
+            reason: "selftest pressure provenance provider dispatch gate",
+            dependsOn: "",
+            taskFingerprint: "pressure-provider-dispatch-gate-selftest",
+            dispatchKey: `${groupId}|coordinator|${targetProject}|pressure-provider-dispatch-gate-selftest`,
+            assignmentId: `${targetProject}::${groupId}|coordinator|${targetProject}|pressure-provider-dispatch-gate-selftest::initial::1`,
+            attempt: 1,
+            sourceProject: "coordinator",
+            scopeId: groupId,
+        };
+        const packet = buildWorkerContextPacketForAssignment(baseAssignment, "", [], {
+            group,
+            workerContextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+        });
+        const gate = buildWorkerContextPreDispatchGateForCoordinator(baseAssignment, packet);
+        const rendered = (0, runtime_kernel_1.renderWorkerContextPacket)(packet);
+        const categories = new Map((packet.context_usage?.categories || []).map((item) => [item.id, item]));
+        const assignment = {
+            ...baseAssignment,
+            worker_context_packet: packet,
+            worker_context_pre_dispatch_gate: gate,
+            dispatch_ready: gate.dispatch_ready !== false,
+            dispatchReady: gate.dispatch_ready !== false,
+        };
+        const binding = recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assignment) || {};
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory)(groupId, {
+            packets: [
+                {
+                    groupId,
+                    packet_id: "wcp-phase145-post-relapse-recovery",
+                    binding_id: "binding-phase145-post-relapse-recovery",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    receipt_row_count: 1,
+                    compliant_doc_count: 1,
+                    current_source_verified_count: 1,
+                    rel_paths: [relPath],
+                },
+            ],
+        }, {
+            updatedAt: "2026-07-10T03:00:03.000Z",
+        });
+        const recoveredPacket = buildWorkerContextPacketForAssignment(baseAssignment, "", [], {
+            group,
+            workerContextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+        });
+        const recoveredGate = buildWorkerContextPreDispatchGateForCoordinator(baseAssignment, recoveredPacket);
+        const checks = {
+            packetCarriesProviderAdvisory: packet.pressure_provenance_provider_dispatch_advisory?.schema === "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1"
+                && packet.pressure_provenance_provider_dispatch_advisory?.selected_candidate?.health_status === "critical"
+                && packet.pressure_provenance_provider_dispatch_advisory?.should_hold_dispatch === true
+                && packet.acceptance?.pressure_provenance_provider_dispatch_hold_required === true,
+            usageCategorizesProviderAdvisory: Number(categories.get("pressure_provenance_provider_dispatch_advisory")?.tokens || 0) > 0,
+            gateBlocksProviderHold: gate.dispatch_ready === false
+                && gate.provider_dispatch_hold === true
+                && gate.repair_source === "worker_context_pressure_provenance_feedback_provider_dispatch_advisory"
+                && gate.next_step === "repair_pressure_provenance_provider_before_child_dispatch",
+            renderedShowsProviderAdvisory: rendered.includes("Pressure provenance provider dispatch advisory")
+                && rendered.includes("hold_until_repair")
+                && rendered.includes("Pre-dispatch hold"),
+            bindingPersistsProviderAdvisory: binding.worker_context_packet_pressure_provenance_provider_dispatch_advisory?.should_hold_dispatch === true
+                && binding.worker_context_packet_render_probe?.rendered_flags?.has_pressure_provenance_provider_dispatch_advisory === true
+                && binding.dispatch_ready === false,
+            recoveryDisarmsProviderHold: recoveredPacket.pressure_provenance_provider_dispatch_advisory?.selected_candidate?.health_status === "monitor"
+                && recoveredPacket.pressure_provenance_provider_dispatch_advisory?.selected_candidate?.dispatch_policy === "allow_with_receipt_sampling"
+                && recoveredGate.dispatch_ready === true
+                && recoveredGate.provider_dispatch_hold === false,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            gate: {
+                dispatch_ready: gate.dispatch_ready,
+                provider_dispatch_hold: gate.provider_dispatch_hold,
+                repair_source: gate.repair_source,
+                reason: gate.reason,
+            },
+            advisory: {
+                health_status: packet.pressure_provenance_provider_dispatch_advisory?.selected_candidate?.health_status || "",
+                dispatch_policy: packet.pressure_provenance_provider_dispatch_advisory?.selected_candidate?.dispatch_policy || "",
+                should_hold_dispatch: packet.pressure_provenance_provider_dispatch_advisory?.should_hold_dispatch === true,
+            },
+            recovered: {
+                dispatch_ready: recoveredGate.dispatch_ready,
+                provider_dispatch_hold: recoveredGate.provider_dispatch_hold,
+                health_status: recoveredPacket.pressure_provenance_provider_dispatch_advisory?.selected_candidate?.health_status || "",
+                dispatch_policy: recoveredPacket.pressure_provenance_provider_dispatch_advisory?.selected_candidate?.dispatch_policy || "",
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            if (typedDir && fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runWorkerContextPressureProvenanceProviderDispatchOverrideFollowupPreDispatchMemorySelfTest() {
+    const groupId = `worker-context-pressure-provider-override-followup-pre-dispatch-memory-selftest-${process.pid}-${Date.now()}`;
+    const typedDir = (0, group_memory_index_1.getGroupTypedMemoryDir)(groupId);
+    const targetProject = "api";
+    const agentType = "codex";
+    const relPath = "pressure-provider-dispatch-override-followup-pre-dispatch-memory.md";
+    try {
+        const group = normalizeGroupOrchestrator({
+            id: groupId,
+            members: [
+                { project: "coordinator", role: "coordinator" },
+                { project: targetProject, agent: agentType },
+            ],
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceToTypedMemory)(groupId, {
+            packets: [{
+                    groupId,
+                    packet_id: "wcp-phase150-initial-missing-usage",
+                    binding_id: "binding-phase150-initial-missing-usage",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "non_compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    missing_memory_provenance_usage: true,
+                    gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "initial missing memoryProvenanceUsage" }],
+                    rel_paths: [relPath],
+                }],
+        }, {
+            frequentThreshold: 2,
+            updatedAt: "2026-07-10T04:30:00.000Z",
+        });
+        (0, group_memory_index_1.distillProviderDispatchOverrideFollowupToTypedMemory)(groupId, {
+            rows: [{
+                    groupId,
+                    project: targetProject,
+                    agent_type: agentType,
+                    binding_id: "binding-phase150-provider-override-followup",
+                    assignment_id: "assignment-phase150-provider-override-followup",
+                    dispatch_key: "dispatch-phase150-provider-override-followup",
+                    worker_context_packet_id: "wcp-phase150-provider-override-followup",
+                    worker_context_provider_dispatch_decision: {
+                        schema: "ccm-worker-context-provider-dispatch-decision-v1",
+                        action: "dispatch_with_provider_override",
+                        decision_id: "decision-phase150-provider-override-followup",
+                        project: targetProject,
+                        agent_type: agentType,
+                    },
+                    worker_context_provider_dispatch_override_receipt: {
+                        schema: "ccm-pressure-provenance-provider-dispatch-override-receipt-v1",
+                        override_id: "provider-dispatch-override:phase150-pre-dispatch-memory",
+                        valid: true,
+                        approved: true,
+                        approved_by: "local-user",
+                        risk_accepted: true,
+                        acknowledges_repair_required: true,
+                        reason: "Phase 150 pre-dispatch memory repaired history selftest.",
+                    },
+                    worker_context_provider_dispatch_override_followup_repair: {
+                        work_item_id: "work-phase150-provider-override-followup",
+                    },
+                    worker_context_provider_dispatch_override_completion: {
+                        schema: "ccm-worker-context-provider-dispatch-override-completion-v1",
+                        completion_id: "completion-phase150-provider-override-followup",
+                        status: "completed",
+                        completion_ok: true,
+                        project: targetProject,
+                        agent_type: agentType,
+                        binding_id: "binding-phase150-provider-override-followup",
+                        assignment_id: "assignment-phase150-provider-override-followup",
+                        dispatch_key: "dispatch-phase150-provider-override-followup",
+                        worker_context_packet_id: "wcp-phase150-provider-override-followup",
+                        decision_id: "decision-phase150-provider-override-followup",
+                        override_id: "provider-dispatch-override:phase150-pre-dispatch-memory",
+                        followup_work_item_id: "work-phase150-provider-override-followup",
+                        task_id: "task-phase150-provider-override-followup",
+                        task_agent_session_id: "tas-phase150-provider-override-followup",
+                        execution_id: "execution-phase150-provider-override-followup",
+                        receipt_status: "done",
+                        memory_provenance_usage_count: 1,
+                        current_source_verified_count: 1,
+                        receipt: {
+                            status: "done",
+                            memoryProvenanceUsage: [{
+                                    relPath,
+                                    usageState: "verified",
+                                    repairStatus: "completed",
+                                    repairGapType: "provider_dispatch_override_followup",
+                                    currentSourceVerified: true,
+                                    reason: "PROVIDER_OVERRIDE_FOLLOWUP_PRE_DISPATCH_MEMORY_SENTINEL repaired provider override history.",
+                                }],
+                        },
+                        reason: "override child-agent completion receipt supplied verified memoryProvenanceUsage follow-up evidence",
+                        at: "2026-07-10T04:31:00.000Z",
+                    },
+                }],
+        }, {
+            reason: "phase150-pre-dispatch-provider-override-followup-memory",
+            updatedAt: "2026-07-10T04:31:00.000Z",
+        });
+        const baseAssignment = {
+            project: targetProject,
+            agentType,
+            task: "验证 provider override follow-up typed memory 会参与 pre-dispatch provider selection。",
+            reason: "selftest provider override follow-up pre-dispatch memory",
+            dependsOn: "",
+            taskFingerprint: "provider-override-followup-pre-dispatch-memory-selftest",
+            dispatchKey: `${groupId}|coordinator|${targetProject}|provider-override-followup-pre-dispatch-memory-selftest`,
+            assignmentId: `${targetProject}::${groupId}|coordinator|${targetProject}|provider-override-followup-pre-dispatch-memory-selftest::initial::1`,
+            attempt: 1,
+            sourceProject: "coordinator",
+            scopeId: groupId,
+        };
+        const repairedPacket = buildWorkerContextPacketForAssignment(baseAssignment, "", [], {
+            group,
+            workerContextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+        });
+        const repairedGate = buildWorkerContextPreDispatchGateForCoordinator(baseAssignment, repairedPacket);
+        const repairedDecision = buildWorkerContextProviderDispatchDecisionForCoordinator(baseAssignment, repairedPacket, repairedGate, {
+            at: "2026-07-10T04:31:30.000Z",
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory)(groupId, {
+            packets: [{
+                    groupId,
+                    packet_id: "wcp-phase150-post-override-compliant-recovery",
+                    binding_id: "binding-phase150-post-override-compliant-recovery",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    receipt_row_count: 1,
+                    compliant_doc_count: 1,
+                    current_source_verified_count: 1,
+                    rel_paths: [relPath],
+                }],
+        }, {
+            updatedAt: "2026-07-10T04:32:00.000Z",
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceToTypedMemory)(groupId, {
+            packets: [{
+                    groupId,
+                    packet_id: "wcp-phase150-post-repair-relapse",
+                    binding_id: "binding-phase150-post-repair-relapse",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "non_compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    missing_memory_provenance_usage: true,
+                    gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "post-repair relapse missing memoryProvenanceUsage" }],
+                    rel_paths: [relPath],
+                }],
+        }, {
+            frequentThreshold: 2,
+            updatedAt: "2026-07-10T04:33:00.000Z",
+        });
+        const relapsedPacket = buildWorkerContextPacketForAssignment(baseAssignment, "", [], {
+            group,
+            workerContextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+        });
+        const relapsedGate = buildWorkerContextPreDispatchGateForCoordinator(baseAssignment, relapsedPacket);
+        const relapsedDecision = buildWorkerContextProviderDispatchDecisionForCoordinator(baseAssignment, relapsedPacket, relapsedGate, {
+            at: "2026-07-10T04:33:30.000Z",
+        });
+        const repairedCandidate = repairedPacket.pressure_provenance_provider_dispatch_advisory?.selected_candidate || {};
+        const relapsedCandidate = relapsedPacket.pressure_provenance_provider_dispatch_advisory?.selected_candidate || {};
+        const checks = {
+            repairedHistoryFeedsProviderAdvisory: repairedCandidate.provider_override_followup_repaired === true
+                && Number(repairedCandidate.provider_override_followup_repaired_count || 0) === 1
+                && repairedCandidate.provider_override_followup_last_completed_at === "2026-07-10T04:31:00.000Z",
+            repairedHistoryAllowsSamplingNotHold: repairedCandidate.health_status === "monitor"
+                && repairedCandidate.dispatch_policy === "allow_with_receipt_sampling"
+                && repairedPacket.pressure_provenance_provider_dispatch_advisory?.should_hold_dispatch === false
+                && repairedGate.dispatch_ready === true
+                && repairedGate.provider_dispatch_hold === false
+                && repairedDecision.action === "dispatch_with_receipt_sampling"
+                && repairedDecision.requires_receipt_sampling === true,
+            preDispatchGateCarriesRepairedHistory: repairedGate.provider_dispatch_override_followup_history?.repaired === true
+                && repairedGate.provider_dispatch_override_followup_history?.followup_work_item_ids?.includes("work-phase150-provider-override-followup"),
+            activeRelapseStillWinsOverHistory: relapsedCandidate.provider_override_followup_repaired === true
+                && relapsedCandidate.provider_override_followup_fresh_after_last_violation === false
+                && relapsedCandidate.health_status === "critical"
+                && relapsedCandidate.dispatch_policy === "hold_until_repair"
+                && relapsedPacket.pressure_provenance_provider_dispatch_advisory?.should_hold_dispatch === true
+                && relapsedGate.dispatch_ready === false
+                && relapsedGate.provider_dispatch_hold_blocked === true
+                && relapsedDecision.action === "hold_until_repair",
+            holdDecisionStillRequiresRepair: relapsedDecision.requires_repair_before_dispatch === true
+                && relapsedDecision.dispatch_ready === false
+                && relapsedDecision.evidence?.provider_override_followup_repaired === true,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            repaired: {
+                health_status: repairedCandidate.health_status || "",
+                dispatch_policy: repairedCandidate.dispatch_policy || "",
+                provider_override_followup_repaired: repairedCandidate.provider_override_followup_repaired === true,
+                action: repairedDecision.action || "",
+                dispatch_ready: repairedGate.dispatch_ready,
+            },
+            relapsed: {
+                health_status: relapsedCandidate.health_status || "",
+                dispatch_policy: relapsedCandidate.dispatch_policy || "",
+                provider_override_followup_repaired: relapsedCandidate.provider_override_followup_repaired === true,
+                provider_override_followup_fresh_after_last_violation: relapsedCandidate.provider_override_followup_fresh_after_last_violation === true,
+                action: relapsedDecision.action || "",
+                dispatch_ready: relapsedGate.dispatch_ready,
+            },
+        };
+    }
+    finally {
+        try {
+            if (typedDir && fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationSelfTest() {
+    const groupId = `worker-context-provider-override-followup-receipt-contract-validation-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+    const targetProject = "api";
+    const agentType = "codex";
+    const relPath = "pressure-provider-dispatch-override-followup-validation.md";
+    const followupWorkItemId = "work-phase152-provider-override-followup";
+    const overrideId = "provider-dispatch-override:phase152-validation";
+    try {
+        const advisory = {
+            schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+            groupId,
+            project: targetProject,
+            agent_type: agentType,
+            health_status: "monitor",
+            dispatch_policy: "allow_with_receipt_sampling",
+            should_hold_dispatch: false,
+            selected_candidate: {
+                schema: "ccm-pressure-provenance-feedback-provider-dispatch-selected-candidate-v1",
+                groupId,
+                project: targetProject,
+                agent_type: agentType,
+                health_status: "monitor",
+                dispatch_policy: "allow_with_receipt_sampling",
+                should_hold_dispatch: false,
+                provider_override_followup_repaired: true,
+                provider_override_followup_repaired_count: 1,
+                provider_override_followup_memory_provenance_usage_count: 1,
+                provider_override_followup_current_source_verified_count: 1,
+                provider_override_followup_last_completed_at: "2026-07-10T05:00:00.000Z",
+                provider_override_followup_fresh_after_last_violation: true,
+                provider_override_followup_rel_paths: [relPath],
+                provider_override_followup_work_item_ids: [followupWorkItemId],
+                provider_override_followup_override_ids: [overrideId],
+            },
+        };
+        const packet = (0, runtime_kernel_1.buildWorkerContextPacket)({
+            group: { id: groupId, members: [{ project: targetProject }] },
+            project: targetProject,
+            agentType,
+            task: "Phase 152 provider override follow-up receipt contract validation selftest.",
+            pressureProvenanceProviderDispatchAdvisory: advisory,
+            contextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+        });
+        const assignment = {
+            scopeId: groupId,
+            project: targetProject,
+            agentType,
+            assignmentId: "assignment-phase152-provider-override-followup-validation",
+            dispatchKey: "dispatch-phase152-provider-override-followup-validation",
+            taskFingerprint: "phase152 provider override followup receipt contract validation",
+            worker_context_packet: packet,
+            dispatch_ready: true,
+        };
+        const binding = recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assignment, { at: "2026-07-10T05:00:01.000Z" }) || {};
+        const invalidValidation = recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(groupId, {
+            binding_id: binding.binding_id,
+            assignment_id: assignment.assignmentId,
+            worker_context_packet_id: packet.packet_id,
+            task_id: "task-phase152-provider-override-followup-validation",
+            task_agent_session_id: "tas-phase152-provider-override-followup-validation",
+            execution_id: "execution-phase152-provider-override-followup-validation-invalid",
+            receipt_status: "done",
+            receipt: {
+                status: "done",
+                memoryProvenanceUsage: [{
+                        relPath,
+                        usageState: "used",
+                        repairStatus: "completed",
+                        repairGapType: "provider_dispatch_override_followup",
+                        currentSourceVerified: true,
+                        reason: "missing providerDispatchOverrideFollowupHistoryReverified and override id",
+                    }],
+            },
+        }, { at: "2026-07-10T05:00:02.000Z" });
+        const validValidation = recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(groupId, {
+            binding_id: binding.binding_id,
+            assignment_id: assignment.assignmentId,
+            worker_context_packet_id: packet.packet_id,
+            task_id: "task-phase152-provider-override-followup-validation",
+            task_agent_session_id: "tas-phase152-provider-override-followup-validation",
+            execution_id: "execution-phase152-provider-override-followup-validation-valid",
+            receipt_status: "done",
+            receipt: {
+                status: "done",
+                memoryProvenanceUsage: [{
+                        relPath,
+                        usageState: "verified",
+                        repairStatus: "completed",
+                        repairGapType: "provider_dispatch_override_followup",
+                        repairWorkItemId: followupWorkItemId,
+                        providerDispatchOverrideId: overrideId,
+                        currentSourceVerified: true,
+                        providerDispatchOverrideFollowupHistoryReverified: true,
+                        reason: "Phase 152 selftest reverified current source for provider override follow-up repaired history.",
+                    }],
+            },
+        }, { at: "2026-07-10T05:00:03.000Z" });
+        const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+        const finalBinding = (ledger.entries || []).find((entry) => entry.binding_id === binding.binding_id) || {};
+        const checks = {
+            invalidReceiptFailsContract: invalidValidation?.status === "failed"
+                && invalidValidation?.contract_satisfied === false
+                && (invalidValidation?.gaps || []).some((gap) => gap.code === "missing_override_id_coverage" || gap.code === "missing_provider_override_followup_reverified_rows"),
+            validReceiptPassesContract: validValidation?.status === "passed"
+                && validValidation?.contract_satisfied === true
+                && validValidation?.covered_rel_path_count === 1
+                && validValidation?.covered_followup_work_item_count === 1
+                && validValidation?.covered_override_id_count === 1,
+            ledgerPersistsFinalValidation: finalBinding.worker_context_provider_dispatch_override_followup_receipt_contract_validation?.contract_satisfied === true
+                && finalBinding.provider_dispatch_override_followup_receipt_contract_validation_status === "passed"
+                && finalBinding.execution_id === "execution-phase152-provider-override-followup-validation-valid",
+            ledgerCountersTrackValidation: Number(ledger.providerDispatchOverrideFollowupReceiptContractValidationCount || 0) >= 1
+                && Number(ledger.providerDispatchOverrideFollowupReceiptContractValidationPassedCount || 0) >= 1
+                && Number(ledger.providerDispatchOverrideFollowupReceiptContractValidationFailedCount || 0) === 0,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            invalid: {
+                status: invalidValidation?.status || "",
+                gaps: (invalidValidation?.gaps || []).map((gap) => gap.code || gap.reason),
+            },
+            valid: {
+                status: validValidation?.status || "",
+                contract_satisfied: validValidation?.contract_satisfied === true,
+                covered_rel_path_count: validValidation?.covered_rel_path_count || 0,
+                covered_followup_work_item_count: validValidation?.covered_followup_work_item_count || 0,
+                covered_override_id_count: validValidation?.covered_override_id_count || 0,
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+    }
+}
+function runWorkerContextPressureProvenanceProviderDispatchDecisionLedgerSelfTest() {
+    const groupId = `worker-context-pressure-provenance-provider-dispatch-decision-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+    const typedDir = (0, group_memory_index_1.getGroupTypedMemoryDir)(groupId);
+    const targetProject = "api";
+    const agentType = "codex";
+    const relPath = "pressure-provider-dispatch-decision.md";
+    try {
+        const group = normalizeGroupOrchestrator({
+            id: groupId,
+            members: [
+                { project: "coordinator", role: "coordinator" },
+                { project: targetProject, agent: agentType },
+            ],
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceToTypedMemory)(groupId, {
+            packets: [
+                {
+                    groupId,
+                    packet_id: "wcp-phase146-initial-missing-usage",
+                    binding_id: "binding-phase146-initial-missing-usage",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "non_compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    missing_memory_provenance_usage: true,
+                    gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "missing memoryProvenanceUsage" }],
+                    rel_paths: [relPath],
+                },
+                {
+                    groupId,
+                    packet_id: "wcp-phase146-initial-current-source-gap",
+                    binding_id: "binding-phase146-initial-current-source-gap",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "non_compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    current_source_verified_gap: true,
+                    gaps: [{ code: "receipt_currentSourceVerified", reason: "currentSourceVerified=false" }],
+                    rel_paths: [relPath],
+                },
+            ],
+        }, {
+            frequentThreshold: 2,
+            updatedAt: "2026-07-10T03:20:00.000Z",
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory)(groupId, {
+            packets: [
+                {
+                    groupId,
+                    packet_id: "wcp-phase146-recovery-1",
+                    binding_id: "binding-phase146-recovery-1",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    receipt_row_count: 1,
+                    compliant_doc_count: 1,
+                    current_source_verified_count: 1,
+                    rel_paths: [relPath],
+                },
+                {
+                    groupId,
+                    packet_id: "wcp-phase146-recovery-2",
+                    binding_id: "binding-phase146-recovery-2",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    receipt_row_count: 1,
+                    compliant_doc_count: 1,
+                    current_source_verified_count: 1,
+                    rel_paths: [relPath],
+                },
+            ],
+        }, {
+            updatedAt: "2026-07-10T03:20:01.000Z",
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceToTypedMemory)(groupId, {
+            packets: [
+                {
+                    groupId,
+                    packet_id: "wcp-phase146-relapse-missing-usage",
+                    binding_id: "binding-phase146-relapse-missing-usage",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "non_compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    missing_memory_provenance_usage: true,
+                    gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "relapse missing memoryProvenanceUsage" }],
+                    rel_paths: [relPath],
+                },
+            ],
+        }, {
+            frequentThreshold: 2,
+            updatedAt: "2026-07-10T03:20:02.000Z",
+        });
+        const activeAssignment = buildAssignment({ project: targetProject, agent: agentType }, "验证 pressure provenance provider dispatch decision ledger 会记录 hold 决策。", "selftest pressure provenance provider dispatch decision", "", { group, workerContextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 } });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory)(groupId, {
+            packets: [
+                {
+                    groupId,
+                    packet_id: "wcp-phase146-post-relapse-recovery",
+                    binding_id: "binding-phase146-post-relapse-recovery",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    receipt_row_count: 1,
+                    compliant_doc_count: 1,
+                    current_source_verified_count: 1,
+                    rel_paths: [relPath],
+                },
+            ],
+        }, {
+            updatedAt: "2026-07-10T03:20:03.000Z",
+        });
+        const recoveredAssignment = buildAssignment({ project: targetProject, agent: agentType }, "验证 pressure provenance provider dispatch decision ledger 会记录恢复后的 sampling 放行决策。", "selftest pressure provenance provider dispatch decision recovered", "", { group, workerContextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 } });
+        const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+        const activeBinding = (ledger.entries || []).find((entry) => entry.assignment_id === activeAssignment.assignmentId) || {};
+        const recoveredBinding = (ledger.entries || []).find((entry) => entry.assignment_id === recoveredAssignment.assignmentId) || {};
+        const activeDecision = activeBinding.worker_context_provider_dispatch_decision || {};
+        const recoveredDecision = recoveredBinding.worker_context_provider_dispatch_decision || {};
+        const checks = {
+            activeAssignmentStoresDecision: activeAssignment.worker_context_provider_dispatch_decision?.schema === "ccm-worker-context-provider-dispatch-decision-v1"
+                && activeAssignment.worker_context_provider_dispatch_decision?.action === "hold_until_repair",
+            activeDecisionHoldsCriticalProvider: activeDecision.action === "hold_until_repair"
+                && activeDecision.provider_dispatch_hold === true
+                && activeDecision.dispatch_ready === false
+                && activeDecision.should_create_real_task === false
+                && activeDecision.health_status === "critical",
+            activeNeedsPressureRepair: Array.isArray(activeAssignment.needs)
+                && activeAssignment.needs.some((item) => String(item || "").includes("pressure provenance provider repair/recovery")),
+            bindingLedgerPersistsDecision: activeBinding.worker_context_provider_dispatch_decision?.decision_id
+                && activeBinding.worker_context_packet_pressure_provenance_provider_dispatch_advisory?.should_hold_dispatch === true,
+            recoveredDecisionAllowsReceiptSampling: recoveredDecision.action === "dispatch_with_receipt_sampling"
+                && recoveredDecision.dispatch_ready === true
+                && recoveredDecision.requires_receipt_sampling === true
+                && recoveredDecision.health_status === "monitor",
+            ledgerCountersTrackProviderDecisions: Number(ledger.providerDispatchDecisionCount || 0) >= 2
+                && Number(ledger.providerDispatchHoldDecisionCount || 0) >= 1
+                && Number(ledger.providerDispatchReadyDecisionCount || 0) >= 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            active: {
+                action: activeDecision.action || "",
+                dispatch_ready: activeDecision.dispatch_ready,
+                provider_dispatch_hold: activeDecision.provider_dispatch_hold,
+                health_status: activeDecision.health_status || "",
+                reason: activeDecision.reason || "",
+            },
+            recovered: {
+                action: recoveredDecision.action || "",
+                dispatch_ready: recoveredDecision.dispatch_ready,
+                requires_receipt_sampling: recoveredDecision.requires_receipt_sampling === true,
+                health_status: recoveredDecision.health_status || "",
+            },
+            ledger: {
+                providerDispatchDecisionCount: ledger.providerDispatchDecisionCount || 0,
+                providerDispatchHoldDecisionCount: ledger.providerDispatchHoldDecisionCount || 0,
+                providerDispatchReadyDecisionCount: ledger.providerDispatchReadyDecisionCount || 0,
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            if (typedDir && fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runWorkerContextPressureProvenanceProviderDispatchOverrideReceiptSelfTest() {
+    const groupId = `worker-context-pressure-provenance-provider-dispatch-override-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+    const typedDir = (0, group_memory_index_1.getGroupTypedMemoryDir)(groupId);
+    const targetProject = "api";
+    const agentType = "codex";
+    const relPath = "pressure-provider-dispatch-override.md";
+    try {
+        const group = normalizeGroupOrchestrator({
+            id: groupId,
+            members: [
+                { project: "coordinator", role: "coordinator" },
+                { project: targetProject, agent: agentType },
+            ],
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceToTypedMemory)(groupId, {
+            packets: [
+                {
+                    groupId,
+                    packet_id: "wcp-phase147-initial-missing-usage",
+                    binding_id: "binding-phase147-initial-missing-usage",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "non_compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    missing_memory_provenance_usage: true,
+                    gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "missing memoryProvenanceUsage" }],
+                    rel_paths: [relPath],
+                },
+                {
+                    groupId,
+                    packet_id: "wcp-phase147-initial-current-source-gap",
+                    binding_id: "binding-phase147-initial-current-source-gap",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "non_compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    current_source_verified_gap: true,
+                    gaps: [{ code: "receipt_currentSourceVerified", reason: "currentSourceVerified=false" }],
+                    rel_paths: [relPath],
+                },
+            ],
+        }, {
+            frequentThreshold: 2,
+            updatedAt: "2026-07-10T03:40:00.000Z",
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory)(groupId, {
+            packets: [
+                {
+                    groupId,
+                    packet_id: "wcp-phase147-recovery-1",
+                    binding_id: "binding-phase147-recovery-1",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    receipt_row_count: 1,
+                    compliant_doc_count: 1,
+                    current_source_verified_count: 1,
+                    rel_paths: [relPath],
+                },
+                {
+                    groupId,
+                    packet_id: "wcp-phase147-recovery-2",
+                    binding_id: "binding-phase147-recovery-2",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    receipt_row_count: 1,
+                    compliant_doc_count: 1,
+                    current_source_verified_count: 1,
+                    rel_paths: [relPath],
+                },
+            ],
+        }, {
+            updatedAt: "2026-07-10T03:40:01.000Z",
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceToTypedMemory)(groupId, {
+            packets: [
+                {
+                    groupId,
+                    packet_id: "wcp-phase147-relapse-missing-usage",
+                    binding_id: "binding-phase147-relapse-missing-usage",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "non_compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    missing_memory_provenance_usage: true,
+                    gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "relapse missing memoryProvenanceUsage" }],
+                    rel_paths: [relPath],
+                },
+            ],
+        }, {
+            frequentThreshold: 2,
+            updatedAt: "2026-07-10T03:40:02.000Z",
+        });
+        const invalidOverride = {
+            schema: "ccm-pressure-provenance-provider-dispatch-override-receipt-v1",
+            approved: true,
+            approved_by: "local-user",
+            reason: "Phase 147 invalid override is missing risk acceptance.",
+            project: targetProject,
+            agent_type: agentType,
+            override_action: "allow_once",
+        };
+        const invalidAssignment = buildAssignment({ project: targetProject, agent: agentType }, "验证无效 provider dispatch override 不会绕过 hold。", "selftest invalid provider override", "", {
+            group,
+            providerDispatchOverride: invalidOverride,
+            workerContextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+        });
+        const validOverride = {
+            schema: "ccm-pressure-provenance-provider-dispatch-override-receipt-v1",
+            approved: true,
+            approved_by: "local-user",
+            risk_accepted: true,
+            acknowledges_repair_required: true,
+            reason: "Phase 147 selftest explicitly accepts temporary provider risk and requires follow-up repair.",
+            project: targetProject,
+            agent_type: agentType,
+            override_action: "allow_once",
+            approved_at: "2026-07-10T03:40:03.000Z",
+        };
+        const validAssignment = buildAssignment({ project: targetProject, agent: agentType }, "验证有效 provider dispatch override receipt 可以一次性放行。", "selftest valid provider override", "", {
+            group,
+            providerDispatchOverride: validOverride,
+            workerContextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+        });
+        const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+        const invalidBinding = (ledger.entries || []).find((entry) => entry.assignment_id === invalidAssignment.assignmentId) || {};
+        const validBinding = (ledger.entries || []).find((entry) => entry.assignment_id === validAssignment.assignmentId) || {};
+        const invalidDecision = invalidBinding.worker_context_provider_dispatch_decision || {};
+        const validDecision = validBinding.worker_context_provider_dispatch_decision || {};
+        const checks = {
+            invalidOverrideDoesNotBypassHold: invalidAssignment.dispatch_ready === false
+                && invalidAssignment.worker_context_pre_dispatch_gate?.provider_dispatch_hold === true
+                && invalidAssignment.worker_context_pre_dispatch_gate?.provider_dispatch_hold_overridden !== true
+                && invalidDecision.action === "hold_until_repair"
+                && invalidDecision.provider_dispatch_override_receipt?.valid === false,
+            validOverrideDispatchesOnce: validAssignment.dispatch_ready === true
+                && validAssignment.status === "pending"
+                && validAssignment.worker_context_pre_dispatch_gate?.provider_dispatch_hold === true
+                && validAssignment.worker_context_pre_dispatch_gate?.provider_dispatch_hold_overridden === true
+                && validAssignment.worker_context_pre_dispatch_gate?.next_step === "dispatch_child_agent_with_provider_override_receipt",
+            validDecisionCarriesOverrideReceipt: validDecision.action === "dispatch_with_provider_override"
+                && validDecision.dispatch_ready === true
+                && validDecision.should_create_real_task === true
+                && validDecision.provider_dispatch_hold === true
+                && validDecision.provider_dispatch_hold_overridden === true
+                && validDecision.requires_repair_followup === true
+                && validDecision.provider_dispatch_override_receipt?.valid === true,
+            bindingLedgerPersistsOverride: validBinding.worker_context_provider_dispatch_override_receipt?.valid === true
+                && validBinding.worker_context_provider_dispatch_decision?.provider_dispatch_override_receipt?.approved_by === "local-user",
+            ledgerCountersTrackOverride: Number(ledger.providerDispatchDecisionCount || 0) >= 2
+                && Number(ledger.providerDispatchHoldDecisionCount || 0) >= 1
+                && Number(ledger.providerDispatchOverrideDecisionCount || 0) >= 1,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            invalid: {
+                action: invalidDecision.action || "",
+                dispatch_ready: invalidDecision.dispatch_ready,
+                override_valid: invalidDecision.provider_dispatch_override_receipt?.valid === true,
+                gaps: invalidDecision.provider_dispatch_override_receipt?.gaps || [],
+            },
+            valid: {
+                action: validDecision.action || "",
+                dispatch_ready: validDecision.dispatch_ready,
+                override_valid: validDecision.provider_dispatch_override_receipt?.valid === true,
+                next_step: validAssignment.worker_context_pre_dispatch_gate?.next_step || "",
+            },
+            ledger: {
+                providerDispatchDecisionCount: ledger.providerDispatchDecisionCount || 0,
+                providerDispatchHoldDecisionCount: ledger.providerDispatchHoldDecisionCount || 0,
+                providerDispatchOverrideDecisionCount: ledger.providerDispatchOverrideDecisionCount || 0,
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            if (typedDir && fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
+    }
+}
+function runWorkerContextPressureProvenanceProviderDispatchOverrideCompletionSelfTest() {
+    const groupId = `worker-context-pressure-provenance-provider-dispatch-override-completion-selftest-${process.pid}-${Date.now()}`;
+    const bindingFile = getReplayRepairDispatchBindingsFileForCoordinator(groupId);
+    const workItemsFile = getReplayRepairWorkItemsFileForCoordinator(groupId);
+    const typedDir = (0, group_memory_index_1.getGroupTypedMemoryDir)(groupId);
+    const targetProject = "api";
+    const agentType = "codex";
+    const relPath = "pressure-provider-dispatch-override-completion.md";
+    try {
+        const group = normalizeGroupOrchestrator({
+            id: groupId,
+            members: [
+                { project: "coordinator", role: "coordinator" },
+                { project: targetProject, agent: agentType },
+            ],
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceToTypedMemory)(groupId, {
+            packets: [
+                {
+                    groupId,
+                    packet_id: "wcp-phase148-initial-missing-usage",
+                    binding_id: "binding-phase148-initial-missing-usage",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "non_compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    missing_memory_provenance_usage: true,
+                    gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "missing memoryProvenanceUsage" }],
+                    rel_paths: [relPath],
+                },
+                {
+                    groupId,
+                    packet_id: "wcp-phase148-initial-current-source-gap",
+                    binding_id: "binding-phase148-initial-current-source-gap",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "non_compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    current_source_verified_gap: true,
+                    gaps: [{ code: "receipt_currentSourceVerified", reason: "currentSourceVerified=false" }],
+                    rel_paths: [relPath],
+                },
+            ],
+        }, {
+            frequentThreshold: 2,
+            updatedAt: "2026-07-10T04:00:00.000Z",
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceRecoveryToTypedMemory)(groupId, {
+            packets: [
+                {
+                    groupId,
+                    packet_id: "wcp-phase148-recovery-1",
+                    binding_id: "binding-phase148-recovery-1",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    receipt_row_count: 1,
+                    compliant_doc_count: 1,
+                    current_source_verified_count: 1,
+                    rel_paths: [relPath],
+                },
+                {
+                    groupId,
+                    packet_id: "wcp-phase148-recovery-2",
+                    binding_id: "binding-phase148-recovery-2",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    receipt_row_count: 1,
+                    compliant_doc_count: 1,
+                    current_source_verified_count: 1,
+                    rel_paths: [relPath],
+                },
+            ],
+        }, {
+            updatedAt: "2026-07-10T04:00:01.000Z",
+        });
+        (0, group_memory_index_1.distillPressureProvenancePreDispatchComplianceToTypedMemory)(groupId, {
+            packets: [
+                {
+                    groupId,
+                    packet_id: "wcp-phase148-relapse-missing-usage",
+                    binding_id: "binding-phase148-relapse-missing-usage",
+                    project: targetProject,
+                    agent_type: agentType,
+                    status: "non_compliant",
+                    pre_dispatch_prompted: true,
+                    required_doc_count: 1,
+                    missing_memory_provenance_usage: true,
+                    gaps: [{ code: "receipt_memoryProvenanceUsage", reason: "relapse missing memoryProvenanceUsage" }],
+                    rel_paths: [relPath],
+                },
+            ],
+        }, {
+            frequentThreshold: 2,
+            updatedAt: "2026-07-10T04:00:02.000Z",
+        });
+        const validOverride = {
+            schema: "ccm-pressure-provenance-provider-dispatch-override-receipt-v1",
+            approved: true,
+            approved_by: "local-user",
+            risk_accepted: true,
+            acknowledges_repair_required: true,
+            reason: "Phase 148 selftest accepts one provider override and requires completion follow-up.",
+            project: targetProject,
+            agent_type: agentType,
+            override_action: "allow_once",
+            approved_at: "2026-07-10T04:00:03.000Z",
+        };
+        const assignment = buildAssignment({ project: targetProject, agent: agentType }, "验证 provider dispatch override completion 会关闭 follow-up repair work item。", "selftest provider override completion", "", {
+            group,
+            providerDispatchOverride: validOverride,
+            workerContextUsageOptions: { maxTokens: 5000, autoCompactBufferTokens: 120 },
+        });
+        const initialLedger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+        const initialBinding = (initialLedger.entries || []).find((entry) => entry.assignment_id === assignment.assignmentId) || {};
+        const followupRef = initialBinding.worker_context_provider_dispatch_override_followup_repair || {};
+        const workItemLedgerBefore = readReplayRepairWorkItemLedgerForCoordinator(groupId);
+        const workItemBefore = (workItemLedgerBefore.items || []).find((item) => (item.work_item_id || item.id) === followupRef.work_item_id) || {};
+        const receipt = {
+            status: "done",
+            summary: "provider override completion supplied verified pressure provenance follow-up",
+            memoryProvenanceUsage: [{
+                    relPath,
+                    usageState: "verified",
+                    repairStatus: "completed",
+                    repairGapType: "provider_dispatch_override_followup",
+                    currentSourceVerified: true,
+                    reason: "Phase 148 selftest verified current source after override dispatch.",
+                }],
+        };
+        const completion = recordWorkerContextProviderDispatchOverrideCompletionForCoordinator(groupId, {
+            assignment_id: assignment.assignmentId,
+            dispatch_key: assignment.dispatchKey,
+            worker_context_packet_id: assignment.worker_context_packet?.packet_id || "",
+            task_id: "task-phase148-provider-override-completion",
+            worker_handoff_id: "handoff-phase148-provider-override-completion",
+            task_agent_session_id: "tas-phase148-provider-override-completion",
+            native_session_id: "native-phase148-provider-override-completion",
+            execution_id: "execution-phase148-provider-override-completion",
+            memory_context_snapshot_id: "snapshot-phase148-provider-override-completion",
+            memory_context_snapshot_checksum: "snapshot-checksum-phase148-provider-override-completion",
+            receipt_status: "done",
+            receipt,
+        }, { at: "2026-07-10T04:00:04.000Z" }) || {};
+        const finalLedger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+        const finalBinding = (finalLedger.entries || []).find((entry) => entry.assignment_id === assignment.assignmentId) || {};
+        const workItemLedgerAfter = readReplayRepairWorkItemLedgerForCoordinator(groupId);
+        const workItemAfter = (workItemLedgerAfter.items || []).find((item) => (item.work_item_id || item.id) === followupRef.work_item_id) || {};
+        const checks = {
+            overrideDispatchCreatesFollowupWorkItem: assignment.dispatch_ready === true
+                && initialBinding.worker_context_provider_dispatch_decision?.action === "dispatch_with_provider_override"
+                && followupRef.work_item_id
+                && replayRepairWorkItemOpenForCoordinator(workItemBefore.status),
+            completionRequiresVerifiedMemoryProvenanceUsage: completion.completion_ok === true
+                && completion.memory_provenance_usage_count === 1
+                && completion.current_source_verified_count === 1
+                && completion.followup_repair_work_item_completion?.closed === 1,
+            bindingLedgerPersistsCompletion: finalBinding.worker_context_provider_dispatch_override_completion?.completion_ok === true
+                && finalBinding.worker_context_provider_dispatch_override_completion?.task_agent_session_id === "tas-phase148-provider-override-completion"
+                && Number(finalLedger.providerDispatchOverrideCompletionCount || 0) >= 1,
+            followupRepairWorkItemClosed: replayRepairWorkItemStatusForCoordinator(workItemAfter.status) === "completed"
+                && workItemAfter.completion_source === "provider_dispatch_override_completion_receipt"
+                && workItemAfter.provider_dispatch_override_completion?.completion_id === completion.completion_id,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            followup: {
+                work_item_id: followupRef.work_item_id || "",
+                before_status: replayRepairWorkItemStatusForCoordinator(workItemBefore.status),
+                after_status: replayRepairWorkItemStatusForCoordinator(workItemAfter.status),
+            },
+            completion: {
+                status: completion.status || "",
+                completion_ok: completion.completion_ok === true,
+                memory_provenance_usage_count: completion.memory_provenance_usage_count || 0,
+                current_source_verified_count: completion.current_source_verified_count || 0,
+            },
+            ledger: {
+                providerDispatchOverrideCompletionCount: finalLedger.providerDispatchOverrideCompletionCount || 0,
+            },
+        };
+    }
+    finally {
+        for (const file of [bindingFile, `${bindingFile}.bak`, workItemsFile, `${workItemsFile}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
+        try {
+            if (typedDir && fs.existsSync(typedDir))
+                fs.rmSync(typedDir, { recursive: true, force: true });
+        }
+        catch { }
     }
 }
 function buildCodedCoordinatorSummary(group, outputs) {
@@ -3361,6 +4990,8 @@ function normalizeWorkerContextCompactOutcomeEntryForCoordinator(raw = {}) {
         ? (partialPolicy.skipped_categories || partialPolicy.skippedCategories).map((item) => String(item || "")).filter(Boolean)
         : [];
     const compactStrategyMemory = partialPolicy.compact_strategy_memory || partialPolicy.compactStrategyMemory || null;
+    const pressureRecallUsageBias = partialPolicy.pressure_recall_usage_strategy_bias || partialPolicy.pressureRecallUsageStrategyBias || null;
+    const pressureRecallUsageSummary = partialPolicy.pressure_recall_usage_summary || partialPolicy.pressureRecallUsageSummary || null;
     return {
         schema: "ccm-worker-context-compact-outcome-entry-v1",
         outcome_id: String(raw.outcome_id || raw.outcomeId || `wcco:${hashCoordinator([raw.group_id, raw.assignment_id, raw.retry_id, raw.retry_packet_id, raw.at || Date.now()], 14)}`),
@@ -3408,6 +5039,27 @@ function normalizeWorkerContextCompactOutcomeEntryForCoordinator(raw = {}) {
                 avoid_categories: Array.isArray(compactStrategyMemory.avoid_categories || compactStrategyMemory.avoidCategories)
                     ? (compactStrategyMemory.avoid_categories || compactStrategyMemory.avoidCategories).map((item) => String(item || "")).filter(Boolean)
                     : [],
+            } : null,
+            pressure_recall_usage_strategy_bias: pressureRecallUsageBias?.schema ? {
+                schema: String(pressureRecallUsageBias.schema || ""),
+                active: pressureRecallUsageBias.active === true,
+                suppressed: pressureRecallUsageBias.suppressed === true,
+                stale: pressureRecallUsageBias.stale === true,
+                recommendation: String(pressureRecallUsageBias.recommendation || ""),
+                trust_score: Number(pressureRecallUsageBias.trust_score || 0),
+                category_adjustment_cap: Number(pressureRecallUsageBias.category_adjustment_cap || 0),
+                weighted_used_count: Number(pressureRecallUsageBias.weighted_used_count || 0),
+                weighted_verified_count: Number(pressureRecallUsageBias.weighted_verified_count || 0),
+                weighted_ignored_count: Number(pressureRecallUsageBias.weighted_ignored_count || 0),
+                stale_count: Number(pressureRecallUsageBias.stale_count || 0),
+                fresh_count: Number(pressureRecallUsageBias.fresh_count || 0),
+                summary_ledger_file: String(pressureRecallUsageBias.summary_ledger_file || ""),
+            } : null,
+            pressure_recall_usage_summary: pressureRecallUsageSummary?.schema ? {
+                schema: String(pressureRecallUsageSummary.schema || ""),
+                ledger_file: String(pressureRecallUsageSummary.ledger_file || ""),
+                target_project: String(pressureRecallUsageSummary.target_project || ""),
+                weighted_totals: pressureRecallUsageSummary.weighted_totals || {},
             } : null,
         } : null,
         ptl_emergency_hint: ptlHint?.schema ? normalizeWorkerContextPtlEmergencyHintForCoordinator(ptlHint, raw.group_id || raw.groupId || "") : null,
@@ -4034,6 +5686,123 @@ function compactWorkerContextMetadataStringsForCoordinator(values = [], options 
     const maxStringChars = Math.max(80, Number(options.maxStringChars || options.max_string_chars || defaults.maxStringChars || 260));
     return list.slice(0, maxItems).map((item) => compactText(item, maxStringChars));
 }
+function workerContextPressureRecallUsageSummaryForCompactPolicy(options = {}) {
+    const explicit = options.pressureRecallUsageSummary
+        || options.pressure_recall_usage_summary
+        || options.workerContextPressureRecallUsageSummary
+        || options.worker_context_pressure_recall_usage_summary
+        || null;
+    if (explicit?.schema)
+        return explicit;
+    const groupId = String(options.groupId || options.group_id || options.group?.id || "").trim();
+    if (!groupId || options.disablePressureRecallUsageStrategy === true || options.disable_pressure_recall_usage_strategy === true)
+        return null;
+    try {
+        const summary = (0, group_memory_index_1.buildGroupTypedMemoryPressureRecallUsageSummary)(groupId, {
+            targetProject: options.targetProject || options.target_project || options.project || "",
+            nowMs: options.nowMs || options.now_ms,
+            now: options.now,
+            generatedAt: options.generatedAt || options.generated_at,
+            usageHalfLifeDays: options.usageHalfLifeDays || options.usage_half_life_days,
+            usageStaleAfterDays: options.usageStaleAfterDays || options.usage_stale_after_days,
+            disableUsageAging: options.disableUsageAging || options.disable_usage_aging,
+        });
+        if (summary?.has_history === true || Number(summary?.memory_count || 0) > 0)
+            return summary;
+        if (options.disableCrossGroupPressureRecallUsage === true
+            || options.disable_cross_group_pressure_recall_usage === true
+            || options.crossGroupPressureRecallUsage === false
+            || options.cross_group_pressure_recall_usage === false)
+            return null;
+        const crossGroupSummary = (0, group_memory_index_1.buildGroupTypedMemoryPressureRecallUsageProjectSummary)(groupId, {
+            targetProject: options.targetProject || options.target_project || options.project || "",
+            nowMs: options.nowMs || options.now_ms,
+            now: options.now,
+            generatedAt: options.generatedAt || options.generated_at,
+            usageHalfLifeDays: options.usageHalfLifeDays || options.usage_half_life_days,
+            usageStaleAfterDays: options.usageStaleAfterDays || options.usage_stale_after_days,
+            disableUsageAging: options.disableUsageAging || options.disable_usage_aging,
+            groupIds: options.crossGroupPressureRecallUsageGroupIds
+                || options.cross_group_pressure_recall_usage_group_ids
+                || options.crossGroupIds
+                || options.cross_group_ids,
+            maxGroups: options.maxCrossGroupPressureRecallUsageGroups || options.max_cross_group_pressure_recall_usage_groups,
+        });
+        return crossGroupSummary?.has_history === true || Number(crossGroupSummary?.memory_count || 0) > 0 ? crossGroupSummary : null;
+    }
+    catch {
+        return null;
+    }
+}
+function workerContextCompactStrategyPressureUsageBiasForCoordinator(summary = null) {
+    const rows = [
+        ...(Array.isArray(summary?.rows) ? summary.rows : []),
+        ...(Array.isArray(summary?.useful_pressure_memories) ? summary.useful_pressure_memories : []),
+        ...(Array.isArray(summary?.ignored_pressure_memories) ? summary.ignored_pressure_memories : []),
+        ...(Array.isArray(summary?.stale_pressure_memories) ? summary.stale_pressure_memories : []),
+    ];
+    const compactStrategyRows = rows.filter((row = {}) => {
+        const relPath = String(row.rel_path || row.relPath || "").toLowerCase();
+        const name = String(row.name || "").toLowerCase();
+        return relPath === "worker-context-compact-strategy-memory.md"
+            || /worker-context-compact-strategy-memory|compact strategy memory/.test(`${relPath}\n${name}`);
+    });
+    const row = compactStrategyRows
+        .sort((a, b) => Number(b.weighted_total_count || b.total_count || 0) - Number(a.weighted_total_count || a.total_count || 0))[0] || null;
+    if (!row) {
+        return {
+            schema: "ccm-worker-context-partial-compact-pressure-recall-usage-bias-v1",
+            active: false,
+            reason: "no_compact_strategy_pressure_usage_feedback",
+            category_adjustment_cap: 0,
+            summary_source: summary?.source || "",
+            source_group_count: Number(summary?.source_group_count || 0),
+        };
+    }
+    const weightedUsed = Number(row.weighted_used_count || row.used_count || 0);
+    const weightedVerified = Number(row.weighted_verified_count || row.verified_count || 0);
+    const weightedIgnored = Number(row.weighted_ignored_count || row.ignored_count || 0);
+    const weightedMentioned = Number(row.weighted_mentioned_count || row.mentioned_count || 0);
+    const weightedTotal = Number(row.weighted_total_count || weightedUsed + weightedVerified + weightedIgnored + weightedMentioned || 0);
+    const useful = weightedUsed + weightedVerified * 1.2;
+    const ignored = weightedIgnored + weightedMentioned * 0.35;
+    const trustScore = Math.round((useful - ignored) * 100) / 100;
+    const recommendation = String(row.recommendation || "");
+    const active = recommendation === "promote_pressure_recall"
+        || trustScore >= 1.25;
+    const suppressed = recommendation === "deprioritize_pressure_recall" || trustScore <= -1.25;
+    const stale = recommendation === "stale_pressure_recall_history"
+        || (Number(row.stale_count || 0) > 0 && Number(row.fresh_count || 0) === 0);
+    return {
+        schema: "ccm-worker-context-partial-compact-pressure-recall-usage-bias-v1",
+        active: active && !stale,
+        suppressed: suppressed || stale,
+        stale,
+        rel_path: row.rel_path || row.relPath || "",
+        recommendation: recommendation || "neutral_verify_current_pressure",
+        weighted_used_count: Math.round(weightedUsed * 1000) / 1000,
+        weighted_verified_count: Math.round(weightedVerified * 1000) / 1000,
+        weighted_ignored_count: Math.round(weightedIgnored * 1000) / 1000,
+        weighted_mentioned_count: Math.round(weightedMentioned * 1000) / 1000,
+        weighted_total_count: Math.round(weightedTotal * 1000) / 1000,
+        stale_count: Number(row.stale_count || 0),
+        fresh_count: Number(row.fresh_count || 0),
+        avg_decay_weight: Number(row.avg_decay_weight || row.decay_weight || 0),
+        trust_score: trustScore,
+        category_adjustment_cap: active && !stale ? Math.min(1200, Math.max(160, Math.round((useful + Math.max(0, trustScore)) * 260))) : 0,
+        reason: active && !stale
+            ? "compact_strategy_pressure_memory_recently_used"
+            : stale
+                ? "compact_strategy_pressure_memory_feedback_is_stale"
+                : suppressed
+                    ? "compact_strategy_pressure_memory_recently_ignored"
+                    : "compact_strategy_pressure_memory_feedback_neutral",
+        summary_ledger_file: summary?.ledger_file || "",
+        summary_source: summary?.source || "",
+        source_group_count: Number(summary?.source_group_count || 0),
+        source_groups: Array.isArray(summary?.source_groups) ? summary.source_groups.slice(0, 8) : [],
+    };
+}
 function buildWorkerContextMetadataPartialCompactPolicyForCoordinator(packet = {}, options = {}) {
     const supported = new Set(["constraints_and_documents", "contract_injections", "dependencies"]);
     const usage = packet.context_usage || packet.contextUsage || {};
@@ -4053,27 +5822,41 @@ function buildWorkerContextMetadataPartialCompactPolicyForCoordinator(packet = {
         && (Number(rawStrategy.sample_count || rawStrategy.sampleCount || 0) > 0 || (Array.isArray(rawStrategy.categories) && rawStrategy.categories.length > 0))
         ? normalizeWorkerContextCompactStrategyMemoryForCoordinator(rawStrategy)
         : null;
+    const pressureRecallUsageSummary = workerContextPressureRecallUsageSummaryForCompactPolicy({
+        ...options,
+        project: options.project || packet.project || "",
+    });
+    const pressureRecallUsageBias = workerContextCompactStrategyPressureUsageBiasForCoordinator(pressureRecallUsageSummary);
     const strategyByCategory = new Map((compactStrategyMemory?.categories || []).map((item) => [String(item.category || ""), item]));
+    const preferredStrategyCategories = new Set(compactStrategyMemory?.preferred_categories || []);
     const candidates = topCategories
         .map((item, index) => {
         const category = String(item.id || item.category_id || item.categoryId || "");
         const strategy = strategyByCategory.get(category) || {};
+        const strategyScore = Number(strategy.strategy_score || 0);
+        const pressureUsageAdjustment = pressureRecallUsageBias.active && preferredStrategyCategories.has(category)
+            ? Math.min(Number(pressureRecallUsageBias.category_adjustment_cap || 0), Math.max(0, Math.round(strategyScore * 0.55)))
+            : 0;
         const candidate = {
             category,
             tokens: Number(item.tokens || 0),
             chars: Number(item.chars || 0),
             rank: index + 1,
+            selection_score: Number(item.tokens || 0) + pressureUsageAdjustment,
+            pressure_recall_usage_adjustment: pressureUsageAdjustment,
         };
         if (compactStrategyMemory?.schema) {
-            candidate.strategy_score = Number(strategy.strategy_score || 0);
+            candidate.strategy_score = strategyScore;
             candidate.strategy_recovery_rate = Number(strategy.recovery_rate || 0);
             candidate.strategy_avg_free_token_delta = Number(strategy.avg_free_token_delta || 0);
             candidate.strategy_recommendation = String(strategy.recommendation || "");
+            candidate.strategy_preferred = preferredStrategyCategories.has(category);
         }
         return candidate;
     })
         .filter((item) => supported.has(item.category) && item.tokens >= minTokens)
-        .sort((a, b) => Number(b.tokens || 0) - Number(a.tokens || 0)
+        .sort((a, b) => Number(b.selection_score ?? b.tokens ?? 0) - Number(a.selection_score ?? a.tokens ?? 0)
+        || Number(b.tokens || 0) - Number(a.tokens || 0)
         || Number(b.strategy_score || 0) - Number(a.strategy_score || 0)
         || Number(b.chars || 0) - Number(a.chars || 0))
         .slice(0, maxCategories);
@@ -4097,10 +5880,36 @@ function buildWorkerContextMetadataPartialCompactPolicyForCoordinator(packet = {
         preferred_categories: compactStrategyMemory.preferred_categories || [],
         avoid_categories: compactStrategyMemory.avoid_categories || [],
     } : null;
+    const pressureRecallUsageSummaryRef = pressureRecallUsageSummary?.schema && (pressureRecallUsageSummary.has_history === true || Number(pressureRecallUsageSummary.memory_count || 0) > 0) ? {
+        schema: pressureRecallUsageSummary.schema,
+        source: pressureRecallUsageSummary.source || "",
+        ledger_file: pressureRecallUsageSummary.ledger_file || "",
+        target_project: pressureRecallUsageSummary.target_project || "",
+        source_group_count: Number(pressureRecallUsageSummary.source_group_count || 0),
+        source_groups: Array.isArray(pressureRecallUsageSummary.source_groups)
+            ? pressureRecallUsageSummary.source_groups.slice(0, 8).map((item) => ({
+                groupId: item.groupId || item.group_id || "",
+                entry_count: Number(item.entry_count || 0),
+                updatedAt: item.updatedAt || item.updated_at || "",
+            }))
+            : undefined,
+        weighted_totals: pressureRecallUsageSummary.weighted_totals || {},
+        aging: pressureRecallUsageSummary.aging ? {
+            stale_entry_count: pressureRecallUsageSummary.aging.stale_entry_count || 0,
+            fresh_entry_count: pressureRecallUsageSummary.aging.fresh_entry_count || 0,
+            stale_memory_count: pressureRecallUsageSummary.aging.stale_memory_count || 0,
+        } : undefined,
+    } : null;
     return {
         schema: "ccm-worker-context-partial-compact-policy-v1",
-        method: compactStrategySummary ? "usage_top_category_pressure_with_outcome_strategy" : "usage_top_category_pressure",
-        source: compactStrategySummary ? "worker_context_usage.top_categories+compact_outcome_strategy_memory" : "worker_context_usage.top_categories",
+        method: pressureRecallUsageBias.active
+            ? "usage_top_category_pressure_with_outcome_strategy_and_pressure_recall_usage"
+            : compactStrategySummary ? "usage_top_category_pressure_with_outcome_strategy" : "usage_top_category_pressure",
+        source: [
+            "worker_context_usage.top_categories",
+            compactStrategySummary ? "compact_outcome_strategy_memory" : "",
+            pressureRecallUsageBias.active ? "pressure_recall_usage_weighted_feedback" : "",
+        ].filter(Boolean).join("+"),
         supported_categories: [...supported],
         selected_categories: selectedCategories,
         skipped_categories: skippedCategories,
@@ -4109,9 +5918,13 @@ function buildWorkerContextMetadataPartialCompactPolicyForCoordinator(packet = {
         min_category_tokens: minTokens,
         candidates,
         compact_strategy_memory: compactStrategySummary || undefined,
+        pressure_recall_usage_strategy_bias: pressureRecallUsageBias.active || pressureRecallUsageBias.suppressed || pressureRecallUsageBias.stale
+            ? pressureRecallUsageBias
+            : undefined,
+        pressure_recall_usage_summary: pressureRecallUsageSummaryRef || undefined,
         fallback_used: candidates.length === 0 && selectedCategories.length > 0,
         reason: selectedCategories.length
-            ? `Selected ${selectedCategories.join(",")} from WorkerContextPacket context_usage top categories before task compaction${compactStrategySummary ? " with compact outcome strategy memory." : "."}`
+            ? `Selected ${selectedCategories.join(",")} from WorkerContextPacket context_usage top categories before task compaction${compactStrategySummary ? " with compact outcome strategy memory" : ""}${pressureRecallUsageBias.active ? " and pressure recall usage feedback." : compactStrategySummary ? "." : "."}`
             : "No supported metadata category was present in WorkerContextPacket context_usage top categories.",
         generated_at: new Date().toISOString(),
     };
@@ -4236,22 +6049,147 @@ function buildWorkerContextPacketForAssignment(baseAssignment, dependsOn, replay
         : dependsOn ? [{ project: dependsOn, reason: "前置依赖" }] : [];
     const memory = options.memory || options.workerMemory || options.worker_memory || null;
     const memoryPolicy = options.memoryPolicy || options.memory_policy || (memory && typeof memory === "object" ? (memory.memory_policy || memory.memoryPolicy) : null) || null;
+    const groupId = String(baseAssignment.scopeId || options.group?.id || options.groupId || options.group_id || "").trim();
+    const agentType = String(baseAssignment.agentType || baseAssignment.agent_type || options.agentType || options.agent_type || "unknown").trim() || "unknown";
+    const pressureProvenanceDispatchFeedbackPolicy = groupId ? (0, group_memory_index_1.buildPressureProvenancePreDispatchComplianceDispatchPolicy)(groupId, {
+        targetProject: baseAssignment.project,
+        agentType,
+        pressureMemoryProvenanceReceiptDiscipline: memory?.pressure_memory_provenance_receipt_discipline
+            || memory?.pressureMemoryProvenanceReceiptDiscipline
+            || memory?.group_state?.typedMemory?.pressureProvenanceReceiptDiscipline
+            || null,
+        frequentThreshold: options.pressureProvenanceFeedbackFrequentThreshold || options.pressure_provenance_feedback_frequent_threshold,
+        recoveryCreditPerCompliant: options.pressureProvenanceFeedbackRecoveryCreditPerCompliant || options.pressure_provenance_feedback_recovery_credit_per_compliant,
+        disablePressureProvenanceFeedbackRecovery: options.disablePressureProvenanceFeedbackRecovery || options.disable_pressure_provenance_feedback_recovery,
+        disabled: options.disablePressureProvenanceFeedbackDispatchPolicy || options.disable_pressure_provenance_feedback_dispatch_policy,
+    }) : null;
+    const pressureProvenanceProviderDispatchAdvisory = buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(groupId, baseAssignment.project, agentType, pressureProvenanceDispatchFeedbackPolicy, options);
     return (0, runtime_kernel_1.buildWorkerContextPacket)({
         group: options.group || null,
         project: baseAssignment.project,
         task: baseAssignment.task,
+        agentType,
         analysis: baseAssignment.analysis || options.analysis || null,
         dependencies,
         contractInjections: baseAssignment.contractInjections || baseAssignment.contract_injections || options.contractInjections || options.contract_injections || [],
         replayRepairDispatchBriefs,
         memory,
         memoryPolicy,
+        pressureProvenanceDispatchFeedbackPolicy,
+        pressureProvenanceProviderDispatchAdvisory,
         contextUsageOptions: options.workerContextUsageOptions || options.worker_context_usage_options || null,
     });
 }
+function pressureProvenanceProviderDispatchPolicyForCoordinator(healthStatus) {
+    if (healthStatus === "critical")
+        return "hold_until_repair";
+    if (healthStatus === "warning")
+        return "strict_review_before_dispatch";
+    if (healthStatus === "monitor")
+        return "allow_with_receipt_sampling";
+    if (healthStatus === "watch")
+        return "allow_with_monitoring";
+    return "preferred";
+}
+function pressureProvenanceProviderHealthForCoordinator(policy = {}, row = {}) {
+    if (policy?.active === true && row?.relapsed === true)
+        return "critical";
+    if (policy?.active === true)
+        return "warning";
+    if (row?.recovered === true)
+        return "monitor";
+    if (row?.provider_override_followup_repaired === true || row?.providerOverrideFollowupRepaired === true)
+        return "monitor";
+    if (Number(row?.violation_count || row?.violationCount || 0) > 0)
+        return "watch";
+    return "healthy";
+}
+function buildPressureProvenanceProviderDispatchAdvisoryForCoordinator(groupId, project, agentType, policy = null, options = {}) {
+    if (!groupId || !project || !agentType || !policy?.schema)
+        return null;
+    const rows = Array.isArray(policy.policyRows || policy.policy_rows)
+        ? (policy.policyRows || policy.policy_rows)
+        : [];
+    const targetKey = `${String(agentType || "unknown").toLowerCase()}|${String(project || "unknown").toLowerCase()}`;
+    const row = rows.find((item) => `${String(item.agent_type || item.agentType || "unknown").toLowerCase()}|${String(item.project || "unknown").toLowerCase()}` === targetKey)
+        || rows[0]
+        || {};
+    const hasEvidence = policy.active === true
+        || row.recovered === true
+        || Number(row.violation_count || row.violationCount || 0) > 0
+        || Number(row.effective_violation_count || row.effectiveViolationCount || 0) > 0;
+    if (!hasEvidence)
+        return null;
+    const healthStatus = pressureProvenanceProviderHealthForCoordinator(policy, row);
+    const dispatchPolicy = pressureProvenanceProviderDispatchPolicyForCoordinator(healthStatus);
+    const holdDisabled = options.disablePressureProvenanceProviderDispatchHold === true
+        || options.disable_pressure_provenance_provider_dispatch_hold === true
+        || options.disableProviderDispatchHold === true
+        || options.disable_provider_dispatch_hold === true;
+    const shouldHoldDispatch = dispatchPolicy === "hold_until_repair" && !holdDisabled;
+    const selected = {
+        schema: "ccm-pressure-provenance-feedback-provider-dispatch-selected-candidate-v1",
+        groupId,
+        project,
+        agent_type: agentType,
+        health_status: healthStatus,
+        dispatch_policy: dispatchPolicy,
+        dispatch_recommendation: shouldHoldDispatch
+            ? "hold_child_dispatch_until_pressure_provenance_repair"
+            : healthStatus === "warning"
+                ? "strict_receipt_review_or_repair_before_ordinary_dispatch"
+                : healthStatus === "monitor"
+                    ? "allow_dispatch_with_receipt_sampling"
+                    : "allow_dispatch_with_pressure_provenance_monitoring",
+        policy_action: policy.action || "",
+        policy_severity: policy.severity || "",
+        relapsed: row.relapsed === true,
+        recovered: row.recovered === true,
+        violation_count: Number(row.violation_count || row.violationCount || 0),
+        effective_violation_count: Number(row.effective_violation_count || row.effectiveViolationCount || row.violation_count || 0),
+        recovery_credit: Number(row.recovery_credit || row.recoveryCredit || 0),
+        post_recovery_violation_count: Number(row.post_recovery_violation_count || row.postRecoveryViolationCount || 0),
+        recovery_last_compliant_at: row.recovery_last_compliant_at || row.recoveryLastCompliantAt || "",
+        recovery_streak_broken_at: row.recovery_streak_broken_at || row.recoveryStreakBrokenAt || "",
+        current_open_repair_item_ids: Array.isArray(row.repair_work_item_ids || row.repairWorkItemIds) ? (row.repair_work_item_ids || row.repairWorkItemIds).slice(0, 8) : [],
+        provider_override_followup_repaired: row.provider_override_followup_repaired === true || row.providerOverrideFollowupRepaired === true,
+        provider_override_followup_only: row.provider_override_followup_only === true || row.providerOverrideFollowupOnly === true,
+        provider_override_followup_repaired_count: Number(row.provider_override_followup_repaired_count || row.providerOverrideFollowupRepairedCount || 0),
+        provider_override_followup_memory_provenance_usage_count: Number(row.provider_override_followup_memory_provenance_usage_count || row.providerOverrideFollowupMemoryProvenanceUsageCount || 0),
+        provider_override_followup_current_source_verified_count: Number(row.provider_override_followup_current_source_verified_count || row.providerOverrideFollowupCurrentSourceVerifiedCount || 0),
+        provider_override_followup_last_completed_at: row.provider_override_followup_last_completed_at || row.providerOverrideFollowupLastCompletedAt || "",
+        provider_override_followup_fresh_after_last_violation: row.provider_override_followup_fresh_after_last_violation === true || row.providerOverrideFollowupFreshAfterLastViolation === true,
+        provider_override_followup_rel_paths: Array.isArray(row.provider_override_followup_rel_paths || row.providerOverrideFollowupRelPaths) ? (row.provider_override_followup_rel_paths || row.providerOverrideFollowupRelPaths).slice(0, 8) : [],
+        provider_override_followup_work_item_ids: Array.isArray(row.provider_override_followup_work_item_ids || row.providerOverrideFollowupWorkItemIds) ? (row.provider_override_followup_work_item_ids || row.providerOverrideFollowupWorkItemIds).slice(0, 8) : [],
+        provider_override_followup_override_ids: Array.isArray(row.provider_override_followup_override_ids || row.providerOverrideFollowupOverrideIds) ? (row.provider_override_followup_override_ids || row.providerOverrideFollowupOverrideIds).slice(0, 8) : [],
+        should_hold_dispatch: shouldHoldDispatch,
+    };
+    return {
+        schema: "ccm-pressure-provenance-provider-dispatch-advisory-selection-v1",
+        version: 1,
+        groupId,
+        project,
+        agent_type: agentType,
+        source: "typed-feedback:pressure-provenance-provider-dispatch-advisory",
+        source_policy_action: policy.action || "",
+        source_policy_severity: policy.severity || "",
+        selected_candidate: selected,
+        dispatch_policy: dispatchPolicy,
+        health_status: healthStatus,
+        should_hold_dispatch: shouldHoldDispatch,
+        safer_alternative_count: 0,
+        safer_alternatives: [],
+        recommendation: shouldHoldDispatch
+            ? `hold ${agentType}/${project} child-agent dispatch until pressure provenance repair closes`
+            : selected.provider_override_followup_repaired
+                ? `allow ${agentType}/${project} dispatch with receipt sampling; verified provider override follow-up history exists but current evidence is still required`
+                : selected.dispatch_recommendation,
+        generated_at: new Date().toISOString(),
+    };
+}
 function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment, dependsOn, replayRepairDispatchBriefs, initialPacket, initialGate, options = {}) {
     const retryEnabled = options.autoWorkerContextCompactRetry !== false && options.auto_worker_context_compact_retry !== false;
-    if (!retryEnabled || initialGate?.dispatch_ready !== false) {
+    if (!retryEnabled || initialGate?.dispatch_ready !== false || (initialGate?.provider_dispatch_hold === true && initialGate?.pressure_status !== "over_budget")) {
         return {
             task: baseAssignment.task,
             packet: initialPacket,
@@ -4269,6 +6207,40 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment, d
         || options.disableCompactStrategyMemory === true
         || options.disable_compact_strategy_memory === true;
     const compactStrategyMemory = strategyMemoryDisabled ? null : readWorkerContextCompactStrategyMemoryForCoordinator(groupId);
+    const pressureRecallUsageStrategyDisabled = rawRetryOptions.disablePressureRecallUsageStrategy === true
+        || rawRetryOptions.disable_pressure_recall_usage_strategy === true
+        || options.disablePressureRecallUsageStrategy === true
+        || options.disable_pressure_recall_usage_strategy === true;
+    const pressureRecallUsageSummaryRaw = pressureRecallUsageStrategyDisabled ? null : (0, group_memory_index_1.buildGroupTypedMemoryPressureRecallUsageSummary)(groupId, {
+        targetProject: baseAssignment.project || "",
+        nowMs: rawRetryOptions.nowMs || rawRetryOptions.now_ms || options.nowMs || options.now_ms,
+        now: rawRetryOptions.now || options.now,
+        generatedAt: rawRetryOptions.generatedAt || rawRetryOptions.generated_at || options.generatedAt || options.generated_at,
+        usageHalfLifeDays: rawRetryOptions.usageHalfLifeDays || rawRetryOptions.usage_half_life_days || options.usageHalfLifeDays || options.usage_half_life_days,
+        usageStaleAfterDays: rawRetryOptions.usageStaleAfterDays || rawRetryOptions.usage_stale_after_days || options.usageStaleAfterDays || options.usage_stale_after_days,
+        disableUsageAging: rawRetryOptions.disableUsageAging || rawRetryOptions.disable_usage_aging || options.disableUsageAging || options.disable_usage_aging,
+    });
+    const pressureRecallUsageSummary = pressureRecallUsageSummaryRaw?.has_history === true || Number(pressureRecallUsageSummaryRaw?.memory_count || 0) > 0
+        ? pressureRecallUsageSummaryRaw
+        : pressureRecallUsageStrategyDisabled ? null : (() => {
+            const crossGroupSummary = (0, group_memory_index_1.buildGroupTypedMemoryPressureRecallUsageProjectSummary)(groupId, {
+                targetProject: baseAssignment.project || "",
+                nowMs: rawRetryOptions.nowMs || rawRetryOptions.now_ms || options.nowMs || options.now_ms,
+                now: rawRetryOptions.now || options.now,
+                generatedAt: rawRetryOptions.generatedAt || rawRetryOptions.generated_at || options.generatedAt || options.generated_at,
+                usageHalfLifeDays: rawRetryOptions.usageHalfLifeDays || rawRetryOptions.usage_half_life_days || options.usageHalfLifeDays || options.usage_half_life_days,
+                usageStaleAfterDays: rawRetryOptions.usageStaleAfterDays || rawRetryOptions.usage_stale_after_days || options.usageStaleAfterDays || options.usage_stale_after_days,
+                disableUsageAging: rawRetryOptions.disableUsageAging || rawRetryOptions.disable_usage_aging || options.disableUsageAging || options.disable_usage_aging,
+                groupIds: rawRetryOptions.crossGroupPressureRecallUsageGroupIds
+                    || rawRetryOptions.cross_group_pressure_recall_usage_group_ids
+                    || options.crossGroupPressureRecallUsageGroupIds
+                    || options.cross_group_pressure_recall_usage_group_ids
+                    || options.crossGroupIds
+                    || options.cross_group_ids,
+                maxGroups: rawRetryOptions.maxCrossGroupPressureRecallUsageGroups || rawRetryOptions.max_cross_group_pressure_recall_usage_groups || options.maxCrossGroupPressureRecallUsageGroups || options.max_cross_group_pressure_recall_usage_groups,
+            });
+            return crossGroupSummary?.has_history === true || Number(crossGroupSummary?.memory_count || 0) > 0 ? crossGroupSummary : null;
+        })();
     const ptlEmergencyHint = readWorkerContextPtlEmergencyHintForCoordinator(groupId);
     const retryOptions = ptlEmergencyHint.engaged
         ? mergeWorkerContextRetryOptionsForCoordinator(rawRetryOptions, ptlEmergencyHint.recommended_retry_options || {})
@@ -4537,6 +6509,9 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment, d
     const metadataPartialCompact = compactWorkerContextMetadataCategoriesForRetry(initialPacket, options, {
         ...(retryOptions.metadata || retryOptions.metadataPartialCompact || retryOptions.metadata_partial_compact || retryOptions.partialCompact || retryOptions.partial_compact || {}),
         compactOutcomeStrategyMemory: compactStrategyMemory,
+        pressureRecallUsageSummary,
+        groupId,
+        targetProject: baseAssignment.project || "",
     });
     if (metadataPartialCompact.compacted) {
         options = metadataPartialCompact.options;
@@ -4711,11 +6686,111 @@ function maybeRetryWorkerContextPacketCompactionForCoordinator(baseAssignment, d
         retry: retryPacket.context_compaction_retry || retry,
     };
 }
+function rawProviderDispatchOverrideForCoordinator(assignment = {}, packet = {}) {
+    return assignment.provider_dispatch_override
+        || assignment.providerDispatchOverride
+        || assignment.pressure_provenance_provider_dispatch_override
+        || assignment.pressureProvenanceProviderDispatchOverride
+        || packet.provider_dispatch_override
+        || packet.providerDispatchOverride
+        || packet.pressure_provenance_provider_dispatch_override
+        || packet.pressureProvenanceProviderDispatchOverride
+        || null;
+}
+function normalizeProviderDispatchOverrideReceiptForCoordinator(raw = null, context = {}) {
+    if (!raw || typeof raw !== "object")
+        return null;
+    const project = String(context.project || "").trim();
+    const agentType = String(context.agentType || context.agent_type || "").trim();
+    const receiptProject = String(raw.project || raw.target_project || raw.targetProject || "").trim();
+    const receiptAgentType = String(raw.agent_type || raw.agentType || raw.provider || raw.runner || "").trim();
+    const schema = String(raw.schema || "ccm-pressure-provenance-provider-dispatch-override-receipt-v1").trim();
+    const overrideAction = String(raw.override_action || raw.overrideAction || raw.action || "allow_once").trim();
+    const approvedBy = String(raw.approved_by || raw.approvedBy || raw.user || raw.user_id || raw.userId || "").trim();
+    const reason = String(raw.reason || raw.justification || raw.user_reason || raw.userReason || "").trim();
+    const expiresAt = String(raw.expires_at || raw.expiresAt || "").trim();
+    const nowMs = Number(context.nowMs || Date.now());
+    const expiresMs = expiresAt ? Date.parse(expiresAt) : NaN;
+    const gaps = [];
+    if (schema !== "ccm-pressure-provenance-provider-dispatch-override-receipt-v1"
+        && schema !== "ccm-worker-context-provider-dispatch-override-receipt-v1")
+        gaps.push("schema");
+    if (raw.approved !== true && raw.user_approved !== true && raw.userApproved !== true)
+        gaps.push("approved");
+    if (raw.risk_accepted !== true && raw.riskAccepted !== true)
+        gaps.push("risk_accepted");
+    if (raw.acknowledges_repair_required !== true && raw.acknowledgesRepairRequired !== true)
+        gaps.push("acknowledges_repair_required");
+    if (!approvedBy)
+        gaps.push("approved_by");
+    if (!reason)
+        gaps.push("reason");
+    if (receiptProject && project && receiptProject.toLowerCase() !== project.toLowerCase())
+        gaps.push("project_mismatch");
+    if (receiptAgentType && agentType && receiptAgentType.toLowerCase() !== agentType.toLowerCase())
+        gaps.push("agent_type_mismatch");
+    if (expiresAt && (!Number.isFinite(expiresMs) || expiresMs <= nowMs))
+        gaps.push("expires_at");
+    if (!["allow_once", "allow", "force_dispatch"].includes(overrideAction))
+        gaps.push("override_action");
+    const valid = gaps.length === 0;
+    const overrideId = String(raw.override_id || raw.overrideId || `provider-dispatch-override:${hashCoordinator([
+        context.groupId || context.group_id || "",
+        project,
+        agentType,
+        approvedBy,
+        reason,
+        raw.approved_at || raw.approvedAt || "",
+    ], 14)}`);
+    return {
+        schema: "ccm-pressure-provenance-provider-dispatch-override-receipt-v1",
+        version: 1,
+        override_id: overrideId,
+        status: valid ? "valid" : "invalid",
+        valid,
+        gaps,
+        override_action: overrideAction,
+        approved: raw.approved === true || raw.user_approved === true || raw.userApproved === true,
+        approved_by: approvedBy,
+        approved_at: raw.approved_at || raw.approvedAt || raw.at || "",
+        risk_accepted: raw.risk_accepted === true || raw.riskAccepted === true,
+        acknowledges_repair_required: raw.acknowledges_repair_required === true || raw.acknowledgesRepairRequired === true,
+        reason,
+        project: receiptProject || project,
+        agent_type: receiptAgentType || agentType,
+        health_status: context.healthStatus || context.health_status || raw.health_status || raw.healthStatus || "",
+        dispatch_policy: context.dispatchPolicy || context.dispatch_policy || raw.dispatch_policy || raw.dispatchPolicy || "",
+        expires_at: expiresAt,
+        source: raw.source || "user_approved_provider_dispatch_override",
+        raw,
+    };
+}
 function buildWorkerContextPreDispatchGateForCoordinator(assignment = {}, packet = {}) {
     const usage = packet.context_usage || packet.contextUsage || {};
     const retry = packet.context_compaction_retry || packet.contextCompactionRetry || null;
+    const providerAdvisory = packet.pressure_provenance_provider_dispatch_advisory
+        || packet.pressureProvenanceProviderDispatchAdvisory
+        || null;
+    const selectedProvider = providerAdvisory?.selected_candidate
+        || providerAdvisory?.selectedCandidate
+        || {};
     const pressureStatus = workerContextUsagePressureStatusForCoordinator(usage);
     const overBudget = pressureStatus === "over_budget";
+    const providerHold = providerAdvisory?.should_hold_dispatch === true
+        || providerAdvisory?.shouldHoldDispatch === true
+        || selectedProvider?.should_hold_dispatch === true
+        || selectedProvider?.shouldHoldDispatch === true
+        || String(selectedProvider?.dispatch_policy || selectedProvider?.dispatchPolicy || providerAdvisory?.dispatch_policy || providerAdvisory?.dispatchPolicy || "") === "hold_until_repair";
+    const providerOverrideReceipt = normalizeProviderDispatchOverrideReceiptForCoordinator(rawProviderDispatchOverrideForCoordinator(assignment, packet), {
+        groupId: assignment.scopeId || assignment.scope_id || providerAdvisory?.groupId || providerAdvisory?.group_id || "",
+        project: assignment.project || packet.project || providerAdvisory?.project || selectedProvider.project || "",
+        agentType: assignment.agentType || assignment.agent_type || packet.agent_type || packet.agentType || selectedProvider.agent_type || selectedProvider.agentType || providerAdvisory?.agent_type || providerAdvisory?.agentType || "",
+        healthStatus: selectedProvider?.health_status || selectedProvider?.healthStatus || providerAdvisory?.health_status || providerAdvisory?.healthStatus || "",
+        dispatchPolicy: selectedProvider?.dispatch_policy || selectedProvider?.dispatchPolicy || providerAdvisory?.dispatch_policy || providerAdvisory?.dispatchPolicy || "",
+    });
+    const providerHoldOverridden = providerHold && providerOverrideReceipt?.valid === true;
+    const providerHoldBlocked = providerHold && !providerHoldOverridden;
+    const blocked = overBudget || providerHoldBlocked;
     const compactRecommended = !!pressureStatus;
     const topCategories = workerContextUsageTopCategoriesForCoordinator(usage);
     const suggestedReductions = Array.isArray(usage.suggested_reductions || usage.suggestedReductions)
@@ -4738,24 +6813,47 @@ function buildWorkerContextPreDispatchGateForCoordinator(assignment = {}, packet
         worker_context_packet_id: packetId,
         usage_status: usage.status || "",
         pressure_status: pressureStatus || usage.status || "ok",
-        dispatch_ready: !overBudget,
-        dispatchReady: !overBudget,
-        blocked: overBudget,
+        dispatch_ready: !blocked,
+        dispatchReady: !blocked,
+        blocked,
         compact_recommended: compactRecommended,
-        must_repair_before_dispatch: overBudget,
-        reason: overBudget
-            ? `WorkerContextPacket over budget before child dispatch: ${Number(usage.total_tokens || 0)}/${Number(usage.max_tokens || 0)} tokens, free=${Number(usage.free_tokens || 0)}.`
-            : compactRecommended
-                ? `WorkerContextPacket ${pressureStatus}; compact recommended before this packet grows further.`
-                : "WorkerContextPacket context usage is within pre-dispatch budget.",
-        repair_source: overBudget ? "worker_context_packet_context_usage_repair" : "",
+        must_repair_before_dispatch: blocked,
+        provider_dispatch_hold: providerHold,
+        provider_dispatch_hold_blocked: providerHoldBlocked,
+        provider_dispatch_hold_overridden: providerHoldOverridden,
+        provider_dispatch_override_receipt: providerOverrideReceipt,
+        provider_dispatch_override_required_followup_repair: providerHoldOverridden,
+        provider_dispatch_override_followup_history: selectedProvider?.provider_override_followup_repaired === true ? {
+            repaired: true,
+            repaired_count: Number(selectedProvider.provider_override_followup_repaired_count || 0),
+            last_completed_at: selectedProvider.provider_override_followup_last_completed_at || "",
+            fresh_after_last_violation: selectedProvider.provider_override_followup_fresh_after_last_violation === true,
+            rel_paths: Array.isArray(selectedProvider.provider_override_followup_rel_paths) ? selectedProvider.provider_override_followup_rel_paths.slice(0, 8) : [],
+            followup_work_item_ids: Array.isArray(selectedProvider.provider_override_followup_work_item_ids) ? selectedProvider.provider_override_followup_work_item_ids.slice(0, 8) : [],
+            override_ids: Array.isArray(selectedProvider.provider_override_followup_override_ids) ? selectedProvider.provider_override_followup_override_ids.slice(0, 8) : [],
+        } : null,
+        pressure_provenance_provider_dispatch_advisory: providerAdvisory,
+        reason: providerHoldBlocked
+            ? `Pressure provenance provider dispatch hold: agentType=${selectedProvider.agent_type || selectedProvider.agentType || packet.agent_type || "unknown"} project=${assignment.project || packet.project || "unknown"} health=${selectedProvider.health_status || selectedProvider.healthStatus || providerAdvisory?.health_status || "critical"}; repair/recovery required before child dispatch.`
+            : providerHoldOverridden
+                ? `Pressure provenance provider dispatch hold overridden by approved receipt ${providerOverrideReceipt?.override_id || ""}; follow-up repair/recovery remains required.`
+                : overBudget
+                    ? `WorkerContextPacket over budget before child dispatch: ${Number(usage.total_tokens || 0)}/${Number(usage.max_tokens || 0)} tokens, free=${Number(usage.free_tokens || 0)}.`
+                    : compactRecommended
+                        ? `WorkerContextPacket ${pressureStatus}; compact recommended before this packet grows further.`
+                        : "WorkerContextPacket context usage is within pre-dispatch budget.",
+        repair_source: providerHoldBlocked ? "worker_context_pressure_provenance_feedback_provider_dispatch_advisory" : overBudget ? "worker_context_packet_context_usage_repair" : "",
         context_compaction_retry: retry,
         auto_retry_status: retry?.status || "",
-        next_step: overBudget
-            ? "compact_worker_context_packet_before_child_dispatch"
-            : compactRecommended
-                ? "prefer_compact_before_large_followup"
-                : "dispatch_child_agent",
+        next_step: providerHoldBlocked
+            ? "repair_pressure_provenance_provider_before_child_dispatch"
+            : providerHoldOverridden
+                ? "dispatch_child_agent_with_provider_override_receipt"
+                : overBudget
+                    ? "compact_worker_context_packet_before_child_dispatch"
+                    : compactRecommended
+                        ? "prefer_compact_before_large_followup"
+                        : "dispatch_child_agent",
         total_tokens: Number(usage.total_tokens || 0),
         max_tokens: Number(usage.max_tokens || 0),
         free_tokens: Number(usage.free_tokens || 0),
@@ -4764,6 +6862,224 @@ function buildWorkerContextPreDispatchGateForCoordinator(assignment = {}, packet
         top_categories: topCategories,
         suggested_reductions: suggestedReductions,
         generated_at: new Date().toISOString(),
+    };
+}
+function buildWorkerContextProviderDispatchDecisionForCoordinator(assignment = {}, packet = {}, gate = {}, options = {}) {
+    const providerAdvisory = gate.pressure_provenance_provider_dispatch_advisory
+        || gate.pressureProvenanceProviderDispatchAdvisory
+        || packet.pressure_provenance_provider_dispatch_advisory
+        || packet.pressureProvenanceProviderDispatchAdvisory
+        || null;
+    const selectedProvider = providerAdvisory?.selected_candidate
+        || providerAdvisory?.selectedCandidate
+        || {};
+    const project = String(assignment.project || packet.project || providerAdvisory?.project || selectedProvider.project || "unknown").trim() || "unknown";
+    const agentType = String(assignment.agentType
+        || assignment.agent_type
+        || assignment.executor
+        || assignment.runner
+        || packet.agent_type
+        || packet.agentType
+        || selectedProvider.agent_type
+        || selectedProvider.agentType
+        || providerAdvisory?.agent_type
+        || providerAdvisory?.agentType
+        || "unknown").trim() || "unknown";
+    const dispatchPolicy = String(selectedProvider.dispatch_policy
+        || selectedProvider.dispatchPolicy
+        || providerAdvisory?.dispatch_policy
+        || providerAdvisory?.dispatchPolicy
+        || (gate.provider_dispatch_hold === true ? "hold_until_repair" : "normal_dispatch")).trim() || "normal_dispatch";
+    const healthStatus = String(selectedProvider.health_status
+        || selectedProvider.healthStatus
+        || providerAdvisory?.health_status
+        || providerAdvisory?.healthStatus
+        || "").trim();
+    const providerHold = gate.provider_dispatch_hold === true
+        || providerAdvisory?.should_hold_dispatch === true
+        || providerAdvisory?.shouldHoldDispatch === true
+        || selectedProvider.should_hold_dispatch === true
+        || selectedProvider.shouldHoldDispatch === true
+        || dispatchPolicy === "hold_until_repair";
+    const providerHoldOverridden = gate.provider_dispatch_hold_overridden === true
+        || gate.providerDispatchHoldOverridden === true;
+    const providerHoldBlocked = providerHold && !providerHoldOverridden;
+    const dispatchReady = gate.dispatch_ready !== false && !providerHoldBlocked;
+    const overrideReceipt = gate.provider_dispatch_override_receipt
+        || gate.providerDispatchOverrideReceipt
+        || normalizeProviderDispatchOverrideReceiptForCoordinator(rawProviderDispatchOverrideForCoordinator(assignment, packet), {
+            groupId: assignment.scopeId || assignment.scope_id || providerAdvisory?.groupId || providerAdvisory?.group_id || options.groupId || options.group_id || "",
+            project,
+            agentType,
+            healthStatus,
+            dispatchPolicy,
+        });
+    const action = providerHoldOverridden && dispatchReady
+        ? "dispatch_with_provider_override"
+        : providerHoldBlocked
+            ? "hold_until_repair"
+            : gate.dispatch_ready === false
+                ? "hold_for_context_repair"
+                : dispatchPolicy === "allow_with_receipt_sampling"
+                    ? "dispatch_with_receipt_sampling"
+                    : dispatchPolicy === "strict_review_before_dispatch"
+                        ? "strict_review_before_dispatch"
+                        : dispatchPolicy === "allow_with_monitoring"
+                            ? "dispatch_with_monitoring"
+                            : "dispatch";
+    const groupId = String(assignment.scopeId || assignment.scope_id || providerAdvisory?.groupId || providerAdvisory?.group_id || options.groupId || options.group_id || "").trim();
+    const at = String(options.at || new Date().toISOString());
+    const decisionId = `provider-dispatch-decision:${hashCoordinator([
+        groupId,
+        assignment.assignmentId || assignment.assignment_id || "",
+        assignment.dispatchKey || assignment.dispatch_key || "",
+        packet.packet_id || "",
+        agentType,
+        project,
+    ], 14)}`;
+    const openRepairItemIds = Array.isArray(selectedProvider.current_open_repair_item_ids || selectedProvider.currentOpenRepairItemIds)
+        ? (selectedProvider.current_open_repair_item_ids || selectedProvider.currentOpenRepairItemIds).slice(0, 8)
+        : [];
+    return {
+        schema: "ccm-worker-context-provider-dispatch-decision-v1",
+        version: 1,
+        decision_id: decisionId,
+        groupId,
+        source: "group_main_agent_pre_dispatch_provider_decision",
+        project,
+        agent_type: agentType,
+        selected_provider: {
+            project,
+            agent_type: agentType,
+            health_status: healthStatus,
+            dispatch_policy: dispatchPolicy,
+            configured: true,
+            provider_override_followup_repaired: selectedProvider.provider_override_followup_repaired === true,
+            provider_override_followup_repaired_count: Number(selectedProvider.provider_override_followup_repaired_count || 0),
+            provider_override_followup_last_completed_at: selectedProvider.provider_override_followup_last_completed_at || "",
+        },
+        assignment_id: assignment.assignmentId || assignment.assignment_id || "",
+        dispatch_key: assignment.dispatchKey || assignment.dispatch_key || "",
+        worker_context_packet_id: packet.packet_id || "",
+        pre_dispatch_gate_id: gate.gate_id || gate.gateId || "",
+        advisory_present: !!providerAdvisory?.schema,
+        pressure_provenance_provider_dispatch_advisory: providerAdvisory?.schema ? providerAdvisory : null,
+        health_status: healthStatus,
+        dispatch_policy: dispatchPolicy,
+        action,
+        decision: action,
+        dispatch_ready: dispatchReady,
+        dispatchReady,
+        should_create_real_task: dispatchReady,
+        provider_dispatch_hold: providerHold,
+        provider_dispatch_hold_blocked: providerHoldBlocked,
+        provider_dispatch_hold_overridden: providerHoldOverridden,
+        requires_repair_before_dispatch: providerHoldBlocked || (gate.dispatch_ready === false && !!gate.repair_source),
+        requires_repair_followup: providerHoldOverridden,
+        requires_receipt_sampling: dispatchPolicy === "allow_with_receipt_sampling",
+        repair_source: gate.repair_source || (providerHoldBlocked ? "worker_context_pressure_provenance_feedback_provider_dispatch_advisory" : ""),
+        next_step: gate.next_step || (providerHold ? "repair_pressure_provenance_provider_before_child_dispatch" : "dispatch_child_agent"),
+        reason: gate.reason || providerAdvisory?.recommendation || "",
+        evidence: {
+            advisory_schema: providerAdvisory?.schema || "",
+            source_policy_action: providerAdvisory?.source_policy_action || providerAdvisory?.sourcePolicyAction || "",
+            source_policy_severity: providerAdvisory?.source_policy_severity || providerAdvisory?.sourcePolicySeverity || "",
+            open_repair_item_ids: openRepairItemIds,
+            provider_override_followup_repaired: selectedProvider.provider_override_followup_repaired === true,
+            provider_override_followup_repaired_count: Number(selectedProvider.provider_override_followup_repaired_count || 0),
+            provider_override_followup_last_completed_at: selectedProvider.provider_override_followup_last_completed_at || "",
+            provider_override_followup_fresh_after_last_violation: selectedProvider.provider_override_followup_fresh_after_last_violation === true,
+            provider_override_followup_work_item_ids: Array.isArray(selectedProvider.provider_override_followup_work_item_ids) ? selectedProvider.provider_override_followup_work_item_ids.slice(0, 8) : [],
+            pre_dispatch_gate_dispatch_ready: gate.dispatch_ready !== false,
+            pre_dispatch_gate_repair_source: gate.repair_source || "",
+        },
+        provider_dispatch_override_receipt: overrideReceipt,
+        override: overrideReceipt || options.override || assignment.provider_dispatch_override || assignment.providerDispatchOverride || null,
+        generated_at: at,
+    };
+}
+function summarizeWorkerContextPacketTypedMemoryPressureRecallForCoordinator(packet = {}) {
+    const memory = packet.memory || packet.group_memory || packet.groupMemory || {};
+    const recall = memory?.group_state?.typedMemory?.recall
+        || memory?.group_state?.typed_memory?.recall
+        || memory?.groupState?.typedMemory?.recall
+        || memory?.typedMemory?.recall
+        || memory?.typed_memory?.recall
+        || memory?.typedMemoryRecall
+        || memory?.typed_memory_recall
+        || null;
+    const scoring = recall?.workerContextPressureScoring || recall?.worker_context_pressure_scoring || {};
+    const feedbackPolicyScoring = recall?.workerContextPressureFeedbackPolicyScoring
+        || recall?.worker_context_pressure_feedback_policy_scoring
+        || {};
+    const provenanceRequiresReceipt = (match = {}) => {
+        const provenance = String(match.provenance_status || match.provenanceStatus || "").trim();
+        return provenance === "disputed_under_repair"
+            || provenance === "stale_evidence_under_repair"
+            || !!String(match.repair_work_item_id || match.repairWorkItemId || match.work_item_id || match.workItemId || "").trim()
+            || match.repair_open === true
+            || match.repairOpen === true;
+    };
+    const docs = (Array.isArray(recall?.recalled) ? recall.recalled : [])
+        .filter((doc) => {
+        const pressure = doc.workerContextPressureRecall || doc.worker_context_pressure_recall || {};
+        const pressureUsage = doc.workerContextPressureUsage || doc.worker_context_pressure_usage || {};
+        const pressureFeedbackPolicy = doc.workerContextPressureFeedbackPolicy || doc.worker_context_pressure_feedback_policy || {};
+        return Number(pressure.adjustment || 0) > 0
+            || Number(pressureUsage.adjustment || 0) !== 0
+            || (Array.isArray(pressureUsage.matched) && pressureUsage.matched.length > 0)
+            || Number(pressureFeedbackPolicy.adjustment || 0) !== 0
+            || pressureFeedbackPolicy.risk_doc === true;
+    })
+        .map((doc) => {
+        const pressure = doc.workerContextPressureRecall || doc.worker_context_pressure_recall || {};
+        const pressureUsage = doc.workerContextPressureUsage || doc.worker_context_pressure_usage || {};
+        const pressureFeedbackPolicy = doc.workerContextPressureFeedbackPolicy || doc.worker_context_pressure_feedback_policy || {};
+        const pressureUsageMatches = Array.isArray(pressureUsage.matched) ? pressureUsage.matched : [];
+        const primaryUsage = pressureUsageMatches.find(provenanceRequiresReceipt) || pressureUsageMatches[0] || {};
+        const requiresMemoryProvenanceUsage = provenanceRequiresReceipt(doc) || pressureUsageMatches.some(provenanceRequiresReceipt);
+        return {
+            rel_path: doc.relPath || doc.rel_path || "",
+            name: doc.name || "",
+            type: doc.type || "",
+            score: Number(doc.score || 0),
+            pressure_adjustment: Number(pressure.adjustment || 0),
+            pressure_status: pressure.pressure_status || scoring.pressure_status || "",
+            kinds: Array.isArray(pressure.kinds) ? pressure.kinds.slice(0, 8) : [],
+            pressure_usage_adjustment: Number(pressureUsage.adjustment || 0),
+            pressure_feedback_policy_adjustment: Number(pressureFeedbackPolicy.adjustment || 0),
+            pressure_feedback_policy_action: pressureFeedbackPolicy.action || "",
+            pressure_feedback_policy_risk_doc: pressureFeedbackPolicy.risk_doc === true,
+            pressure_feedback_policy_repair_first: pressureFeedbackPolicy.repair_first === true,
+            pressure_usage_recommendation: primaryUsage.recommendation || "",
+            pressure_usage_matches: pressureUsageMatches.slice(0, 4).map((match) => ({
+                rel_path: match.rel_path || match.relPath || doc.relPath || doc.rel_path || "",
+                name: match.name || doc.name || "",
+                target_project: match.target_project || match.targetProject || "",
+                recommendation: match.recommendation || "",
+                hint_scope: match.hint_scope || match.hintScope || "",
+                provenance_status: match.provenance_status || match.provenanceStatus || "",
+                repair_work_item_id: match.repair_work_item_id || match.repairWorkItemId || "",
+                repair_status: match.repair_status || match.repairStatus || "",
+                repair_gap_type: match.repair_gap_type || match.repairGapType || "",
+                repair_open: match.repair_open === true || match.repairOpen === true,
+                source_group_count: Number(match.source_group_count || match.sourceGroupCount || 0),
+            })),
+            provenance_status: primaryUsage.provenance_status || primaryUsage.provenanceStatus || "",
+            repair_work_item_id: primaryUsage.repair_work_item_id || primaryUsage.repairWorkItemId || "",
+            repair_status: primaryUsage.repair_status || primaryUsage.repairStatus || "",
+            repair_gap_type: primaryUsage.repair_gap_type || primaryUsage.repairGapType || "",
+            requires_memory_provenance_usage: requiresMemoryProvenanceUsage,
+        };
+    });
+    return {
+        schema: "ccm-worker-context-packet-typed-memory-pressure-recall-v1",
+        active: scoring.active === true || docs.length > 0,
+        pressure_status: scoring.pressure_status || "",
+        boosted_count: docs.length,
+        recalled_count: Array.isArray(recall?.recalled) ? recall.recalled.length : 0,
+        pressure_feedback_policy_scoring: feedbackPolicyScoring?.schema ? feedbackPolicyScoring : null,
+        docs: docs.slice(0, 12),
     };
 }
 function readReplayRepairDispatchPlanLedgerForCoordinator(groupId) {
@@ -4821,6 +7137,11 @@ function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assig
     const gate = assignment.worker_context_pre_dispatch_gate
         || assignment.workerContextPreDispatchGate
         || buildWorkerContextPreDispatchGateForCoordinator(assignment, packet);
+    const providerDispatchDecision = assignment.worker_context_provider_dispatch_decision
+        || assignment.workerContextProviderDispatchDecision
+        || assignment.provider_dispatch_decision
+        || assignment.providerDispatchDecision
+        || buildWorkerContextProviderDispatchDecisionForCoordinator(assignment, packet, gate, { at });
     let rendered = "";
     try {
         rendered = (0, runtime_kernel_1.renderWorkerContextPacket)(packet);
@@ -4832,12 +7153,13 @@ function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assig
         assignment.dispatchKey || assignment.dispatch_key || "",
         packet.packet_id || "",
     ], 14)}`;
-    const entry = {
+    let entry = {
         schema: "ccm-worker-context-packet-assignment-binding-v1",
         binding_id: bindingId,
         groupId,
         source: "worker_context_packet_pre_dispatch_gate",
         project: assignment.project || "",
+        agent_type: assignment.agentType || assignment.agent_type || assignment.executor || assignment.runner || packet.agent_type || packet.agentType || packet.memory?.session_binding?.agent_type || packet.memory?.sessionBinding?.agentType || "unknown",
         assignment_id: assignment.assignmentId || assignment.assignment_id || "",
         dispatch_key: assignment.dispatchKey || assignment.dispatch_key || "",
         task_fingerprint: assignment.taskFingerprint || assignment.task_fingerprint || "",
@@ -4845,6 +7167,13 @@ function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assig
         worker_context_packet_context_usage: packet.context_usage || packet.contextUsage || null,
         worker_context_packet_memory_policy: packet.memory_policy || packet.memoryPolicy || null,
         worker_context_packet_acceptance: packet.acceptance || null,
+        worker_context_packet_pressure_memory_provenance_receipt_discipline: packet.pressure_memory_provenance_receipt_discipline || packet.pressureMemoryProvenanceReceiptDiscipline || null,
+        worker_context_packet_pressure_provenance_dispatch_feedback_policy: packet.pressure_provenance_dispatch_feedback_policy || packet.pressureProvenanceDispatchFeedbackPolicy || null,
+        worker_context_packet_pressure_provenance_provider_dispatch_advisory: packet.pressure_provenance_provider_dispatch_advisory || packet.pressureProvenanceProviderDispatchAdvisory || null,
+        worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract: packet.pressure_provenance_provider_dispatch_override_followup_receipt_contract || packet.pressureProvenanceProviderDispatchOverrideFollowupReceiptContract || null,
+        worker_context_provider_dispatch_decision: providerDispatchDecision,
+        provider_dispatch_decision: providerDispatchDecision,
+        worker_context_provider_dispatch_override_receipt: providerDispatchDecision?.provider_dispatch_override_receipt || providerDispatchDecision?.override || null,
         worker_context_packet_compaction_retry: packet.context_compaction_retry || packet.contextCompactionRetry || null,
         worker_context_packet_partial_compaction: (packet.context_compaction_retry || packet.contextCompactionRetry || {})?.partial_compaction
             || (packet.context_compaction_retry || packet.contextCompactionRetry || {})?.partialCompaction
@@ -4856,6 +7185,7 @@ function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assig
             || null,
         worker_context_packet_compact_hook_run_id: (packet.context_compaction_retry || packet.contextCompactionRetry || {})?.compact_hook_run_id || "",
         worker_context_packet_memory_reinjection_proof: packet.memory_reinjection_proof || packet.memoryReinjectionProof || null,
+        worker_context_packet_typed_memory_pressure_recall: summarizeWorkerContextPacketTypedMemoryPressureRecallForCoordinator(packet),
         worker_context_pre_dispatch_gate: gate,
         dispatch_ready: gate.dispatch_ready !== false,
         dispatchReady: gate.dispatch_ready !== false,
@@ -4868,6 +7198,11 @@ function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assig
                 has_memory_policy: rendered.includes("Memory policy"),
                 has_memory_ignored_policy: rendered.includes("Memory policy：ignored") || rendered.includes("memoryIgnored"),
                 has_memory_reinjection_proof: rendered.includes("Memory reinjection proof"),
+                has_pressure_memory_provenance_receipt_discipline: rendered.includes("Pressure memory provenance receipt discipline"),
+                has_pressure_provenance_dispatch_feedback_policy: rendered.includes("Pressure provenance dispatch feedback policy"),
+                has_pressure_provenance_provider_dispatch_advisory: rendered.includes("Pressure provenance provider dispatch advisory"),
+                has_pressure_provenance_provider_dispatch_override_followup_receipt_contract: rendered.includes("Provider dispatch override follow-up receipt contract"),
+                has_memory_provenance_usage_example: rendered.includes("memoryProvenanceUsage"),
                 has_memory_compaction_hash: !!(packet.memory_reinjection_proof?.expected_compacted_memory_hash || packet.memoryReinjectionProof?.expectedCompactedMemoryHash)
                     && rendered.includes(packet.memory_reinjection_proof?.expected_compacted_memory_hash || packet.memoryReinjectionProof?.expectedCompactedMemoryHash || ""),
                 has_memory_context_compact_marker: rendered.includes("memory-context-compact"),
@@ -4878,6 +7213,14 @@ function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assig
         should_create_real_task: gate.dispatch_ready !== false,
         at,
     };
+    const overrideFollowup = syncProviderDispatchOverrideFollowupRepairWorkItemForCoordinator(groupId, entry, at);
+    if (overrideFollowup) {
+        entry = {
+            ...entry,
+            worker_context_provider_dispatch_override_followup_repair: overrideFollowup,
+            provider_dispatch_override_followup_repair_work_item: overrideFollowup,
+        };
+    }
     const existingIndex = entries.findIndex((item) => item.binding_id === bindingId);
     if (existingIndex >= 0)
         entries[existingIndex] = { ...entries[existingIndex], ...entry, first_seen_at: entries[existingIndex].first_seen_at || entries[existingIndex].at || at, at };
@@ -4894,10 +7237,82 @@ function recordWorkerContextPacketAssignmentBindingForCoordinator(groupId, assig
         workerContextPacketBindingCount: entries.filter((item) => item.worker_context_packet_id).length,
         preDispatchGateCount: entries.filter((item) => item.worker_context_pre_dispatch_gate?.schema === "ccm-worker-context-pre-dispatch-gate-v1").length,
         blockedPreDispatchGateCount: entries.filter((item) => item.worker_context_pre_dispatch_gate?.dispatch_ready === false).length,
+        providerDispatchDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.schema === "ccm-worker-context-provider-dispatch-decision-v1").length,
+        providerDispatchHoldDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.action === "hold_until_repair").length,
+        providerDispatchReadyDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.dispatch_ready === true).length,
+        providerDispatchOverrideDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.action === "dispatch_with_provider_override").length,
+        providerDispatchOverrideFollowupRepairCount: entries.filter((item) => item.worker_context_provider_dispatch_override_followup_repair?.work_item_id).length,
+        providerDispatchOverrideCompletionCount: entries.filter((item) => item.worker_context_provider_dispatch_override_completion?.completion_ok === true).length,
+        providerDispatchOverrideFollowupReceiptContractCount: entries.filter((item) => item.worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract?.active === true).length,
         entries: entries.slice(-160),
     };
     writeJsonAtomicForCoordinator(next.file, next);
     return entry;
+}
+function recordWorkerContextProviderDispatchOverrideCompletionForCoordinator(groupId, input = {}, options = {}) {
+    if (!groupId)
+        return null;
+    const at = String(options.at || input.at || new Date().toISOString());
+    const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+    const entries = Array.isArray(ledger.entries) ? [...ledger.entries] : [];
+    const bindingId = String(input.binding_id || input.bindingId || "").trim();
+    const assignmentId = String(input.assignment_id || input.assignmentId || "").trim();
+    const dispatchKey = String(input.dispatch_key || input.dispatchKey || "").trim();
+    const packetId = String(input.worker_context_packet_id || input.workerContextPacketId || "").trim();
+    const index = entries.findIndex((entry) => {
+        if (bindingId && String(entry.binding_id || "") === bindingId)
+            return true;
+        if (assignmentId && String(entry.assignment_id || "") === assignmentId)
+            return true;
+        if (dispatchKey && String(entry.dispatch_key || "") === dispatchKey)
+            return true;
+        return !!packetId && String(entry.worker_context_packet_id || "") === packetId;
+    });
+    if (index < 0)
+        return null;
+    const entry = entries[index];
+    const decision = entry.worker_context_provider_dispatch_decision || entry.provider_dispatch_decision || {};
+    if (decision.action !== "dispatch_with_provider_override")
+        return null;
+    const completion = buildProviderDispatchOverrideCompletionForCoordinator(entry, input, at);
+    const closure = closeProviderDispatchOverrideFollowupRepairWorkItemForCoordinator(groupId, completion, at);
+    const nextEntry = {
+        ...entry,
+        worker_context_provider_dispatch_override_completion: {
+            ...completion,
+            followup_repair_work_item_completion: closure,
+        },
+        provider_dispatch_override_completion: {
+            ...completion,
+            followup_repair_work_item_completion: closure,
+        },
+        provider_dispatch_override_completion_status: completion.status,
+        provider_dispatch_override_completion_at: at,
+        at,
+    };
+    entries[index] = nextEntry;
+    const next = {
+        schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+        version: ledger.version || 1,
+        groupId,
+        file: ledger.file || getReplayRepairDispatchBindingsFileForCoordinator(groupId),
+        updatedAt: at,
+        bindingCount: entries.length,
+        nativeBindingCount: entries.filter((item) => isApiMicrocompactNativeProofRepairSourceForCoordinator(item.source)).length,
+        workerContextPacketBindingCount: entries.filter((item) => item.worker_context_packet_id).length,
+        preDispatchGateCount: entries.filter((item) => item.worker_context_pre_dispatch_gate?.schema === "ccm-worker-context-pre-dispatch-gate-v1").length,
+        blockedPreDispatchGateCount: entries.filter((item) => item.worker_context_pre_dispatch_gate?.dispatch_ready === false).length,
+        providerDispatchDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.schema === "ccm-worker-context-provider-dispatch-decision-v1").length,
+        providerDispatchHoldDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.action === "hold_until_repair").length,
+        providerDispatchReadyDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.dispatch_ready === true).length,
+        providerDispatchOverrideDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.action === "dispatch_with_provider_override").length,
+        providerDispatchOverrideFollowupRepairCount: entries.filter((item) => item.worker_context_provider_dispatch_override_followup_repair?.work_item_id).length,
+        providerDispatchOverrideCompletionCount: entries.filter((item) => item.worker_context_provider_dispatch_override_completion?.completion_ok === true).length,
+        providerDispatchOverrideFollowupReceiptContractCount: entries.filter((item) => item.worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract?.active === true).length,
+        entries: entries.slice(-160),
+    };
+    writeJsonAtomicForCoordinator(next.file, next);
+    return nextEntry.worker_context_provider_dispatch_override_completion;
 }
 function readReplayRepairDispatchTimelineBindingLedgerForCoordinator(groupId) {
     const file = getReplayRepairDispatchTimelineBindingsFileForCoordinator(groupId);
@@ -4969,6 +7384,477 @@ function replayRepairWorkItemStatsForCoordinator(items = []) {
         completedCount: normalized.filter(status => status === "completed").length,
         cancelledCount: normalized.filter(status => status === "cancelled").length,
     };
+}
+function readReplayRepairWorkItemLedgerForCoordinator(groupId) {
+    const file = getReplayRepairWorkItemsFileForCoordinator(groupId);
+    try {
+        const ledger = JSON.parse(fs.readFileSync(file, "utf-8"));
+        if (ledger && typeof ledger === "object") {
+            return {
+                ...ledger,
+                schema: ledger.schema || "ccm-compact-boundary-replay-repair-work-items-v1",
+                version: ledger.version || 1,
+                groupId: ledger.groupId || groupId,
+                file: ledger.file || file,
+                items: Array.isArray(ledger.items) ? ledger.items : [],
+            };
+        }
+    }
+    catch { }
+    return {
+        schema: "ccm-compact-boundary-replay-repair-work-items-v1",
+        version: 1,
+        groupId,
+        file,
+        updatedAt: "",
+        stats: replayRepairWorkItemStatsForCoordinator([]),
+        items: [],
+    };
+}
+function writeReplayRepairWorkItemLedgerForCoordinator(groupId, items = [], at = new Date().toISOString(), extra = {}) {
+    const ledger = readReplayRepairWorkItemLedgerForCoordinator(groupId);
+    const next = {
+        ...ledger,
+        ...extra,
+        schema: ledger.schema || "ccm-compact-boundary-replay-repair-work-items-v1",
+        version: ledger.version || 1,
+        groupId: ledger.groupId || groupId,
+        file: ledger.file || getReplayRepairWorkItemsFileForCoordinator(groupId),
+        items: items.slice(-160),
+        stats: replayRepairWorkItemStatsForCoordinator(items),
+        updatedAt: at,
+    };
+    writeJsonAtomicForCoordinator(next.file, next);
+    return next;
+}
+function providerDispatchOverrideFollowupWorkItemIdForCoordinator(groupId, entry = {}) {
+    const decision = entry.worker_context_provider_dispatch_decision || entry.provider_dispatch_decision || {};
+    const overrideReceipt = entry.worker_context_provider_dispatch_override_receipt
+        || decision.provider_dispatch_override_receipt
+        || decision.override
+        || {};
+    return `provider-dispatch-override-followup:${hashCoordinator([
+        groupId,
+        decision.decision_id || "",
+        overrideReceipt.override_id || "",
+        entry.assignment_id || "",
+        entry.worker_context_packet_id || "",
+    ], 14)}`;
+}
+function syncProviderDispatchOverrideFollowupRepairWorkItemForCoordinator(groupId, entry = {}, at = new Date().toISOString()) {
+    const decision = entry.worker_context_provider_dispatch_decision || entry.provider_dispatch_decision || {};
+    if (!groupId || decision.action !== "dispatch_with_provider_override")
+        return null;
+    const overrideReceipt = entry.worker_context_provider_dispatch_override_receipt
+        || decision.provider_dispatch_override_receipt
+        || decision.override
+        || {};
+    if (overrideReceipt?.valid !== true)
+        return null;
+    const ledger = readReplayRepairWorkItemLedgerForCoordinator(groupId);
+    const items = Array.isArray(ledger.items) ? [...ledger.items] : [];
+    const workItemId = providerDispatchOverrideFollowupWorkItemIdForCoordinator(groupId, entry);
+    const evidence = [
+        `decision_id=${decision.decision_id || ""}`,
+        `override_id=${overrideReceipt.override_id || ""}`,
+        `assignment_id=${entry.assignment_id || ""}`,
+        `worker_context_packet_id=${entry.worker_context_packet_id || ""}`,
+    ].filter(Boolean);
+    const draft = {
+        schema: "ccm-provider-dispatch-override-followup-repair-work-item-v1",
+        id: workItemId,
+        work_item_id: workItemId,
+        source: "worker_context_pressure_provenance_provider_dispatch_override_followup",
+        component: "worker_context_pressure_provenance_provider_dispatch_override",
+        status: "pending",
+        priority: "high",
+        groupId,
+        project: entry.project || decision.project || "",
+        agent_type: entry.agent_type || decision.agent_type || "unknown",
+        assignment_id: entry.assignment_id || "",
+        dispatch_key: entry.dispatch_key || "",
+        worker_context_packet_id: entry.worker_context_packet_id || "",
+        decision_id: decision.decision_id || "",
+        override_id: overrideReceipt.override_id || "",
+        repair_target: "pressure_provenance_provider_override_followup",
+        expected: "child Agent completion receipt must include memoryProvenanceUsage rows with currentSourceVerified=true after provider override dispatch",
+        prompt_patch: "因为本次 provider hold 被用户结构化 override 放行，完成回执必须补强 memoryProvenanceUsage/currentSourceVerified=true，并说明后续 pressure provenance repair/recovery 证据。",
+        reason: decision.reason || overrideReceipt.reason || "provider dispatch override requires follow-up pressure provenance repair evidence",
+        evidence: uniqueCoordinatorStrings(evidence).slice(0, 24),
+        blockers: [],
+        needs: ["等待 override 子 Agent 完成回执补强 memoryProvenanceUsage/currentSourceVerified=true"],
+        createdAt: at,
+        updatedAt: at,
+    };
+    const existingIndex = items.findIndex((item) => String(item.work_item_id || item.id || "") === workItemId);
+    if (existingIndex >= 0) {
+        const existing = items[existingIndex];
+        items[existingIndex] = {
+            ...existing,
+            ...draft,
+            status: replayRepairWorkItemOpenForCoordinator(existing.status) ? existing.status || "pending" : existing.status,
+            createdAt: existing.createdAt || existing.created_at || draft.createdAt,
+            evidence: uniqueCoordinatorStrings([...(Array.isArray(existing.evidence) ? existing.evidence : []), ...draft.evidence]).slice(-24),
+            needs: replayRepairWorkItemOpenForCoordinator(existing.status) ? uniqueCoordinatorStrings([...(Array.isArray(existing.needs) ? existing.needs : []), ...draft.needs]).slice(-12) : [],
+            updatedAt: at,
+        };
+    }
+    else {
+        items.push(draft);
+    }
+    const next = writeReplayRepairWorkItemLedgerForCoordinator(groupId, items, at, {
+        latestProviderDispatchOverrideFollowup: {
+            work_item_id: workItemId,
+            decision_id: decision.decision_id || "",
+            override_id: overrideReceipt.override_id || "",
+            assignment_id: entry.assignment_id || "",
+            at,
+        },
+    });
+    return {
+        schema: "ccm-provider-dispatch-override-followup-repair-work-item-ref-v1",
+        work_item_id: workItemId,
+        file: next.file,
+        status: (next.items || []).find((item) => String(item.work_item_id || item.id || "") === workItemId)?.status || "pending",
+        source: "worker_context_pressure_provenance_provider_dispatch_override_followup",
+    };
+}
+function pressureProvenanceUsageRowsFromReceiptForCoordinator(receipt = {}) {
+    return [
+        ...(Array.isArray(receipt.memoryProvenanceUsage) ? receipt.memoryProvenanceUsage : []),
+        ...(Array.isArray(receipt.memory_provenance_usage) ? receipt.memory_provenance_usage : []),
+        ...(Array.isArray(receipt.pressureMemoryProvenanceUsage) ? receipt.pressureMemoryProvenanceUsage : []),
+        ...(Array.isArray(receipt.pressure_memory_provenance_usage) ? receipt.pressure_memory_provenance_usage : []),
+    ].filter((row) => row && typeof row === "object");
+}
+function buildProviderDispatchOverrideCompletionForCoordinator(entry = {}, input = {}, at = new Date().toISOString()) {
+    const receipt = input.receipt || input.ccm_receipt || input.delivery_summary || {};
+    const rows = pressureProvenanceUsageRowsFromReceiptForCoordinator(receipt);
+    const verifiedRows = rows.filter((row) => row.currentSourceVerified === true || row.current_source_verified === true);
+    const receiptStatus = String(input.receipt_status || input.receiptStatus || receipt.status || "").trim().toLowerCase();
+    const statusDone = ["done", "completed", "ok", "success"].includes(receiptStatus);
+    const completionOk = statusDone && rows.length > 0 && verifiedRows.length === rows.length;
+    const decision = entry.worker_context_provider_dispatch_decision || entry.provider_dispatch_decision || {};
+    const overrideReceipt = entry.worker_context_provider_dispatch_override_receipt
+        || decision.provider_dispatch_override_receipt
+        || decision.override
+        || {};
+    return {
+        schema: "ccm-worker-context-provider-dispatch-override-completion-v1",
+        completion_id: `provider-dispatch-override-completion:${hashCoordinator([
+            entry.binding_id || "",
+            entry.assignment_id || "",
+            entry.worker_context_packet_id || "",
+            input.task_id || input.taskId || "",
+            input.execution_id || input.executionId || "",
+        ], 14)}`,
+        status: completionOk ? "completed" : "needs_repair",
+        groupId: entry.groupId || input.groupId || input.group_id || "",
+        project: entry.project || input.project || "",
+        agent_type: entry.agent_type || input.agent_type || input.agentType || "unknown",
+        binding_id: entry.binding_id || "",
+        assignment_id: entry.assignment_id || input.assignment_id || input.assignmentId || "",
+        dispatch_key: entry.dispatch_key || input.dispatch_key || input.dispatchKey || "",
+        worker_context_packet_id: entry.worker_context_packet_id || input.worker_context_packet_id || input.workerContextPacketId || "",
+        decision_id: decision.decision_id || "",
+        override_id: overrideReceipt.override_id || "",
+        followup_work_item_id: entry.worker_context_provider_dispatch_override_followup_repair?.work_item_id
+            || entry.provider_dispatch_override_followup_repair_work_item?.work_item_id
+            || "",
+        task_id: input.task_id || input.taskId || "",
+        worker_handoff_id: input.worker_handoff_id || input.workerHandoffId || "",
+        task_agent_session_id: input.task_agent_session_id || input.taskAgentSessionId || "",
+        native_session_id: input.native_session_id || input.nativeSessionId || "",
+        execution_id: input.execution_id || input.executionId || "",
+        memory_context_snapshot_id: input.memory_context_snapshot_id || input.memoryContextSnapshotId || "",
+        memory_context_snapshot_checksum: input.memory_context_snapshot_checksum || input.memoryContextSnapshotChecksum || "",
+        receipt_status: receiptStatus,
+        receipt,
+        memory_provenance_usage_count: rows.length,
+        current_source_verified_count: verifiedRows.length,
+        completion_ok: completionOk,
+        reason: completionOk
+            ? "override child-agent completion receipt supplied verified memoryProvenanceUsage follow-up evidence"
+            : "override child-agent completion receipt missing verified memoryProvenanceUsage follow-up evidence",
+        at,
+    };
+}
+function providerOverrideFollowupContractStringListForCoordinator(value, limit = 16) {
+    const raw = Array.isArray(value)
+        ? value
+        : value === undefined || value === null || value === "" ? [] : [value];
+    const out = [];
+    const seen = new Set();
+    for (const item of raw) {
+        const text = String(item || "").trim();
+        const key = text.toLowerCase();
+        if (!text || seen.has(key))
+            continue;
+        seen.add(key);
+        out.push(text);
+        if (out.length >= limit)
+            break;
+    }
+    return out;
+}
+function providerOverrideFollowupContractReceiptRowValueForCoordinator(row = {}, keys = []) {
+    for (const key of keys) {
+        const value = row[key];
+        if (value !== undefined && value !== null && String(value || "").trim())
+            return String(value || "").trim();
+    }
+    return "";
+}
+function providerOverrideFollowupContractReceiptRowReverifiedForCoordinator(row = {}) {
+    return row.providerDispatchOverrideFollowupHistoryReverified === true
+        || row.provider_dispatch_override_followup_history_reverified === true
+        || row.providerOverrideFollowupHistoryReverified === true
+        || row.provider_override_followup_history_reverified === true;
+}
+function providerOverrideFollowupContractReceiptRowMatchesForCoordinator(row = {}, kind, value) {
+    const target = String(value || "").trim().toLowerCase();
+    if (!target)
+        return false;
+    if (kind === "rel_path") {
+        return providerOverrideFollowupContractReceiptRowValueForCoordinator(row, ["relPath", "rel_path", "path", "memoryRelPath", "memory_rel_path"]).toLowerCase() === target;
+    }
+    if (kind === "work_item") {
+        return providerOverrideFollowupContractReceiptRowValueForCoordinator(row, ["repairWorkItemId", "repair_work_item_id", "workItemId", "work_item_id"]).toLowerCase() === target;
+    }
+    if (kind === "override") {
+        return providerOverrideFollowupContractReceiptRowValueForCoordinator(row, ["providerDispatchOverrideId", "provider_dispatch_override_id", "overrideId", "override_id"]).toLowerCase() === target;
+    }
+    return false;
+}
+function buildProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(entry = {}, input = {}, at = new Date().toISOString()) {
+    const contract = entry.worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract
+        || entry.workerContextPacketPressureProvenanceProviderDispatchOverrideFollowupReceiptContract
+        || {};
+    const receipt = input.receipt || input.ccm_receipt || input.delivery_summary || {};
+    const rows = pressureProvenanceUsageRowsFromReceiptForCoordinator(receipt);
+    const receiptStatus = String(input.receipt_status || input.receiptStatus || receipt.status || "").trim().toLowerCase();
+    const statusDone = ["done", "completed", "ok", "success"].includes(receiptStatus);
+    const relPaths = providerOverrideFollowupContractStringListForCoordinator(contract.rel_paths || contract.relPaths, 24);
+    const workItemIds = providerOverrideFollowupContractStringListForCoordinator(contract.followup_work_item_ids || contract.followupWorkItemIds, 24);
+    const overrideIds = providerOverrideFollowupContractStringListForCoordinator(contract.override_ids || contract.overrideIds, 24);
+    const reverifiedRows = rows.filter(providerOverrideFollowupContractReceiptRowReverifiedForCoordinator);
+    const verifiedRows = rows.filter((row) => row.currentSourceVerified === true || row.current_source_verified === true || row.verified === true);
+    const contractRows = rows.filter((row) => providerOverrideFollowupContractReceiptRowReverifiedForCoordinator(row)
+        || String(row.repairGapType || row.repair_gap_type || "").trim() === "provider_dispatch_override_followup");
+    const gaps = [];
+    if (contract.schema !== "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-contract-v1" || contract.active !== true) {
+        gaps.push({ code: "missing_contract", reason: "binding missing active provider override follow-up receipt contract" });
+    }
+    if (!statusDone)
+        gaps.push({ code: "receipt_status_not_done", reason: `receipt status ${receiptStatus || "missing"} is not done/completed/ok` });
+    if (!rows.length)
+        gaps.push({ code: "missing_memory_provenance_usage", reason: "receipt missing memoryProvenanceUsage rows" });
+    if (!contractRows.length)
+        gaps.push({ code: "missing_provider_override_followup_reverified_rows", reason: "receipt missing provider override follow-up reverified memoryProvenanceUsage rows" });
+    const missingRelPaths = relPaths.filter(item => !rows.some((row) => providerOverrideFollowupContractReceiptRowMatchesForCoordinator(row, "rel_path", item)
+        && providerOverrideFollowupContractReceiptRowReverifiedForCoordinator(row)
+        && (row.currentSourceVerified === true || row.current_source_verified === true || row.verified === true)));
+    const missingWorkItems = workItemIds.filter(item => !rows.some((row) => providerOverrideFollowupContractReceiptRowMatchesForCoordinator(row, "work_item", item)
+        && providerOverrideFollowupContractReceiptRowReverifiedForCoordinator(row)
+        && (row.currentSourceVerified === true || row.current_source_verified === true || row.verified === true)));
+    const missingOverrideIds = overrideIds.filter(item => !rows.some((row) => providerOverrideFollowupContractReceiptRowMatchesForCoordinator(row, "override", item)
+        && providerOverrideFollowupContractReceiptRowReverifiedForCoordinator(row)
+        && (row.currentSourceVerified === true || row.current_source_verified === true || row.verified === true)));
+    if (missingRelPaths.length)
+        gaps.push({ code: "missing_rel_path_coverage", reason: `receipt missing reverified relPath coverage: ${missingRelPaths.join(", ")}`, missing: missingRelPaths });
+    if (missingWorkItems.length)
+        gaps.push({ code: "missing_followup_work_item_coverage", reason: `receipt missing reverified follow-up work item coverage: ${missingWorkItems.join(", ")}`, missing: missingWorkItems });
+    if (missingOverrideIds.length)
+        gaps.push({ code: "missing_override_id_coverage", reason: `receipt missing reverified override id coverage: ${missingOverrideIds.join(", ")}`, missing: missingOverrideIds });
+    for (const row of contractRows) {
+        const rowLabel = providerOverrideFollowupContractReceiptRowValueForCoordinator(row, ["relPath", "rel_path", "repairWorkItemId", "repair_work_item_id", "providerDispatchOverrideId", "provider_dispatch_override_id"]) || "provider override follow-up row";
+        if (!(row.currentSourceVerified === true || row.current_source_verified === true || row.verified === true)) {
+            gaps.push({ code: "current_source_verified_missing", reason: `${rowLabel} missing currentSourceVerified=true` });
+        }
+        if (!String(row.usageState || row.usage_state || "").trim())
+            gaps.push({ code: "usage_state_missing", reason: `${rowLabel} missing usageState` });
+        if (!String(row.repairStatus || row.repair_status || "").trim())
+            gaps.push({ code: "repair_status_missing", reason: `${rowLabel} missing repairStatus` });
+        if (String(row.repairGapType || row.repair_gap_type || "").trim() !== "provider_dispatch_override_followup") {
+            gaps.push({ code: "repair_gap_type_mismatch", reason: `${rowLabel} missing repairGapType=provider_dispatch_override_followup` });
+        }
+    }
+    const contractSatisfied = contract.schema === "ccm-pressure-provenance-provider-dispatch-override-followup-receipt-contract-v1"
+        && contract.active === true
+        && statusDone
+        && rows.length > 0
+        && contractRows.length > 0
+        && gaps.length === 0;
+    return {
+        schema: "ccm-worker-context-provider-dispatch-override-followup-receipt-contract-validation-v1",
+        validation_id: `provider-dispatch-override-followup-receipt-contract-validation:${hashCoordinator([
+            entry.binding_id || "",
+            entry.assignment_id || "",
+            entry.worker_context_packet_id || "",
+            input.task_id || input.taskId || "",
+            input.execution_id || input.executionId || "",
+        ], 14)}`,
+        groupId: entry.groupId || input.groupId || input.group_id || "",
+        project: entry.project || input.project || "",
+        agent_type: entry.agent_type || input.agent_type || input.agentType || "unknown",
+        binding_id: entry.binding_id || "",
+        assignment_id: entry.assignment_id || input.assignment_id || input.assignmentId || "",
+        dispatch_key: entry.dispatch_key || input.dispatch_key || input.dispatchKey || "",
+        worker_context_packet_id: entry.worker_context_packet_id || input.worker_context_packet_id || input.workerContextPacketId || "",
+        task_id: input.task_id || input.taskId || "",
+        worker_handoff_id: input.worker_handoff_id || input.workerHandoffId || "",
+        task_agent_session_id: input.task_agent_session_id || input.taskAgentSessionId || "",
+        native_session_id: input.native_session_id || input.nativeSessionId || "",
+        execution_id: input.execution_id || input.executionId || "",
+        receipt_status: receiptStatus,
+        receipt,
+        contract,
+        contract_required: contract.active === true,
+        contract_satisfied: contractSatisfied,
+        status: contractSatisfied ? "passed" : "failed",
+        memory_provenance_usage_count: rows.length,
+        provider_override_followup_reverified_row_count: reverifiedRows.length,
+        current_source_verified_count: verifiedRows.length,
+        contract_row_count: contractRows.length,
+        required_rel_path_count: relPaths.length,
+        covered_rel_path_count: Math.max(0, relPaths.length - missingRelPaths.length),
+        required_followup_work_item_count: workItemIds.length,
+        covered_followup_work_item_count: Math.max(0, workItemIds.length - missingWorkItems.length),
+        required_override_id_count: overrideIds.length,
+        covered_override_id_count: Math.max(0, overrideIds.length - missingOverrideIds.length),
+        gaps,
+        reason: contractSatisfied
+            ? "provider override follow-up receipt contract satisfied by reverified memoryProvenanceUsage rows"
+            : "provider override follow-up receipt contract missing required reverified memoryProvenanceUsage evidence",
+        at,
+    };
+}
+function recordWorkerContextProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(groupId, input = {}, options = {}) {
+    if (!groupId)
+        return null;
+    const at = String(options.at || input.at || new Date().toISOString());
+    const ledger = readReplayRepairDispatchBindingLedgerForCoordinator(groupId);
+    const entries = Array.isArray(ledger.entries) ? [...ledger.entries] : [];
+    const bindingId = String(input.binding_id || input.bindingId || "").trim();
+    const assignmentId = String(input.assignment_id || input.assignmentId || "").trim();
+    const dispatchKey = String(input.dispatch_key || input.dispatchKey || "").trim();
+    const packetId = String(input.worker_context_packet_id || input.workerContextPacketId || "").trim();
+    const index = entries.findIndex((entry) => {
+        if (bindingId && String(entry.binding_id || "") === bindingId)
+            return true;
+        if (assignmentId && String(entry.assignment_id || "") === assignmentId)
+            return true;
+        if (dispatchKey && String(entry.dispatch_key || "") === dispatchKey)
+            return true;
+        return !!packetId && String(entry.worker_context_packet_id || "") === packetId;
+    });
+    if (index < 0)
+        return null;
+    const entry = entries[index];
+    const validation = buildProviderDispatchOverrideFollowupReceiptContractValidationForCoordinator(entry, input, at);
+    const nextEntry = {
+        ...entry,
+        worker_context_provider_dispatch_override_followup_receipt_contract_validation: validation,
+        provider_dispatch_override_followup_receipt_contract_validation: validation,
+        provider_dispatch_override_followup_receipt_contract_validation_status: validation.status,
+        provider_dispatch_override_followup_receipt_contract_validation_at: at,
+        worker_context_packet_receipt: input.receipt || input.ccm_receipt || input.delivery_summary || entry.worker_context_packet_receipt || null,
+        receipt_status: validation.receipt_status || entry.receipt_status || "",
+        task_id: input.task_id || input.taskId || entry.task_id || "",
+        worker_handoff_id: input.worker_handoff_id || input.workerHandoffId || entry.worker_handoff_id || "",
+        task_agent_session_id: input.task_agent_session_id || input.taskAgentSessionId || entry.task_agent_session_id || "",
+        native_session_id: input.native_session_id || input.nativeSessionId || entry.native_session_id || "",
+        execution_id: input.execution_id || input.executionId || entry.execution_id || "",
+        at,
+    };
+    entries[index] = nextEntry;
+    const next = {
+        schema: "ccm-replay-repair-main-agent-dispatch-brief-assignment-ledger-v1",
+        version: ledger.version || 1,
+        groupId,
+        file: ledger.file || getReplayRepairDispatchBindingsFileForCoordinator(groupId),
+        updatedAt: at,
+        bindingCount: entries.length,
+        nativeBindingCount: entries.filter((item) => isApiMicrocompactNativeProofRepairSourceForCoordinator(item.source)).length,
+        workerContextPacketBindingCount: entries.filter((item) => item.worker_context_packet_id).length,
+        preDispatchGateCount: entries.filter((item) => item.worker_context_pre_dispatch_gate?.schema === "ccm-worker-context-pre-dispatch-gate-v1").length,
+        blockedPreDispatchGateCount: entries.filter((item) => item.worker_context_pre_dispatch_gate?.dispatch_ready === false).length,
+        providerDispatchDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.schema === "ccm-worker-context-provider-dispatch-decision-v1").length,
+        providerDispatchHoldDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.action === "hold_until_repair").length,
+        providerDispatchReadyDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.dispatch_ready === true).length,
+        providerDispatchOverrideDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.action === "dispatch_with_provider_override").length,
+        providerDispatchOverrideFollowupRepairCount: entries.filter((item) => item.worker_context_provider_dispatch_override_followup_repair?.work_item_id).length,
+        providerDispatchOverrideCompletionCount: entries.filter((item) => item.worker_context_provider_dispatch_override_completion?.completion_ok === true).length,
+        providerDispatchOverrideFollowupReceiptContractCount: entries.filter((item) => item.worker_context_packet_pressure_provenance_provider_dispatch_override_followup_receipt_contract?.active === true).length,
+        providerDispatchOverrideFollowupReceiptContractValidationCount: entries.filter((item) => item.worker_context_provider_dispatch_override_followup_receipt_contract_validation?.schema === "ccm-worker-context-provider-dispatch-override-followup-receipt-contract-validation-v1").length,
+        providerDispatchOverrideFollowupReceiptContractValidationPassedCount: entries.filter((item) => item.worker_context_provider_dispatch_override_followup_receipt_contract_validation?.contract_satisfied === true).length,
+        providerDispatchOverrideFollowupReceiptContractValidationFailedCount: entries.filter((item) => item.worker_context_provider_dispatch_override_followup_receipt_contract_validation?.status === "failed").length,
+        entries: entries.slice(-160),
+    };
+    writeJsonAtomicForCoordinator(next.file, next);
+    return validation;
+}
+function closeProviderDispatchOverrideFollowupRepairWorkItemForCoordinator(groupId, completion = {}, at = new Date().toISOString()) {
+    if (!groupId || completion.completion_ok !== true || !completion.followup_work_item_id)
+        return { closed: 0, itemIds: [] };
+    const ledger = readReplayRepairWorkItemLedgerForCoordinator(groupId);
+    const items = Array.isArray(ledger.items) ? [...ledger.items] : [];
+    let closed = 0;
+    const itemIds = [];
+    const nextItems = items.map((item) => {
+        const itemId = String(item.work_item_id || item.id || "").trim();
+        if (itemId !== String(completion.followup_work_item_id || "").trim())
+            return item;
+        if (!replayRepairWorkItemOpenForCoordinator(item.status))
+            return item;
+        closed += 1;
+        itemIds.push(itemId);
+        return {
+            ...item,
+            status: "completed",
+            updatedAt: at,
+            completedAt: item.completedAt || item.completed_at || at,
+            completion_source: "provider_dispatch_override_completion_receipt",
+            resolutionReason: "override_child_agent_receipt_verified_pressure_provenance_followup",
+            provider_dispatch_override_completion: {
+                completion_id: completion.completion_id || "",
+                decision_id: completion.decision_id || "",
+                override_id: completion.override_id || "",
+                task_id: completion.task_id || "",
+                task_agent_session_id: completion.task_agent_session_id || "",
+                execution_id: completion.execution_id || "",
+                receipt_status: completion.receipt_status || "",
+                memory_provenance_usage_count: completion.memory_provenance_usage_count || 0,
+                current_source_verified_count: completion.current_source_verified_count || 0,
+                completed_at: at,
+            },
+            blockers: [],
+            needs: [],
+            evidence: uniqueCoordinatorStrings([
+                ...(Array.isArray(item.evidence) ? item.evidence : []),
+                `completion_id=${completion.completion_id || ""}`,
+                `task_agent_session_id=${completion.task_agent_session_id || ""}`,
+                `execution_id=${completion.execution_id || ""}`,
+                `memory_provenance_usage_count=${completion.memory_provenance_usage_count || 0}`,
+            ]).slice(-24),
+            verification: uniqueCoordinatorStrings([
+                ...(Array.isArray(item.verification) ? item.verification : []),
+                "override completion receipt supplied verified pressure provenance follow-up evidence",
+            ]).slice(-24),
+        };
+    });
+    if (!closed)
+        return { closed: 0, itemIds: [] };
+    writeReplayRepairWorkItemLedgerForCoordinator(groupId, nextItems, at, {
+        latestProviderDispatchOverrideCompletion: {
+            completion_id: completion.completion_id || "",
+            work_item_id: completion.followup_work_item_id || "",
+            closed,
+            itemIds,
+            at,
+        },
+    });
+    return { closed, itemIds };
 }
 function timelineBindingHasRequiredNativeRepairEvidence(binding = {}) {
     if (!isTimelineClosableNativeRepairSourceForCoordinator(binding.source))
@@ -5554,6 +8440,17 @@ function recordReplayRepairDispatchBriefAssignmentBinding(groupId, assignment = 
         source_worker_context_packet_binding_id: brief.worker_context_packet_binding_id || brief.binding_id || "",
         source_worker_context_packet_memory_policy_reason: brief.worker_context_packet_memory_policy_reason || "",
         worker_context_packet_context_usage: packetProbe.context_usage,
+        worker_context_provider_dispatch_decision: assignment.worker_context_provider_dispatch_decision
+            || assignment.workerContextProviderDispatchDecision
+            || assignment.provider_dispatch_decision
+            || assignment.providerDispatchDecision
+            || null,
+        worker_context_provider_dispatch_override_receipt: (assignment.worker_context_provider_dispatch_decision
+            || assignment.workerContextProviderDispatchDecision
+            || assignment.provider_dispatch_decision
+            || assignment.providerDispatchDecision
+            || {})?.provider_dispatch_override_receipt
+            || null,
         proof_entry_id: brief.proof_entry_id || "",
         request_patch_checksum: brief.request_patch_checksum || "",
         provider_reproof_status: brief.provider_reproof_status || "",
@@ -5591,6 +8488,11 @@ function recordReplayRepairDispatchBriefAssignmentBinding(groupId, assignment = 
         updatedAt: at,
         bindingCount: entries.length,
         nativeBindingCount: entries.filter((item) => isApiMicrocompactNativeProofRepairSourceForCoordinator(item.source)).length,
+        workerContextPacketBindingCount: entries.filter((item) => item.worker_context_packet_id).length,
+        providerDispatchDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.schema === "ccm-worker-context-provider-dispatch-decision-v1").length,
+        providerDispatchHoldDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.action === "hold_until_repair").length,
+        providerDispatchReadyDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.dispatch_ready === true).length,
+        providerDispatchOverrideDecisionCount: entries.filter((item) => item.worker_context_provider_dispatch_decision?.action === "dispatch_with_provider_override").length,
         entries: entries.slice(-120),
     };
     writeJsonAtomicForCoordinator(next.file, next);
@@ -5602,6 +8504,16 @@ function buildReplayRepairDispatchBriefForCoordinator(groupId, candidate = {}, i
     const nativeBinding = candidateNativeBindingForCoordinator(candidate);
     const nativeProofSource = isApiMicrocompactNativeProofRepairSourceForCoordinator(candidate.source);
     const ignoreMemoryReceiptSource = String(candidate.source || "") === "worker_context_ignore_memory_receipt_repair";
+    const pressureMemoryProvenanceReceiptSource = String(candidate.source || "") === "worker_context_pressure_memory_provenance_receipt_repair";
+    const pressureProvenanceRelPaths = Array.isArray(candidate.pressure_memory_provenance_rel_paths)
+        ? candidate.pressure_memory_provenance_rel_paths.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+        : [];
+    const pressureProvenanceRepairIds = Array.isArray(candidate.pressure_memory_provenance_repair_work_item_ids)
+        ? candidate.pressure_memory_provenance_repair_work_item_ids.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+        : [];
+    const pressureProvenanceGapCodes = Array.isArray(candidate.pressure_memory_provenance_gap_codes)
+        ? candidate.pressure_memory_provenance_gap_codes.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 12)
+        : [];
     const briefId = `replay-repair-dispatch-brief:${hashCoordinator([groupId, workItemId, targetProject, candidate.candidate_id || ""], 14)}`;
     const workerTask = [
         `主 Agent Replay Repair 工作简报：${targetProject}`,
@@ -5613,6 +8525,9 @@ function buildReplayRepairDispatchBriefForCoordinator(groupId, candidate = {}, i
         `优先级：${candidate.priority || "medium"}`,
         candidate.source ? `来源类型：${candidate.source}` : "",
         nativeBinding.length ? `native proof 绑定：${nativeBinding.join("；")}` : "",
+        pressureMemoryProvenanceReceiptSource && pressureProvenanceRelPaths.length ? `pressure memory docs：${pressureProvenanceRelPaths.join("；")}` : "",
+        pressureMemoryProvenanceReceiptSource && pressureProvenanceRepairIds.length ? `pressure repair work items：${pressureProvenanceRepairIds.join("；")}` : "",
+        pressureMemoryProvenanceReceiptSource && pressureProvenanceGapCodes.length ? `provenance receipt gaps：${pressureProvenanceGapCodes.join("；")}` : "",
         "",
         "执行边界：只有当前用户消息或主 Agent 明确把本简报派发给你时，才执行修复；如果只是作为上下文注入，不要自行创建额外任务。",
         "",
@@ -5627,11 +8542,15 @@ function buildReplayRepairDispatchBriefForCoordinator(groupId, candidate = {}, i
             ? "- 对 API microcompact native_applied 修复，必须证明 nativeApplyStrongProof=true、requestTelemetrySessionBound=true、requestTelemetryDispatchBound=true，并保留 runnerRequestId/executionId 绑定。"
             : ignoreMemoryReceiptSource
                 ? "- 对 ignore-memory receipt 修复，不得重新注入或使用群聊/typed/global 记忆；只要求补齐 corrected CCM_AGENT_RECEIPT.memoryIgnored，并证明 memoryUsed 未声明历史记忆。"
-                : "- 必须证明压缩后子 Agent 记忆包能重新包含缺失上下文。",
+                : pressureMemoryProvenanceReceiptSource
+                    ? "- 对 pressure memory provenance receipt 修复，只要求补齐 corrected CCM_AGENT_RECEIPT.memoryProvenanceUsage；每条 under-repair pressure MEMORY.md 必须声明 relPath、usageState、provenanceStatus、repairWorkItemId、repairStatus、repairGapType；若 used/verified，必须 currentSourceVerified=true。"
+                    : "- 必须证明压缩后子 Agent 记忆包能重新包含缺失上下文。",
         "",
         ignoreMemoryReceiptSource
             ? "回执要求：最后追加 corrected CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、memoryUsed、memoryIgnored；memoryIgnored 必须声明 user_requested_ignore_memory / must_not_use_group_memory，memoryUsed 不得声明任何群聊/typed/global 历史记忆。"
-            : "回执要求：最后追加 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs；如果是 native proof 修复，还要写明 proof_entry_id、request_patch_checksum、runner_request_id。"
+            : pressureMemoryProvenanceReceiptSource
+                ? "回执要求：最后追加 corrected CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs、memoryUsed、memoryIgnored、memoryProvenanceUsage；memoryProvenanceUsage 必须逐条覆盖上述 pressure memory docs / repair work items，disputed_under_repair 或 stale_evidence_under_repair 被 used/verified 时必须 currentSourceVerified=true。"
+                : "回执要求：最后追加 CCM_AGENT_RECEIPT，写明 status、summary、actions、filesChanged、verification、blockers、needs；如果是 native proof 修复，还要写明 proof_entry_id、request_patch_checksum、runner_request_id。"
     ].filter(Boolean).join("\n");
     return {
         schema: "ccm-replay-repair-main-agent-dispatch-brief-v1",
@@ -5656,6 +8575,9 @@ function buildReplayRepairDispatchBriefForCoordinator(groupId, candidate = {}, i
         binding_id: candidate.binding_id || candidate.worker_context_packet_binding_id || "",
         assignment_id: candidate.assignment_id || "",
         dispatch_key: candidate.dispatch_key || "",
+        pressure_memory_provenance_gap_codes: pressureProvenanceGapCodes,
+        pressure_memory_provenance_repair_work_item_ids: pressureProvenanceRepairIds,
+        pressure_memory_provenance_rel_paths: pressureProvenanceRelPaths,
         provider_reproof_status: candidate.provider_reproof_status || "",
         provider_reproof_reason: candidate.provider_reproof_reason || "",
         reproof_candidate_id: candidate.reproof_candidate_id || "",

@@ -1,4 +1,6 @@
 import { EvidenceItem, TestAgentReport, TestAgentVerdict } from "./types";
+import { buildAcceptanceSummary } from "./acceptance-summary";
+import { buildRequiredCheckSummary } from "./required-check-summary";
 
 function countStatuses(items: Array<{ status: string }>) {
   const counts: Record<string, number> = {};
@@ -65,6 +67,8 @@ export function buildTestAgentVerdict(report: TestAgentReport): TestAgentVerdict
   const failedAcceptanceCriteria = report.acceptanceCoverage.filter(item => item.status === "not_verified");
   const unknownAcceptanceCriteria = report.acceptanceCoverage.filter(item => item.status === "unknown");
   const canAccept = report.status === "passed" && report.recommendation === "accept";
+  const requiredCheckSummary = buildRequiredCheckSummary(report.requiredCheckCoverage);
+  const acceptanceSummary = buildAcceptanceSummary(report.acceptanceCoverage);
   return {
     schema: "ccm-test-agent-verdict-v1",
     agent: "test-agent",
@@ -82,6 +86,8 @@ export function buildTestAgentVerdict(report: TestAgentReport): TestAgentVerdict
     unknownRequiredChecks,
     failedAcceptanceCriteria,
     unknownAcceptanceCriteria,
+    requiredCheckSummary,
+    acceptanceSummary,
     blockedReasons: report.blockedReasons.slice(0, 12),
     risks: report.risks.slice(0, 20),
     nextActions: nextActionsFor(report, failedRequiredChecks, unknownRequiredChecks),
@@ -96,10 +102,14 @@ export function buildTestAgentVerdict(report: TestAgentReport): TestAgentVerdict
       browserFailedActions: browserInteractionCount(report, "failedActions"),
       browserAssertions: browserInteractionCount(report, "assertionCount"),
       browserFailedAssertions: browserInteractionCount(report, "failedAssertions"),
+      browserProviderGaps: (report.browserProviderGaps || []).length,
       artifacts: report.evidence.filter(item => item.type === "artifact" && item.path).length,
     },
     browserNetworkSummary: report.browserNetworkSummary || [],
     browserInteractionSummary: report.browserInteractionSummary || [],
+    browserProviderSummary: report.browserProviderSummary,
+    browserProviderGaps: report.browserProviderGaps || [],
+    failureSummary: report.failureSummary || [],
     keyEvidence: shortEvidence(report.evidence),
     artifacts: artifactFiles(report),
     metadata: {

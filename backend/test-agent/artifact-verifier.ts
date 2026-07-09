@@ -547,6 +547,15 @@ function validateVideoArtifact(filePath: string) {
   throw new Error(`Expected WebM/MP4/MOV container signature for browser video artifact${ext ? ` (${ext})` : ""}.`);
 }
 
+function validateAccessibilitySnapshotArtifact(filePath: string) {
+  const text = fs.readFileSync(filePath, "utf-8");
+  const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (!lines.length) throw new Error("Accessibility snapshot artifact is empty.");
+  const roleLines = lines.filter(line => /^-\s+[a-z][a-z0-9_-]*(\s|$)/i.test(line));
+  if (!roleLines.length) throw new Error("Accessibility snapshot artifact does not contain any role/name lines.");
+  return { format: "text:accessibility-snapshot", entries: roleLines.length };
+}
+
 function verifyBrowserEvidenceArtifactMetadata(
   manifestPath: string,
   manifestFiles: TestAgentArtifactManifestItem[],
@@ -554,12 +563,14 @@ function verifyBrowserEvidenceArtifactMetadata(
 ): TestAgentArtifactVerificationItem[] {
   return manifestFiles.flatMap((item, index) => {
     const type = item.type;
-    if (type !== "browser_trace" && type !== "browser_har" && type !== "browser_video") return [];
+    if (type !== "browser_trace" && type !== "browser_har" && type !== "browser_video" && type !== "browser_accessibility_snapshot") return [];
     const verificationType = type === "browser_trace"
       ? "browser_trace_zip"
       : type === "browser_har"
         ? "browser_har_metadata"
-        : "browser_video_container";
+        : type === "browser_video"
+          ? "browser_video_container"
+          : "browser_accessibility_snapshot_text";
     const integrity = integrityItems[index];
     if (integrity?.status !== "passed") {
       return [browserEvidenceMetadataItem(item, verificationType, "skipped", {}, "Artifact integrity did not pass, so browser artifact metadata could not be checked.")];
@@ -571,7 +582,9 @@ function verifyBrowserEvidenceArtifactMetadata(
         ? validateZipArtifact(filePath)
         : type === "browser_har"
           ? validateHarArtifact(filePath)
-          : validateVideoArtifact(filePath);
+          : type === "browser_video"
+            ? validateVideoArtifact(filePath)
+            : validateAccessibilitySnapshotArtifact(filePath);
       return [browserEvidenceMetadataItem(item, verificationType, "passed", metadata)];
     } catch (error: any) {
       return [browserEvidenceMetadataItem(item, verificationType, "failed", {}, error.message || String(error))];
@@ -629,6 +642,32 @@ function expectEqual(label: string, actual: any, expected: any, errors: string[]
   if (!sameJson(actual, expected)) {
     errors.push(`${label} mismatch: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}.`);
   }
+}
+
+function coverageStatusCounts(items: Array<{ status: string }> | undefined) {
+  const counts = { verified: 0, not_verified: 0, unknown: 0 };
+  for (const item of Array.isArray(items) ? items : []) {
+    if (item.status === "verified" || item.status === "not_verified" || item.status === "unknown") counts[item.status] += 1;
+  }
+  return counts;
+}
+
+function acceptanceMatchStrengthCounts(items: Array<{ matchStrength?: string }> | undefined) {
+  const counts = { direct: 0, token: 0, fallback: 0, none: 0 };
+  for (const item of Array.isArray(items) ? items : []) {
+    const strength = item.matchStrength || "none";
+    if (strength === "direct" || strength === "token" || strength === "fallback" || strength === "none") counts[strength] += 1;
+  }
+  return counts;
+}
+
+function acceptanceEvidenceSourceCounts(items: Array<{ evidenceSource?: string }> | undefined) {
+  const counts = { matched_evidence: 0, single_criterion_report_status: 0, none: 0 };
+  for (const item of Array.isArray(items) ? items : []) {
+    const source = item.evidenceSource || "none";
+    if (source === "matched_evidence" || source === "single_criterion_report_status" || source === "none") counts[source] += 1;
+  }
+  return counts;
 }
 
 function browserNetworkErrorCount(report: TestAgentReport) {
@@ -719,6 +758,10 @@ function verifyReportVerdictConsistency(
   const actualUnknownAcceptance = statusCoverageKeys(verdict?.unknownAcceptanceCriteria, "unknown", "criterion");
   compareStringList("verdict.failedAcceptanceCriteria", expectedFailedAcceptance, actualFailedAcceptance, errors);
   compareStringList("verdict.unknownAcceptanceCriteria", expectedUnknownAcceptance, actualUnknownAcceptance, errors);
+  expectEqual("verdict.acceptanceSummary.total", verdict?.acceptanceSummary?.total, (report?.acceptanceCoverage || []).length, errors);
+  expectEqual("verdict.acceptanceSummary.statusCounts", verdict?.acceptanceSummary?.statusCounts, coverageStatusCounts(report?.acceptanceCoverage), errors);
+  expectEqual("verdict.acceptanceSummary.matchStrengthCounts", verdict?.acceptanceSummary?.matchStrengthCounts, acceptanceMatchStrengthCounts(report?.acceptanceCoverage), errors);
+  expectEqual("verdict.acceptanceSummary.evidenceSourceCounts", verdict?.acceptanceSummary?.evidenceSourceCounts, acceptanceEvidenceSourceCounts(report?.acceptanceCoverage), errors);
 
   if (Array.isArray(report?.browserNetworkSummary) || Array.isArray(verdict?.browserNetworkSummary)) {
     expectEqual("verdict.browserNetworkSummary", verdict?.browserNetworkSummary || [], report?.browserNetworkSummary || [], errors);
@@ -730,6 +773,13 @@ function verifyReportVerdictConsistency(
     expectEqual("verdict.evidenceSummary.browserFailedActions", verdict?.evidenceSummary?.browserFailedActions, browserInteractionCount(report, "failedActions"), errors);
     expectEqual("verdict.evidenceSummary.browserAssertions", verdict?.evidenceSummary?.browserAssertions, browserInteractionCount(report, "assertionCount"), errors);
     expectEqual("verdict.evidenceSummary.browserFailedAssertions", verdict?.evidenceSummary?.browserFailedAssertions, browserInteractionCount(report, "failedAssertions"), errors);
+  }
+  if (report?.browserProviderSummary || verdict?.browserProviderSummary) {
+    expectEqual("verdict.browserProviderSummary", verdict?.browserProviderSummary || null, report?.browserProviderSummary || null, errors);
+  }
+  if (Array.isArray(report?.browserProviderGaps) || Array.isArray(verdict?.browserProviderGaps)) {
+    expectEqual("verdict.browserProviderGaps", verdict?.browserProviderGaps || [], report?.browserProviderGaps || [], errors);
+    expectEqual("verdict.evidenceSummary.browserProviderGaps", verdict?.evidenceSummary?.browserProviderGaps, (report?.browserProviderGaps || []).length, errors);
   }
 
   const artifactFiles = (report?.metadata?.artifactFiles || {}) as Record<string, string>;

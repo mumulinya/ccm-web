@@ -4,6 +4,9 @@ exports.buildTestAgentReport = buildTestAgentReport;
 const coverage_1 = require("./coverage");
 const interaction_summary_1 = require("./browser/interaction-summary");
 const network_summary_1 = require("./browser/network-summary");
+const provider_gaps_1 = require("./browser/provider-gaps");
+const provider_summary_1 = require("./browser/provider-summary");
+const failure_summary_1 = require("./failure-summary");
 const required_checks_1 = require("./required-checks");
 const utils_1 = require("./utils");
 function resultStatusToAgent(status) {
@@ -14,6 +17,13 @@ function resultStatusToAgent(status) {
     if (status === "blocked")
         return "blocked";
     return "skipped";
+}
+function browserSourceSummary(context) {
+    if (!context)
+        return "";
+    const generatedBy = String(context.generatedBy || context.source || "").trim();
+    const criteria = Array.isArray(context.acceptanceCriteria) ? context.acceptanceCriteria.length : 0;
+    return [generatedBy, criteria ? `criteria=${criteria}` : ""].filter(Boolean).join("; ");
 }
 function buildEvidence(commandResults, devServerResults, httpResults, browserResults, browserToolCalls) {
     const evidence = [];
@@ -45,12 +55,13 @@ function buildEvidence(commandResults, devServerResults, httpResults, browserRes
         });
     }
     for (const result of browserResults) {
+        const source = browserSourceSummary(result.context);
         evidence.push({
             type: "browser",
             project: result.project,
             title: `${result.adversarial ? "Adversarial " : ""}${result.name}`,
             status: resultStatusToAgent(result.status),
-            detail: result.error || `${result.url}${result.finalUrl ? `; final=${result.finalUrl}` : ""}${result.title ? `; title=${result.title}` : ""}${result.probeType ? `; probe=${result.probeType}` : ""}`,
+            detail: result.error || `${result.url}${result.finalUrl ? `; final=${result.finalUrl}` : ""}${result.title ? `; title=${result.title}` : ""}${source ? `; source=${source}` : ""}${result.probeType ? `; probe=${result.probeType}` : ""}`,
         });
         for (const screenshot of result.screenshots) {
             evidence.push({
@@ -153,6 +164,8 @@ function buildTestAgentReport(input) {
     const finishedAt = (0, utils_1.nowIso)();
     const browserInteractionSummary = (0, interaction_summary_1.buildBrowserInteractionSummary)(browserResults);
     const browserNetworkSummary = (0, network_summary_1.buildBrowserNetworkSummary)(browserResults);
+    const browserProviderSummary = (0, provider_summary_1.buildBrowserProviderSummary)(workOrder, browserResults);
+    const browserProviderGaps = (0, provider_gaps_1.buildBrowserProviderGaps)(browserResults);
     const requiredCheckCoverage = (0, required_checks_1.buildRequiredCheckCoverage)({
         workOrder,
         commandResults,
@@ -177,6 +190,7 @@ function buildTestAgentReport(input) {
         ...failedCommands.map(item => `${item.project}: command failed: ${item.command}`),
         ...failedHttp.map(item => `${item.project}: ${item.adversarial ? "adversarial " : ""}HTTP probe failed: ${item.error || item.url}`),
         ...failedBrowser.map(item => `${item.project}: ${item.adversarial ? "adversarial " : ""}browser check failed: ${item.name}`),
+        ...browserProviderGaps.map(item => `${item.project || "browser"}: provider gap ${item.provider} ${item.step || item.check}: ${item.reason}`),
         ...requiredCheckCoverage.filter(item => item.status !== "verified").map(item => `required check ${item.check}: ${item.missingReason || item.status}`),
     ];
     const evidence = buildEvidence(commandResults, devServerResults, httpResults, browserResults, browserToolCalls);
@@ -190,6 +204,15 @@ function buildTestAgentReport(input) {
         browserResults,
         browserToolCalls,
         evidence,
+    });
+    const failureSummary = (0, failure_summary_1.buildTestAgentFailureSummary)({
+        issues,
+        commandResults,
+        devServerResults,
+        httpResults,
+        browserResults,
+        requiredCheckCoverage,
+        acceptanceCoverage,
     });
     const summary = status === "passed"
         ? `TestAgent verified ${commandResults.filter(item => item.status === "passed").length} command checks, ${httpResults.filter(item => item.status === "passed").length} HTTP probes, ${browserResults.filter(item => item.status === "passed").length} browser checks, and ${browserToolCalls.length} browser tool calls.`
@@ -220,6 +243,9 @@ function buildTestAgentReport(input) {
         browserToolCalls,
         browserNetworkSummary,
         browserInteractionSummary,
+        browserProviderSummary,
+        browserProviderGaps,
+        failureSummary,
         requiredCheckCoverage,
         acceptanceCoverage,
         evidence,

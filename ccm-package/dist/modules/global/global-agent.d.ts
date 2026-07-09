@@ -53,12 +53,17 @@ export declare function runGlobalAgentIntentSelfTest(): {
         globalStatusFollowupAvoidsManagementMutation: boolean;
         globalStatusSummaryFriendly: boolean;
         globalStatusShowsChildAgentWaitingState: boolean;
+        globalStatusWeakMissionStaysReviewing: boolean;
         globalStatusShowsSupervisionWaitingState: boolean;
         globalStatusShowsSupervisionReworkState: boolean;
         globalStatusShowsStandaloneRunState: boolean;
+        globalStatusShowsIndependentReviewRework: boolean;
+        globalStatusShowsTestAgentPlanOnly: boolean;
+        globalStatusSynthesizesTestAgentFailureSummary: boolean;
         globalStatusIncludesDirectDispatch: boolean;
         globalStatusShowsDirectDispatchContinuation: boolean;
         globalStatusShowsPickupSummary: boolean;
+        globalStatusWeakDirectDispatchStaysReviewing: boolean;
         globalStatusShowsProgressRefreshSummary: boolean;
         globalStatusHidesProtocol: boolean;
     };
@@ -75,6 +80,17 @@ export declare function runGlobalAgentIntentSelfTest(): {
         verificationOnlyCanAvoidCodeChanges: boolean;
         dispatchLaunchUiFriendly: boolean;
         dispatchLaunchUiHidesProtocol: boolean;
+    };
+    testAgentRelayChecks: {
+        globalTestAgentUnknownCoverageRelayNeedsUser: boolean;
+        globalTestAgentUnknownCoverageUiWaits: boolean;
+        globalTestAgentNotVerifiedCoverageRelayNeedsRework: boolean;
+        globalTestAgentNotVerifiedCoverageUiWaits: boolean;
+        globalTestAgentSummaryOnlyGapRelayNeedsRework: boolean;
+        globalTestAgentWeakSummaryRelayNeedsUser: boolean;
+        globalTestAgentWeakSummaryUiWaits: boolean;
+        globalTestAgentFailureSummaryRelayNeedsRework: boolean;
+        globalTestAgentFailureSummaryUiWaits: boolean;
     };
     visibleReply: string;
 };

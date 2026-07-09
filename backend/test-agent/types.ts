@@ -203,6 +203,7 @@ export interface HttpCheckSpec {
   probe_type?: string;
   timeoutMs?: number;
   timeout_ms?: number;
+  context?: Record<string, any>;
 }
 
 export interface HttpAssertionSpec {
@@ -363,6 +364,8 @@ export interface BrowserAssertionSpec {
   type:
     | "visible"
     | "notVisible"
+    | "present"
+    | "notPresent"
     | "focused"
     | "notFocused"
     | "enabled"
@@ -407,6 +410,16 @@ export interface BrowserAssertionSpec {
     | "accessibleDescriptionEquals"
     | "accessibleDescriptionIncludes"
     | "ariaSnapshotIncludes"
+    | "ariaExpanded"
+    | "ariaCollapsed"
+    | "ariaPressed"
+    | "ariaNotPressed"
+    | "ariaSelected"
+    | "ariaNotSelected"
+    | "ariaInvalid"
+    | "ariaValid"
+    | "ariaRequired"
+    | "ariaNotRequired"
     | "inViewport"
     | "pageNotBlank"
     | "noHorizontalOverflow"
@@ -414,6 +427,7 @@ export interface BrowserAssertionSpec {
     | "browserOnline"
     | "browserOffline"
     | "cookieExists"
+    | "cookieValueEquals"
     | "cookieValueIncludes"
     | "networkNoErrors"
     | "networkRequest"
@@ -676,6 +690,7 @@ export interface BrowserCheckResult {
   browserArtifacts?: BrowserEvidenceArtifact[];
   adversarial?: boolean;
   probeType?: string;
+  context?: Record<string, any>;
   error?: string;
 }
 
@@ -727,8 +742,46 @@ export interface BrowserInteractionSummaryItem {
   failedSteps: BrowserInteractionSummaryStep[];
 }
 
+export interface BrowserProviderGapItem {
+  provider: string;
+  project?: string;
+  check: string;
+  kind: BrowserStepResult["kind"] | "provider";
+  step?: string;
+  category: "unsupported_action" | "unsupported_assertion" | "missing_tool" | "provider_unavailable" | "provider_capability_gap";
+  reason: string;
+  recommendation: string;
+}
+
+export interface BrowserProviderSummaryItem {
+  provider: string;
+  label?: string;
+  preferred: boolean;
+  available: boolean;
+  selected: boolean;
+  attempted: boolean;
+  resultCount: number;
+  passed: number;
+  failed: number;
+  blocked: number;
+  skipped: number;
+  reason?: string;
+  tools?: string[];
+  diagnostics?: Record<string, any>;
+}
+
+export interface BrowserProviderSummary {
+  preferred: string;
+  status: "not_required" | "provider_none" | "ready" | "used" | "blocked" | "unavailable";
+  selectedProvider?: string;
+  availableProviders: string[];
+  attemptedProviders: string[];
+  fallbackUsed: boolean;
+  items: BrowserProviderSummaryItem[];
+}
+
 export interface BrowserEvidenceArtifact {
-  type: "trace" | "har" | "video" | "download" | "metadata" | "other";
+  type: "trace" | "har" | "video" | "download" | "accessibility_snapshot" | "metadata" | "other";
   title: string;
   path: string;
   source?: string;
@@ -769,10 +822,35 @@ export interface HttpCheckResult {
   error?: string;
 }
 
+export type AcceptanceEvidenceMatchStrength = "direct" | "token" | "fallback" | "none";
+export type AcceptanceEvidenceSource = "matched_evidence" | "single_criterion_report_status" | "none";
+
 export interface AcceptanceCoverageItem {
   criterion: string;
   status: "verified" | "not_verified" | "unknown";
   evidence: string[];
+  matchStrength?: AcceptanceEvidenceMatchStrength;
+  matchScore?: number;
+  evidenceSource?: AcceptanceEvidenceSource;
+}
+
+export interface TestAgentAcceptanceSummaryItem {
+  criterion: string;
+  status: AcceptanceCoverageItem["status"];
+  evidence: string[];
+  matchStrength?: AcceptanceEvidenceMatchStrength;
+  matchScore?: number;
+  evidenceSource?: AcceptanceEvidenceSource;
+}
+
+export interface TestAgentAcceptanceSummary {
+  total: number;
+  statusCounts: Record<AcceptanceCoverageItem["status"], number>;
+  matchStrengthCounts: Record<AcceptanceEvidenceMatchStrength, number>;
+  evidenceSourceCounts: Record<AcceptanceEvidenceSource, number>;
+  verified: TestAgentAcceptanceSummaryItem[];
+  notVerified: TestAgentAcceptanceSummaryItem[];
+  unknown: TestAgentAcceptanceSummaryItem[];
 }
 
 export interface RequiredCheckCoverageItem {
@@ -780,6 +858,32 @@ export interface RequiredCheckCoverageItem {
   status: "verified" | "not_verified" | "unknown";
   evidence: string[];
   missingReason?: string;
+}
+
+export interface TestAgentRequiredCheckSummaryItem {
+  check: string;
+  status: RequiredCheckCoverageItem["status"];
+  evidence: string[];
+  missingReason?: string;
+}
+
+export interface TestAgentRequiredCheckSummary {
+  total: number;
+  statusCounts: Record<RequiredCheckCoverageItem["status"], number>;
+  verified: TestAgentRequiredCheckSummaryItem[];
+  notVerified: TestAgentRequiredCheckSummaryItem[];
+  unknown: TestAgentRequiredCheckSummaryItem[];
+}
+
+export interface TestAgentFailureSummaryItem {
+  type: "issue" | "server" | "command" | "http" | "browser" | "required_check" | "acceptance";
+  project?: string;
+  title: string;
+  status: "failed" | "blocked" | "not_verified" | "unknown";
+  reason: string;
+  evidence?: string[];
+  nextAction?: string;
+  diagnostics?: string[];
 }
 
 export interface EvidenceItem {
@@ -799,6 +903,7 @@ export interface TestAgentArtifactManifestItem {
     | "artifact_manifest"
     | "screenshot"
     | "browser_snapshot"
+    | "browser_accessibility_snapshot"
     | "browser_console_log"
     | "browser_dialog_log"
     | "browser_popup_log"
@@ -835,6 +940,7 @@ export interface TestAgentArtifactManifest {
     reports: number;
     screenshots: number;
     browserSnapshots: number;
+    browserAccessibilitySnapshots: number;
     browserConsoleLogs: number;
     browserPopupLogs: number;
     browserNetworkLogs: number;
@@ -867,6 +973,8 @@ export interface TestAgentVerdict {
   unknownRequiredChecks: RequiredCheckCoverageItem[];
   failedAcceptanceCriteria: AcceptanceCoverageItem[];
   unknownAcceptanceCriteria: AcceptanceCoverageItem[];
+  requiredCheckSummary: TestAgentRequiredCheckSummary;
+  acceptanceSummary: TestAgentAcceptanceSummary;
   blockedReasons: string[];
   risks: string[];
   nextActions: string[];
@@ -881,10 +989,14 @@ export interface TestAgentVerdict {
     browserFailedActions?: number;
     browserAssertions?: number;
     browserFailedAssertions?: number;
+    browserProviderGaps?: number;
     artifacts: number;
   };
   browserNetworkSummary?: BrowserNetworkSummaryItem[];
   browserInteractionSummary?: BrowserInteractionSummaryItem[];
+  browserProviderSummary?: BrowserProviderSummary;
+  browserProviderGaps?: BrowserProviderGapItem[];
+  failureSummary?: TestAgentFailureSummaryItem[];
   keyEvidence: EvidenceItem[];
   artifacts: {
     artifactDir: string;
@@ -918,6 +1030,9 @@ export interface TestAgentReport {
   browserToolCalls: BrowserToolCallRecord[];
   browserNetworkSummary: BrowserNetworkSummaryItem[];
   browserInteractionSummary: BrowserInteractionSummaryItem[];
+  browserProviderSummary: BrowserProviderSummary;
+  browserProviderGaps: BrowserProviderGapItem[];
+  failureSummary: TestAgentFailureSummaryItem[];
   requiredCheckCoverage: RequiredCheckCoverageItem[];
   acceptanceCoverage: AcceptanceCoverageItem[];
   evidence: EvidenceItem[];

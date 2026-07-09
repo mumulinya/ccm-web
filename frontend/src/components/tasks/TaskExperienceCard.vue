@@ -24,7 +24,7 @@ const kicker = computed(() => card.value.kicker || ({
 }[props.context] || 'AI 编程任务'))
 
 const agentLabel = (status) => ({
-  done: '已完成', completed: '已完成', succeeded: '已完成',
+  done: '已回传结果', completed: '已回传结果', succeeded: '已回传结果',
   running: '执行中', in_progress: '执行中', reviewing: '检查中',
   pending: '等待中', queued: '等待中', blocked: '受阻',
   failed: '失败', partial: '需修复', cancelled: '已取消',
@@ -605,7 +605,39 @@ const userHandoffEvidence = computed(() => asList(userHandoff.value?.evidence).s
 const userHandoffUnresolved = computed(() => asList(userHandoff.value?.unresolved).slice(0, 5))
 const userHandoffSecondaryActions = computed(() => asList(userHandoff.value?.secondary_actions || userHandoff.value?.secondaryActions).filter(item => item?.label).slice(0, 3))
 const userHandoffSummaryCards = computed(() => asList(userHandoff.value?.summary_cards || userHandoff.value?.summaryCards).filter(item => item?.label || item?.value).slice(0, 4))
-const userRequestSummary = computed(() => displayValue(props.card.user_request_summary || props.card.userRequestSummary || props.card.clarification_summary || props.card.clarificationSummary || props.card.confirmation_summary || props.card.confirmationSummary || null, '我正在等待你补充信息或确认操作。'))
+const userRequestSummarySource = computed(() => props.card.user_request_summary || props.card.userRequestSummary || props.card.clarification_summary || props.card.clarificationSummary || props.card.confirmation_summary || props.card.confirmationSummary || null)
+const taskUserActionText = (summary = {}) => [
+  summary.headline,
+  summary.question,
+  summary.action,
+  summary.target,
+  summary.reason,
+  summary.next_action,
+  summary.nextAction,
+  ...asList(summary.answer_suggestions || summary.answerSuggestions),
+].map(item => String(item || '').trim()).filter(Boolean).join('\n')
+const taskUserRequestNeedsAction = (raw = {}, visible = {}) => {
+  const policy = raw?.display_policy || raw?.displayPolicy || visible?.display_policy || visible?.displayPolicy || {}
+  if (policy.user_visible === false || policy.userVisible === false) return false
+  if (policy.requires_user_action === true || policy.requiresUserAction === true || policy.user_action_required === true || policy.userActionRequired === true) return true
+  if (policy.requires_user_action === false || policy.requiresUserAction === false || policy.user_action_required === false || policy.userActionRequired === false) return false
+  const schema = String(raw.schema || visible.schema || '').toLowerCase()
+  const kind = String(raw.kind || visible.kind || '').toLowerCase()
+  if (/confirmation|clarification|user_request|user-action|human/.test(`${schema}\n${kind}`)) return true
+  const status = String(raw.status || visible.status || raw.phase || visible.phase || '').toLowerCase()
+  const text = taskUserActionText({ ...raw, ...visible })
+  const userActionPattern = /(?:需要你|等你|等待你|请你|请确认|确认(?:是否|计划|范围|授权|影响|执行|操作)|补充(?:目标|范围|信息|材料|上下文|账号|环境变量|验收标准|需求)|提供(?:目标|信息|材料|凭证|截图|账号|环境变量)|选择|授权|回复|上传|输入|填写|人工确认|待确认问答|是否允许|是否继续|允许继续|确认并继续)/i
+  if (userActionPattern.test(text)) return true
+  const hasUserQuestion = Boolean(raw.question || visible.question) && /[?？]|是否|哪一|哪个|什么|如何|要不要|能否|可否/.test(text)
+  if (hasUserQuestion && /needs_user|waiting_user|waiting_confirmation|waiting_clarification|manual_takeover|paused/.test(status)) return true
+  return false
+}
+const userRequestSummary = computed(() => {
+  const raw = userRequestSummarySource.value
+  if (!raw) return null
+  const visible = displayValue(raw, '我正在等待你补充信息或确认操作。')
+  return taskUserRequestNeedsAction(raw, visible) ? visible : null
+})
 const userRequestSuggestions = computed(() => asList(userRequestSummary.value?.answer_suggestions || userRequestSummary.value?.answerSuggestions).slice(0, 4))
 const agentCoordination = computed(() => displayValue(props.card.agent_coordination || props.card.agentCoordination || null, '协作状态已整理。'))
 const buildChildPlanReviewFromAck = (ackReview = null) => {
@@ -702,18 +734,34 @@ const childPlanReviewStatusLabel = (status) => ({
   needs_revision: '需调整',
 }[status] || status || '跟踪中')
 const agentProgressStatusLabel = (status) => ({
-  completed: '已完成',
-  done: '已完成',
-  succeeded: '已完成',
+  completed: '已回传结果',
+  done: '已回传结果',
+  succeeded: '已回传结果',
+  success: '已回传结果',
+  ok: '已回传结果',
   running: '执行中',
   in_progress: '执行中',
   reviewing: '检查中',
   pending: '等待中',
   queued: '等待中',
   needs_attention: '需关注',
-  blocked: '需处理',
+  blocked: '待补齐',
   failed: '失败',
 }[status] || status || '跟踪中')
+const isCompletedAgentProgressStatus = (status) => /^(completed|done|succeeded|success|ok)$/.test(String(status || '').toLowerCase())
+const visibleAgentProgressStatusLabel = (row = {}) => {
+  const raw = String(row.status_label || row.statusLabel || '').trim()
+  if (isCompletedAgentProgressStatus(row.status) && /^(已完成|完成)$/.test(raw)) return '已回传结果'
+  return raw || agentProgressStatusLabel(row.status)
+}
+const visibleAgentProgressEvidenceValue = (row = {}, item = {}) => {
+  const key = String(item.id || item.label || '').trim().toLowerCase()
+  const value = String(item.value || '').trim()
+  if (isCompletedAgentProgressStatus(row.status) && /^(result|update|status|结果|更新|状态)$/.test(key) && /^(已完成|完成)$/.test(value)) {
+    return '已回传结果'
+  }
+  return item.value
+}
 const receiptGradeLabel = (grade) => ({
   good: '高质量',
   partial: '需补充',
@@ -814,11 +862,15 @@ const workItemActiveForm = (item) => {
   const raw = item.activeForm || item.active_form || item.current_focus || item.currentFocus || ''
   const status = String(item.status || '').toLowerCase()
   let fallback = ''
-  if (/^(completed|done|succeeded)$/.test(status)) fallback = `已完成：${subject}`
+  if (/^(completed|done|succeeded)$/.test(status)) fallback = `已处理：${subject}`
   else if (/^(pending|queued|waiting)$/.test(status)) fallback = `等待处理：${subject}`
-  else if (/^(blocked|failed)$/.test(status)) fallback = `需要处理：${subject}`
+  else if (/^blocked$/.test(status)) fallback = `待补齐：${subject}`
+  else if (/^failed$/.test(status)) fallback = `待排查：${subject}`
   else if (/^(running|in_progress|active|reviewing|reworking)$/.test(status)) fallback = `正在处理：${subject.replace(/^正在[:：\s]*/, '')}`
-  const text = sanitizeUserFacingAgentText(raw || fallback, '', 160)
+  let text = sanitizeUserFacingAgentText(raw || fallback, '', 160)
+  if (/^(completed|done|succeeded)$/.test(status)) {
+    text = text.replace(/^已完成[:：\s]*/, '已处理：')
+  }
   if (!text || text === subject) return ''
   return text
 }
@@ -927,7 +979,7 @@ const handoffActionPayload = (action) => {
       </div>
       <ul v-if="recoverySummary.preserved?.length || recoverySummary.remaining_gaps?.length">
         <li v-for="item in recoverySummary.preserved?.slice(0, 3)" :key="`preserved-${item}`">{{ item }}</li>
-        <li v-for="item in recoverySummary.remaining_gaps?.slice(0, 3)" :key="`gap-${item}`">仍需处理：{{ item }}</li>
+        <li v-for="item in recoverySummary.remaining_gaps?.slice(0, 3)" :key="`gap-${item}`">仍待补齐：{{ item }}</li>
       </ul>
       <small v-if="recoverySummary.next_action">下一步：{{ recoverySummary.next_action }}</small>
     </div>
@@ -961,13 +1013,13 @@ const handoffActionPayload = (action) => {
         <article v-for="row in agentProgressRows" :key="row.agent" :class="['agent-progress-row', row.status]">
           <header>
             <strong>{{ row.role ? `${row.role} · ${row.agent}` : row.agent }}</strong>
-            <em>{{ row.status_label || agentProgressStatusLabel(row.status) }}</em>
+            <em>{{ visibleAgentProgressStatusLabel(row) }}</em>
           </header>
           <p v-if="row.summary || row.current_focus">{{ row.agent }}：{{ row.summary || row.current_focus }}</p>
           <small v-if="row.current_focus">当前重点：{{ row.current_focus }}</small>
           <div v-if="asList(row.evidence).length" class="agent-progress-evidence">
             <span v-for="item in asList(row.evidence).slice(0, 4)" :key="item.id || `${row.agent}-${item.label}`">
-              {{ item.label }}：{{ item.value }}<small v-if="item.detail"> · {{ item.detail }}</small>
+              {{ item.label }}：{{ visibleAgentProgressEvidenceValue(row, item) }}<small v-if="item.detail"> · {{ item.detail }}</small>
             </span>
           </div>
           <ul v-if="row.blockers?.length">
@@ -1579,7 +1631,7 @@ const handoffActionPayload = (action) => {
     </div>
 
     <div v-if="card.agent_questions?.length" class="task-card-section task-card-qa">
-      <label>Agent 问答</label>
+      <label>协作问答</label>
       <div v-for="qa in card.agent_questions" :key="qa.id" class="task-card-qa-row" :class="qa.status">
         <strong>{{ qa.from }} → {{ qa.to }}</strong>
         <span>{{ qa.label }}</span>

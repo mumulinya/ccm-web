@@ -10,6 +10,7 @@ import {
 import { compactText, ensureDir, nowIso, resolveUrl, safeSegment } from "../utils";
 import { createMcpBrowserAdapter } from "./mcp-adapters";
 import { writeBrowserEvidenceArtifacts } from "./evidence-artifacts";
+import { captureMcpFailureScreenshot } from "./mcp-failure-screenshots";
 import { BrowserProvider, BrowserProviderContext, blockedBrowserResult } from "./provider-types";
 import { writeMcpScreenshotArtifacts } from "./screenshot-artifacts";
 import { checksForProject } from "./shared";
@@ -68,6 +69,7 @@ async function runMcpCheck(context: BrowserProviderContext, tools: string[], pro
   const consoleMessages: string[] = [];
   const networkRequests: string[] = [];
   const adapter = createMcpBrowserAdapter(tools, (toolName, input) => callTool(context, toolName, input));
+  const normalScreenshotRequested = check.screenshot !== false;
 
   if (!adapter) {
     return {
@@ -90,6 +92,7 @@ async function runMcpCheck(context: BrowserProviderContext, tools: string[], pro
       browserArtifacts,
       adversarial: check.adversarial === true,
       probeType: check.probeType || check.probe_type,
+      context: check.context,
       error: "No supported MCP browser adapter matched the available tools.",
     };
   }
@@ -132,7 +135,7 @@ async function runMcpCheck(context: BrowserProviderContext, tools: string[], pro
     if (pageErrors.length) {
       steps.push({ kind: "assertion", name: `${adapter.id}:pageText`, status: "failed", error: pageErrors.slice(0, 3).join(" | ") });
     }
-    if (check.screenshot !== false) {
+    if (normalScreenshotRequested) {
       try {
         const captures = await adapter.captureScreenshot(name);
         screenshots.push(...writeMcpScreenshotArtifacts({
@@ -155,6 +158,20 @@ async function runMcpCheck(context: BrowserProviderContext, tools: string[], pro
       } catch (error: any) {
         screenshots.push(`screenshot failed: ${error.message || String(error)}`);
       }
+    }
+    const failedStep = steps.find(step => step.status === "failed");
+    if (failedStep && !normalScreenshotRequested) {
+      const failureCapture = await captureMcpFailureScreenshot({
+        adapter,
+        artifactDir: context.workOrder.options.artifactDir,
+        projectName: project.name,
+        checkName: name,
+        index,
+        failedStep,
+        collectBrowserArtifacts: context.workOrder.options.collectBrowserArtifacts,
+      });
+      screenshots.push(...failureCapture.screenshots);
+      browserArtifacts.push(...failureCapture.browserArtifacts);
     }
     pageSnapshots.push(...writeMcpPageSnapshot(context.workOrder.options.artifactDir, project.name, name, index, pageText));
     const telemetryLogs = writeMcpTelemetryLogs({
@@ -190,8 +207,22 @@ async function runMcpCheck(context: BrowserProviderContext, tools: string[], pro
       ...telemetryLogs,
       adversarial: check.adversarial === true,
       probeType: check.probeType || check.probe_type,
+      context: check.context,
     };
   } catch (error: any) {
+    if (adapter && !normalScreenshotRequested) {
+      const failureCapture = await captureMcpFailureScreenshot({
+        adapter,
+        artifactDir: context.workOrder.options.artifactDir,
+        projectName: project.name,
+        checkName: name,
+        index,
+        failedStep: steps.find(step => step.status === "failed"),
+        collectBrowserArtifacts: context.workOrder.options.collectBrowserArtifacts,
+      });
+      screenshots.push(...failureCapture.screenshots);
+      browserArtifacts.push(...failureCapture.browserArtifacts);
+    }
     return {
       provider: "mcp",
       project: project.name,
@@ -220,6 +251,7 @@ async function runMcpCheck(context: BrowserProviderContext, tools: string[], pro
       }),
       adversarial: check.adversarial === true,
       probeType: check.probeType || check.probe_type,
+      context: check.context,
       error: error.message || String(error),
     };
   }

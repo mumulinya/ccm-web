@@ -7,11 +7,18 @@ import * as zlib from "zlib";
 import { spawnSync } from "child_process";
 import { runTestAgent } from "./agent";
 import { verifyTestAgentArtifactManifestFile } from "./artifact-verifier";
+import { ACCEPTANCE_CLICK_FLOW_PROBE_TYPE, buildAcceptanceClickFlowBrowserChecks } from "./browser/acceptance-click-flows";
 import { buildAcceptanceDerivedBrowserAssertions } from "./browser/acceptance-derived-checks";
+import { ACCEPTANCE_DIALOG_FLOW_PROBE_TYPE, buildAcceptanceDialogFlowBrowserChecks } from "./browser/acceptance-dialog-flows";
 import { ACCEPTANCE_DOWNLOAD_FLOW_PROBE_TYPE, buildAcceptanceDownloadFlowBrowserChecks } from "./browser/acceptance-download-flows";
 import { ACCEPTANCE_FORM_FLOW_PROBE_TYPE, buildAcceptanceFormFlowBrowserChecks } from "./browser/acceptance-form-flows";
+import { ACCEPTANCE_HOVER_FLOW_PROBE_TYPE, buildAcceptanceHoverFlowBrowserChecks } from "./browser/acceptance-hover-flows";
+import { ACCEPTANCE_KEYBOARD_FLOW_PROBE_TYPE, buildAcceptanceKeyboardFlowBrowserChecks } from "./browser/acceptance-keyboard-flows";
+import { ACCEPTANCE_REPEATED_CLICK_PROBE_TYPE, buildAcceptanceRepeatedClickBrowserChecks } from "./browser/acceptance-repeated-click-checks";
+import { ACCEPTANCE_RESPONSIVE_PROBE_TYPE, buildAcceptanceResponsiveBrowserChecks } from "./browser/acceptance-responsive-checks";
+import { ACCEPTANCE_SCROLL_FLOW_PROBE_TYPE, buildAcceptanceScrollFlowBrowserChecks } from "./browser/acceptance-scroll-flows";
 import { ACCEPTANCE_UPLOAD_FLOW_PROBE_TYPE, buildAcceptanceUploadFlowBrowserChecks } from "./browser/acceptance-upload-flows";
-import { AUTO_BROWSER_SMOKE_PROBE_TYPE, buildAcceptancePathBrowserSmokeChecks, buildAutoBrowserSmokeCheck } from "./browser/auto-checks";
+import { AUTO_BROWSER_SMOKE_PROBE_TYPE, buildAcceptancePathBrowserSmokeChecks, buildAutoBrowserSmokeCheck, buildBrowserChecksForProject } from "./browser/auto-checks";
 import { checkPlaywrightAvailability } from "./browser/playwright-provider";
 import { buildSemanticLocatorPlan } from "./browser/semantic-locator";
 import { createStaticBrowserToolExecutor } from "./browser/tool-executor";
@@ -19,7 +26,13 @@ import { formatTestAgentCliArtifactVerificationSummary, formatTestAgentCliExecut
 import { cliOverrides, parseTestAgentCliArgs } from "./cli-options";
 import { TEST_AGENT_MINIMAL_HANDOFF_EXAMPLE, TEST_AGENT_WEB_APP_HANDOFF_EXAMPLE, TEST_AGENT_WEB_APP_WORK_ORDER_EXAMPLE, validateTestAgentHandoffContract, validateTestAgentReportContract, validateTestAgentVerdictContract, validateTestAgentWorkOrderContract } from "./contract";
 import { buildAcceptanceCoverage } from "./coverage";
+import { buildAcceptanceSummary } from "./acceptance-summary";
 import { buildTestAgentExecutionPlan } from "./execution-plan";
+import { buildTestAgentMarkdownReport } from "./artifacts";
+import { buildTestAgentReport } from "./result-builder";
+import { buildRequiredCheckCoverage } from "./required-checks";
+import { discoverTestAgentSelfTests, formatTestAgentSelfTestMatrixSummary, runTestAgentSelfTestMatrix } from "./self-test-matrix";
+import { buildTestAgentVerdict } from "./verdict";
 import { buildTestAgentWorkOrderFromHandoff } from "./work-order-builder";
 import { normalizeTestAgentWorkOrder } from "./work-order";
 
@@ -432,9 +445,14 @@ export function runTestAgentWorkOrderNormalizationSelfTest() {
           { assertion: "url_includes", text: "example.test" },
           { assertion: "browser_offline" },
           { assertion: "online_state", value: "online" },
+          { assertion: "element_exists", selector: "#status" },
+          { assertion: "element_removed", selector: "#toast" },
           { assertion: "accessible_name_equals", role: "button", name: "Save", value: "Save profile" },
           { assertion: "accessible_description_includes", role: "button", name: "Save", value: "profile changes" },
           { assertion: "aria_snapshot_includes", role: "button", name: "Save", text: "Save profile" },
+          { assertion: "aria_expanded", role: "button", name: "Menu" },
+          { assertion: "aria_pressed", role: "button", name: "Bold" },
+          { assertion: "aria_invalid", label: "Email" },
           { assertion: "console_message_contains", text: "ready" },
           { assertion: "console_not_contains", text: "deprecated" },
           { assertion: "no_console_warning" },
@@ -457,10 +475,63 @@ export function runTestAgentWorkOrderNormalizationSelfTest() {
   return {
     pass: normalized.issues.every(issue => issue.severity !== "error")
       && actionTypes.join(",") === "requestAccess,openApplication,setOffline,setOnline,press,waitForUrl,waitForTimeout"
-      && assertionTypes.join(",") === "urlIncludes,browserOffline,onlineState,accessibleNameEquals,accessibleDescriptionIncludes,ariaSnapshotIncludes,consoleIncludes,consoleNotIncludes,consoleNoWarnings,consoleNoErrors"
+      && assertionTypes.join(",") === "urlIncludes,browserOffline,onlineState,present,notPresent,accessibleNameEquals,accessibleDescriptionIncludes,ariaSnapshotIncludes,ariaExpanded,ariaPressed,ariaInvalid,consoleIncludes,consoleNotIncludes,consoleNoWarnings,consoleNoErrors"
       && invalid.issues.some(issue => issue.code === "invalid_browser_action_type"),
     normalized,
     invalid,
+  };
+}
+
+export async function runTestAgentSelfTestMatrixSelfTest() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-self-test-matrix-selftest-"));
+  const modulePath = path.join(dir, "fake-self-test.js");
+  fs.writeFileSync(modulePath, [
+    "exports.runTestAgentFastSelfTest = async () => ({ pass: true, report: { status: 'passed' } });",
+    "exports.runTestAgentFailSelfTest = () => ({ pass: false, reason: 'intentional failure', report: { status: 'failed' } });",
+    "exports.runTestAgentSlowSelfTest = () => new Promise(() => {});",
+    "exports.helper = () => true;",
+  ].join("\n"), "utf-8");
+
+  const discovered = discoverTestAgentSelfTests(modulePath);
+  const report = await runTestAgentSelfTestMatrix({
+    selfTestModulePath: modulePath,
+    names: ["runTestAgentFastSelfTest", "runTestAgentFailSelfTest"],
+    timeoutMs: 1000,
+    cwd: dir,
+    stopOnFailure: false,
+  });
+  const timeoutReport = await runTestAgentSelfTestMatrix({
+    selfTestModulePath: modulePath,
+    names: ["runTestAgentSlowSelfTest"],
+    timeoutMs: 200,
+    cwd: dir,
+  });
+  const summary = formatTestAgentSelfTestMatrixSummary(report);
+  const pass = discovered.join(",") === "runTestAgentFailSelfTest,runTestAgentFastSelfTest,runTestAgentSlowSelfTest"
+    && report.pass === false
+    && report.total === 2
+    && report.passed === 1
+    && report.failed === 1
+    && report.results[0].name === "runTestAgentFastSelfTest"
+    && report.results[0].pass === true
+    && report.results[1].name === "runTestAgentFailSelfTest"
+    && report.results[1].pass === false
+    && String(report.results[1].reason || "").includes("intentional failure")
+    && timeoutReport.pass === false
+    && timeoutReport.failed === 1
+    && timeoutReport.results[0].timedOut === true
+    && String(timeoutReport.results[0].reason || "").includes("timeout 200ms")
+    && summary.includes("TestAgent self-test matrix: failed")
+    && summary.includes("PASS runTestAgentFastSelfTest")
+    && summary.includes("FAIL runTestAgentFailSelfTest");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    discovered,
+    report,
+    timeoutReport,
+    summary,
   };
 }
 
@@ -529,6 +600,7 @@ export function runTestAgentHandoffBuilderSelfTest() {
       && required.has("screenshots")
       && required.has("console_errors")
       && required.has("browser_snapshots")
+      && required.has("browser_accessibility_snapshot")
       && required.has("browser_console_logs")
       && required.has("browser_network_logs")
       && required.has("browser_trace")
@@ -550,6 +622,7 @@ export function runTestAgentHandoffBuilderSelfTest() {
       && webRequired.has("http")
       && webRequired.has("browser_e2e")
       && webRequired.has("screenshots")
+      && webRequired.has("browser_accessibility_snapshot")
       && webRequired.has("browser_trace")
       && webRequired.has("browser_har")
       && webRequired.has("adversarial")
@@ -683,8 +756,14 @@ export async function runTestAgentArtifactSelfTest() {
     && verdict?.reportId === report.id
     && verdict?.canAccept === true
     && verdict?.recommendation === "accept"
+    && verdict?.requiredCheckSummary?.statusCounts?.verified === 1
+    && verdict?.requiredCheckSummary?.statusCounts?.not_verified === 0
+    && verdict?.requiredCheckSummary?.verified?.some((item: any) => item.check === "commands" && item.evidence?.some((evidence: string) => evidence.includes("exit=0")))
     && verdict?.artifacts?.verdictJsonPath === verdictPath
     && verdictValidation.valid
+    && markdownText.includes("## Required Check Summary")
+    && markdownText.includes("Status counts: verified:1, not_verified:0, unknown:0, total:1")
+    && markdownText.includes("Verified commands:")
     && markdownText.includes("## Command Details")
     && markdownText.includes("**Output observed:**")
     && markdownText.includes("artifact ok")
@@ -722,6 +801,8 @@ export async function runTestAgentVerdictSelfTest() {
   const validation = validateTestAgentVerdictContract(verdict);
   const manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, "utf-8")) : null;
   const manifestVerdict = (manifest?.files || []).find((item: any) => item.type === "verdict_json");
+  const cliSummary = formatTestAgentCliReportSummary(report);
+  const markdown = buildTestAgentMarkdownReport(report);
   const pass = report.status === "failed"
     && report.recommendation === "rework"
     && verdict?.schema === "ccm-test-agent-verdict-v1"
@@ -730,6 +811,12 @@ export async function runTestAgentVerdictSelfTest() {
     && verdict?.needsRework === true
     && verdict?.needsHuman === false
     && verdict?.failedRequiredChecks?.some((item: any) => item.check === "commands")
+    && verdict?.requiredCheckSummary?.total === 1
+    && verdict?.requiredCheckSummary?.statusCounts?.not_verified === 1
+    && verdict?.requiredCheckSummary?.notVerified?.some((item: any) => item.check === "commands")
+    && cliSummary.includes("Required checks: verified:0, not_verified:1, unknown:0, total:1")
+    && cliSummary.includes("- not_verified commands:")
+    && markdown.includes("Attention not_verified commands:")
     && verdict?.risks?.some((item: string) => item.includes("command failed"))
     && verdict?.nextActions?.some((item: string) => item.includes("Route the task back for rework"))
     && verdict?.evidenceSummary?.commands?.failed === 1
@@ -745,6 +832,379 @@ export async function runTestAgentVerdictSelfTest() {
     verdict,
     validation,
     manifest,
+    cliSummary,
+    markdown,
+  };
+}
+
+export function runTestAgentFailureSummarySelfTest() {
+  const { workOrder, issues } = normalizeTestAgentWorkOrder({
+    id: `failure-summary-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent failure summaries identify rework points.",
+    acceptanceCriteria: ["The dashboard browser check must pass."],
+    requiredChecks: ["commands", "browser_e2e"],
+    projects: [{
+      name: "failure-summary-self-test",
+      workDir: process.cwd(),
+      verificationCommands: ["npm test"],
+      targetUrl: "http://example.test/dashboard",
+    }],
+    options: { browserProvider: "none" },
+  });
+  const startedAt = new Date(Date.now() - 1000).toISOString();
+  const now = new Date().toISOString();
+  const commandResults = [{
+    project: "failure-summary-self-test",
+    command: "npm test",
+    cwd: process.cwd(),
+    status: "failed" as const,
+    exitCode: 1,
+    startedAt,
+    finishedAt: now,
+    durationMs: 100,
+    stdout: "",
+    stderr: "expected dashboard to render",
+    output: "expected dashboard to render",
+  }];
+  const browserResults = [{
+    provider: "playwright" as const,
+    project: "failure-summary-self-test",
+    name: "Dashboard smoke",
+    url: "http://example.test/dashboard",
+    finalUrl: "http://example.test/dashboard",
+    title: "Dashboard",
+    pageTextPreview: "Loading",
+    status: "failed" as const,
+    startedAt,
+    finishedAt: now,
+    durationMs: 200,
+    steps: [
+      { kind: "action" as const, name: "goto", status: "passed" as const, detail: "http://example.test/dashboard" },
+      { kind: "assertion" as const, name: "assert:text", status: "failed" as const, detail: "Ready", error: "Expected page text to include Ready." },
+    ],
+    screenshots: ["C:\\tmp\\dashboard-failure.png"],
+    consoleErrors: [],
+    pageErrors: [],
+    networkErrors: [],
+  }];
+  const report = buildTestAgentReport({
+    workOrder,
+    startedAt,
+    issues,
+    commandResults,
+    devServerResults: [],
+    httpResults: [],
+    browserResults,
+    browserToolCalls: [],
+  });
+  const markdown = buildTestAgentMarkdownReport(report);
+  const verdict = buildTestAgentVerdict(report);
+  const reportValidation = validateTestAgentReportContract(report);
+  const verdictValidation = validateTestAgentVerdictContract(verdict);
+  const commandFailure = report.failureSummary.find(item => item.type === "command");
+  const browserFailure = report.failureSummary.find(item => item.type === "browser");
+  const requiredFailure = report.failureSummary.find(item => item.type === "required_check" && item.title === "commands");
+  const acceptanceFailure = report.failureSummary.find(item => item.type === "acceptance" && item.title === "The dashboard browser check must pass.");
+  const pass = report.status === "failed"
+    && report.failureSummary.length >= 3
+    && commandFailure?.reason.includes("expected dashboard")
+    && commandFailure?.nextAction?.includes("rerun TestAgent")
+    && commandFailure?.diagnostics?.some(item => item.includes("Rerun `npm test`"))
+    && browserFailure?.reason.includes("assert:text")
+    && browserFailure?.evidence?.some(item => item.includes("screenshot="))
+    && browserFailure?.diagnostics?.some(item => item.includes("Open screenshot artifact"))
+    && browserFailure?.diagnostics?.some(item => item.includes("pageTextPreview"))
+    && requiredFailure?.status === "not_verified"
+    && requiredFailure?.diagnostics?.some(item => item.includes("exact verification command"))
+    && acceptanceFailure?.status === "not_verified"
+    && acceptanceFailure?.reason.includes("evidence strength=token")
+    && acceptanceFailure?.reason.includes("source=matched_evidence")
+    && acceptanceFailure?.nextAction?.includes("Fix the matched failed evidence")
+    && acceptanceFailure?.diagnostics?.some(item => item.includes("Acceptance evidence strength=token"))
+    && acceptanceFailure?.diagnostics?.some(item => item.includes("Only token-level evidence matched"))
+    && markdown.includes("## Failure Summary")
+    && markdown.includes("diagnostics=")
+    && markdown.includes("evidence strength=token")
+    && markdown.includes("command failure-summary-self-test npm test")
+    && markdown.includes("browser failure-summary-self-test Dashboard smoke")
+    && verdict.failureSummary?.some(item => item.type === "browser" && item.reason.includes("Expected page text"))
+    && verdict.failureSummary?.some(item => item.type === "browser" && item.diagnostics?.some((diagnostic: string) => diagnostic.includes("Open screenshot artifact")))
+    && verdict.failureSummary?.some(item => item.type === "acceptance" && item.reason.includes("evidence strength=token"))
+    && reportValidation.valid
+    && verdictValidation.valid;
+
+  return {
+    pass,
+    report,
+    verdict,
+    markdown,
+    reportValidation,
+    verdictValidation,
+  };
+}
+
+export function runTestAgentBrowserProviderGapSummarySelfTest() {
+  const { workOrder, issues } = normalizeTestAgentWorkOrder({
+    id: `browser-provider-gap-summary-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify browser provider capability gaps are surfaced for handoff.",
+    acceptanceCriteria: ["Unsupported MCP browser operations produce a provider gap summary."],
+    requiredChecks: ["browser_e2e", "browser_upload", "browser_network"],
+    projects: [{
+      name: "provider-gap-self-test",
+      workDir: process.cwd(),
+      targetUrl: "http://example.test/app",
+      browserChecks: [{
+        name: "Provider gap fixture",
+        url: "http://example.test/app",
+        actions: [{ type: "uploadFile", selector: "#file", filePath: "fixture.txt" }],
+        assertions: [{ type: "networkNoErrors" }],
+      }],
+    }],
+    options: { browserProvider: "mcp" },
+  });
+  const startedAt = new Date(Date.now() - 1000).toISOString();
+  const now = new Date().toISOString();
+  const browserResults = [{
+    provider: "mcp" as const,
+    project: "provider-gap-self-test",
+    name: "Provider gap fixture",
+    url: "http://example.test/app",
+    finalUrl: "http://example.test/app",
+    title: "Provider Gap Fixture",
+    pageTextPreview: "Upload form",
+    status: "failed" as const,
+    startedAt,
+    finishedAt: now,
+    durationMs: 150,
+    steps: [
+      {
+        kind: "action" as const,
+        name: "computer-use:uploadFile",
+        status: "failed" as const,
+        error: "Computer Use MCP cannot verify local file uploads from TestAgent; use the Playwright provider for this action.",
+      },
+      {
+        kind: "assertion" as const,
+        name: "computer-use:networkNoErrors",
+        status: "failed" as const,
+        error: "Computer Use MCP does not expose console, network, offline/online emulation, accessibility/ARIA DOM state, or popup page telemetry.",
+      },
+    ],
+    screenshots: [],
+    consoleErrors: [],
+    pageErrors: [],
+    networkErrors: [],
+  }];
+  const report = buildTestAgentReport({
+    workOrder,
+    startedAt,
+    issues,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserResults,
+    browserToolCalls: [],
+  });
+  const verdict = buildTestAgentVerdict(report);
+  const reportValidation = validateTestAgentReportContract(report);
+  const verdictValidation = validateTestAgentVerdictContract(verdict);
+  const cliSummary = formatTestAgentCliReportSummary(report);
+  const markdown = buildTestAgentMarkdownReport(report);
+  const uploadGap = report.browserProviderGaps.find(item => item.category === "unsupported_action" && item.step === "computer-use:uploadFile");
+  const networkGap = report.browserProviderGaps.find(item => item.category === "unsupported_assertion" && item.step === "computer-use:networkNoErrors");
+  const pass = report.status === "failed"
+    && report.browserProviderGaps.length === 2
+    && uploadGap?.recommendation.includes("Playwright provider")
+    && networkGap?.recommendation.includes("DOM, JavaScript, console, network")
+    && verdict.browserProviderGaps?.length === 2
+    && verdict.evidenceSummary.browserProviderGaps === 2
+    && report.risks.some(item => item.includes("provider gap mcp computer-use:uploadFile"))
+    && cliSummary.includes("Browser provider gaps: 2")
+    && cliSummary.includes("computer-use:uploadFile")
+    && markdown.includes("## Browser Provider Gaps")
+    && markdown.includes("computer-use:networkNoErrors")
+    && reportValidation.valid
+    && verdictValidation.valid;
+
+  return {
+    pass,
+    report,
+    verdict,
+    uploadGap,
+    networkGap,
+    cliSummary,
+    markdown,
+    reportValidation,
+    verdictValidation,
+  };
+}
+
+export function runTestAgentAcceptanceSummarySelfTest() {
+  const { workOrder, issues } = normalizeTestAgentWorkOrder({
+    id: `acceptance-summary-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify acceptance criteria are summarized for handoff.",
+    acceptanceCriteria: [
+      "Ready banner appears",
+      "Payment succeeds",
+      "Audit log is created",
+    ],
+    requiredChecks: ["browser_e2e"],
+    projects: [{
+      name: "acceptance-summary-self-test",
+      workDir: process.cwd(),
+      targetUrl: "http://example.test/app",
+    }],
+    options: { browserProvider: "playwright" },
+  });
+  const startedAt = new Date(Date.now() - 1000).toISOString();
+  const now = new Date().toISOString();
+  const browserResults = [
+    {
+      provider: "playwright" as const,
+      project: "acceptance-summary-self-test",
+      name: "Ready banner appears",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      title: "Ready",
+      pageTextPreview: "Ready banner appears",
+      status: "passed" as const,
+      startedAt,
+      finishedAt: now,
+      durationMs: 100,
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "Ready banner appears" }],
+      screenshots: ["C:\\tmp\\ready-banner.png"],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    },
+    {
+      provider: "playwright" as const,
+      project: "acceptance-summary-self-test",
+      name: "Payment succeeds",
+      url: "http://example.test/pay",
+      finalUrl: "http://example.test/pay",
+      title: "Payment",
+      pageTextPreview: "Payment failed",
+      status: "failed" as const,
+      startedAt,
+      finishedAt: now,
+      durationMs: 120,
+      error: "Payment succeeds assertion failed.",
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "failed" as const, detail: "Payment succeeds", error: "Expected page text to include Payment succeeds." }],
+      screenshots: ["C:\\tmp\\payment-failure.png"],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    },
+  ];
+  const report = buildTestAgentReport({
+    workOrder,
+    startedAt,
+    issues,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserResults,
+    browserToolCalls: [],
+  });
+  const verdict = buildTestAgentVerdict(report);
+  const reportValidation = validateTestAgentReportContract(report);
+  const verdictValidation = validateTestAgentVerdictContract(verdict);
+  const cliSummary = formatTestAgentCliReportSummary(report);
+  const markdown = buildTestAgentMarkdownReport(report);
+  const byCriterion = new Map(report.acceptanceCoverage.map(item => [item.criterion, item]));
+  const { workOrder: fallbackWorkOrder } = normalizeTestAgentWorkOrder({
+    id: `acceptance-fallback-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify single acceptance fallback evidence is labeled.",
+    acceptanceCriteria: ["Checkout flow completes"],
+    requiredChecks: ["unit_tests"],
+    projects: [{
+      name: "acceptance-fallback-self-test",
+      workDir: process.cwd(),
+      verificationCommands: ["npm test"],
+    }],
+  });
+  const fallbackCoverage = buildAcceptanceCoverage({
+    workOrder: fallbackWorkOrder,
+    status: "passed",
+    issues: [],
+    commandResults: [{
+      project: "acceptance-fallback-self-test",
+      command: "npm test",
+      cwd: process.cwd(),
+      status: "passed",
+      exitCode: 0,
+      startedAt,
+      finishedAt: now,
+      durationMs: 20,
+      stdout: "all automated checks passed",
+      stderr: "",
+      output: "all automated checks passed",
+    }],
+    devServerResults: [],
+    httpResults: [],
+    browserResults: [],
+    browserToolCalls: [],
+    evidence: [],
+  });
+  const fallbackSummary = buildAcceptanceSummary(fallbackCoverage);
+  const fallbackItem = fallbackCoverage[0];
+  const readyCoverage = byCriterion.get("Ready banner appears");
+  const paymentCoverage = byCriterion.get("Payment succeeds");
+  const auditCoverage = byCriterion.get("Audit log is created");
+  const pass = report.status === "failed"
+    && readyCoverage?.status === "verified"
+    && readyCoverage?.matchStrength === "direct"
+    && readyCoverage?.matchScore === 100
+    && readyCoverage?.evidenceSource === "matched_evidence"
+    && paymentCoverage?.status === "not_verified"
+    && paymentCoverage?.matchStrength === "direct"
+    && paymentCoverage?.matchScore === 100
+    && paymentCoverage?.evidenceSource === "matched_evidence"
+    && auditCoverage?.status === "unknown"
+    && auditCoverage?.matchStrength === "none"
+    && auditCoverage?.matchScore === 0
+    && auditCoverage?.evidenceSource === "none"
+    && verdict.acceptanceSummary?.total === 3
+    && verdict.acceptanceSummary?.statusCounts?.verified === 1
+    && verdict.acceptanceSummary?.statusCounts?.not_verified === 1
+    && verdict.acceptanceSummary?.statusCounts?.unknown === 1
+    && verdict.acceptanceSummary?.matchStrengthCounts?.direct === 2
+    && verdict.acceptanceSummary?.matchStrengthCounts?.none === 1
+    && verdict.acceptanceSummary?.evidenceSourceCounts?.matched_evidence === 2
+    && verdict.acceptanceSummary?.evidenceSourceCounts?.none === 1
+    && verdict.acceptanceSummary?.verified?.some(item => item.criterion === "Ready banner appears" && item.matchStrength === "direct")
+    && verdict.acceptanceSummary?.notVerified?.some(item => item.criterion === "Payment succeeds" && item.matchStrength === "direct" && item.evidence.some(evidence => evidence.includes("Payment succeeds assertion failed")))
+    && verdict.acceptanceSummary?.unknown?.some(item => item.criterion === "Audit log is created" && item.matchStrength === "none")
+    && fallbackItem?.status === "verified"
+    && fallbackItem?.matchStrength === "fallback"
+    && fallbackItem?.matchScore === 0
+    && fallbackItem?.evidenceSource === "single_criterion_report_status"
+    && fallbackSummary.matchStrengthCounts.fallback === 1
+    && fallbackSummary.evidenceSourceCounts.single_criterion_report_status === 1
+    && cliSummary.includes("Acceptance coverage: verified:1, not_verified:1, unknown:1, total:3")
+    && cliSummary.includes("Acceptance attention:")
+    && cliSummary.includes("Payment succeeds")
+    && cliSummary.includes("Audit log is created")
+    && markdown.includes("## Acceptance Summary")
+    && markdown.includes("Match strength counts: direct:2")
+    && markdown.includes("Evidence source counts: matched_evidence:2")
+    && markdown.includes("Attention not_verified Payment succeeds")
+    && markdown.includes("Attention unknown Audit log is created")
+    && reportValidation.valid
+    && verdictValidation.valid;
+
+  return {
+    pass,
+    report,
+    verdict,
+    byCriterion: Object.fromEntries(byCriterion),
+    fallbackCoverage,
+    fallbackSummary,
+    cliSummary,
+    markdown,
+    reportValidation,
+    verdictValidation,
   };
 }
 
@@ -997,6 +1457,84 @@ export async function runTestAgentMcpScreenshotArtifactSelfTest() {
     verification,
     blank,
     tampered,
+  };
+}
+
+export async function runTestAgentMcpFailureScreenshotSelfTest() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-mcp-failure-screenshot-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const onePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+  const calls: any[] = [];
+  const executor = createStaticBrowserToolExecutor({
+    tools: [
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_console_messages",
+      "mcp__playwright__browser_network_requests",
+    ],
+    onCall: (toolName, input) => {
+      calls.push({ toolName, input });
+      if (toolName.endsWith("browser_snapshot")) return "MCP failure page ready";
+      if (toolName.endsWith("browser_console_messages")) return [];
+      if (toolName.endsWith("browser_network_requests")) return [];
+      if (toolName.endsWith("browser_take_screenshot")) return { image: `data:image/png;base64,${onePixelPng}` };
+      return { ok: true };
+    },
+  });
+  const report = await runTestAgent({
+    id: `mcp-failure-screenshot-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify MCP browser provider captures failure screenshots when normal screenshots are disabled.",
+    acceptanceCriteria: ["A failing MCP browser assertion produces a local failure screenshot artifact."],
+    requiredChecks: ["browser_e2e", "console_errors"],
+    projects: [{
+      name: "mcp-failure-screenshot-self-test",
+      workDir: dir,
+      browserChecks: [{
+        name: "MCP failure screenshot",
+        url: "http://example.test/mcp-failure",
+        actions: [{ type: "goto", url: "http://example.test/mcp-failure" }],
+        assertions: [{ type: "text", text: "Missing MCP text" }],
+        screenshot: false,
+      }],
+    }],
+    options: { artifactDir, browserProvider: "mcp" },
+  }, { browserProvider: "mcp", browserToolExecutor: executor });
+
+  const browser = report.browserResults[0];
+  const screenshotPath = String(browser?.screenshots?.[0] || "");
+  const manifestPath = String((report.metadata.artifactFiles as any)?.manifestPath || "");
+  const manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, "utf-8")) : null;
+  const verification = manifestPath ? verifyTestAgentArtifactManifestFile(manifestPath) : null;
+  const screenshotEntry = (manifest?.files || []).find((item: any) => item.type === "screenshot" && String(item.path || "").includes("failure"));
+  const screenshotMetadata = verification?.items.find(item => item.type === "screenshot_png_metadata" && String(item.path || "").includes("failure"));
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const pass = report.status === "failed"
+    && browser?.provider === "mcp"
+    && browser?.status === "failed"
+    && browser?.steps.some(step => step.name === "playwright:text" && step.status === "failed")
+    && browser?.screenshots.length === 1
+    && screenshotPath.endsWith(".png")
+    && screenshotPath.includes("failure")
+    && fs.existsSync(screenshotPath)
+    && fs.statSync(screenshotPath).size > 20
+    && calls.some(call => call.toolName.endsWith("browser_take_screenshot"))
+    && calls.some(call => call.toolName.endsWith("browser_take_screenshot") && String(call.input?.filename || "").includes("failure"))
+    && manifest?.summary?.screenshots === 1
+    && screenshotEntry?.path === screenshotPath
+    && verification?.status === "passed"
+    && screenshotMetadata?.status === "passed"
+    && byCheck.get("browser_e2e")?.status === "not_verified"
+    && report.failureSummary.some(item => item.type === "browser" && item.evidence?.some(evidence => evidence.includes(screenshotPath)));
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    report,
+    manifest,
+    verification,
+    calls,
+    screenshotPath,
   };
 }
 
@@ -1280,6 +1818,30 @@ export async function runTestAgentExecutionPlanSelfTest() {
   const validation = validateTestAgentWorkOrderContract(workOrder);
   const plan = buildTestAgentExecutionPlan(workOrder, {}, validation);
   const summary = formatTestAgentCliExecutionPlanSummary(plan);
+  const providerWarningWorkOrder = buildTestAgentWorkOrderFromHandoff({
+    taskId: `execution-plan-provider-warning-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Preview browser provider limitations before execution.",
+    acceptanceCriteria: ["The upload flow can upload and download a file."],
+    requiredChecks: ["browser_e2e", "browser_upload", "browser_download"],
+    projects: [{
+      name: "execution-plan-provider-warning-web",
+      workDir: dir,
+      targetUrl: "http://127.0.0.1:5173/upload",
+      browserChecks: [{
+        name: "Upload download MCP warning",
+        url: "http://127.0.0.1:5173/upload",
+        actions: [{ type: "uploadFile", selector: "#file", filePath: "fixture.txt" }],
+        assertions: [{ type: "downloadedFile", fileName: "fixture.txt" }],
+      }],
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "mcp",
+    },
+  }).workOrder;
+  const providerWarningValidation = validateTestAgentWorkOrderContract(providerWarningWorkOrder);
+  const providerWarningPlan = buildTestAgentExecutionPlan(providerWarningWorkOrder, {}, providerWarningValidation);
+  const providerWarningSummary = formatTestAgentCliExecutionPlanSummary(providerWarningPlan);
 
   const handoffPath = path.join(dir, "handoff.json");
   fs.writeFileSync(handoffPath, JSON.stringify({
@@ -1341,13 +1903,28 @@ export async function runTestAgentExecutionPlanSelfTest() {
     && plan.summary.httpChecks === 1
     && plan.summary.browserChecks === 1
     && plan.summary.autoBrowserChecks === 1
+    && plan.summary.browserProviderWarnings === 0
+    && plan.browserProviderWarnings.length === 0
     && browserCheck?.autoGenerated === true
     && browserCheck?.screenshot === true
+    && plan.summary.expectedArtifactTypes.includes("browser_accessibility_snapshot")
     && plan.summary.expectedArtifactTypes.includes("browser_trace")
     && plan.summary.expectedArtifactTypes.includes("browser_har")
     && plan.summary.expectedArtifactTypes.includes("screenshot")
     && summary.includes("TestAgent execution plan: valid")
     && summary.includes("Commands: 3")
+    && summary.includes("Browser provider warnings: 0")
+    && providerWarningValidation.valid
+    && providerWarningPlan.valid
+    && providerWarningPlan.browserProvider === "mcp"
+    && providerWarningPlan.summary.browserProviderWarnings === 3
+    && providerWarningPlan.browserProviderWarnings.some(item => item.kind === "artifact" && item.item === "trace/har")
+    && providerWarningPlan.browserProviderWarnings.some(item => item.kind === "action" && item.item === "uploadFile" && item.category === "requires_playwright")
+    && providerWarningPlan.browserProviderWarnings.some(item => item.kind === "assertion" && item.item === "downloadedFile" && item.recommendation.includes("Playwright"))
+    && providerWarningSummary.includes("Browser provider warnings: 3")
+    && providerWarningSummary.includes("trace/har")
+    && providerWarningSummary.includes("uploadFile")
+    && providerWarningSummary.includes("downloadedFile")
     && cliResult.exitCode === 0
     && !runAgentCalled
     && cliStderr.length === 0
@@ -1361,6 +1938,8 @@ export async function runTestAgentExecutionPlanSelfTest() {
     validation,
     plan,
     summary,
+    providerWarningPlan,
+    providerWarningSummary,
     cliResult,
     cliSummary,
     runAgentCalled,
@@ -1787,6 +2366,988 @@ export async function runTestAgentAutoBrowserSmokeSelfTest() {
   };
 }
 
+export function runTestAgentBrowserCheckSourceMetadataSelfTest() {
+  const baseUrl = "http://127.0.0.1:43123/";
+  const project = {
+    name: "browser-check-source-metadata-self-test",
+    workDir: process.cwd(),
+    runCommand: "",
+    devServerCommand: "",
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 1000,
+    env: {},
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const autoCriteria = ['Home page shows "Welcome aboard".'];
+  const pathCriteria = ['Tasks page at /tasks shows "Tasks Ready".'];
+  const formCriteria = ['At /form, enter "Buy milk" into "Task", click "Add task", then shows "Buy milk".'];
+  const invalidFormCriteria = ['At /login, enter "bad@example.test" into "Email" and enter "wrong-password" into "Password", click "Sign in", then stays on /login and shows "Invalid password".'];
+  const dialogCriteria = ['At /dialogs, click "Show alert", then alert dialog includes "Saved profile dialog".'];
+  const downloadCriteria = ['At /exports, click "Export CSV", then downloads "tasks.csv" containing "Ship TestAgent".'];
+  const uploadCriteria = ['At /upload, upload "notes.txt" containing "Ship TestAgent upload payload" to "Attachment", click "Upload", then shows "Uploaded notes.txt".'];
+  const repeatedClickCriteria = ['At /retry, click "Retry" 3 times, then shows "Retry stable".'];
+  const keyboardCriteria = ['At /shortcuts, press "Control+K" keyboard shortcut, then shows "Command palette ready".'];
+  const clickCriteria = ['At /menu, click "Open settings", then shows "Settings panel ready".'];
+  const hoverCriteria = ['At /menu, hover "Tools", then shows "Export report".'];
+  const scrollCriteria = ['At /landing, scroll down, then shows "Ready after scroll".'];
+  const responsiveCriteria = ['Mobile responsive page at /responsive shows "Mobile navigation ready" with no horizontal overflow.'];
+  const allCriteria = [
+    ...pathCriteria,
+    ...formCriteria,
+    ...invalidFormCriteria,
+    ...dialogCriteria,
+    ...downloadCriteria,
+    ...uploadCriteria,
+    ...repeatedClickCriteria,
+    ...keyboardCriteria,
+    ...clickCriteria,
+    ...hoverCriteria,
+    ...scrollCriteria,
+    ...responsiveCriteria,
+  ];
+
+  const autoCheck = buildAutoBrowserSmokeCheck(project as any, autoCriteria);
+  const pathCheck = buildAcceptancePathBrowserSmokeChecks(project as any, pathCriteria)[0];
+  const formCheck = buildAcceptanceFormFlowBrowserChecks(project as any, formCriteria)[0];
+  const invalidFormCheck = buildAcceptanceFormFlowBrowserChecks(project as any, invalidFormCriteria)[0];
+  const dialogCheck = buildAcceptanceDialogFlowBrowserChecks(project as any, dialogCriteria)[0];
+  const downloadCheck = buildAcceptanceDownloadFlowBrowserChecks(project as any, downloadCriteria)[0];
+  const uploadCheck = buildAcceptanceUploadFlowBrowserChecks(project as any, uploadCriteria)[0];
+  const repeatedClickCheck = buildAcceptanceRepeatedClickBrowserChecks(project as any, repeatedClickCriteria)[0];
+  const keyboardCheck = buildAcceptanceKeyboardFlowBrowserChecks(project as any, keyboardCriteria)[0];
+  const clickCheck = buildAcceptanceClickFlowBrowserChecks(project as any, clickCriteria)[0];
+  const hoverCheck = buildAcceptanceHoverFlowBrowserChecks(project as any, hoverCriteria)[0];
+  const scrollCheck = buildAcceptanceScrollFlowBrowserChecks(project as any, scrollCriteria)[0];
+  const responsiveCheck = buildAcceptanceResponsiveBrowserChecks(project as any, responsiveCriteria)[0];
+  const generatedChecks = buildBrowserChecksForProject(project as any, allCriteria);
+
+  const hasSource = (check: any, generatedBy: string, criteria: string[]) => {
+    const context = check?.context || {};
+    const actualCriteria = Array.isArray(context.acceptanceCriteria)
+      ? context.acceptanceCriteria.map((item: any) => String(item))
+      : [];
+    return context.source === "acceptance_criteria"
+      && context.generatedBy === generatedBy
+      && criteria.every(item => actualCriteria.includes(item));
+  };
+  const generatedBy = new Set(generatedChecks.map(check => String(check.context?.generatedBy || "")));
+  const allGeneratedChecksHaveSource = generatedChecks.length > 0
+    && generatedChecks.every(check => {
+      const context = check.context || {};
+      return context.source === "acceptance_criteria"
+        && typeof context.generatedBy === "string"
+        && context.generatedBy.length > 0
+        && Array.isArray(context.acceptanceCriteria)
+        && context.acceptanceCriteria.length > 0;
+    });
+
+  const pass = hasSource(autoCheck, AUTO_BROWSER_SMOKE_PROBE_TYPE, autoCriteria)
+    && hasSource(pathCheck, "acceptance_path_smoke", pathCriteria)
+    && hasSource(formCheck, ACCEPTANCE_FORM_FLOW_PROBE_TYPE, formCriteria)
+    && hasSource(invalidFormCheck, ACCEPTANCE_FORM_FLOW_PROBE_TYPE, invalidFormCriteria)
+    && invalidFormCheck?.adversarial === true
+    && invalidFormCheck?.context?.adversarialIntent === "invalid_form_input"
+    && hasSource(dialogCheck, ACCEPTANCE_DIALOG_FLOW_PROBE_TYPE, dialogCriteria)
+    && hasSource(downloadCheck, ACCEPTANCE_DOWNLOAD_FLOW_PROBE_TYPE, downloadCriteria)
+    && hasSource(uploadCheck, ACCEPTANCE_UPLOAD_FLOW_PROBE_TYPE, uploadCriteria)
+    && hasSource(repeatedClickCheck, ACCEPTANCE_REPEATED_CLICK_PROBE_TYPE, repeatedClickCriteria)
+    && repeatedClickCheck?.adversarial === true
+    && hasSource(keyboardCheck, ACCEPTANCE_KEYBOARD_FLOW_PROBE_TYPE, keyboardCriteria)
+    && hasSource(clickCheck, ACCEPTANCE_CLICK_FLOW_PROBE_TYPE, clickCriteria)
+    && hasSource(hoverCheck, ACCEPTANCE_HOVER_FLOW_PROBE_TYPE, hoverCriteria)
+    && hasSource(scrollCheck, ACCEPTANCE_SCROLL_FLOW_PROBE_TYPE, scrollCriteria)
+    && hasSource(responsiveCheck, ACCEPTANCE_RESPONSIVE_PROBE_TYPE, responsiveCriteria)
+    && allGeneratedChecksHaveSource
+    && generatedBy.has("acceptance_path_smoke")
+    && generatedBy.has(ACCEPTANCE_FORM_FLOW_PROBE_TYPE)
+    && generatedBy.has(ACCEPTANCE_DIALOG_FLOW_PROBE_TYPE)
+    && generatedBy.has(ACCEPTANCE_DOWNLOAD_FLOW_PROBE_TYPE)
+    && generatedBy.has(ACCEPTANCE_UPLOAD_FLOW_PROBE_TYPE)
+    && generatedBy.has(ACCEPTANCE_REPEATED_CLICK_PROBE_TYPE)
+    && generatedBy.has(ACCEPTANCE_KEYBOARD_FLOW_PROBE_TYPE)
+    && generatedBy.has(ACCEPTANCE_CLICK_FLOW_PROBE_TYPE)
+    && generatedBy.has(ACCEPTANCE_HOVER_FLOW_PROBE_TYPE)
+    && generatedBy.has(ACCEPTANCE_SCROLL_FLOW_PROBE_TYPE)
+    && generatedBy.has(ACCEPTANCE_RESPONSIVE_PROBE_TYPE)
+    && !responsiveCheck?.assertions?.some(assertion => assertion.type === "notVisible" && assertion.text === "Mobile navigation ready")
+    && responsiveCheck?.assertions?.some(assertion => assertion.type === "text" && assertion.text === "Mobile navigation ready") === true;
+
+  return {
+    pass,
+    autoCheck,
+    pathCheck,
+    formCheck,
+    invalidFormCheck,
+    dialogCheck,
+    downloadCheck,
+    uploadCheck,
+    repeatedClickCheck,
+    keyboardCheck,
+    clickCheck,
+    hoverCheck,
+    scrollCheck,
+    responsiveCheck,
+    generatedChecks,
+  };
+}
+
+export async function runTestAgentAcceptanceDialogFlowSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-dialog-flow-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const dialogsUrl = `http://127.0.0.1:${port}/dialogs`;
+  const englishMessage = "Saved profile dialog";
+  const chineseMessage = "确认发货对话框";
+  const acceptanceCriteria = [
+    `At /dialogs, click "Show alert", then alert dialog includes "${englishMessage}".`,
+    `在 /dialogs 点击 "显示确认"，然后确认框包含 "${chineseMessage}"。`,
+  ];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Dialog Flow Fixture</title></head>",
+    "<body><main>",
+    "<h1>Dialog flow</h1>",
+    "<button type=\"button\" id=\"alertButton\">Show alert</button>",
+    "<button type=\"button\" id=\"confirmButton\">显示确认</button>",
+    "<p id=\"status\" role=\"status\">Ready</p>",
+    "<script>",
+    `document.getElementById('alertButton').addEventListener('click', () => { alert('${englishMessage}'); document.getElementById('status').textContent = 'Alert handled'; });`,
+    `document.getElementById('confirmButton').addEventListener('click', () => { const ok = confirm('${chineseMessage}'); document.getElementById('status').textContent = ok ? '确认已接受' : '确认已取消'; });`,
+    "</script>",
+    "</main></body></html>`;",
+    "const root = '<!doctype html><title>Home</title><main><h1>Home</h1></main>';",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type':'text/html; charset=utf-8'});",
+    "  res.end(route === '/dialogs' ? html : root);",
+    "}).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-dialog-flow-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const dialogChecks = buildAcceptanceDialogFlowBrowserChecks(project, acceptanceCriteria);
+  const generatedChecks = buildBrowserChecksForProject(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-dialog-flow-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer native browser dialog flows from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["http", "browser_e2e", "browser_dialog", "browser_dialog_log", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const dialogResults = report.browserResults.filter(result => result.probeType === ACCEPTANCE_DIALOG_FLOW_PROBE_TYPE);
+  const generatedDialogChecks = generatedChecks.filter(check => check.probeType === ACCEPTANCE_DIALOG_FLOW_PROBE_TYPE);
+  const generatedClickChecks = generatedChecks.filter(check => check.probeType === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE);
+  const targets = [
+    { target: "Show alert", dialogType: "alert", message: englishMessage },
+    { target: "显示确认", dialogType: "confirm", message: chineseMessage },
+  ];
+  const checksCoverTargets = dialogChecks.length === 2
+    && targets.every(item => dialogChecks.some(check =>
+      check.url === dialogsUrl
+      && check.context?.generatedBy === ACCEPTANCE_DIALOG_FLOW_PROBE_TYPE
+      && check.context?.clickTarget?.name === item.target
+      && check.context?.dialogType === item.dialogType
+      && check.context?.messageIncludes === item.message
+      && check.actions?.some(action => action.type === "click" && action.role === "button" && action.name === item.target)
+      && check.assertions?.some(assertion => assertion.type === "dialogAppeared" && assertion.dialogType === item.dialogType)
+      && check.assertions?.some(assertion => assertion.type === "dialogMessageIncludes" && assertion.text === item.message && assertion.dialogType === item.dialogType)
+      && check.assertions?.some(assertion => assertion.type === "urlIncludes" && assertion.text === "/dialogs")
+    ));
+  const resultsCoverTargets = dialogResults.length === 2
+    && targets.every(item => dialogResults.some(result =>
+      result.status === "passed"
+      && result.provider === "playwright"
+      && result.url === dialogsUrl
+      && result.finalUrl === dialogsUrl
+      && result.context?.generatedBy === ACCEPTANCE_DIALOG_FLOW_PROBE_TYPE
+      && result.context?.clickTarget?.name === item.target
+      && result.context?.dialogType === item.dialogType
+      && result.context?.messageIncludes === item.message
+      && result.steps.some(step => step.name === "action:click" && step.status === "passed" && String(step.detail || "").includes(item.target))
+      && result.steps.some(step => step.name === "assert:dialogAppeared" && step.status === "passed" && String(step.detail || "").includes(`dialogType=${item.dialogType}`))
+      && result.steps.some(step => step.name === "assert:dialogMessageIncludes" && step.status === "passed" && String(step.detail || "").includes(`dialogType=${item.dialogType}`))
+      && (result.dialogMessages || []).some(message => message.includes(`dialog ${item.dialogType}`) && message.includes(item.message) && message.includes("accepted=yes"))
+      && !!result.dialogLogPath
+    ));
+  const dialogLogText = dialogResults
+    .map(result => result.dialogLogPath && fs.existsSync(result.dialogLogPath) ? fs.readFileSync(result.dialogLogPath, "utf-8") : "")
+    .join("\n");
+  const pass = checksCoverTargets
+    && generatedDialogChecks.length === 2
+    && generatedClickChecks.length === 0
+    && report.status === "passed"
+    && report.browserResults.length === 2
+    && resultsCoverTargets
+    && dialogLogText.includes(englishMessage)
+    && dialogLogText.includes(chineseMessage)
+    && byCheck.get("browser_dialog")?.status === "verified"
+    && byCheck.get("browser_dialog_log")?.status === "verified"
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    dialogChecks,
+    generatedChecks,
+    report,
+    dialogLogText,
+  };
+}
+
+export async function runTestAgentAcceptanceKeyboardFlowSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-keyboard-flow-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const shortcutsUrl = `http://127.0.0.1:${port}/shortcuts`;
+  const englishText = "Command palette ready";
+  const chineseText = "中文命令面板就绪";
+  const acceptanceCriteria = [
+    `At /shortcuts, press "Control+Alt+K" keyboard shortcut, then shows "${englishText}".`,
+    `在 /shortcuts 按下 "Control+Alt+J" 快捷键，然后显示 "${chineseText}"。`,
+  ];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Keyboard Flow Fixture</title>",
+    "<style>",
+    "body { font-family: sans-serif; padding: 32px; }",
+    ".palette { display: none; margin-top: 16px; padding: 16px; border: 1px solid #555; background: white; width: 320px; }",
+    ".palette[aria-hidden='false'] { display: block; }",
+    "</style></head>",
+    "<body><main>",
+    "<h1>Keyboard shortcuts</h1>",
+    "<p role=\"status\">Waiting for shortcut</p>",
+    "<section id=\"palette\" class=\"palette\" aria-hidden=\"true\" role=\"dialog\" aria-label=\"Command palette\">",
+    `<p>${englishText}</p>`,
+    "</section>",
+    "<section id=\"palette-cn\" class=\"palette\" aria-hidden=\"true\" role=\"dialog\" aria-label=\"中文命令面板\">",
+    `<p>${chineseText}</p>`,
+    "</section>",
+    "</main>",
+    "<script>",
+    "document.addEventListener('keydown', event => {",
+    "  const key = String(event.key || '').toLowerCase();",
+    "  if (event.ctrlKey && event.altKey && key === 'k') {",
+    "    event.preventDefault();",
+    "    document.getElementById('palette').setAttribute('aria-hidden', 'false');",
+    "  }",
+    "  if (event.ctrlKey && event.altKey && key === 'j') {",
+    "    event.preventDefault();",
+    "    document.getElementById('palette-cn').setAttribute('aria-hidden', 'false');",
+    "  }",
+    "});",
+    "</script>",
+    "</body></html>`;",
+    "const root = '<!doctype html><title>Home</title><main><h1>Home</h1></main>';",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type':'text/html; charset=utf-8'});",
+    "  res.end(route === '/shortcuts' ? html : root);",
+    "}).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-keyboard-flow-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const keyboardChecks = buildAcceptanceKeyboardFlowBrowserChecks(project, acceptanceCriteria);
+  const generatedChecks = buildBrowserChecksForProject(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-keyboard-flow-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer keyboard shortcut browser flows from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["http", "browser_e2e", "browser_keyboard", "browser_visibility", "browser_layout", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const keyboardResults = report.browserResults.filter(result => result.probeType === ACCEPTANCE_KEYBOARD_FLOW_PROBE_TYPE);
+  const generatedKeyboardChecks = generatedChecks.filter(check => check.probeType === ACCEPTANCE_KEYBOARD_FLOW_PROBE_TYPE);
+  const generatedClickChecks = generatedChecks.filter(check => check.probeType === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE);
+  const targets = [
+    { key: "Control+Alt+K", expected: englishText },
+    { key: "Control+Alt+J", expected: chineseText },
+  ];
+  const checksCoverTargets = keyboardChecks.length === 2
+    && targets.every(item => keyboardChecks.some(check =>
+      check.url === shortcutsUrl
+      && check.context?.generatedBy === ACCEPTANCE_KEYBOARD_FLOW_PROBE_TYPE
+      && check.context?.key === item.key
+      && check.context?.expectedText === item.expected
+      && check.actions?.some(action => action.type === "press" && action.key === item.key)
+      && check.assertions?.some(assertion => assertion.type === "visible" && assertion.text === item.expected)
+      && check.assertions?.some(assertion => assertion.type === "inViewport" && assertion.text === item.expected)
+      && check.assertions?.some(assertion => assertion.type === "urlIncludes" && assertion.text === "/shortcuts")
+    ));
+  const resultsCoverTargets = keyboardResults.length === 2
+    && targets.every(item => keyboardResults.some(result =>
+      result.status === "passed"
+      && result.provider === "playwright"
+      && result.url === shortcutsUrl
+      && result.finalUrl === shortcutsUrl
+      && result.context?.generatedBy === ACCEPTANCE_KEYBOARD_FLOW_PROBE_TYPE
+      && result.context?.key === item.key
+      && result.context?.expectedText === item.expected
+      && result.steps.some(step => step.name === "action:press" && step.status === "passed" && String(step.detail || "").includes(item.key))
+      && result.steps.some(step => step.name === "assert:visible" && step.status === "passed" && String(step.detail || "").includes(item.expected))
+      && result.steps.some(step => step.name === "assert:inViewport" && step.status === "passed" && String(step.detail || "").includes(item.expected))
+      && result.pageTextPreview?.includes(item.expected)
+    ));
+  const pass = checksCoverTargets
+    && generatedKeyboardChecks.length === 2
+    && generatedClickChecks.length === 0
+    && report.status === "passed"
+    && report.browserResults.length === 2
+    && resultsCoverTargets
+    && byCheck.get("browser_keyboard")?.status === "verified"
+    && byCheck.get("browser_visibility")?.status === "verified"
+    && byCheck.get("browser_layout")?.status === "verified"
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    keyboardChecks,
+    generatedChecks,
+    report,
+  };
+}
+
+export async function runTestAgentAcceptanceHoverFlowSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-hover-flow-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const menuUrl = `http://127.0.0.1:${port}/menu`;
+  const englishText = "Export report";
+  const chineseText = "导出报告";
+  const acceptanceCriteria = [
+    `At /menu, hover "Tools", then shows "${englishText}".`,
+    `在 /menu 悬停在 "工具"，然后显示 "${chineseText}"。`,
+  ];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Hover Flow Fixture</title>",
+    "<style>",
+    "body { font-family: sans-serif; padding: 32px; }",
+    ".toolbar { display: flex; gap: 32px; align-items: flex-start; }",
+    ".menu-wrap { position: relative; }",
+    ".menu { display: none; margin-top: 8px; padding: 12px; border: 1px solid #555; width: 220px; background: white; }",
+    ".trigger:hover + .menu, .menu:hover { display: block; }",
+    "[role=menuitem] { display: block; padding: 8px; }",
+    "</style></head>",
+    "<body><main>",
+    "<h1>Hover tools</h1>",
+    "<div class=\"toolbar\">",
+    "<section class=\"menu-wrap\">",
+    "<button class=\"trigger\" id=\"tools\" type=\"button\">Tools</button>",
+    "<div class=\"menu\" role=\"menu\" aria-label=\"Tools menu\">",
+    `<button type="button" role="menuitem">${englishText}</button>`,
+    "<button type=\"button\" role=\"menuitem\">Archive report</button>",
+    "</div>",
+    "</section>",
+    "<section class=\"menu-wrap\">",
+    "<button class=\"trigger\" id=\"tools-cn\" type=\"button\">工具</button>",
+    "<div class=\"menu\" role=\"menu\" aria-label=\"工具菜单\">",
+    `<button type="button" role="menuitem">${chineseText}</button>`,
+    "<button type=\"button\" role=\"menuitem\">归档报告</button>",
+    "</div>",
+    "</section>",
+    "</div>",
+    "<p role=\"status\">Menu waits for hover</p>",
+    "</main></body></html>`;",
+    "const root = '<!doctype html><title>Home</title><main><h1>Home</h1></main>';",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type':'text/html; charset=utf-8'});",
+    "  res.end(route === '/menu' ? html : root);",
+    "}).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-hover-flow-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const hoverChecks = buildAcceptanceHoverFlowBrowserChecks(project, acceptanceCriteria);
+  const generatedChecks = buildBrowserChecksForProject(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-hover-flow-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer hover browser flows from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["http", "browser_e2e", "browser_hover", "browser_visibility", "browser_layout", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const hoverResults = report.browserResults.filter(result => result.probeType === ACCEPTANCE_HOVER_FLOW_PROBE_TYPE);
+  const generatedHoverChecks = generatedChecks.filter(check => check.probeType === ACCEPTANCE_HOVER_FLOW_PROBE_TYPE);
+  const targets = [
+    { target: "Tools", expected: englishText },
+    { target: "工具", expected: chineseText },
+  ];
+  const checksCoverTargets = hoverChecks.length === 2
+    && targets.every(item => hoverChecks.some(check =>
+      check.url === menuUrl
+      && check.context?.generatedBy === ACCEPTANCE_HOVER_FLOW_PROBE_TYPE
+      && check.context?.hoverTarget?.name === item.target
+      && check.context?.expectedText === item.expected
+      && check.actions?.some(action => action.type === "hover" && action.role === "button" && action.name === item.target)
+      && check.assertions?.some(assertion => assertion.type === "visible" && assertion.text === item.expected)
+      && check.assertions?.some(assertion => assertion.type === "inViewport" && assertion.text === item.expected)
+      && check.assertions?.some(assertion => assertion.type === "urlIncludes" && assertion.text === "/menu")
+    ));
+  const resultsCoverTargets = hoverResults.length === 2
+    && targets.every(item => hoverResults.some(result =>
+      result.status === "passed"
+      && result.provider === "playwright"
+      && result.url === menuUrl
+      && result.finalUrl === menuUrl
+      && result.context?.generatedBy === ACCEPTANCE_HOVER_FLOW_PROBE_TYPE
+      && result.context?.hoverTarget?.name === item.target
+      && result.context?.expectedText === item.expected
+      && result.steps.some(step => step.name === "action:hover" && step.status === "passed" && String(step.detail || "").includes(item.target))
+      && result.steps.some(step => step.name === "assert:visible" && step.status === "passed" && String(step.detail || "").includes(item.expected))
+      && result.steps.some(step => step.name === "assert:inViewport" && step.status === "passed" && String(step.detail || "").includes(item.expected))
+      && result.pageTextPreview?.includes(item.expected)
+    ));
+  const pass = checksCoverTargets
+    && generatedHoverChecks.length === 2
+    && report.status === "passed"
+    && report.browserResults.length === 2
+    && resultsCoverTargets
+    && byCheck.get("browser_hover")?.status === "verified"
+    && byCheck.get("browser_visibility")?.status === "verified"
+    && byCheck.get("browser_layout")?.status === "verified"
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    hoverChecks,
+    generatedChecks,
+    report,
+  };
+}
+
+export async function runTestAgentAcceptanceScrollFlowSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-scroll-flow-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const landingUrl = `http://127.0.0.1:${port}/landing`;
+  const englishText = "Ready after scroll";
+  const chineseText = "滚动后就绪";
+  const acceptanceCriteria = [
+    `At /landing, scroll down 1200px, then shows "${englishText}".`,
+    `在 /landing 向下滚动 1200 像素，然后显示 "${chineseText}"。`,
+  ];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const page = `<!doctype html>",
+    "<html><head><title>Scroll Flow Fixture</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />",
+    "<style>",
+    "body { margin: 0; font-family: sans-serif; }",
+    "header { min-height: 1050px; padding: 32px; background: #f3f4f6; }",
+    "#target { margin: 0 32px 220px; padding: 24px; border: 1px solid #9ca3af; background: white; }",
+    "#target p { font-size: 20px; margin: 12px 0; }",
+    "</style></head>",
+    "<body><main>",
+    "<header><h1>Scroll flow</h1><p>Verification target starts below the first viewport.</p></header>",
+    "<section id=\"target\" aria-label=\"Scrolled content\">",
+    `<p role="status">${englishText}</p>`,
+    `<p>${chineseText}</p>`,
+    "</section>",
+    "</main></body></html>`;",
+    "const root = '<!doctype html><title>Home</title><main><h1>Home</h1></main>';",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type':'text/html; charset=utf-8'});",
+    "  res.end(route === '/landing' ? page : root);",
+    "}).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-scroll-flow-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const scrollChecks = buildAcceptanceScrollFlowBrowserChecks(project, acceptanceCriteria);
+  const layoutOnlyScrollChecks = buildAcceptanceScrollFlowBrowserChecks(project, [
+    'Mobile responsive page at /landing shows "Ready after scroll" with no horizontal scroll.',
+    '移动端页面在 /landing 显示 "滚动后就绪"，没有横向滚动。',
+  ]);
+  const generatedChecks = buildBrowserChecksForProject(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-scroll-flow-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer scroll browser flows from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["http", "browser_e2e", "browser_scroll", "browser_layout", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const scrollResults = report.browserResults.filter(result => result.probeType === ACCEPTANCE_SCROLL_FLOW_PROBE_TYPE);
+  const generatedScrollChecks = generatedChecks.filter(check => check.probeType === ACCEPTANCE_SCROLL_FLOW_PROBE_TYPE);
+  const textTargets = new Set([englishText, chineseText]);
+  const checksCoverTargets = scrollChecks.length === 2
+    && [...textTargets].every(text => scrollChecks.some(check =>
+      check.url === landingUrl
+      && check.context?.generatedBy === ACCEPTANCE_SCROLL_FLOW_PROBE_TYPE
+      && check.context?.expectedText === text
+      && check.actions?.some(action => action.type === "scroll" && action.direction === "down" && action.amount === 1200)
+      && check.assertions?.some(assertion => assertion.type === "text" && assertion.text === text)
+      && check.assertions?.some(assertion => assertion.type === "inViewport" && assertion.text === text)
+      && check.assertions?.some(assertion => assertion.type === "urlIncludes" && assertion.text === "/landing")
+    ));
+  const resultsCoverTargets = scrollResults.length === 2
+    && [...textTargets].every(text => scrollResults.some(result =>
+      result.status === "passed"
+      && result.provider === "playwright"
+      && result.url === landingUrl
+      && result.finalUrl === landingUrl
+      && result.context?.generatedBy === ACCEPTANCE_SCROLL_FLOW_PROBE_TYPE
+      && result.context?.expectedText === text
+      && result.steps.some(step => step.name === "action:scroll" && step.status === "passed" && String(step.detail || "").includes("down 1200px"))
+      && result.steps.some(step => step.name === "assert:inViewport" && step.status === "passed" && String(step.detail || "").includes(text))
+      && result.pageTextPreview?.includes(text)
+    ));
+  const pass = checksCoverTargets
+    && layoutOnlyScrollChecks.length === 0
+    && generatedScrollChecks.length === 2
+    && report.status === "passed"
+    && report.browserResults.length === 2
+    && resultsCoverTargets
+    && byCheck.get("browser_scroll")?.status === "verified"
+    && byCheck.get("browser_layout")?.status === "verified"
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    scrollChecks,
+    layoutOnlyScrollChecks,
+    generatedChecks,
+    report,
+  };
+}
+
+export async function runTestAgentAcceptanceRepeatedClickSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-repeated-click-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const retryUrl = `http://127.0.0.1:${port}/retry`;
+  const acceptanceCriteria = ['At /retry, click "Retry" 3 times, then shows "Retry stable".'];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const retryPage = `<!doctype html>",
+    "<html><head><title>Retry</title></head>",
+    "<body><main>",
+    "<h1>Retry action</h1>",
+    "<button type=\"button\" id=\"retry\">Retry</button>",
+    "<p id=\"status\" role=\"status\">Waiting</p>",
+    "</main>",
+    "<script>",
+    "let count = 0;",
+    "document.getElementById('retry').addEventListener('click', () => {",
+    "  count += 1;",
+    "  document.body.dataset.retryCount = String(count);",
+    "  document.getElementById('status').textContent = count >= 3 ? 'Retry stable' : 'Retry count ' + count;",
+    "});",
+    "</script>",
+    "</body></html>`;",
+    "const root = '<!doctype html><title>Home</title><main><h1>Home</h1></main>';",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type':'text/html'});",
+    "  res.end(route === '/retry' ? retryPage : root);",
+    "}).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-repeated-click-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const repeatedChecks = buildAcceptanceRepeatedClickBrowserChecks(project, acceptanceCriteria);
+  const generatedChecks = buildBrowserChecksForProject(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-repeated-click-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer repeated-click adversarial browser checks from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["http", "browser_e2e", "adversarial", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const repeatedCheck = repeatedChecks[0];
+  const generatedRepeatedCheck = generatedChecks.find(check => check.probeType === ACCEPTANCE_REPEATED_CLICK_PROBE_TYPE);
+  const generatedClickCheck = generatedChecks.find(check => check.probeType === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE);
+  const browser = report.browserResults.find(result => result.probeType === ACCEPTANCE_REPEATED_CLICK_PROBE_TYPE);
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const clickSteps = browser?.steps.filter(step => step.name === "action:click" && step.status === "passed") || [];
+  const pass = repeatedChecks.length === 1
+    && repeatedCheck?.probeType === ACCEPTANCE_REPEATED_CLICK_PROBE_TYPE
+    && repeatedCheck?.adversarial === true
+    && repeatedCheck?.url === retryUrl
+    && repeatedCheck?.context?.generatedBy === ACCEPTANCE_REPEATED_CLICK_PROBE_TYPE
+    && repeatedCheck?.context?.acceptanceCriteria?.[0] === acceptanceCriteria[0]
+    && repeatedCheck?.context?.repeatCount === 3
+    && repeatedCheck?.actions?.filter(action => action.type === "click" && action.role === "button" && action.name === "Retry").length === 3
+    && repeatedCheck?.assertions?.some(assertion => assertion.type === "text" && assertion.text === "Retry stable")
+    && generatedRepeatedCheck?.adversarial === true
+    && generatedClickCheck === undefined
+    && report.status === "passed"
+    && report.browserResults.length === 1
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.adversarial === true
+    && browser?.url === retryUrl
+    && browser?.finalUrl === retryUrl
+    && browser?.context?.generatedBy === ACCEPTANCE_REPEATED_CLICK_PROBE_TYPE
+    && browser?.pageTextPreview?.includes("Retry stable")
+    && clickSteps.length === 3
+    && browser?.steps.some(step => step.name === "assert:text" && step.status === "passed" && String(step.detail || "").includes("Retry stable"))
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("adversarial")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    repeatedChecks,
+    generatedChecks,
+    report,
+  };
+}
+
+export async function runTestAgentAcceptanceChineseRepeatedClickSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-chinese-repeated-click-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const retryUrl = `http://127.0.0.1:${port}/retry`;
+  const acceptanceCriteria = ['在 /retry 点击 "重试" 3 次，然后显示 "重试稳定"。'];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const retryPage = `<!doctype html>",
+    "<html><head><title>重试</title></head>",
+    "<body><main>",
+    "<h1>重试操作</h1>",
+    "<button type=\"button\" id=\"retry\">重试</button>",
+    "<p id=\"status\" role=\"status\">等待</p>",
+    "</main>",
+    "<script>",
+    "let count = 0;",
+    "document.getElementById('retry').addEventListener('click', () => {",
+    "  count += 1;",
+    "  document.body.dataset.retryCount = String(count);",
+    "  document.getElementById('status').textContent = count >= 3 ? '重试稳定' : '重试次数 ' + count;",
+    "});",
+    "</script>",
+    "</body></html>`;",
+    "const root = '<!doctype html><title>首页</title><main><h1>首页</h1></main>';",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type':'text/html; charset=utf-8'});",
+    "  res.end(route === '/retry' ? retryPage : root);",
+    "}).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-chinese-repeated-click-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const repeatedChecks = buildAcceptanceRepeatedClickBrowserChecks(project, acceptanceCriteria);
+  const generatedChecks = buildBrowserChecksForProject(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-chinese-repeated-click-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer Chinese repeated-click adversarial browser checks from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["http", "browser_e2e", "adversarial", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const repeatedCheck = repeatedChecks[0];
+  const generatedRepeatedCheck = generatedChecks.find(check => check.probeType === ACCEPTANCE_REPEATED_CLICK_PROBE_TYPE);
+  const generatedClickCheck = generatedChecks.find(check => check.probeType === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE);
+  const browser = report.browserResults.find(result => result.probeType === ACCEPTANCE_REPEATED_CLICK_PROBE_TYPE);
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const clickSteps = browser?.steps.filter(step => step.name === "action:click" && step.status === "passed") || [];
+  const pass = repeatedChecks.length === 1
+    && repeatedCheck?.probeType === ACCEPTANCE_REPEATED_CLICK_PROBE_TYPE
+    && repeatedCheck?.adversarial === true
+    && repeatedCheck?.url === retryUrl
+    && repeatedCheck?.context?.generatedBy === ACCEPTANCE_REPEATED_CLICK_PROBE_TYPE
+    && repeatedCheck?.context?.acceptanceCriteria?.[0] === acceptanceCriteria[0]
+    && repeatedCheck?.context?.repeatCount === 3
+    && repeatedCheck?.actions?.filter(action => action.type === "click" && action.role === "button" && action.name === "重试").length === 3
+    && repeatedCheck?.assertions?.some(assertion => assertion.type === "text" && assertion.text === "重试稳定")
+    && generatedRepeatedCheck?.adversarial === true
+    && generatedClickCheck === undefined
+    && report.status === "passed"
+    && report.browserResults.length === 1
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.adversarial === true
+    && browser?.url === retryUrl
+    && browser?.finalUrl === retryUrl
+    && browser?.context?.generatedBy === ACCEPTANCE_REPEATED_CLICK_PROBE_TYPE
+    && browser?.pageTextPreview?.includes("重试稳定")
+    && clickSteps.length === 3
+    && browser?.steps.some(step => step.name === "assert:text" && step.status === "passed" && String(step.detail || "").includes("重试稳定"))
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("adversarial")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    repeatedChecks,
+    generatedChecks,
+    report,
+  };
+}
+
 export async function runTestAgentBlankPageSmokeSelfTest() {
   const availability = await checkPlaywrightAvailability();
   if (!availability.available) {
@@ -2063,6 +3624,252 @@ export async function runTestAgentAcceptancePathGroupingSelfTest() {
   };
 }
 
+export async function runTestAgentAcceptanceResponsiveViewportSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-responsive-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const responsiveUrl = `http://127.0.0.1:${port}/responsive`;
+  const acceptanceCriteria = ['Mobile responsive page at /responsive shows "Mobile navigation ready" with no horizontal overflow.'];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const root = '<!doctype html><title>Home</title><main><h1>Home</h1></main>';",
+    "const responsive = `<!doctype html>",
+    "<html><head><title>Responsive</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+    "<style>",
+    "body { margin: 0; font-family: sans-serif; }",
+    "main { box-sizing: border-box; width: 100%; max-width: 100%; padding: 16px; }",
+    ".desktop { display: block; }",
+    ".mobile { display: none; }",
+    ".row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }",
+    ".tile { min-width: 0; border: 1px solid #ccc; padding: 12px; }",
+    "@media (max-width: 600px) { .desktop { display: none; } .mobile { display: block; } .row { grid-template-columns: 1fr; } }",
+    "</style></head>",
+    "<body><main>",
+    "<h1>Responsive dashboard</h1>",
+    "<p class=\"desktop\">Desktop navigation ready</p>",
+    "<p class=\"mobile\" role=\"status\">Mobile navigation ready</p>",
+    "<section class=\"row\"><article class=\"tile\">Overview</article><article class=\"tile\">Activity</article></section>",
+    "</main></body></html>`;",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type':'text/html'});",
+    "  res.end(route === '/responsive' ? responsive : root);",
+    "}).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-responsive-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const responsiveChecks = buildAcceptanceResponsiveBrowserChecks(project, acceptanceCriteria);
+  const generatedChecks = buildBrowserChecksForProject(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-responsive-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer mobile responsive browser checks from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["browser_e2e", "responsive", "screenshots", "browser_snapshots", "console_errors"],
+    projects: [{
+      name: "acceptance-responsive-self-test",
+      workDir: dir,
+      runCommand: `"${process.execPath}" server.js`,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const responsiveCheck = responsiveChecks[0];
+  const generatedResponsiveCheck = generatedChecks.find(check => check.probeType === ACCEPTANCE_RESPONSIVE_PROBE_TYPE);
+  const browser = report.browserResults.find(item => item.probeType === ACCEPTANCE_RESPONSIVE_PROBE_TYPE);
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const pass = responsiveChecks.length === 1
+    && generatedResponsiveCheck?.url === responsiveUrl
+    && responsiveCheck?.viewportWidth === 390
+    && responsiveCheck?.viewportHeight === 844
+    && responsiveCheck?.isMobile === true
+    && responsiveCheck?.assertions?.some(assertion => assertion.type === "noHorizontalOverflow")
+    && responsiveCheck?.assertions?.some(assertion => assertion.type === "text" && assertion.text === "Mobile navigation ready")
+    && responsiveCheck?.assertions?.some(assertion => assertion.type === "urlIncludes" && assertion.text === "/responsive")
+    && report.status === "passed"
+    && report.browserResults.length === 1
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.url === responsiveUrl
+    && browser?.viewport?.width === 390
+    && browser?.viewport?.height === 844
+    && browser?.viewport?.isMobile === true
+    && browser?.steps.some(step => step.name === "assert:noHorizontalOverflow" && step.status === "passed")
+    && browser?.steps.some(step => step.name === "assert:text" && step.status === "passed" && String(step.detail || "").includes("Mobile navigation ready"))
+    && browser?.pageTextPreview?.includes("Mobile navigation ready")
+    && byCheck.get("responsive")?.status === "verified"
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    report,
+    availability,
+    responsiveChecks,
+    generatedChecks,
+  };
+}
+
+export async function runTestAgentAcceptanceChineseResponsiveViewportSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-chinese-responsive-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const responsiveUrl = `http://127.0.0.1:${port}/responsive`;
+  const expectedText = "移动导航已就绪";
+  const acceptanceCriteria = [`移动端响应式页面在 /responsive 显示 "${expectedText}"，并且没有横向滚动。`];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const root = '<!doctype html><title>首页</title><main><h1>首页</h1></main>';",
+    "const responsive = `<!doctype html>",
+    "<html><head><title>中文响应式</title><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+    "<style>",
+    "body { margin: 0; font-family: sans-serif; }",
+    "main { box-sizing: border-box; width: 100%; max-width: 100%; padding: 16px; }",
+    ".desktop { display: block; }",
+    ".mobile { display: none; }",
+    ".row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }",
+    ".tile { min-width: 0; border: 1px solid #ccc; padding: 12px; }",
+    "@media (max-width: 600px) { .desktop { display: none; } .mobile { display: block; } .row { grid-template-columns: 1fr; } }",
+    "</style></head>",
+    "<body><main>",
+    "<h1>响应式看板</h1>",
+    "<p class=\"desktop\">桌面导航已就绪</p>",
+    `<p class="mobile" role="status">${expectedText}</p>`,
+    "<section class=\"row\"><article class=\"tile\">概览</article><article class=\"tile\">动态</article></section>",
+    "</main></body></html>`;",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type':'text/html; charset=utf-8'});",
+    "  res.end(route === '/responsive' ? responsive : root);",
+    "}).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-chinese-responsive-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const responsiveChecks = buildAcceptanceResponsiveBrowserChecks(project, acceptanceCriteria);
+  const generatedChecks = buildBrowserChecksForProject(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-chinese-responsive-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer mobile responsive browser checks from Chinese acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["browser_e2e", "responsive", "screenshots", "browser_snapshots", "console_errors"],
+    projects: [{
+      name: "acceptance-chinese-responsive-self-test",
+      workDir: dir,
+      runCommand: `"${process.execPath}" server.js`,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const responsiveCheck = responsiveChecks[0];
+  const generatedResponsiveCheck = generatedChecks.find(check => check.probeType === ACCEPTANCE_RESPONSIVE_PROBE_TYPE);
+  const browser = report.browserResults.find(item => item.probeType === ACCEPTANCE_RESPONSIVE_PROBE_TYPE);
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const pass = responsiveChecks.length === 1
+    && generatedResponsiveCheck?.url === responsiveUrl
+    && responsiveCheck?.context?.generatedBy === ACCEPTANCE_RESPONSIVE_PROBE_TYPE
+    && responsiveCheck?.context?.acceptanceCriteria?.[0] === acceptanceCriteria[0]
+    && responsiveCheck?.viewportWidth === 390
+    && responsiveCheck?.viewportHeight === 844
+    && responsiveCheck?.isMobile === true
+    && responsiveCheck?.assertions?.some(assertion => assertion.type === "noHorizontalOverflow")
+    && responsiveCheck?.assertions?.some(assertion => assertion.type === "text" && assertion.text === expectedText)
+    && responsiveCheck?.assertions?.some(assertion => assertion.type === "urlIncludes" && assertion.text === "/responsive")
+    && report.status === "passed"
+    && report.browserResults.length === 1
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.context?.generatedBy === ACCEPTANCE_RESPONSIVE_PROBE_TYPE
+    && browser?.url === responsiveUrl
+    && browser?.viewport?.width === 390
+    && browser?.viewport?.height === 844
+    && browser?.viewport?.isMobile === true
+    && browser?.steps.some(step => step.name === "assert:noHorizontalOverflow" && step.status === "passed")
+    && browser?.steps.some(step => step.name === "assert:text" && step.status === "passed" && String(step.detail || "").includes(expectedText))
+    && browser?.pageTextPreview?.includes(expectedText)
+    && byCheck.get("responsive")?.status === "verified"
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    report,
+    availability,
+    responsiveChecks,
+    generatedChecks,
+  };
+}
+
 export async function runTestAgentAcceptanceDownloadFlowSelfTest() {
   const availability = await checkPlaywrightAvailability();
   if (!availability.available) {
@@ -2169,6 +3976,135 @@ export async function runTestAgentAcceptanceDownloadFlowSelfTest() {
     && browser?.finalUrl === exportsUrl
     && browser?.pageTextPreview?.includes("Export started")
     && browser?.steps.some(step => step.name === "action:click" && step.status === "passed" && String(step.detail || "").includes("Export CSV"))
+    && browser?.steps.some(step => step.name === "assert:downloadedFile" && step.status === "passed" && String(step.detail || "").includes("filename=tasks.csv") && String(step.detail || "").includes("Ship TestAgent"))
+    && downloadArtifact?.path
+    && fs.existsSync(downloadArtifact.path)
+    && downloadText.includes("Ship TestAgent,done")
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("browser_download")?.status === "verified"
+    && byCheck.get("browser_artifacts")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    report,
+    availability,
+    downloadChecks,
+    downloadArtifact,
+  };
+}
+
+export async function runTestAgentAcceptanceChineseDownloadFlowSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-chinese-download-flow-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const exportsUrl = `http://127.0.0.1:${port}/exports`;
+  const acceptanceCriteria = ['在 /exports 点击 "导出 CSV"，然后下载 "tasks.csv"，内容包含 "Ship TestAgent"。'];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const exportsPage = `<!doctype html>",
+    "<html><head><title>导出</title></head>",
+    "<body><main>",
+    "<h1>导出</h1>",
+    "<button type=\"button\" id=\"export\">导出 CSV</button>",
+    "<p id=\"status\" role=\"status\">准备就绪</p>",
+    "</main>",
+    "<script>",
+    "document.getElementById('export').addEventListener('click', () => {",
+    "  const csv = 'title,status\\\\nShip TestAgent,done\\\\n';",
+    "  const blob = new Blob([csv], { type: 'text/csv' });",
+    "  const link = document.createElement('a');",
+    "  link.href = URL.createObjectURL(blob);",
+    "  link.download = 'tasks.csv';",
+    "  document.body.appendChild(link);",
+    "  link.click();",
+    "  document.getElementById('status').textContent = '导出已开始';",
+    "  setTimeout(() => { URL.revokeObjectURL(link.href); link.remove(); }, 1000);",
+    "});",
+    "</script>",
+    "</body></html>`;",
+    "const root = '<!doctype html><title>首页</title><main><h1>首页</h1></main>';",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type':'text/html; charset=utf-8'});",
+    "  res.end(route === '/exports' ? exportsPage : root);",
+    "}).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-chinese-download-flow-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const downloadChecks = buildAcceptanceDownloadFlowBrowserChecks(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-chinese-download-flow-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer browser download checks from Chinese acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["http", "browser_e2e", "browser_download", "browser_artifacts", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const flowCheck = downloadChecks[0];
+  const downloadArtifact = (browser?.browserArtifacts || []).find(item => item.type === "download");
+  const downloadText = downloadArtifact?.path && fs.existsSync(downloadArtifact.path) ? fs.readFileSync(downloadArtifact.path, "utf-8") : "";
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const pass = downloadChecks.length === 1
+    && flowCheck?.probeType === ACCEPTANCE_DOWNLOAD_FLOW_PROBE_TYPE
+    && flowCheck?.url === exportsUrl
+    && flowCheck?.context?.generatedBy === ACCEPTANCE_DOWNLOAD_FLOW_PROBE_TYPE
+    && flowCheck?.context?.acceptanceCriteria?.[0] === acceptanceCriteria[0]
+    && flowCheck?.actions?.some(action => action.type === "goto" && action.url === exportsUrl)
+    && flowCheck?.actions?.some(action => action.type === "click" && action.role === "button" && action.name === "导出 CSV")
+    && flowCheck?.assertions?.some(assertion => assertion.type === "downloadedFile" && assertion.fileName === "tasks.csv" && assertion.contentIncludes === "Ship TestAgent")
+    && report.status === "passed"
+    && report.browserResults.length === 1
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.probeType === ACCEPTANCE_DOWNLOAD_FLOW_PROBE_TYPE
+    && browser?.url === exportsUrl
+    && browser?.finalUrl === exportsUrl
+    && browser?.context?.acceptanceCriteria?.[0] === acceptanceCriteria[0]
+    && browser?.pageTextPreview?.includes("导出已开始")
+    && browser?.steps.some(step => step.name === "action:click" && step.status === "passed" && String(step.detail || "").includes("导出 CSV"))
     && browser?.steps.some(step => step.name === "assert:downloadedFile" && step.status === "passed" && String(step.detail || "").includes("filename=tasks.csv") && String(step.detail || "").includes("Ship TestAgent"))
     && downloadArtifact?.path
     && fs.existsSync(downloadArtifact.path)
@@ -2317,6 +4253,623 @@ export async function runTestAgentAcceptanceUploadFlowSelfTest() {
   };
 }
 
+export async function runTestAgentAcceptanceChineseUploadFlowSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-chinese-upload-flow-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const uploadUrl = `http://127.0.0.1:${port}/upload`;
+  const payload = "中文上传内容";
+  const expectedText = `已上传 notes.txt: ${payload}`;
+  const acceptanceCriteria = [`在 /upload 上传 "notes.txt" 内容为 "${payload}" 到 "附件"，点击 "上传"，然后显示 "${expectedText}"。`];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const uploadPage = `<!doctype html>",
+    "<html><head><title>中文上传</title></head>",
+    "<body><main>",
+    "<h1>中文上传</h1>",
+    "<label for=\"attachment\">附件</label>",
+    "<input id=\"attachment\" name=\"attachment\" type=\"file\" />",
+    "<button type=\"button\" id=\"upload\">上传</button>",
+    "<p id=\"status\" role=\"status\">等待上传</p>",
+    "</main>",
+    "<script>",
+    "document.getElementById('upload').addEventListener('click', async () => {",
+    "  const input = document.getElementById('attachment');",
+    "  const file = input.files && input.files[0];",
+    "  if (!file) { document.getElementById('status').textContent = '缺少文件'; return; }",
+    "  const text = await file.text();",
+    "  document.body.dataset.fileName = file.name;",
+    "  document.body.dataset.fileText = text;",
+    "  document.getElementById('status').textContent = '已上传 ' + file.name + ': ' + text;",
+    "});",
+    "</script>",
+    "</body></html>`;",
+    "const root = '<!doctype html><title>首页</title><main><h1>首页</h1></main>';",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type':'text/html; charset=utf-8'});",
+    "  res.end(route === '/upload' ? uploadPage : root);",
+    "}).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-chinese-upload-flow-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const uploadChecks = buildAcceptanceUploadFlowBrowserChecks(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-chinese-upload-flow-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer a browser upload flow from Chinese acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["http", "browser_e2e", "browser_upload", "screenshots", "browser_snapshots", "console_errors"],
+    projects: [{
+      name: "acceptance-chinese-upload-flow-self-test",
+      workDir: dir,
+      runCommand: `"${process.execPath}" server.js`,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const flowCheck = uploadChecks[0];
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const uploadAction = flowCheck?.actions?.find(action => action.type === "uploadFile");
+  const interaction = report.browserInteractionSummary?.[0];
+  const pass = uploadChecks.length === 1
+    && flowCheck?.probeType === ACCEPTANCE_UPLOAD_FLOW_PROBE_TYPE
+    && flowCheck?.url === uploadUrl
+    && flowCheck?.context?.generatedBy === ACCEPTANCE_UPLOAD_FLOW_PROBE_TYPE
+    && flowCheck?.context?.acceptanceCriteria?.[0] === acceptanceCriteria[0]
+    && uploadAction?.label === "附件"
+    && uploadAction?.fileName === "notes.txt"
+    && uploadAction?.fileContent === payload
+    && uploadAction?.mediaType === "text/plain"
+    && flowCheck?.actions?.some(action => action.type === "click" && action.role === "button" && action.name === "上传")
+    && flowCheck?.assertions?.some(assertion => assertion.type === "text" && assertion.text === expectedText)
+    && report.status === "passed"
+    && report.browserResults.length === 1
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.probeType === ACCEPTANCE_UPLOAD_FLOW_PROBE_TYPE
+    && browser?.context?.generatedBy === ACCEPTANCE_UPLOAD_FLOW_PROBE_TYPE
+    && browser?.url === uploadUrl
+    && browser?.finalUrl === uploadUrl
+    && browser?.pageTextPreview?.includes(expectedText)
+    && browser?.steps.some(step => step.name === "action:uploadFile" && step.status === "passed" && String(step.detail || "").includes("label=附件") && String(step.detail || "").includes("file=notes.txt"))
+    && browser?.steps.some(step => step.name === "action:click" && step.status === "passed" && String(step.detail || "").includes("上传"))
+    && browser?.steps.some(step => step.name === "assert:text" && step.status === "passed" && String(step.detail || "").includes(expectedText))
+    && interaction?.actionTypes?.uploadFile === 1
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("browser_upload")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    report,
+    availability,
+    uploadChecks,
+  };
+}
+
+export async function runTestAgentAcceptanceClickFlowSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-click-flow-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const menuUrl = `http://127.0.0.1:${port}/menu`;
+  const acceptanceCriteria = ['At /menu, click "Open settings", then shows "Settings panel ready".'];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Click Flow Fixture</title></head>",
+    "<body>",
+    "<main>",
+    "<h1>Menu</h1>",
+    "<button type=\"button\" id=\"open\">Open settings</button>",
+    "<section id=\"panel\" hidden>",
+    "<h2>Settings</h2>",
+    "<p>Settings panel ready</p>",
+    "</section>",
+    "</main>",
+    "<script>",
+    "document.getElementById('open').addEventListener('click', () => {",
+    "  document.getElementById('panel').hidden = false;",
+    "});",
+    "</script>",
+    "</body></html>`;",
+    "const server = http.createServer((req, res) => {",
+    "  res.writeHead(200, {'content-type': 'text/html'});",
+    "  res.end(html);",
+    "});",
+    "server.listen(process.env.PORT || 0, '127.0.0.1');",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-click-flow-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const clickChecks = buildAcceptanceClickFlowBrowserChecks(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-click-flow-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer a browser click flow from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["http", "browser_e2e", "screenshots", "console_errors"],
+    projects: [{
+      name: "acceptance-click-flow-self-test",
+      workDir: dir,
+      runCommand: `"${process.execPath}" server.js`,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const markdown = buildTestAgentMarkdownReport(report);
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const clickCheck = clickChecks[0];
+  const hasAction = (type: string, detail: string) => {
+    return browser?.steps.some(step => step.name === `action:${type}` && step.status === "passed" && String(step.detail || "").includes(detail)) === true;
+  };
+  const hasAssertion = (type: string, detail: string) => {
+    return browser?.steps.some(step => step.name === `assert:${type}` && step.status === "passed" && String(step.detail || "").includes(detail)) === true;
+  };
+  const pass = clickChecks.length === 1
+    && clickCheck?.probeType === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE
+    && clickCheck?.url === menuUrl
+    && clickCheck?.context?.generatedBy === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE
+    && clickCheck?.context?.acceptanceCriteria?.[0] === acceptanceCriteria[0]
+    && clickCheck?.actions?.some(action => action.type === "click" && action.role === "button" && action.name === "Open settings")
+    && clickCheck?.assertions?.some(assertion => assertion.type === "text" && assertion.text === "Settings panel ready")
+    && report.status === "passed"
+    && report.browserResults.length === 1
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.probeType === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE
+    && browser?.context?.generatedBy === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE
+    && browser?.context?.acceptanceCriteria?.[0] === acceptanceCriteria[0]
+    && browser?.url === menuUrl
+    && browser?.pageTextPreview?.includes("Settings panel ready")
+    && hasAction("click", "role=button; name=Open settings")
+    && hasAssertion("text", "Settings panel ready")
+    && hasAssertion("urlIncludes", "/menu")
+    && report.evidence.some(item => item.type === "browser" && item.detail?.includes("source=acceptance_click_flow"))
+    && markdown.includes("**Acceptance source:**")
+    && markdown.includes(acceptanceCriteria[0])
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    report,
+    availability,
+    clickChecks,
+    markdown,
+  };
+}
+
+export async function runTestAgentAcceptanceChineseClickFlowSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-chinese-click-flow-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const menuUrl = `http://127.0.0.1:${port}/menu`;
+  const acceptanceCriteria = ['在 /menu 点击 "打开设置"，然后显示 "设置面板就绪"。'];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>菜单</title></head>",
+    "<body>",
+    "<main>",
+    "<h1>菜单</h1>",
+    "<button type=\"button\" id=\"open\">打开设置</button>",
+    "<section id=\"panel\" hidden>",
+    "<h2>设置</h2>",
+    "<p>设置面板就绪</p>",
+    "</section>",
+    "</main>",
+    "<script>",
+    "document.getElementById('open').addEventListener('click', () => {",
+    "  document.getElementById('panel').hidden = false;",
+    "});",
+    "</script>",
+    "</body></html>`;",
+    "const home = '<!doctype html><title>首页</title><main><h1>首页</h1></main>';",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type': 'text/html; charset=utf-8'});",
+    "  res.end(route === '/menu' ? html : home);",
+    "}).listen(process.env.PORT || 0, '127.0.0.1');",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-chinese-click-flow-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const clickChecks = buildAcceptanceClickFlowBrowserChecks(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-chinese-click-flow-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer a browser click flow from Chinese acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["http", "browser_e2e", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const clickCheck = clickChecks[0];
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const pass = clickChecks.length === 1
+    && clickCheck?.probeType === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE
+    && clickCheck?.url === menuUrl
+    && clickCheck?.context?.generatedBy === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE
+    && clickCheck?.context?.acceptanceCriteria?.[0] === acceptanceCriteria[0]
+    && clickCheck?.actions?.some(action => action.type === "click" && action.role === "button" && action.name === "打开设置")
+    && clickCheck?.assertions?.some(assertion => assertion.type === "text" && assertion.text === "设置面板就绪")
+    && report.status === "passed"
+    && report.browserResults.length === 1
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.probeType === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE
+    && browser?.context?.acceptanceCriteria?.[0] === acceptanceCriteria[0]
+    && browser?.url === menuUrl
+    && browser?.pageTextPreview?.includes("设置面板就绪")
+    && browser?.steps.some(step => step.name === "action:click" && step.status === "passed" && String(step.detail || "").includes("打开设置"))
+    && browser?.steps.some(step => step.name === "assert:text" && step.status === "passed" && String(step.detail || "").includes("设置面板就绪"))
+    && browser?.steps.some(step => step.name === "assert:urlIncludes" && step.status === "passed" && String(step.detail || "").includes("/menu"))
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    report,
+    availability,
+    clickChecks,
+  };
+}
+
+export async function runTestAgentAcceptanceClickNavigationFlowSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-click-navigation-flow-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const menuUrl = `http://127.0.0.1:${port}/menu`;
+  const settingsUrl = `http://127.0.0.1:${port}/settings`;
+  const acceptanceCriteria = ["At /menu, click the Settings link, then navigates to /settings."];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const menu = `<!doctype html>",
+    "<html><head><title>Menu</title></head>",
+    "<body><main>",
+    "<h1>Menu</h1>",
+    "<nav><a href=\"/settings\">Settings</a></nav>",
+    "</main></body></html>`;",
+    "const settings = `<!doctype html>",
+    "<html><head><title>Settings</title></head>",
+    "<body><main><h1>Settings</h1><p>Settings route ready</p></main></body></html>`;",
+    "const home = '<!doctype html><title>Home</title><main><h1>Home</h1></main>';",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type':'text/html'});",
+    "  if (route === '/menu') return res.end(menu);",
+    "  if (route === '/settings') return res.end(settings);",
+    "  return res.end(home);",
+    "}).listen(process.env.PORT, '127.0.0.1');",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-click-navigation-flow-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const clickChecks = buildAcceptanceClickFlowBrowserChecks(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-click-navigation-flow-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer a browser link navigation flow from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["http", "browser_e2e", "screenshots", "console_errors"],
+    projects: [{
+      name: "acceptance-click-navigation-flow-self-test",
+      workDir: dir,
+      runCommand: `"${process.execPath}" server.js`,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const clickCheck = clickChecks[0];
+  const hasAction = (type: string, detail: string) => {
+    return browser?.steps.some(step => step.name === `action:${type}` && step.status === "passed" && String(step.detail || "").includes(detail)) === true;
+  };
+  const hasAssertion = (type: string, detail: string) => {
+    return browser?.steps.some(step => step.name === `assert:${type}` && step.status === "passed" && String(step.detail || "").includes(detail)) === true;
+  };
+  const pass = clickChecks.length === 1
+    && clickCheck?.probeType === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE
+    && clickCheck?.url === menuUrl
+    && clickCheck?.actions?.some(action => action.type === "click" && action.role === "link" && action.name === "Settings")
+    && clickCheck?.actions?.some(action => action.type === "waitForUrl" && action.text === "/settings")
+    && clickCheck?.assertions?.some(assertion => assertion.type === "urlIncludes" && assertion.text === "/settings")
+    && report.status === "passed"
+    && report.browserResults.length === 1
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.probeType === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE
+    && browser?.url === menuUrl
+    && browser?.finalUrl === settingsUrl
+    && browser?.pageTextPreview?.includes("Settings route ready")
+    && hasAction("click", "role=link; name=Settings")
+    && hasAction("waitForUrl", "/settings")
+    && hasAssertion("urlIncludes", "/settings")
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    report,
+    availability,
+    clickChecks,
+  };
+}
+
+export async function runTestAgentAcceptanceMultiClickFlowSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-multi-click-flow-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const menuUrl = `http://127.0.0.1:${port}/menu`;
+  const acceptanceCriteria = ['At /menu, click "Open settings", click "Advanced", then shows "Advanced settings ready".'];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Multi Click Fixture</title></head>",
+    "<body><main>",
+    "<h1>Menu</h1>",
+    "<button type=\"button\" id=\"open\">Open settings</button>",
+    "<section id=\"settings\" hidden>",
+    "<button type=\"button\" id=\"advanced\">Advanced</button>",
+    "</section>",
+    "<p id=\"status\" role=\"status\">Waiting</p>",
+    "</main>",
+    "<script>",
+    "document.getElementById('open').addEventListener('click', () => {",
+    "  document.getElementById('settings').hidden = false;",
+    "  document.getElementById('status').textContent = 'Settings opened';",
+    "});",
+    "document.getElementById('advanced').addEventListener('click', () => {",
+    "  document.getElementById('status').textContent = 'Advanced settings ready';",
+    "});",
+    "</script>",
+    "</body></html>`;",
+    "const home = '<!doctype html><title>Home</title><main><h1>Home</h1></main>';",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type':'text/html'});",
+    "  res.end(route === '/menu' ? html : home);",
+    "}).listen(process.env.PORT, '127.0.0.1');",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-multi-click-flow-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const clickChecks = buildAcceptanceClickFlowBrowserChecks(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-multi-click-flow-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer a multi-click browser flow from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["http", "browser_e2e", "screenshots", "console_errors"],
+    projects: [{
+      name: "acceptance-multi-click-flow-self-test",
+      workDir: dir,
+      runCommand: `"${process.execPath}" server.js`,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const clickCheck = clickChecks[0];
+  const clickActions = clickCheck?.actions?.filter(action => action.type === "click") || [];
+  const hasAction = (detail: string) => {
+    return browser?.steps.some(step => step.name === "action:click" && step.status === "passed" && String(step.detail || "").includes(detail)) === true;
+  };
+  const hasAssertion = (type: string, detail: string) => {
+    return browser?.steps.some(step => step.name === `assert:${type}` && step.status === "passed" && String(step.detail || "").includes(detail)) === true;
+  };
+  const pass = clickChecks.length === 1
+    && clickCheck?.probeType === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE
+    && clickCheck?.url === menuUrl
+    && clickActions.length === 2
+    && clickActions[0]?.role === "button"
+    && clickActions[0]?.name === "Open settings"
+    && clickActions[1]?.role === "button"
+    && clickActions[1]?.name === "Advanced"
+    && clickCheck?.assertions?.some(assertion => assertion.type === "text" && assertion.text === "Advanced settings ready")
+    && report.status === "passed"
+    && report.browserResults.length === 1
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.probeType === ACCEPTANCE_CLICK_FLOW_PROBE_TYPE
+    && browser?.url === menuUrl
+    && browser?.pageTextPreview?.includes("Advanced settings ready")
+    && hasAction("role=button; name=Open settings")
+    && hasAction("role=button; name=Advanced")
+    && hasAssertion("text", "Advanced settings ready")
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    report,
+    availability,
+    clickChecks,
+  };
+}
+
 export async function runTestAgentAcceptanceFormFlowSelfTest() {
   const availability = await checkPlaywrightAvailability();
   if (!availability.available) {
@@ -2403,6 +4956,131 @@ export async function runTestAgentAcceptanceFormFlowSelfTest() {
     && hasAssertion("text", "Buy milk")
     && hasAssertion("urlIncludes", "/tasks")
     && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    report,
+    availability,
+    flowChecks,
+  };
+}
+
+export async function runTestAgentAcceptanceChineseFormFlowSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-chinese-form-flow-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const tasksUrl = `http://127.0.0.1:${port}/tasks`;
+  const acceptanceCriteria = ['在 /tasks 输入 "买牛奶" 到 "任务"，点击 "添加任务"，然后显示 "买牛奶"。'];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>任务</title></head>",
+    "<body>",
+    "<main>",
+    "<h1>任务</h1>",
+    "<label for=\"task\">任务</label>",
+    "<input id=\"task\" name=\"task\" />",
+    "<button type=\"button\" id=\"add\">添加任务</button>",
+    "<ul id=\"tasks\" aria-label=\"已保存任务\"></ul>",
+    "<p id=\"status\" role=\"status\">等待</p>",
+    "</main>",
+    "<script>",
+    "document.getElementById('add').addEventListener('click', () => {",
+    "  const value = document.getElementById('task').value.trim();",
+    "  if (!value) { document.getElementById('status').textContent = '缺少任务'; return; }",
+    "  const item = document.createElement('li');",
+    "  item.textContent = value;",
+    "  document.getElementById('tasks').appendChild(item);",
+    "  document.getElementById('status').textContent = '已添加 ' + value;",
+    "});",
+    "</script>",
+    "</body></html>`;",
+    "const home = '<!doctype html><title>首页</title><main><h1>首页</h1></main>';",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type': 'text/html; charset=utf-8'});",
+    "  res.end(route === '/tasks' ? html : home);",
+    "}).listen(process.env.PORT || 0, '127.0.0.1');",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-chinese-form-flow-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const flowChecks = buildAcceptanceFormFlowBrowserChecks(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-chinese-form-flow-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can infer a browser form flow from Chinese acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["http", "browser_e2e", "browser_form", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const flowCheck = flowChecks[0];
+  const pass = flowChecks.length === 1
+    && flowCheck?.probeType === ACCEPTANCE_FORM_FLOW_PROBE_TYPE
+    && flowCheck?.url === tasksUrl
+    && flowCheck?.context?.generatedBy === ACCEPTANCE_FORM_FLOW_PROBE_TYPE
+    && flowCheck?.context?.acceptanceCriteria?.[0] === acceptanceCriteria[0]
+    && flowCheck?.actions?.some(action => action.type === "fill" && action.label === "任务" && action.value === "买牛奶")
+    && flowCheck?.actions?.some(action => action.type === "click" && action.role === "button" && action.name === "添加任务")
+    && flowCheck?.assertions?.some(assertion => assertion.type === "text" && assertion.text === "买牛奶")
+    && report.status === "passed"
+    && report.browserResults.length === 1
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.probeType === ACCEPTANCE_FORM_FLOW_PROBE_TYPE
+    && browser?.url === tasksUrl
+    && browser?.finalUrl === tasksUrl
+    && browser?.context?.acceptanceCriteria?.[0] === acceptanceCriteria[0]
+    && browser?.pageTextPreview?.includes("买牛奶")
+    && browser?.steps.some(step => step.name === "action:fill" && step.status === "passed" && String(step.detail || "").includes("label=任务"))
+    && browser?.steps.some(step => step.name === "action:click" && step.status === "passed" && String(step.detail || "").includes("添加任务"))
+    && browser?.steps.some(step => step.name === "assert:text" && step.status === "passed" && String(step.detail || "").includes("买牛奶"))
+    && browser?.steps.some(step => step.name === "assert:urlIncludes" && step.status === "passed" && String(step.detail || "").includes("/tasks"))
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("browser_form")?.status === "verified"
     && byCheck.get("screenshots")?.status === "verified"
     && report.acceptanceCoverage.every(item => item.status === "verified");
 
@@ -2519,6 +5197,8 @@ export async function runTestAgentAcceptanceMultiFieldFormFlowSelfTest() {
     && fillActions[1]?.value === "correct horse battery staple"
     && flowCheck?.actions?.some(action => action.type === "click" && action.role === "button" && action.name === "Sign in")
     && flowCheck?.assertions?.some(assertion => assertion.type === "text" && assertion.text === "Dashboard")
+    && !flowCheck?.assertions?.some(assertion => assertion.type === "text" && assertion.text === "ada@example.test")
+    && !flowCheck?.assertions?.some(assertion => assertion.type === "text" && assertion.text === "correct horse battery staple")
     && report.status === "passed"
     && report.browserResults.length === 1
     && browser?.provider === "playwright"
@@ -2936,6 +5616,136 @@ export async function runTestAgentAcceptanceRedirectFormFlowSelfTest() {
   };
 }
 
+export async function runTestAgentAcceptanceInvalidFormAdversarialSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-invalid-form-adversarial-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const baseUrl = `http://127.0.0.1:${port}/`;
+  const loginUrl = `http://127.0.0.1:${port}/login`;
+  const acceptanceCriteria = ['At /login, enter "bad@example.test" into "Email" and enter "wrong-password" into "Password", click "Sign in", then stays on /login and shows "Invalid password".'];
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const login = `<!doctype html>",
+    "<html><head><title>Login</title></head>",
+    "<body><main>",
+    "<h1>Sign in</h1>",
+    "<label for=\"email\">Email</label>",
+    "<input id=\"email\" name=\"email\" />",
+    "<label for=\"password\">Password</label>",
+    "<input id=\"password\" name=\"password\" type=\"password\" />",
+    "<button type=\"button\" id=\"signin\">Sign in</button>",
+    "<p id=\"status\" role=\"status\">Waiting</p>",
+    "</main>",
+    "<script>",
+    "document.getElementById('signin').addEventListener('click', () => {",
+    "  const email = document.getElementById('email').value;",
+    "  const password = document.getElementById('password').value;",
+    "  document.body.dataset.submittedEmail = email;",
+    "  document.body.dataset.submittedPassword = password;",
+    "  document.getElementById('status').textContent = 'Invalid password';",
+    "});",
+    "</script>",
+    "</body></html>`;",
+    "const root = '<!doctype html><title>Home</title><main><h1>Home</h1></main>';",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type':'text/html'});",
+    "  res.end(route === '/login' ? login : root);",
+    "}).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const project = {
+    name: "acceptance-invalid-form-adversarial-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: `"${process.execPath}" server.js`,
+    targetUrl: baseUrl,
+    startupUrl: baseUrl,
+    startupTimeoutMs: 30_000,
+    env: { PORT: String(port) },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const flowChecks = buildAcceptanceFormFlowBrowserChecks(project, acceptanceCriteria);
+  const generatedChecks = buildBrowserChecksForProject(project, acceptanceCriteria);
+
+  const report = await runTestAgent({
+    id: `acceptance-invalid-form-adversarial-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can treat invalid form acceptance criteria as adversarial browser evidence.",
+    acceptanceCriteria,
+    requiredChecks: ["http", "browser_e2e", "browser_form", "adversarial", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl: baseUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const flowCheck = flowChecks[0];
+  const generatedFormCheck = generatedChecks.find(check => check.probeType === ACCEPTANCE_FORM_FLOW_PROBE_TYPE);
+  const browser = report.browserResults.find(result => result.probeType === ACCEPTANCE_FORM_FLOW_PROBE_TYPE);
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const pass = flowChecks.length === 1
+    && flowCheck?.probeType === ACCEPTANCE_FORM_FLOW_PROBE_TYPE
+    && flowCheck?.adversarial === true
+    && flowCheck?.url === loginUrl
+    && flowCheck?.context?.generatedBy === ACCEPTANCE_FORM_FLOW_PROBE_TYPE
+    && flowCheck?.context?.adversarialIntent === "invalid_form_input"
+    && flowCheck?.context?.acceptanceCriteria?.[0] === acceptanceCriteria[0]
+    && flowCheck?.actions?.some(action => action.type === "fill" && action.label === "Email" && action.value === "bad@example.test")
+    && flowCheck?.actions?.some(action => action.type === "fill" && action.label === "Password" && action.value === "wrong-password")
+    && flowCheck?.assertions?.some(assertion => assertion.type === "text" && assertion.text === "Invalid password")
+    && flowCheck?.assertions?.some(assertion => assertion.type === "urlIncludes" && assertion.text === "/login")
+    && generatedFormCheck?.adversarial === true
+    && report.status === "passed"
+    && report.browserResults.length === 1
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.adversarial === true
+    && browser?.url === loginUrl
+    && browser?.finalUrl === loginUrl
+    && browser?.context?.adversarialIntent === "invalid_form_input"
+    && browser?.pageTextPreview?.includes("Invalid password")
+    && browser?.steps.some(step => step.name === "assert:text" && step.status === "passed" && String(step.detail || "").includes("Invalid password"))
+    && browser?.steps.some(step => step.name === "assert:urlIncludes" && step.status === "passed" && String(step.detail || "").includes("/login"))
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("browser_form")?.status === "verified"
+    && byCheck.get("adversarial")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    flowChecks,
+    generatedChecks,
+    report,
+  };
+}
+
 export async function runTestAgentAcceptanceRefreshPersistenceFormFlowSelfTest() {
   const availability = await checkPlaywrightAvailability();
   if (!availability.available) {
@@ -3159,6 +5969,97 @@ export async function runTestAgentPlaywrightUrlIncludesWaitSelfTest() {
     pass,
     report,
     availability,
+  };
+}
+
+export async function runTestAgentPlaywrightFailureScreenshotSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-playwright-failure-screenshot-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const targetUrl = `http://127.0.0.1:${port}/failure`;
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Failure Screenshot Fixture</title><link rel=\"icon\" href=\"data:,\"></head>",
+    "<body><main>",
+    "<h1>Failure evidence page</h1>",
+    "<p role=\"status\">Ready for failure evidence</p>",
+    "<button type=\"button\">Retry</button>",
+    "</main></body></html>`;",
+    "http.createServer((req, res) => { res.writeHead(200, {'content-type':'text/html'}); res.end(html); }).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const report = await runTestAgent({
+    id: `playwright-failure-screenshot-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent captures failure screenshots even when normal screenshots are disabled.",
+    acceptanceCriteria: ["A failing browser assertion produces a local failure screenshot artifact."],
+    requiredChecks: ["browser_e2e", "console_errors"],
+    projects: [{
+      name: "playwright-failure-screenshot-self-test",
+      workDir: dir,
+      runCommand: `"${process.execPath}" server.js`,
+      targetUrl,
+      env: { PORT: port },
+      browserChecks: [{
+        name: "Fail without requested screenshot",
+        url: targetUrl,
+        actions: [{ type: "goto", url: targetUrl }],
+        assertions: [
+          { type: "text", text: "This text is intentionally missing", timeoutMs: 500 },
+          { type: "consoleNoErrors" },
+          { type: "networkNoErrors" },
+        ],
+        screenshot: false,
+      }],
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+      browserTimeoutMs: 2_000,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const screenshotPath = String(browser?.screenshots?.[0] || "");
+  const manifestPath = String((report.metadata.artifactFiles as any)?.manifestPath || "");
+  const manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, "utf-8")) : null;
+  const verification = manifestPath ? verifyTestAgentArtifactManifestFile(manifestPath) : null;
+  const screenshotEntry = (manifest?.files || []).find((item: any) => item.type === "screenshot" && String(item.path || "").endsWith(".failure.png"));
+  const screenshotMetadata = verification?.items.find(item => item.type === "screenshot_png_metadata" && String(item.path || "").endsWith(".failure.png"));
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const pass = report.status === "failed"
+    && browser?.provider === "playwright"
+    && browser?.status === "failed"
+    && browser?.steps.some(step => step.name === "assert:text" && step.status === "failed")
+    && browser?.screenshots.length === 1
+    && screenshotPath.endsWith(".failure.png")
+    && fs.existsSync(screenshotPath)
+    && fs.statSync(screenshotPath).size > 100
+    && manifest?.summary?.screenshots === 1
+    && screenshotEntry?.path === screenshotPath
+    && verification?.status === "passed"
+    && screenshotMetadata?.status === "passed"
+    && byCheck.get("browser_e2e")?.status === "not_verified"
+    && report.failureSummary.some(item => item.type === "browser" && item.evidence?.some(evidence => evidence.includes(screenshotPath)));
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    report,
+    manifest,
+    verification,
+    screenshotPath,
   };
 }
 
@@ -3903,6 +6804,317 @@ export async function runTestAgentBrowserAccessibilityAssertionSelfTest() {
   };
 }
 
+export async function runTestAgentBrowserAccessibilitySnapshotArtifactSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-browser-a11y-snapshot-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const targetUrl = `http://127.0.0.1:${port}/profile`;
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Accessibility Snapshot Fixture</title><link rel=\"icon\" href=\"data:,\"></head>",
+    "<body><main aria-label=\"Profile settings\">",
+    "<h1>Profile settings</h1>",
+    "<p id=\"save-help\">Saves profile changes and announces completion.</p>",
+    "<label for=\"email\">Email address</label>",
+    "<input id=\"email\" aria-describedby=\"email-help\" value=\"user@example.test\" />",
+    "<p id=\"email-help\">We will send updates to this address.</p>",
+    "<button id=\"save\" type=\"button\" aria-describedby=\"save-help\">Save profile changes</button>",
+    "<p id=\"status\" role=\"status\">Ready</p>",
+    "<script>",
+    "document.getElementById('save').addEventListener('click', () => {",
+    "  document.getElementById('status').textContent = 'Saved for snapshot evidence';",
+    "});",
+    "</script>",
+    "</main></body></html>`;",
+    "http.createServer((req, res) => { res.writeHead(200, {'content-type':'text/html'}); res.end(html); }).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const report = await runTestAgent({
+    id: `browser-a11y-snapshot-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent records accessibility tree evidence from a real browser.",
+    acceptanceCriteria: ["Profile controls expose accessible names in the saved snapshot artifact."],
+    requiredChecks: ["browser_e2e", "browser_accessibility_snapshot", "console_errors"],
+    projects: [{
+      name: "browser-a11y-snapshot-self-test",
+      workDir: dir,
+      runCommand: `"${process.execPath}" server.js`,
+      targetUrl,
+      env: { PORT: port },
+      browserChecks: [{
+        name: "Profile accessibility snapshot evidence",
+        url: targetUrl,
+        actions: [
+          { type: "goto", url: targetUrl },
+          { type: "click", role: "button", name: "Save profile changes", exact: true },
+        ],
+        assertions: [
+          { type: "accessibleNameEquals", role: "button", name: "Save profile changes", value: "Save profile changes", exact: true },
+          { type: "text", text: "Saved for snapshot evidence" },
+          { type: "consoleNoErrors" },
+          { type: "networkNoErrors" },
+        ],
+        screenshot: false,
+      }],
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const accessibilityArtifact = (browser?.browserArtifacts || []).find(item => item.type === "accessibility_snapshot");
+  const accessibilityText = accessibilityArtifact?.path && fs.existsSync(accessibilityArtifact.path)
+    ? fs.readFileSync(accessibilityArtifact.path, "utf-8")
+    : "";
+  const manifestPath = String((report.metadata.artifactFiles as any)?.manifestPath || "");
+  const manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, "utf-8")) : null;
+  const verification = manifestPath ? verifyTestAgentArtifactManifestFile(manifestPath) : null;
+  const manifestTypes = new Set<string>((manifest?.files || []).map((item: any) => String(item.type)));
+  const a11yMetadata = verification?.items.find(item => item.type === "browser_accessibility_snapshot_text");
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const reportValidation = validateTestAgentReportContract(report);
+  const pass = report.status === "passed"
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && accessibilityArtifact?.path?.endsWith(".aria.txt")
+    && fs.existsSync(accessibilityArtifact.path)
+    && accessibilityArtifact.source?.includes("playwright")
+    && accessibilityText.includes("Accessibility Snapshot")
+    && accessibilityText.includes("Save profile changes")
+    && /-\s+button/i.test(accessibilityText)
+    && manifestTypes.has("browser_accessibility_snapshot")
+    && manifest?.summary?.browserAccessibilitySnapshots === 1
+    && byCheck.get("browser_accessibility_snapshot")?.status === "verified"
+    && verification?.status === "passed"
+    && a11yMetadata?.status === "passed"
+    && a11yMetadata?.artifactFormat === "text:accessibility-snapshot"
+    && Number(a11yMetadata?.artifactEntries || 0) >= 1
+    && reportValidation.valid;
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    report,
+    manifest,
+    verification,
+    accessibilityArtifact,
+    accessibilityPreview: accessibilityText.slice(0, 1000),
+    reportValidation,
+  };
+}
+
+export async function runTestAgentBrowserAriaStateAssertionSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-browser-aria-state-selftest-"));
+  const passArtifactDir = path.join(dir, "pass-artifacts");
+  const failArtifactDir = path.join(dir, "fail-artifacts");
+  const mcpArtifactDir = path.join(dir, "mcp-artifacts");
+  const port = await getFreePort();
+  const targetUrl = `http://127.0.0.1:${port}/aria-state`;
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>ARIA State Fixture</title><link rel=\"icon\" href=\"data:,\"></head>",
+    "<body><main>",
+    "<h1>ARIA state controls</h1>",
+    "<button id=\"menu\" type=\"button\" aria-expanded=\"false\">Menu</button>",
+    "<button id=\"bold\" type=\"button\" aria-pressed=\"false\">Bold</button>",
+    "<div role=\"listbox\" aria-label=\"Density\"><div id=\"compact\" role=\"option\" aria-selected=\"false\" tabindex=\"0\">Compact</div></div>",
+    "<label for=\"email\">Email</label><input id=\"email\" aria-invalid=\"true\" aria-required=\"true\" />",
+    "<label for=\"phone\">Phone</label><input id=\"phone\" />",
+    "<p id=\"status\" role=\"status\">Ready</p>",
+    "<script>",
+    "document.getElementById('menu').addEventListener('click', () => { document.getElementById('menu').setAttribute('aria-expanded', 'true'); });",
+    "document.getElementById('bold').addEventListener('click', () => { document.getElementById('bold').setAttribute('aria-pressed', 'true'); });",
+    "document.getElementById('compact').addEventListener('click', () => { document.getElementById('compact').setAttribute('aria-selected', 'true'); document.getElementById('status').textContent = 'ARIA state updated'; });",
+    "</script>",
+    "</main></body></html>`;",
+    "http.createServer((req, res) => { res.writeHead(200, {'content-type':'text/html'}); res.end(html); }).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const baseProject = {
+    name: "browser-aria-state-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    targetUrl,
+    env: { PORT: port },
+  };
+
+  const passReport = await runTestAgent({
+    id: `browser-aria-state-pass-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can prove ARIA state changes in a real browser.",
+    acceptanceCriteria: ["Menu, toggle button, option, and form ARIA states are correct."],
+    requiredChecks: ["browser_e2e", "screenshots", "console_errors"],
+    projects: [{
+      ...baseProject,
+      browserChecks: [{
+        name: "ARIA states update after interaction",
+        url: targetUrl,
+        actions: [
+          { type: "goto", url: targetUrl },
+          { type: "click", role: "button", name: "Menu", exact: true },
+          { type: "click", role: "button", name: "Bold", exact: true },
+          { type: "click", selector: "#compact" },
+        ],
+        assertions: [
+          { assertion: "aria_expanded", role: "button", name: "Menu", exact: true } as any,
+          { assertion: "aria_pressed", role: "button", name: "Bold", exact: true } as any,
+          { assertion: "aria_selected", selector: "#compact" } as any,
+          { assertion: "aria_invalid", selector: "#email" } as any,
+          { assertion: "aria_required", selector: "#email" } as any,
+          { assertion: "aria_valid", selector: "#phone" } as any,
+          { assertion: "aria_not_required", selector: "#phone" } as any,
+          { type: "text", text: "ARIA state updated" },
+          { type: "consoleNoErrors" },
+          { type: "networkNoErrors" },
+        ],
+        screenshot: true,
+      }],
+    }],
+    options: {
+      artifactDir: passArtifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const failReport = await runTestAgent({
+    id: `browser-aria-state-fail-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent fails when ARIA state expectations are wrong.",
+    acceptanceCriteria: ["The menu should already be expanded."],
+    requiredChecks: ["browser_e2e", "screenshots", "console_errors"],
+    projects: [{
+      ...baseProject,
+      browserChecks: [{
+        name: "Wrong ARIA expanded state is reported",
+        url: targetUrl,
+        actions: [
+          { type: "goto", url: targetUrl },
+        ],
+        assertions: [
+          { type: "ariaExpanded", role: "button", name: "Menu", timeoutMs: 800, exact: true },
+          { type: "consoleNoErrors" },
+          { type: "networkNoErrors" },
+        ],
+        screenshot: true,
+      }],
+    }],
+    options: {
+      artifactDir: failArtifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const calls: any[] = [];
+  const executor = createStaticBrowserToolExecutor({
+    tools: [
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_console_messages",
+      "mcp__playwright__browser_network_requests",
+    ],
+    onCall: (toolName, input) => {
+      calls.push({ toolName, input });
+      if (toolName.endsWith("browser_snapshot")) return "- button \"Menu\"\n- button \"Bold\"\n- option \"Compact\"";
+      if (toolName.endsWith("browser_console_messages")) return [];
+      if (toolName.endsWith("browser_network_requests")) return [];
+      return { ok: true };
+    },
+  });
+  const mcpReport = await runTestAgent({
+    id: `browser-aria-state-mcp-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent MCP ARIA state boundary is explicit.",
+    acceptanceCriteria: ["MCP cannot claim precise ARIA state without DOM attributes."],
+    requiredChecks: ["browser_e2e"],
+    projects: [{
+      name: "browser-aria-state-mcp-self-test",
+      workDir: process.cwd(),
+      browserChecks: [{
+        name: "MCP ARIA state support boundary",
+        url: "http://example.test/aria-state",
+        actions: [{ type: "goto", url: "http://example.test/aria-state" }],
+        assertions: [
+          { type: "ariaExpanded", role: "button", name: "Menu" },
+        ],
+        screenshot: false,
+      }],
+    }],
+    options: {
+      artifactDir: mcpArtifactDir,
+      browserProvider: "mcp",
+    },
+  }, { browserProvider: "mcp", browserToolExecutor: executor });
+
+  const passBrowser = passReport.browserResults[0];
+  const failBrowser = failReport.browserResults[0];
+  const mcpBrowser = mcpReport.browserResults[0];
+  const expandedStep = passBrowser?.steps.find(step => step.name === "assert:ariaExpanded");
+  const pressedStep = passBrowser?.steps.find(step => step.name === "assert:ariaPressed");
+  const selectedStep = passBrowser?.steps.find(step => step.name === "assert:ariaSelected");
+  const invalidStep = passBrowser?.steps.find(step => step.name === "assert:ariaInvalid");
+  const requiredStep = passBrowser?.steps.find(step => step.name === "assert:ariaRequired");
+  const validStep = passBrowser?.steps.find(step => step.name === "assert:ariaValid");
+  const notRequiredStep = passBrowser?.steps.find(step => step.name === "assert:ariaNotRequired");
+  const failExpandedStep = failBrowser?.steps.find(step => step.name === "assert:ariaExpanded");
+  const mcpExpandedStep = mcpBrowser?.steps.find(step => step.name === "playwright:ariaExpanded");
+  const pass = passReport.status === "passed"
+    && passBrowser?.provider === "playwright"
+    && passBrowser?.status === "passed"
+    && expandedStep?.status === "passed"
+    && String(expandedStep?.detail || "").includes("aria-expanded=true")
+    && pressedStep?.status === "passed"
+    && selectedStep?.status === "passed"
+    && invalidStep?.status === "passed"
+    && requiredStep?.status === "passed"
+    && validStep?.status === "passed"
+    && notRequiredStep?.status === "passed"
+    && passBrowser?.pageTextPreview?.includes("ARIA state updated")
+    && passReport.requiredCheckCoverage.some(item => item.check === "browser_e2e" && item.status === "verified")
+    && failReport.status === "failed"
+    && failBrowser?.provider === "playwright"
+    && failBrowser?.status === "failed"
+    && failExpandedStep?.status === "failed"
+    && String(failExpandedStep?.error || "").includes("actual aria-expanded=false")
+    && failReport.requiredCheckCoverage.some(item => item.check === "browser_e2e" && item.status === "not_verified")
+    && mcpReport.status === "failed"
+    && mcpBrowser?.provider === "mcp"
+    && mcpBrowser?.status === "failed"
+    && mcpExpandedStep?.status === "failed"
+    && String(mcpExpandedStep?.error || "").includes("ARIA DOM state")
+    && calls.some(call => call.toolName.endsWith("browser_snapshot"));
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    passReport,
+    failReport,
+    mcpReport,
+  };
+}
+
 export async function runTestAgentBrowserNetworkAssertionSelfTest() {
   const availability = await checkPlaywrightAvailability();
   if (!availability.available) {
@@ -4533,6 +7745,577 @@ export function runTestAgentAcceptanceDerivedChecksSelfTest() {
   };
 }
 
+export async function runTestAgentAcceptanceDerivedAccessibilitySelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-derived-accessibility-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const targetUrl = `http://127.0.0.1:${port}/`;
+  const settingsUrl = `http://127.0.0.1:${port}/settings`;
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Derived Accessibility</title><link rel=\"icon\" href=\"data:,\"></head>",
+    "<body><main>",
+    "<h1>Settings</h1>",
+    "<p id=\"save-help\">Saves profile changes for the current user.</p>",
+    "<button id=\"save\" type=\"button\" aria-label=\"Save profile\" aria-describedby=\"save-help\">Save</button>",
+    "<button id=\"menu\" type=\"button\" aria-expanded=\"true\">Menu</button>",
+    "<button id=\"bold\" type=\"button\" aria-pressed=\"true\">Bold</button>",
+    "<label for=\"email\">Email</label><input id=\"email\" aria-invalid=\"true\" aria-required=\"true\" />",
+    "</main></body></html>`;",
+    "http.createServer((req, res) => { res.writeHead(200, {'content-type':'text/html'}); res.end(html); }).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const acceptanceCriteria = [
+    'At /settings, button "Save" must have accessible name "Save profile".',
+    'At /settings, button "Save" accessible description includes "Saves profile changes".',
+    'At /settings, button "Menu" has aria-expanded true.',
+    'At /settings, button "Bold" has aria-pressed true.',
+    'At /settings, field "Email" has aria-invalid true and aria-required true.',
+  ];
+  const project = {
+    name: "acceptance-derived-accessibility-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: "",
+    targetUrl,
+    startupUrl: targetUrl,
+    startupTimeoutMs: 1000,
+    env: { PORT: port },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const derived = buildAcceptanceDerivedBrowserAssertions(acceptanceCriteria);
+  const generatedChecks = buildBrowserChecksForProject(project as any, acceptanceCriteria);
+  const report = await runTestAgent({
+    id: `acceptance-derived-accessibility-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent derives accessibility browser assertions from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["browser_e2e", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const pass = derived.some(item => item.reason === "accessible_name" && item.assertion.type === "accessibleNameEquals" && item.assertion.value === "Save profile")
+    && derived.some(item => item.reason === "accessible_description" && item.assertion.type === "accessibleDescriptionIncludes" && item.assertion.value === "Saves profile changes")
+    && derived.some(item => item.reason === "aria_state" && item.assertion.type === "ariaExpanded")
+    && derived.some(item => item.reason === "aria_state" && item.assertion.type === "ariaPressed")
+    && derived.some(item => item.reason === "aria_state" && item.assertion.type === "ariaInvalid")
+    && derived.some(item => item.reason === "aria_state" && item.assertion.type === "ariaRequired")
+    && !derived.some(item => item.reason === "quoted_text" && item.assertion.text === "Save profile")
+    && generatedChecks.length === 1
+    && generatedChecks[0].url === settingsUrl
+    && generatedChecks[0].assertions.some(assertion => assertion.type === "accessibleNameEquals")
+    && generatedChecks[0].assertions.some(assertion => assertion.type === "accessibleDescriptionIncludes")
+    && generatedChecks[0].assertions.some(assertion => assertion.type === "ariaExpanded")
+    && generatedChecks[0].assertions.some(assertion => assertion.type === "ariaPressed")
+    && generatedChecks[0].assertions.some(assertion => assertion.type === "ariaInvalid")
+    && generatedChecks[0].assertions.some(assertion => assertion.type === "ariaRequired")
+    && report.status === "passed"
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.finalUrl === settingsUrl
+    && browser?.steps.some(step => step.name === "assert:accessibleNameEquals" && step.status === "passed")
+    && browser?.steps.some(step => step.name === "assert:accessibleDescriptionIncludes" && step.status === "passed")
+    && browser?.steps.some(step => step.name === "assert:ariaExpanded" && step.status === "passed")
+    && browser?.steps.some(step => step.name === "assert:ariaPressed" && step.status === "passed")
+    && browser?.steps.some(step => step.name === "assert:ariaInvalid" && step.status === "passed")
+    && browser?.steps.some(step => step.name === "assert:ariaRequired" && step.status === "passed")
+    && report.requiredCheckCoverage.some(item => item.check === "browser_e2e" && item.status === "verified")
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    derived,
+    generatedChecks,
+    report,
+  };
+}
+
+export async function runTestAgentAcceptanceDerivedStorageAssertionSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-derived-storage-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const targetUrl = `http://127.0.0.1:${port}/`;
+  const appUrl = `http://127.0.0.1:${port}/app`;
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Derived Storage</title><link rel=\"icon\" href=\"data:,\"></head>",
+    "<body><main>",
+    "<h1>Storage fixture</h1>",
+    "<p id=\"status\">Storage fixture ready</p>",
+    "<script>",
+    "localStorage.setItem('profile.saved', 'yes');",
+    "localStorage.setItem('feature.flag', 'enabled');",
+    "sessionStorage.setItem('draft.notice', 'Resume draft active');",
+    "</script>",
+    "</main></body></html>`;",
+    "http.createServer((req, res) => { res.writeHead(200, {'content-type':'text/html'}); res.end(html); }).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const acceptanceCriteria = [
+    'At /app, localStorage key "profile.saved" equals "yes".',
+    'At /app, sessionStorage key "draft.notice" includes "draft".',
+    'At /app, storage key "feature.flag" equals "enabled".',
+  ];
+  const project = {
+    name: "acceptance-derived-storage-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: "",
+    targetUrl,
+    startupUrl: targetUrl,
+    startupTimeoutMs: 1000,
+    env: { PORT: port },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const derived = buildAcceptanceDerivedBrowserAssertions(acceptanceCriteria);
+  const generatedChecks = buildBrowserChecksForProject(project as any, acceptanceCriteria);
+  const report = await runTestAgent({
+    id: `acceptance-derived-storage-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent derives Web Storage browser assertions from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["browser_e2e", "browser_storage", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const generatedAssertions = generatedChecks[0]?.assertions || [];
+  const quotedTexts = new Set(derived.filter(item => item.reason === "quoted_text").map(item => item.assertion.text));
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const pass = derived.some(item => item.reason === "web_storage" && item.assertion.type === "localStorageEquals" && item.assertion.key === "profile.saved" && item.assertion.value === "yes")
+    && derived.some(item => item.reason === "web_storage" && item.assertion.type === "sessionStorageIncludes" && item.assertion.key === "draft.notice" && item.assertion.value === "draft")
+    && derived.some(item => item.reason === "web_storage" && item.assertion.type === "localStorageEquals" && item.assertion.key === "feature.flag" && item.assertion.value === "enabled")
+    && derived.some(item => item.reason === "explicit_url_path" && item.assertion.type === "urlIncludes" && item.assertion.text === "/app")
+    && !["profile.saved", "yes", "draft.notice", "draft", "feature.flag", "enabled"].some(text => quotedTexts.has(text))
+    && generatedChecks.length === 1
+    && generatedChecks[0].url === appUrl
+    && generatedAssertions.some(assertion => assertion.type === "localStorageEquals" && assertion.key === "profile.saved" && assertion.value === "yes")
+    && generatedAssertions.some(assertion => assertion.type === "sessionStorageIncludes" && assertion.key === "draft.notice" && assertion.value === "draft")
+    && generatedAssertions.some(assertion => assertion.type === "localStorageEquals" && assertion.key === "feature.flag" && assertion.value === "enabled")
+    && report.status === "passed"
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.finalUrl === appUrl
+    && browser?.steps.filter(step => step.name === "assert:localStorageEquals" && step.status === "passed").length === 2
+    && browser?.steps.some(step => step.name === "assert:sessionStorageIncludes" && step.status === "passed")
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("browser_storage")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    derived,
+    generatedChecks,
+    report,
+  };
+}
+
+export async function runTestAgentAcceptanceDerivedCookieAssertionSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-derived-cookie-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const targetUrl = `http://127.0.0.1:${port}/`;
+  const appUrl = `http://127.0.0.1:${port}/app`;
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Derived Cookie</title><link rel=\"icon\" href=\"data:,\"></head>",
+    "<body><main>",
+    "<h1>Cookie fixture</h1>",
+    "<p id=\"status\">Cookie fixture ready</p>",
+    "</main></body></html>`;",
+    "http.createServer((req, res) => {",
+    "  res.writeHead(200, {",
+    "    'content-type':'text/html',",
+    "    'set-cookie':[",
+    "      'ccm_session=verified-token-123; Path=/; SameSite=Lax',",
+    "      'theme=dark-mode; Path=/; SameSite=Lax',",
+    "      'analytics_id=visit-42; Path=/; SameSite=Lax'",
+    "    ]",
+    "  });",
+    "  res.end(html);",
+    "}).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const acceptanceCriteria = [
+    'At /app, cookie "ccm_session" equals "verified-token-123".',
+    'At /app, cookie "theme" includes "dark".',
+    'At /app, cookie "analytics_id" exists.',
+  ];
+  const project = {
+    name: "acceptance-derived-cookie-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: "",
+    targetUrl,
+    startupUrl: targetUrl,
+    startupTimeoutMs: 1000,
+    env: { PORT: port },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const derived = buildAcceptanceDerivedBrowserAssertions(acceptanceCriteria);
+  const generatedChecks = buildBrowserChecksForProject(project as any, acceptanceCriteria);
+  const report = await runTestAgent({
+    id: `acceptance-derived-cookie-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent derives browser cookie assertions from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["browser_e2e", "browser_cookie", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const generatedAssertions = generatedChecks[0]?.assertions || [];
+  const quotedTexts = new Set(derived.filter(item => item.reason === "quoted_text").map(item => item.assertion.text));
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const pass = derived.some(item => item.reason === "browser_cookie" && item.assertion.type === "cookieValueEquals" && item.assertion.key === "ccm_session" && item.assertion.value === "verified-token-123")
+    && derived.some(item => item.reason === "browser_cookie" && item.assertion.type === "cookieValueIncludes" && item.assertion.key === "theme" && item.assertion.value === "dark")
+    && derived.some(item => item.reason === "browser_cookie" && item.assertion.type === "cookieExists" && item.assertion.key === "analytics_id")
+    && derived.some(item => item.reason === "explicit_url_path" && item.assertion.type === "urlIncludes" && item.assertion.text === "/app")
+    && !["ccm_session", "verified-token-123", "theme", "dark", "analytics_id"].some(text => quotedTexts.has(text))
+    && generatedChecks.length === 1
+    && generatedChecks[0].url === appUrl
+    && generatedAssertions.some(assertion => assertion.type === "cookieValueEquals" && assertion.key === "ccm_session" && assertion.value === "verified-token-123")
+    && generatedAssertions.some(assertion => assertion.type === "cookieValueIncludes" && assertion.key === "theme" && assertion.value === "dark")
+    && generatedAssertions.some(assertion => assertion.type === "cookieExists" && assertion.key === "analytics_id")
+    && report.status === "passed"
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.finalUrl === appUrl
+    && browser?.steps.some(step => step.name === "assert:cookieValueEquals" && step.status === "passed")
+    && browser?.steps.some(step => step.name === "assert:cookieValueIncludes" && step.status === "passed")
+    && browser?.steps.some(step => step.name === "assert:cookieExists" && step.status === "passed")
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("browser_cookie")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    derived,
+    generatedChecks,
+    report,
+  };
+}
+
+export async function runTestAgentAcceptanceDerivedNetworkAssertionSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-derived-network-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const targetUrl = `http://127.0.0.1:${port}/`;
+  const tasksUrl = `http://127.0.0.1:${port}/tasks`;
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Derived Network</title><link rel=\"icon\" href=\"data:,\"></head>",
+    "<body><main>",
+    "<h1>Task form</h1>",
+    "<label for=\"task\">Task</label>",
+    "<input id=\"task\" />",
+    "<button id=\"add\" type=\"button\">Add task</button>",
+    "<p id=\"status\">Ready</p>",
+    "<script>",
+    "document.getElementById('add').addEventListener('click', async () => {",
+    "  const title = document.getElementById('task').value;",
+    "  const response = await fetch('/api/tasks', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title }) });",
+    "  const data = await response.json();",
+    "  document.getElementById('status').textContent = response.status === 201 ? 'Saved ' + data.title : 'Save failed';",
+    "});",
+    "</script>",
+    "</main></body></html>`;",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  if (route === '/api/tasks' && req.method === 'POST') {",
+    "    let body = '';",
+    "    req.on('data', chunk => { body += chunk; });",
+    "    req.on('end', () => {",
+    "      let title = '';",
+    "      try { title = JSON.parse(body).title || ''; } catch {}",
+    "      res.writeHead(201, {'content-type':'application/json'});",
+    "      res.end(JSON.stringify({ ok: true, title }));",
+    "    });",
+    "    return;",
+    "  }",
+    "  res.writeHead(200, {'content-type':'text/html'});",
+    "  res.end(html);",
+    "}).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const acceptanceCriteria = [
+    'At /tasks, fill "Task" with "Buy milk", click "Add task", then show "Saved Buy milk" and send a POST request to /api/tasks and receive a 201 API response.',
+  ];
+  const project = {
+    name: "acceptance-derived-network-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: "",
+    targetUrl,
+    startupUrl: targetUrl,
+    startupTimeoutMs: 1000,
+    env: { PORT: port },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const derived = buildAcceptanceDerivedBrowserAssertions(acceptanceCriteria);
+  const generatedChecks = buildBrowserChecksForProject(project as any, acceptanceCriteria);
+  const report = await runTestAgent({
+    id: `acceptance-derived-network-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent derives browser network assertions from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["browser_e2e", "browser_network", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const generatedAssertions = generatedChecks[0]?.assertions || [];
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const pass = derived.some(item => item.reason === "browser_network" && item.assertion.type === "networkRequest" && item.assertion.method === "POST" && item.assertion.urlIncludes === "/api/tasks")
+    && derived.some(item => item.reason === "browser_network" && item.assertion.type === "networkResponse" && item.assertion.status === 201 && item.assertion.urlIncludes === "/api/tasks")
+    && derived.some(item => item.reason === "explicit_url_path" && item.assertion.type === "urlIncludes" && item.assertion.text === "/tasks")
+    && !derived.some(item => item.reason === "explicit_url_path" && item.assertion.text === "/api/tasks")
+    && generatedChecks.length === 1
+    && generatedChecks[0].url === tasksUrl
+    && generatedAssertions.some(assertion => assertion.type === "networkRequest" && assertion.method === "POST" && assertion.urlIncludes === "/api/tasks")
+    && generatedAssertions.some(assertion => assertion.type === "networkResponse" && assertion.status === 201 && assertion.urlIncludes === "/api/tasks")
+    && report.status === "passed"
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.finalUrl === tasksUrl
+    && browser?.pageTextPreview?.includes("Saved Buy milk")
+    && browser?.steps.some(step => step.name === "assert:networkRequest" && step.status === "passed" && String(step.detail || "").includes("method=POST") && String(step.detail || "").includes("urlIncludes=/api/tasks"))
+    && browser?.steps.some(step => step.name === "assert:networkResponse" && step.status === "passed" && String(step.detail || "").includes("status=201") && String(step.detail || "").includes("urlIncludes=/api/tasks"))
+    && browser?.networkRequests?.some(item => item.includes("request POST") && item.includes("/api/tasks"))
+    && browser?.networkRequests?.some(item => item.includes("response 201") && item.includes("/api/tasks"))
+    && byCheck.get("browser_e2e")?.status === "verified"
+    && byCheck.get("browser_network")?.status === "verified"
+    && byCheck.get("screenshots")?.status === "verified"
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    derived,
+    generatedChecks,
+    report,
+  };
+}
+
+export async function runTestAgentAcceptanceDerivedNegativeUiSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-acceptance-derived-negative-ui-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const targetUrl = `http://127.0.0.1:${port}/`;
+  const dashboardUrl = `http://127.0.0.1:${port}/dashboard`;
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Derived Negative UI</title><link rel=\"icon\" href=\"data:,\"></head>",
+    "<body><main>",
+    "<h1>Dashboard</h1>",
+    "<p>Ready dashboard</p>",
+    "<section hidden>Debug panel</section>",
+    "</main></body></html>`;",
+    "http.createServer((req, res) => { res.writeHead(200, {'content-type':'text/html'}); res.end(html); }).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const acceptanceCriteria = [
+    'At /dashboard, "Debug panel" should not be visible.',
+    'At /dashboard, "Obsolete task" must not be present.',
+  ];
+  const project = {
+    name: "acceptance-derived-negative-ui-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    devServerCommand: "",
+    targetUrl,
+    startupUrl: targetUrl,
+    startupTimeoutMs: 1000,
+    env: { PORT: port },
+    changedFiles: [],
+    verificationCommands: [],
+    httpChecks: [],
+    adversarialHttpChecks: [],
+    adversarialBrowserChecks: [],
+    browserChecks: [],
+    agentSummary: "",
+    risks: [],
+  };
+  const derived = buildAcceptanceDerivedBrowserAssertions(acceptanceCriteria);
+  const generatedChecks = buildBrowserChecksForProject(project as any, acceptanceCriteria);
+  const report = await runTestAgent({
+    id: `acceptance-derived-negative-ui-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent derives negative UI browser assertions from acceptance criteria.",
+    acceptanceCriteria,
+    requiredChecks: ["browser_e2e", "screenshots", "console_errors"],
+    projects: [{
+      name: project.name,
+      workDir: dir,
+      runCommand: project.runCommand,
+      targetUrl,
+      env: { PORT: port },
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const generatedAssertions = generatedChecks[0]?.assertions || [];
+  const quotedTexts = new Set(derived.filter(item => item.reason === "quoted_text").map(item => item.assertion.text));
+  const pass = derived.some(item => item.reason === "negative_ui" && item.assertion.type === "notVisible" && item.assertion.text === "Debug panel")
+    && derived.some(item => item.reason === "negative_ui" && item.assertion.type === "notPresent" && item.assertion.text === "Obsolete task")
+    && derived.some(item => item.reason === "explicit_url_path" && item.assertion.type === "urlIncludes" && item.assertion.text === "/dashboard")
+    && !quotedTexts.has("Debug panel")
+    && !quotedTexts.has("Obsolete task")
+    && generatedChecks.length === 1
+    && generatedChecks[0].url === dashboardUrl
+    && generatedAssertions.some(assertion => assertion.type === "notVisible" && assertion.text === "Debug panel")
+    && generatedAssertions.some(assertion => assertion.type === "notPresent" && assertion.text === "Obsolete task")
+    && report.status === "passed"
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.finalUrl === dashboardUrl
+    && browser?.steps.some(step => step.name === "assert:notVisible" && step.status === "passed" && String(step.detail || "").includes("Debug panel"))
+    && browser?.steps.some(step => step.name === "assert:notPresent" && step.status === "passed" && String(step.detail || "").includes("Obsolete task"))
+    && report.requiredCheckCoverage.some(item => item.check === "browser_e2e" && item.status === "verified")
+    && report.acceptanceCoverage.every(item => item.status === "verified");
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    derived,
+    generatedChecks,
+    report,
+  };
+}
+
 export function runTestAgentSemanticLocatorSelfTest() {
   const { workOrder, issues } = normalizeTestAgentWorkOrder({
     id: `semantic-locator-self-test-${process.pid}-${Date.now()}`,
@@ -4614,6 +8397,94 @@ export function runTestAgentBrowserStateSelfTest() {
     actionTypes,
     assertionTypes,
     issues,
+  };
+}
+
+export async function runTestAgentBrowserScriptWaitAssertionSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-browser-script-wait-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const targetUrl = `http://127.0.0.1:${port}/script-wait`;
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Script Wait Fixture</title></head>",
+    "<body><main>",
+    "<h1>Script wait</h1>",
+    "<p id=\"status\" role=\"status\">Loading async state</p>",
+    "<script>",
+    "setTimeout(() => {",
+    "  document.body.dataset.asyncState = 'ready';",
+    "  document.getElementById('status').textContent = 'Async state ready';",
+    "}, 150);",
+    "</script>",
+    "</main></body></html>`;",
+    "http.createServer((req, res) => { res.writeHead(200, {'content-type':'text/html'}); res.end(html); }).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const report = await runTestAgent({
+    id: `browser-script-wait-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can prove browser JavaScript state after conditional waits.",
+    acceptanceCriteria: ["Async browser state becomes ready and is verified with JavaScript assertions."],
+    requiredChecks: ["browser_e2e", "browser_js", "browser_script", "browser_wait", "console_errors"],
+    projects: [{
+      name: "browser-script-wait-self-test",
+      workDir: dir,
+      runCommand: `"${process.execPath}" server.js`,
+      targetUrl,
+      env: { PORT: port },
+      browserChecks: [{
+        name: "Async state is verified with script and wait evidence",
+        url: targetUrl,
+        actions: [
+          { type: "goto", url: targetUrl },
+          { type: "evaluate", text: "localStorage.setItem('script.wait.seed', 'ready')" },
+          { type: "waitForText", text: "Async state ready", timeoutMs: 3000 },
+        ],
+        assertions: [
+          { type: "jsTruthy", expression: "document.body.dataset.asyncState === 'ready'" },
+          { type: "jsEquals", expression: "localStorage.getItem('script.wait.seed')", value: "ready" },
+          { type: "text", text: "Async state ready" },
+          { type: "consoleNoErrors" },
+          { type: "networkNoErrors" },
+        ],
+        screenshot: true,
+      }],
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const pass = report.status === "passed"
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.steps.some(step => step.name === "action:evaluate" && step.status === "passed")
+    && browser?.steps.some(step => step.name === "action:waitForText" && step.status === "passed" && String(step.detail || "").includes("Async state ready"))
+    && browser?.steps.some(step => step.name === "assert:jsTruthy" && step.status === "passed" && String(step.detail || "").includes("asyncState"))
+    && browser?.steps.some(step => step.name === "assert:jsEquals" && step.status === "passed" && String(step.detail || "").includes("script.wait.seed"))
+    && byCheck.get("browser_js")?.status === "verified"
+    && byCheck.get("browser_script")?.status === "verified"
+    && byCheck.get("browser_wait")?.status === "verified";
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    report,
   };
 }
 
@@ -5102,6 +8973,191 @@ export async function runTestAgentBrowserFocusStateSelfTest() {
     availability,
     passReport,
     failReport,
+  };
+}
+
+export async function runTestAgentBrowserPresenceAssertionSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-browser-presence-selftest-"));
+  const passArtifactDir = path.join(dir, "pass-artifacts");
+  const failArtifactDir = path.join(dir, "fail-artifacts");
+  const mcpArtifactDir = path.join(dir, "mcp-artifacts");
+  const port = await getFreePort();
+  const targetUrl = `http://127.0.0.1:${port}/presence`;
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Presence Fixture</title><link rel=\"icon\" href=\"data:,\"></head>",
+    "<body><main>",
+    "<h1>Presence checks</h1>",
+    "<p id=\"status\">Ready</p>",
+    "<div id=\"archived\" hidden>Archived marker</div>",
+    "<ul id=\"tasks\"><li id=\"active\">Active task</li></ul>",
+    "<button id=\"delete\" type=\"button\">Delete active task</button>",
+    "<script>",
+    "document.getElementById('delete').addEventListener('click', () => {",
+    "  document.getElementById('active')?.remove();",
+    "  document.getElementById('status').textContent = 'Deleted active task';",
+    "});",
+    "</script>",
+    "</main></body></html>`;",
+    "http.createServer((req, res) => { res.writeHead(200, {'content-type':'text/html'}); res.end(html); }).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const baseProject = {
+    name: "browser-presence-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    targetUrl,
+    env: { PORT: port },
+  };
+
+  const passReport = await runTestAgent({
+    id: `browser-presence-pass-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can distinguish DOM presence from visibility.",
+    acceptanceCriteria: ["Hidden archived marker is still in the DOM and deleted active task is removed."],
+    requiredChecks: ["browser_e2e", "screenshots", "console_errors"],
+    projects: [{
+      ...baseProject,
+      browserChecks: [{
+        name: "DOM presence and absence are verified",
+        url: targetUrl,
+        actions: [
+          { type: "goto", url: targetUrl },
+          { type: "click", role: "button", name: "Delete active task", exact: true },
+        ],
+        assertions: [
+          { assertion: "element_exists", selector: "#archived" } as any,
+          { assertion: "element_removed", selector: "#active" } as any,
+          { type: "text", text: "Deleted active task" },
+          { type: "consoleNoErrors" },
+          { type: "networkNoErrors" },
+        ],
+        screenshot: true,
+      }],
+    }],
+    options: {
+      artifactDir: passArtifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const failReport = await runTestAgent({
+    id: `browser-presence-fail-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent fails when an element remains in the DOM.",
+    acceptanceCriteria: ["The archived marker should be removed."],
+    requiredChecks: ["browser_e2e", "screenshots", "console_errors"],
+    projects: [{
+      ...baseProject,
+      browserChecks: [{
+        name: "Wrong DOM absence is reported",
+        url: targetUrl,
+        actions: [
+          { type: "goto", url: targetUrl },
+        ],
+        assertions: [
+          { type: "notPresent", selector: "#archived", timeoutMs: 800 },
+          { type: "consoleNoErrors" },
+          { type: "networkNoErrors" },
+        ],
+        screenshot: true,
+      }],
+    }],
+    options: {
+      artifactDir: failArtifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const calls: any[] = [];
+  const executor = createStaticBrowserToolExecutor({
+    tools: [
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_console_messages",
+      "mcp__playwright__browser_network_requests",
+    ],
+    onCall: (toolName, input) => {
+      calls.push({ toolName, input });
+      if (toolName.endsWith("browser_snapshot")) return "Presence checks\nExisting item";
+      if (toolName.endsWith("browser_console_messages")) return [];
+      if (toolName.endsWith("browser_network_requests")) return [];
+      return { ok: true };
+    },
+  });
+  const mcpReport = await runTestAgent({
+    id: `browser-presence-mcp-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent MCP presence behavior is explicit.",
+    acceptanceCriteria: ["MCP can best-effort assert text presence but not selector-only DOM presence."],
+    requiredChecks: ["browser_e2e"],
+    projects: [{
+      name: "browser-presence-mcp-self-test",
+      workDir: process.cwd(),
+      browserChecks: [{
+        name: "MCP presence support boundary",
+        url: "http://example.test/presence",
+        actions: [{ type: "goto", url: "http://example.test/presence" }],
+        assertions: [
+          { type: "present", text: "Existing item" },
+          { type: "notPresent", text: "Removed item" },
+          { type: "notPresent", selector: "#selector-only" },
+        ],
+        screenshot: false,
+      }],
+    }],
+    options: {
+      artifactDir: mcpArtifactDir,
+      browserProvider: "mcp",
+    },
+  }, { browserProvider: "mcp", browserToolExecutor: executor });
+
+  const passBrowser = passReport.browserResults[0];
+  const failBrowser = failReport.browserResults[0];
+  const mcpBrowser = mcpReport.browserResults[0];
+  const presentStep = passBrowser?.steps.find(step => step.name === "assert:present");
+  const notPresentStep = passBrowser?.steps.find(step => step.name === "assert:notPresent");
+  const failNotPresentStep = failBrowser?.steps.find(step => step.name === "assert:notPresent");
+  const mcpPresentStep = mcpBrowser?.steps.find(step => step.name === "playwright:present");
+  const mcpTextNotPresentStep = mcpBrowser?.steps.find(step => step.name === "playwright:notPresent" && step.status === "passed");
+  const mcpSelectorStep = mcpBrowser?.steps.find(step => step.name === "playwright:notPresent" && step.status === "failed");
+  const pass = passReport.status === "passed"
+    && passBrowser?.provider === "playwright"
+    && passBrowser?.status === "passed"
+    && presentStep?.status === "passed"
+    && String(presentStep?.detail || "").includes("#archived")
+    && notPresentStep?.status === "passed"
+    && String(notPresentStep?.detail || "").includes("#active")
+    && passBrowser?.pageTextPreview?.includes("Deleted active task")
+    && failReport.status === "failed"
+    && failBrowser?.provider === "playwright"
+    && failBrowser?.status === "failed"
+    && failNotPresentStep?.status === "failed"
+    && String(failNotPresentStep?.error || "").includes("actual count=1")
+    && mcpReport.status === "failed"
+    && mcpBrowser?.provider === "mcp"
+    && mcpPresentStep?.status === "passed"
+    && mcpTextNotPresentStep?.status === "passed"
+    && mcpSelectorStep?.status === "failed"
+    && String(mcpSelectorStep?.error || "").includes("selector-only DOM presence")
+    && calls.some(call => call.toolName.endsWith("browser_snapshot"));
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    passReport,
+    failReport,
+    mcpReport,
   };
 }
 
@@ -5828,6 +9884,222 @@ export async function runTestAgentBrowserDragToActionSelfTest() {
     availability,
     passReport,
     failReport,
+  };
+}
+
+export async function runTestAgentBrowserHoverActionSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-browser-hover-action-selftest-"));
+  const passArtifactDir = path.join(dir, "pass-artifacts");
+  const failArtifactDir = path.join(dir, "fail-artifacts");
+  const port = await getFreePort();
+  const targetUrl = `http://127.0.0.1:${port}/menu`;
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const html = `<!doctype html>",
+    "<html><head><title>Hover Menu Fixture</title>",
+    "<style>",
+    "body { font-family: sans-serif; padding: 32px; }",
+    "#tools-menu { display: none; margin-top: 8px; padding: 12px; border: 1px solid #555; width: 220px; }",
+    "#tools:hover + #tools-menu, #tools-menu:hover { display: block; }",
+    "[role=menuitem] { display: block; padding: 8px; }",
+    "</style></head>",
+    "<body><main>",
+    "<h1>Hover tools</h1>",
+    "<button id=\"tools\" type=\"button\">Tools</button>",
+    "<div id=\"tools-menu\" role=\"menu\" aria-label=\"Tools menu\">",
+    "<button type=\"button\" role=\"menuitem\">Export report</button>",
+    "<button type=\"button\" role=\"menuitem\">Archive report</button>",
+    "</div>",
+    "<p role=\"status\">Menu waits for hover</p>",
+    "</main></body></html>`;",
+    "http.createServer((req, res) => { res.writeHead(200, {'content-type':'text/html'}); res.end(html); }).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const baseProject = {
+    name: "browser-hover-action-self-test",
+    workDir: dir,
+    runCommand: `"${process.execPath}" server.js`,
+    targetUrl,
+    env: { PORT: port },
+  };
+
+  const passReport = await runTestAgent({
+    id: `browser-hover-pass-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can perform a real browser hover before checking hover-only UI.",
+    acceptanceCriteria: ["Hovering Tools reveals the Export report menu item."],
+    requiredChecks: ["browser_e2e", "browser_hover", "browser_visibility", "console_errors"],
+    projects: [{
+      ...baseProject,
+      browserChecks: [{
+        name: "Tools hover reveals export menu item",
+        url: targetUrl,
+        actions: [
+          { type: "goto", url: targetUrl },
+          { type: "hover", role: "button", name: "Tools", exact: true },
+        ],
+        assertions: [
+          { type: "visible", role: "menuitem", name: "Export report", exact: true },
+          { type: "consoleNoErrors" },
+          { type: "networkNoErrors" },
+        ],
+        screenshot: true,
+      }],
+    }],
+    options: {
+      artifactDir: passArtifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const failReport = await runTestAgent({
+    id: `browser-hover-fail-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent fails when a hover target cannot be found.",
+    acceptanceCriteria: ["Hovering a missing Tools button should be reported as failed."],
+    requiredChecks: ["browser_e2e", "browser_hover", "console_errors"],
+    projects: [{
+      ...baseProject,
+      browserChecks: [{
+        name: "Missing hover target fails",
+        url: targetUrl,
+        actions: [
+          { type: "goto", url: targetUrl },
+          { type: "hover", role: "button", name: "Missing tools", exact: true, timeoutMs: 800 },
+        ],
+        assertions: [
+          { type: "consoleNoErrors" },
+          { type: "networkNoErrors" },
+        ],
+        screenshot: true,
+      }],
+    }],
+    options: {
+      artifactDir: failArtifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = passReport.browserResults[0];
+  const failBrowser = failReport.browserResults[0];
+  const failHover = failBrowser?.steps.find(step => step.name === "action:hover");
+  const passByCheck = new Map(passReport.requiredCheckCoverage.map(item => [item.check, item]));
+  const failByCheck = new Map(failReport.requiredCheckCoverage.map(item => [item.check, item]));
+  const pass = passReport.status === "passed"
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.steps.some(step => step.name === "action:hover" && step.status === "passed" && String(step.detail || "").includes("Tools"))
+    && browser?.steps.some(step => step.name === "assert:visible" && step.status === "passed" && String(step.detail || "").includes("Export report"))
+    && passByCheck.get("browser_hover")?.status === "verified"
+    && passByCheck.get("browser_hover")?.evidence.some(item => item.includes("action:hover"))
+    && passByCheck.get("browser_visibility")?.status === "verified"
+    && failReport.status === "failed"
+    && failBrowser?.provider === "playwright"
+    && failBrowser?.status === "failed"
+    && failHover?.status === "failed"
+    && String(failHover?.detail || "").includes("Missing tools")
+    && failByCheck.get("browser_hover")?.status === "not_verified";
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    passReport,
+    failReport,
+  };
+}
+
+export async function runTestAgentBrowserHistoryNavigationActionSelfTest() {
+  const availability = await checkPlaywrightAvailability();
+  if (!availability.available) {
+    return {
+      pass: false,
+      availability,
+      reason: availability.reason,
+    };
+  }
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccm-test-agent-browser-history-action-selftest-"));
+  const artifactDir = path.join(dir, "artifacts");
+  const port = await getFreePort();
+  const oneUrl = `http://127.0.0.1:${port}/one`;
+  fs.writeFileSync(path.join(dir, "server.js"), [
+    "const http = require('http');",
+    "const one = '<!doctype html><title>Page One</title><main><h1>Page One</h1><a href=\"/two\">Open two</a><p role=\"status\">One ready</p></main>';",
+    "const two = '<!doctype html><title>Page Two</title><main><h1>Page Two</h1><p role=\"status\">Two ready after history</p></main>';",
+    "http.createServer((req, res) => {",
+    "  const route = String(req.url || '/').split('?')[0];",
+    "  res.writeHead(200, {'content-type':'text/html'});",
+    "  res.end(route === '/two' ? two : one);",
+    "}).listen(process.env.PORT);",
+  ].join("\n"), "utf-8");
+
+  const report = await runTestAgent({
+    id: `browser-history-action-self-test-${process.pid}-${Date.now()}`,
+    originalUserGoal: "Verify TestAgent can perform browser history navigation and reload actions.",
+    acceptanceCriteria: ["Back, forward, and reload keep the browser on the expected pages."],
+    requiredChecks: ["browser_e2e", "browser_history", "browser_reload", "browser_navigation", "console_errors"],
+    projects: [{
+      name: "browser-history-action-self-test",
+      workDir: dir,
+      runCommand: `"${process.execPath}" server.js`,
+      targetUrl: oneUrl,
+      env: { PORT: port },
+      browserChecks: [{
+        name: "History back forward reload flow",
+        url: oneUrl,
+        actions: [
+          { type: "goto", url: oneUrl },
+          { type: "click", role: "link", name: "Open two", exact: true },
+          { type: "goBack" },
+          { type: "goForward" },
+          { type: "reload" },
+        ],
+        assertions: [
+          { type: "urlIncludes", text: "/two" },
+          { type: "titleEquals", title: "Page Two" },
+          { type: "text", text: "Two ready after history" },
+          { type: "consoleNoErrors" },
+          { type: "networkNoErrors" },
+        ],
+        screenshot: true,
+      }],
+    }],
+    options: {
+      artifactDir,
+      browserProvider: "playwright",
+      collectBrowserArtifacts: false,
+    },
+  }, { browserProvider: "playwright" });
+
+  const browser = report.browserResults[0];
+  const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const pass = report.status === "passed"
+    && browser?.provider === "playwright"
+    && browser?.status === "passed"
+    && browser?.steps.some(step => step.name === "action:goBack" && step.status === "passed")
+    && browser?.steps.some(step => step.name === "action:goForward" && step.status === "passed")
+    && browser?.steps.some(step => step.name === "action:reload" && step.status === "passed")
+    && browser?.steps.some(step => step.name === "assert:urlIncludes" && step.status === "passed" && String(step.detail || "").includes("/two"))
+    && browser?.finalUrl?.includes("/two")
+    && byCheck.get("browser_history")?.status === "verified"
+    && byCheck.get("browser_reload")?.status === "verified"
+    && byCheck.get("browser_navigation")?.status === "verified";
+
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  return {
+    pass,
+    availability,
+    report,
   };
 }
 
@@ -8321,20 +12593,47 @@ export async function runTestAgentBrowserPreflightSelfTest() {
   }, { browserProvider: "mcp", browserToolExecutor: executor });
 
   const preflight = report.metadata.browserProviderPreflight as any[];
+  const verdict = buildTestAgentVerdict(report);
+  const cliSummary = formatTestAgentCliReportSummary(report);
+  const reportValidation = validateTestAgentReportContract(report);
+  const verdictValidation = validateTestAgentVerdictContract(verdict);
   const markdownPath = String((report.metadata.artifactFiles as any)?.reportMarkdownPath || "");
   const markdown = fs.existsSync(markdownPath) ? fs.readFileSync(markdownPath, "utf-8") : "";
+  const providerSummary = report.browserProviderSummary;
+  const mcpProviderSummary = providerSummary.items.find(item => item.provider === "mcp");
   const pass = report.status === "passed"
     && Array.isArray(preflight)
     && preflight.some(item => item.provider === "mcp" && item.available === true && item.tools?.includes("mcp__playwright__browser_navigate"))
     && preflight.some(item => item.provider === "playwright")
+    && providerSummary.status === "used"
+    && providerSummary.preferred === "mcp"
+    && providerSummary.selectedProvider === "mcp"
+    && providerSummary.availableProviders.includes("mcp")
+    && providerSummary.attemptedProviders.includes("mcp")
+    && providerSummary.fallbackUsed === false
+    && mcpProviderSummary?.selected === true
+    && mcpProviderSummary?.attempted === true
+    && mcpProviderSummary?.passed === 1
+    && mcpProviderSummary?.tools?.includes("mcp__playwright__browser_navigate")
+    && verdict.browserProviderSummary?.selectedProvider === "mcp"
+    && cliSummary.includes("Browser providers: status=used; preferred=mcp; selected=mcp")
+    && markdown.includes("## Browser Provider Summary")
+    && markdown.includes("selected=yes")
     && markdown.includes("## Browser Provider Preflight")
-    && markdown.includes("mcp__playwright__browser_navigate");
+    && markdown.includes("mcp__playwright__browser_navigate")
+    && reportValidation.valid
+    && verdictValidation.valid;
 
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
   return {
     pass,
     report,
+    verdict,
     preflight,
+    providerSummary,
+    cliSummary,
+    reportValidation,
+    verdictValidation,
   };
 }
 
@@ -9036,15 +13335,2135 @@ export async function runTestAgentRequiredCheckCoverageSelfTest() {
     options: { browserProvider: "none" },
   });
   const byCheck = new Map(report.requiredCheckCoverage.map(item => [item.check, item]));
+  const { workOrder: networkWorkOrder } = normalizeTestAgentWorkOrder({
+    id: `required-browser-network-coverage-self-test-${process.pid}-${Date.now()}`,
+    acceptanceCriteria: ["Browser network evidence is tracked separately from generic browser evidence."],
+    requiredChecks: ["browser_e2e", "browser_network", "browser_network_logs"],
+    projects: [{ name: "required-browser-network-coverage-self-test", workDir: dir }],
+  });
+  const genericBrowserCoverage = buildRequiredCheckCoverage({
+    workOrder: networkWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-browser-network-coverage-self-test",
+      name: "Generic browser check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "Ready" }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      networkRequests: [],
+    } as any],
+  });
+  const networkBrowserCoverage = buildRequiredCheckCoverage({
+    workOrder: networkWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-browser-network-coverage-self-test",
+      name: "Network browser check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "assertion" as const, name: "assert:networkRequest", status: "passed" as const, detail: "method=POST urlIncludes=/api/tasks" },
+        { kind: "assertion" as const, name: "assert:networkResponse", status: "passed" as const, detail: "status=201 urlIncludes=/api/tasks" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      networkRequests: ["request POST http://example.test/api/tasks", "response 201 fetch http://example.test/api/tasks"],
+      networkLogPath: path.join(dir, "browser.network.log"),
+    } as any],
+  });
+  const failedNetworkBrowserCoverage = buildRequiredCheckCoverage({
+    workOrder: networkWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-browser-network-coverage-self-test",
+      name: "Failed network browser check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected browser network telemetry to match method=POST urlIncludes=/api/tasks.",
+      steps: [{ kind: "assertion" as const, name: "assert:networkRequest", status: "failed" as const, detail: "method=POST urlIncludes=/api/tasks", error: "Expected browser network telemetry to match method=POST urlIncludes=/api/tasks." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      networkRequests: [],
+    } as any],
+  });
+  const { workOrder: accessibilityWorkOrder } = normalizeTestAgentWorkOrder({
+    id: `required-accessibility-coverage-self-test-${process.pid}-${Date.now()}`,
+    acceptanceCriteria: ["Accessibility evidence is tracked separately from generic browser evidence."],
+    requiredChecks: ["browser_e2e", "accessibility", "aria", "browser_accessibility_snapshot"],
+    projects: [{ name: "required-accessibility-coverage-self-test", workDir: dir }],
+  });
+  const genericAccessibilityCoverage = buildRequiredCheckCoverage({
+    workOrder: accessibilityWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-accessibility-coverage-self-test",
+      name: "Generic browser check",
+      url: "http://example.test/settings",
+      finalUrl: "http://example.test/settings",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "Settings" }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      browserArtifacts: [],
+    } as any],
+  });
+  const accessibilityBrowserCoverage = buildRequiredCheckCoverage({
+    workOrder: accessibilityWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-accessibility-coverage-self-test",
+      name: "Accessibility browser check",
+      url: "http://example.test/settings",
+      finalUrl: "http://example.test/settings",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "assertion" as const, name: "assert:accessibleNameEquals", status: "passed" as const, detail: "button name=Save profile" },
+        { kind: "assertion" as const, name: "assert:ariaExpanded", status: "passed" as const, detail: "aria-expanded=true" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      browserArtifacts: [{
+        type: "accessibility_snapshot",
+        title: "Accessibility snapshot",
+        path: path.join(dir, "settings.aria.txt"),
+        source: "self-test",
+      }],
+    } as any],
+  });
+  const failedAccessibilityCoverage = buildRequiredCheckCoverage({
+    workOrder: accessibilityWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-accessibility-coverage-self-test",
+      name: "Failed accessibility browser check",
+      url: "http://example.test/settings",
+      finalUrl: "http://example.test/settings",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected accessible name to equal Save profile.",
+      steps: [{ kind: "assertion" as const, name: "assert:accessibleNameEquals", status: "failed" as const, detail: "button name=Save profile", error: "Expected accessible name to equal Save profile." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      browserArtifacts: [],
+    } as any],
+  });
+  const { workOrder: consoleWarningWorkOrder } = normalizeTestAgentWorkOrder({
+    id: `required-console-warning-coverage-self-test-${process.pid}-${Date.now()}`,
+    acceptanceCriteria: ["Console warning evidence is tracked separately from generic browser evidence."],
+    requiredChecks: ["browser_e2e", "console_warnings", "console_errors"],
+    projects: [{ name: "required-console-warning-coverage-self-test", workDir: dir }],
+  });
+  const genericConsoleWarningCoverage = buildRequiredCheckCoverage({
+    workOrder: consoleWarningWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-console-warning-coverage-self-test",
+      name: "Generic browser check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "Ready" }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const warningFreeConsoleCoverage = buildRequiredCheckCoverage({
+    workOrder: consoleWarningWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-console-warning-coverage-self-test",
+      name: "Warning-free browser check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:consoleNoWarnings", status: "passed" as const, detail: "no console warning messages" }],
+      screenshots: [],
+      consoleMessages: ["[log] feature ready"],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      consoleLogPath: path.join(dir, "warning-free.console.log"),
+    } as any],
+  });
+  const warningConsoleCoverage = buildRequiredCheckCoverage({
+    workOrder: consoleWarningWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-console-warning-coverage-self-test",
+      name: "Warning browser check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "Ready" }],
+      screenshots: [],
+      consoleMessages: ["[warning] deprecated API used"],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      consoleLogPath: path.join(dir, "warning.console.log"),
+    } as any],
+  });
+  const failedWarningAssertionCoverage = buildRequiredCheckCoverage({
+    workOrder: consoleWarningWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-console-warning-coverage-self-test",
+      name: "Failed warning assertion browser check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:consoleNoWarnings", status: "failed" as const, detail: "no console warning messages", error: "Unexpected browser console telemetry matched no console warning messages: warning: deprecated API" }],
+      screenshots: [],
+      consoleMessages: ["warning: deprecated API"],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      consoleLogPath: path.join(dir, "failed-warning.console.log"),
+    } as any],
+  });
+  const failedConsoleErrorCoverage = buildRequiredCheckCoverage({
+    workOrder: consoleWarningWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-console-warning-coverage-self-test",
+      name: "Console error browser check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "Ready" }],
+      screenshots: [],
+      consoleMessages: ["error: Uncaught TypeError: boom"],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      consoleLogPath: path.join(dir, "console-error.console.log"),
+    } as any],
+  });
+  const computerUseConsoleCoverage = buildRequiredCheckCoverage({
+    workOrder: consoleWarningWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-console-warning-coverage-self-test",
+      name: "Computer Use browser check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "passed" as const,
+      provider: "mcp" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "action" as const, name: "computer-use:goto", status: "passed" as const, detail: "http://example.test/app typed into the active browser" }],
+      screenshots: [],
+      consoleMessages: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      consoleLogPath: path.join(dir, "computer-use.console.log"),
+    } as any],
+  });
+  const { workOrder: browserInteractionWorkOrder } = normalizeTestAgentWorkOrder({
+    id: `required-browser-interaction-coverage-self-test-${process.pid}-${Date.now()}`,
+    acceptanceCriteria: ["Dialog and popup evidence is tracked separately from generic browser evidence."],
+    requiredChecks: ["browser_e2e", "browser_dialog", "browser_popup", "browser_dialog_log", "browser_popup_log"],
+    projects: [{ name: "required-browser-interaction-coverage-self-test", workDir: dir }],
+  });
+  const genericInteractionCoverage = buildRequiredCheckCoverage({
+    workOrder: browserInteractionWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-browser-interaction-coverage-self-test",
+      name: "Generic browser check with interaction logs",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "Ready" }],
+      screenshots: [],
+      consoleMessages: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      dialogMessages: [],
+      popupMessages: [],
+      dialogLogPath: path.join(dir, "generic.dialogs.log"),
+      popupLogPath: path.join(dir, "generic.popups.log"),
+    } as any],
+  });
+  const dialogInteractionCoverage = buildRequiredCheckCoverage({
+    workOrder: browserInteractionWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-browser-interaction-coverage-self-test",
+      name: "Dialog browser check",
+      url: "http://example.test/dialogs",
+      finalUrl: "http://example.test/dialogs",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:dialogMessageIncludes", status: "passed" as const, detail: "dialogType=alert; expected message substring length=12" }],
+      screenshots: [],
+      consoleMessages: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      dialogMessages: ["dialog alert message=\"Saved profile\" accepted=yes"],
+      popupMessages: [],
+      dialogLogPath: path.join(dir, "dialog.dialogs.log"),
+    } as any],
+  });
+  const failedDialogInteractionCoverage = buildRequiredCheckCoverage({
+    workOrder: browserInteractionWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-browser-interaction-coverage-self-test",
+      name: "Failed dialog browser check",
+      url: "http://example.test/dialogs",
+      finalUrl: "http://example.test/dialogs",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected browser dialog matching dialogType=alert.",
+      steps: [{ kind: "assertion" as const, name: "assert:dialogMessageIncludes", status: "failed" as const, detail: "dialogType=alert; expected message substring length=9", error: "Observed dialogs: confirm: wrong type" }],
+      screenshots: [],
+      consoleMessages: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      dialogMessages: ["dialog confirm message=\"Confirm shipping\" accepted=yes"],
+      popupMessages: [],
+      dialogLogPath: path.join(dir, "failed-dialog.dialogs.log"),
+    } as any],
+  });
+  const popupInteractionCoverage = buildRequiredCheckCoverage({
+    workOrder: browserInteractionWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-browser-interaction-coverage-self-test",
+      name: "Popup browser check",
+      url: "http://example.test/help",
+      finalUrl: "http://example.test/help",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:popupTextIncludes", status: "passed" as const, detail: "any popup; expected text substring length=12" }],
+      screenshots: [],
+      consoleMessages: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      dialogMessages: [],
+      popupMessages: ["popup url=http://example.test/help title=\"Help Center\" text=\"Support article\""],
+      popupLogPath: path.join(dir, "popup.popups.log"),
+    } as any],
+  });
+  const failedPopupInteractionCoverage = buildRequiredCheckCoverage({
+    workOrder: browserInteractionWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-browser-interaction-coverage-self-test",
+      name: "Failed popup browser check",
+      url: "http://example.test/help",
+      finalUrl: "http://example.test/help",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected browser popup matching any popup.",
+      steps: [{ kind: "assertion" as const, name: "assert:popupTextIncludes", status: "failed" as const, detail: "any popup; expected text substring length=15", error: "Observed popups: 1" }],
+      screenshots: [],
+      consoleMessages: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      dialogMessages: [],
+      popupMessages: ["popup url=http://example.test/help title=\"Help Center\" text=\"Support article\""],
+      popupLogPath: path.join(dir, "failed-popup.popups.log"),
+    } as any],
+  });
+  const { workOrder: transferWorkOrder } = normalizeTestAgentWorkOrder({
+    id: `required-transfer-coverage-self-test-${process.pid}-${Date.now()}`,
+    acceptanceCriteria: ["Upload and download evidence is tracked separately from generic browser evidence."],
+    requiredChecks: ["browser_e2e", "browser_upload", "browser_download"],
+    projects: [{ name: "required-transfer-coverage-self-test", workDir: dir }],
+  });
+  const genericTransferCoverage = buildRequiredCheckCoverage({
+    workOrder: transferWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-transfer-coverage-self-test",
+      name: "Generic browser check",
+      url: "http://example.test/files",
+      finalUrl: "http://example.test/files",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "Files" }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      browserArtifacts: [],
+    } as any],
+  });
+  const uploadTransferCoverage = buildRequiredCheckCoverage({
+    workOrder: transferWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-transfer-coverage-self-test",
+      name: "Upload browser check",
+      url: "http://example.test/upload",
+      finalUrl: "http://example.test/upload",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      probeType: "acceptance_upload_flow",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "action" as const, name: "action:uploadFile", status: "passed" as const, detail: "label=Attachment; files=notes.txt" },
+        { kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "Uploaded notes.txt" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      browserArtifacts: [],
+    } as any],
+  });
+  const failedUploadTransferCoverage = buildRequiredCheckCoverage({
+    workOrder: transferWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-transfer-coverage-self-test",
+      name: "Failed upload browser check",
+      url: "http://example.test/upload",
+      finalUrl: "http://example.test/upload",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "uploadFile requires filePath/file_path/path or fileContent/file_content/content.",
+      steps: [{ kind: "action" as const, name: "action:uploadFile", status: "failed" as const, detail: "label=Attachment", error: "uploadFile requires filePath/file_path/path or fileContent/file_content/content." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      browserArtifacts: [],
+    } as any],
+  });
+  const downloadTransferCoverage = buildRequiredCheckCoverage({
+    workOrder: transferWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-transfer-coverage-self-test",
+      name: "Download browser check",
+      url: "http://example.test/exports",
+      finalUrl: "http://example.test/exports",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:downloadedFile", status: "passed" as const, detail: "filename=tasks.csv; contentIncludes=Ship TestAgent" }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      browserArtifacts: [{
+        type: "download",
+        title: "Download: tasks.csv",
+        path: path.join(dir, "tasks.csv"),
+        source: "self-test",
+      }],
+    } as any],
+  });
+  const failedDownloadTransferCoverage = buildRequiredCheckCoverage({
+    workOrder: transferWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-transfer-coverage-self-test",
+      name: "Failed download browser check",
+      url: "http://example.test/exports",
+      finalUrl: "http://example.test/exports",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected downloaded file matching filename=tasks.csv.",
+      steps: [{ kind: "assertion" as const, name: "assert:downloadedFile", status: "failed" as const, detail: "filename=tasks.csv", error: "No downloads were observed." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+      browserArtifacts: [],
+    } as any],
+  });
+  const { workOrder: inputWorkOrder } = normalizeTestAgentWorkOrder({
+    id: `required-input-coverage-self-test-${process.pid}-${Date.now()}`,
+    acceptanceCriteria: ["Keyboard, focus, and clipboard evidence is tracked separately from generic browser evidence."],
+    requiredChecks: ["browser_e2e", "browser_clipboard", "browser_focus", "browser_keyboard"],
+    projects: [{ name: "required-input-coverage-self-test", workDir: dir }],
+  });
+  const genericInputCoverage = buildRequiredCheckCoverage({
+    workOrder: inputWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-input-coverage-self-test",
+      name: "Generic browser check",
+      url: "http://example.test/input",
+      finalUrl: "http://example.test/input",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "Input Ready" }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const clipboardInputCoverage = buildRequiredCheckCoverage({
+    workOrder: inputWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-input-coverage-self-test",
+      name: "Clipboard browser check",
+      url: "http://example.test/input",
+      finalUrl: "http://example.test/input",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "action" as const, name: "action:setClipboard", status: "passed" as const, detail: "text length=12" },
+        { kind: "assertion" as const, name: "assert:clipboardTextEquals", status: "passed" as const, detail: "expected length=12" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedClipboardInputCoverage = buildRequiredCheckCoverage({
+    workOrder: inputWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-input-coverage-self-test",
+      name: "Failed clipboard browser check",
+      url: "http://example.test/input",
+      finalUrl: "http://example.test/input",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Clipboard text did not match expected length.",
+      steps: [{ kind: "assertion" as const, name: "assert:clipboardTextEquals", status: "failed" as const, detail: "expected length=12", error: "Clipboard text length 4 did not equal expected length 12." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const focusInputCoverage = buildRequiredCheckCoverage({
+    workOrder: inputWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-input-coverage-self-test",
+      name: "Focus browser check",
+      url: "http://example.test/input",
+      finalUrl: "http://example.test/input",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "action" as const, name: "action:focus", status: "passed" as const, detail: "label=Email" },
+        { kind: "assertion" as const, name: "assert:focused", status: "passed" as const, detail: "label=Email" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedFocusInputCoverage = buildRequiredCheckCoverage({
+    workOrder: inputWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-input-coverage-self-test",
+      name: "Failed focus browser check",
+      url: "http://example.test/input",
+      finalUrl: "http://example.test/input",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected target to be focused.",
+      steps: [{ kind: "assertion" as const, name: "assert:focused", status: "failed" as const, detail: "role=button; name=Save", error: "Expected target to be focused." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const keyboardInputCoverage = buildRequiredCheckCoverage({
+    workOrder: inputWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-input-coverage-self-test",
+      name: "Keyboard browser check",
+      url: "http://example.test/input",
+      finalUrl: "http://example.test/input",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "action" as const, name: "action:typeText", status: "passed" as const, detail: "label=Search; text length=5" },
+        { kind: "action" as const, name: "action:press", status: "passed" as const, detail: "Enter" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedKeyboardInputCoverage = buildRequiredCheckCoverage({
+    workOrder: inputWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-input-coverage-self-test",
+      name: "Failed keyboard browser check",
+      url: "http://example.test/input",
+      finalUrl: "http://example.test/input",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "press requires key/text/value.",
+      steps: [{ kind: "action" as const, name: "action:press", status: "failed" as const, detail: "", error: "press requires key/text/value." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const { workOrder: visualLayoutWorkOrder } = normalizeTestAgentWorkOrder({
+    id: `required-visual-layout-coverage-self-test-${process.pid}-${Date.now()}`,
+    acceptanceCriteria: ["Visual and layout evidence is tracked separately from generic browser and screenshot evidence."],
+    requiredChecks: ["browser_e2e", "screenshots", "browser_visual", "browser_layout"],
+    projects: [{ name: "required-visual-layout-coverage-self-test", workDir: dir }],
+  });
+  const genericVisualLayoutCoverage = buildRequiredCheckCoverage({
+    workOrder: visualLayoutWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-visual-layout-coverage-self-test",
+      name: "Generic browser check with screenshot",
+      url: "http://example.test/visual",
+      finalUrl: "http://example.test/visual",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "Chart ready" }],
+      screenshots: [path.join(dir, "visual.png")],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const visualAssertionCoverage = buildRequiredCheckCoverage({
+    workOrder: visualLayoutWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-visual-layout-coverage-self-test",
+      name: "Visual browser check",
+      url: "http://example.test/visual",
+      finalUrl: "http://example.test/visual",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:elementScreenshotNotBlank", status: "passed" as const, detail: "selector=#chart; minUniqueColors=3" }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedVisualAssertionCoverage = buildRequiredCheckCoverage({
+    workOrder: visualLayoutWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-visual-layout-coverage-self-test",
+      name: "Failed visual browser check",
+      url: "http://example.test/visual",
+      finalUrl: "http://example.test/visual",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Element screenshot was visually blank.",
+      steps: [{ kind: "assertion" as const, name: "assert:elementScreenshotNotBlank", status: "failed" as const, detail: "selector=#chart; minNonWhitePixels=100", error: "Expected element screenshot to contain non-blank visual content." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const layoutAssertionCoverage = buildRequiredCheckCoverage({
+    workOrder: visualLayoutWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-visual-layout-coverage-self-test",
+      name: "Layout browser check",
+      url: "http://example.test/layout",
+      finalUrl: "http://example.test/layout",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "assertion" as const, name: "assert:inViewport", status: "passed" as const, detail: "testId=cta" },
+        { kind: "assertion" as const, name: "assert:noHorizontalOverflow", status: "passed" as const, detail: "scrollWidth=390 clientWidth=390" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedLayoutAssertionCoverage = buildRequiredCheckCoverage({
+    workOrder: visualLayoutWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-visual-layout-coverage-self-test",
+      name: "Failed layout browser check",
+      url: "http://example.test/layout",
+      finalUrl: "http://example.test/layout",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected no horizontal overflow.",
+      steps: [{ kind: "assertion" as const, name: "assert:noHorizontalOverflow", status: "failed" as const, detail: "scrollWidth=900 clientWidth=390", error: "Page has horizontal overflow." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const { workOrder: uiStructureWorkOrder } = normalizeTestAgentWorkOrder({
+    id: `required-ui-structure-coverage-self-test-${process.pid}-${Date.now()}`,
+    acceptanceCriteria: ["Form, table, list, and text-order evidence is tracked separately from generic browser evidence."],
+    requiredChecks: ["browser_e2e", "browser_form", "form_state", "input_value", "selected", "checked", "enabled", "browser_table", "browser_list", "browser_text_order"],
+    projects: [{ name: "required-ui-structure-coverage-self-test", workDir: dir }],
+  });
+  const genericUiStructureCoverage = buildRequiredCheckCoverage({
+    workOrder: uiStructureWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-ui-structure-coverage-self-test",
+      name: "Generic browser check",
+      url: "http://example.test/dashboard",
+      finalUrl: "http://example.test/dashboard",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "Dashboard Ready" }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const formFlowCoverage = buildRequiredCheckCoverage({
+    workOrder: uiStructureWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-ui-structure-coverage-self-test",
+      name: "Acceptance form flow",
+      url: "http://example.test/profile",
+      finalUrl: "http://example.test/profile",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      probeType: "acceptance_form_flow",
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "action" as const, name: "action:fill", status: "passed" as const, detail: "label=Display name; value length=12" },
+        { kind: "action" as const, name: "action:click", status: "passed" as const, detail: "role=button; name=Save" },
+        { kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "Saved profile" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const formStateCoverage = buildRequiredCheckCoverage({
+    workOrder: uiStructureWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-ui-structure-coverage-self-test",
+      name: "Form state browser check",
+      url: "http://example.test/profile",
+      finalUrl: "http://example.test/profile",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "assertion" as const, name: "assert:inputValueEquals", status: "passed" as const, detail: "label=Display name; expected length=12" },
+        { kind: "assertion" as const, name: "assert:selectedTextIncludes", status: "passed" as const, detail: "label=Priority; expected=High" },
+        { kind: "assertion" as const, name: "assert:checked", status: "passed" as const, detail: "label=Notify team" },
+        { kind: "assertion" as const, name: "assert:enabled", status: "passed" as const, detail: "role=button; name=Save" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedFormStateCoverage = buildRequiredCheckCoverage({
+    workOrder: uiStructureWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-ui-structure-coverage-self-test",
+      name: "Failed form state browser check",
+      url: "http://example.test/profile",
+      finalUrl: "http://example.test/profile",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected input value to equal Ada Lovelace.",
+      steps: [{ kind: "assertion" as const, name: "assert:inputValueEquals", status: "failed" as const, detail: "label=Display name; expected length=12", error: "Expected input value to equal Ada Lovelace." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const tableCoverage = buildRequiredCheckCoverage({
+    workOrder: uiStructureWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-ui-structure-coverage-self-test",
+      name: "Table browser check",
+      url: "http://example.test/orders",
+      finalUrl: "http://example.test/orders",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "assertion" as const, name: "assert:tableRowIncludes", status: "passed" as const, detail: "selector=#orders; expected text count=2" },
+        { kind: "assertion" as const, name: "assert:tableCellTextEquals", status: "passed" as const, detail: "column=Status; expected=Shipped" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedTableCoverage = buildRequiredCheckCoverage({
+    workOrder: uiStructureWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-ui-structure-coverage-self-test",
+      name: "Failed table browser check",
+      url: "http://example.test/orders",
+      finalUrl: "http://example.test/orders",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected table cell Status to equal Shipped.",
+      steps: [{ kind: "assertion" as const, name: "assert:tableCellTextEquals", status: "failed" as const, detail: "column=Status; expected=Shipped", error: "Expected table cell Status to equal Shipped." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const listCoverage = buildRequiredCheckCoverage({
+    workOrder: uiStructureWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-ui-structure-coverage-self-test",
+      name: "List browser check",
+      url: "http://example.test/tasks",
+      finalUrl: "http://example.test/tasks",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:elementCountAtLeast", status: "passed" as const, detail: "role=listitem; min count=3" }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedListCoverage = buildRequiredCheckCoverage({
+    workOrder: uiStructureWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-ui-structure-coverage-self-test",
+      name: "Failed list browser check",
+      url: "http://example.test/tasks",
+      finalUrl: "http://example.test/tasks",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected element count to equal 3.",
+      steps: [{ kind: "assertion" as const, name: "assert:elementCountEquals", status: "failed" as const, detail: "role=listitem; expected count=3", error: "Expected element count to equal 3." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const textOrderCoverage = buildRequiredCheckCoverage({
+    workOrder: uiStructureWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-ui-structure-coverage-self-test",
+      name: "Text order browser check",
+      url: "http://example.test/tasks",
+      finalUrl: "http://example.test/tasks",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:textOrder", status: "passed" as const, detail: "expected text count=3" }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedTextOrderCoverage = buildRequiredCheckCoverage({
+    workOrder: uiStructureWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-ui-structure-coverage-self-test",
+      name: "Failed text order browser check",
+      url: "http://example.test/tasks",
+      finalUrl: "http://example.test/tasks",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected text order to match Alpha, Bravo, Charlie.",
+      steps: [{ kind: "assertion" as const, name: "assert:textOrder", status: "failed" as const, detail: "expected text count=3", error: "Expected text order to match Alpha, Bravo, Charlie." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const { workOrder: pageStateWorkOrder } = normalizeTestAgentWorkOrder({
+    id: `required-page-state-coverage-self-test-${process.pid}-${Date.now()}`,
+    acceptanceCriteria: ["URL, title, navigation, attributes, network state, and presence evidence is tracked separately from generic browser evidence."],
+    requiredChecks: ["browser_e2e", "browser_url", "browser_title", "browser_navigation", "browser_attribute", "browser_network_state", "browser_presence", "browser_visibility"],
+    projects: [{ name: "required-page-state-coverage-self-test", workDir: dir }],
+  });
+  const genericPageStateCoverage = buildRequiredCheckCoverage({
+    workOrder: pageStateWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-page-state-coverage-self-test",
+      name: "Generic browser check",
+      url: "http://example.test/home",
+      finalUrl: "http://example.test/home",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "Home Ready" }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const urlTitleNavigationCoverage = buildRequiredCheckCoverage({
+    workOrder: pageStateWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-page-state-coverage-self-test",
+      name: "URL title navigation browser check",
+      url: "http://example.test/start",
+      finalUrl: "http://example.test/done",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "action" as const, name: "action:waitForUrl", status: "passed" as const, detail: "/done" },
+        { kind: "assertion" as const, name: "assert:urlIncludes", status: "passed" as const, detail: "expected=/done" },
+        { kind: "assertion" as const, name: "assert:titleEquals", status: "passed" as const, detail: "expected=Done Title" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedUrlTitleNavigationCoverage = buildRequiredCheckCoverage({
+    workOrder: pageStateWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-page-state-coverage-self-test",
+      name: "Failed URL title navigation browser check",
+      url: "http://example.test/start",
+      finalUrl: "http://example.test/login",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected URL to include /done and title to equal Done Title.",
+      steps: [
+        { kind: "assertion" as const, name: "assert:urlIncludes", status: "failed" as const, detail: "expected=/done", error: "Expected URL to include /done." },
+        { kind: "assertion" as const, name: "assert:titleEquals", status: "failed" as const, detail: "expected=Done Title", error: "Expected title to equal Done Title." },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const attributeCoverage = buildRequiredCheckCoverage({
+    workOrder: pageStateWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-page-state-coverage-self-test",
+      name: "Attribute browser check",
+      url: "http://example.test/menu",
+      finalUrl: "http://example.test/menu",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "assertion" as const, name: "assert:attributeEquals", status: "passed" as const, detail: "attribute=aria-expanded; expected length=4" },
+        { kind: "assertion" as const, name: "assert:attributeIncludes", status: "passed" as const, detail: "attribute=data-state; expected substring length=6" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedAttributeCoverage = buildRequiredCheckCoverage({
+    workOrder: pageStateWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-page-state-coverage-self-test",
+      name: "Failed attribute browser check",
+      url: "http://example.test/menu",
+      finalUrl: "http://example.test/menu",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected aria-expanded to equal true.",
+      steps: [{ kind: "assertion" as const, name: "assert:attributeEquals", status: "failed" as const, detail: "attribute=aria-expanded; expected length=4", error: "Expected aria-expanded to equal true." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const networkStateCoverage = buildRequiredCheckCoverage({
+    workOrder: pageStateWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-page-state-coverage-self-test",
+      name: "Network state browser check",
+      url: "http://example.test/network",
+      finalUrl: "http://example.test/network",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "action" as const, name: "action:setOffline", status: "passed" as const, detail: "offline" },
+        { kind: "assertion" as const, name: "assert:browserOffline", status: "passed" as const, detail: "offline" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedNetworkStateCoverage = buildRequiredCheckCoverage({
+    workOrder: pageStateWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-page-state-coverage-self-test",
+      name: "Failed network state browser check",
+      url: "http://example.test/network",
+      finalUrl: "http://example.test/network",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected browser to be online.",
+      steps: [{ kind: "assertion" as const, name: "assert:browserOnline", status: "failed" as const, detail: "online", error: "Expected browser to be online." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const presenceCoverage = buildRequiredCheckCoverage({
+    workOrder: pageStateWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-page-state-coverage-self-test",
+      name: "Presence browser check",
+      url: "http://example.test/items",
+      finalUrl: "http://example.test/items",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "assertion" as const, name: "assert:visible", status: "passed" as const, detail: "role=button; name=Save" },
+        { kind: "assertion" as const, name: "assert:notPresent", status: "passed" as const, detail: "selector=#deleted" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedPresenceCoverage = buildRequiredCheckCoverage({
+    workOrder: pageStateWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-page-state-coverage-self-test",
+      name: "Failed presence browser check",
+      url: "http://example.test/items",
+      finalUrl: "http://example.test/items",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected target to be hidden.",
+      steps: [{ kind: "assertion" as const, name: "assert:notVisible", status: "failed" as const, detail: "text=Debug panel", error: "Expected target to be hidden." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const { workOrder: interactionActionWorkOrder } = normalizeTestAgentWorkOrder({
+    id: `required-interaction-action-coverage-self-test-${process.pid}-${Date.now()}`,
+    acceptanceCriteria: ["Hover, drag/drop, scroll, and history action evidence is tracked separately from generic browser evidence."],
+    requiredChecks: ["browser_e2e", "browser_hover", "browser_drag", "browser_scroll", "browser_history", "browser_reload"],
+    projects: [{ name: "required-interaction-action-coverage-self-test", workDir: dir }],
+  });
+  const genericInteractionActionCoverage = buildRequiredCheckCoverage({
+    workOrder: interactionActionWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-interaction-action-coverage-self-test",
+      name: "Generic browser check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "App Ready" }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const hoverInteractionActionCoverage = buildRequiredCheckCoverage({
+    workOrder: interactionActionWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-interaction-action-coverage-self-test",
+      name: "Hover browser check",
+      url: "http://example.test/menu",
+      finalUrl: "http://example.test/menu",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "action" as const, name: "action:hover", status: "passed" as const, detail: "role=button; name=Tools" },
+        { kind: "assertion" as const, name: "assert:visible", status: "passed" as const, detail: "role=menuitem; name=Export" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedHoverInteractionActionCoverage = buildRequiredCheckCoverage({
+    workOrder: interactionActionWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-interaction-action-coverage-self-test",
+      name: "Failed hover browser check",
+      url: "http://example.test/menu",
+      finalUrl: "http://example.test/menu",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected hover target to be visible.",
+      steps: [{ kind: "action" as const, name: "action:hover", status: "failed" as const, detail: "role=button; name=Missing", error: "Expected hover target to be visible." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const dragInteractionActionCoverage = buildRequiredCheckCoverage({
+    workOrder: interactionActionWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-interaction-action-coverage-self-test",
+      name: "Drag browser check",
+      url: "http://example.test/board",
+      finalUrl: "http://example.test/board",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "action" as const, name: "action:dragTo", status: "passed" as const, detail: "text=Task; destinationTestId=done-column" },
+        { kind: "assertion" as const, name: "assert:elementTextIncludes", status: "passed" as const, detail: "testId=done-list" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedDragInteractionActionCoverage = buildRequiredCheckCoverage({
+    workOrder: interactionActionWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-interaction-action-coverage-self-test",
+      name: "Failed drag browser check",
+      url: "http://example.test/board",
+      finalUrl: "http://example.test/board",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Drag destination missing.",
+      steps: [{ kind: "action" as const, name: "action:dragTo", status: "failed" as const, detail: "destinationTestId=missing-column", error: "Drag destination missing." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const scrollInteractionActionCoverage = buildRequiredCheckCoverage({
+    workOrder: interactionActionWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-interaction-action-coverage-self-test",
+      name: "Scroll browser check",
+      url: "http://example.test/landing",
+      finalUrl: "http://example.test/landing",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "action" as const, name: "action:scroll", status: "passed" as const, detail: "page; down 920px" },
+        { kind: "assertion" as const, name: "assert:inViewport", status: "passed" as const, detail: "testId=below-fold-cta" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedScrollInteractionActionCoverage = buildRequiredCheckCoverage({
+    workOrder: interactionActionWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-interaction-action-coverage-self-test",
+      name: "Failed scroll browser check",
+      url: "http://example.test/landing",
+      finalUrl: "http://example.test/landing",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Scroll target missing.",
+      steps: [{ kind: "action" as const, name: "action:scroll", status: "failed" as const, detail: "selector=#missing; down 400px", error: "Scroll target missing." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const historyInteractionActionCoverage = buildRequiredCheckCoverage({
+    workOrder: interactionActionWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-interaction-action-coverage-self-test",
+      name: "History browser check",
+      url: "http://example.test/start",
+      finalUrl: "http://example.test/start",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "action" as const, name: "action:reload", status: "passed" as const, detail: "domcontentloaded" },
+        { kind: "action" as const, name: "action:goBack", status: "passed" as const, detail: "domcontentloaded" },
+        { kind: "action" as const, name: "action:goForward", status: "passed" as const, detail: "domcontentloaded" },
+        { kind: "assertion" as const, name: "assert:urlIncludes", status: "passed" as const, detail: "/start" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedHistoryInteractionActionCoverage = buildRequiredCheckCoverage({
+    workOrder: interactionActionWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-interaction-action-coverage-self-test",
+      name: "Failed history browser check",
+      url: "http://example.test/start",
+      finalUrl: "http://example.test/start",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "History navigation failed.",
+      steps: [{ kind: "action" as const, name: "action:goBack", status: "failed" as const, detail: "domcontentloaded", error: "History navigation failed." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const { workOrder: scriptWaitWorkOrder } = normalizeTestAgentWorkOrder({
+    id: `required-script-wait-coverage-self-test-${process.pid}-${Date.now()}`,
+    acceptanceCriteria: ["Browser JavaScript/expression and conditional wait evidence is tracked separately from generic browser evidence."],
+    requiredChecks: ["browser_e2e", "browser_js", "browser_script", "browser_wait"],
+    projects: [{ name: "required-script-wait-coverage-self-test", workDir: dir }],
+  });
+  const genericScriptWaitCoverage = buildRequiredCheckCoverage({
+    workOrder: scriptWaitWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-script-wait-coverage-self-test",
+      name: "Generic browser check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [{ kind: "assertion" as const, name: "assert:text", status: "passed" as const, detail: "App Ready" }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const scriptCoverage = buildRequiredCheckCoverage({
+    workOrder: scriptWaitWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-script-wait-coverage-self-test",
+      name: "Browser script check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "action" as const, name: "action:evaluate", status: "passed" as const, detail: "localStorage.setItem('profile.saved','yes')" },
+        { kind: "assertion" as const, name: "assert:jsTruthy", status: "passed" as const, detail: "Boolean(localStorage.getItem('profile.saved'))" },
+        { kind: "assertion" as const, name: "assert:jsEquals", status: "passed" as const, detail: "document.readyState; expected=complete" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedScriptCoverage = buildRequiredCheckCoverage({
+    workOrder: scriptWaitWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-script-wait-coverage-self-test",
+      name: "Failed browser script check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Expected JavaScript expression to be truthy.",
+      steps: [{ kind: "assertion" as const, name: "assert:jsTruthy", status: "failed" as const, detail: "window.__ready === true", error: "Expected JavaScript expression to be truthy." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const waitCoverage = buildRequiredCheckCoverage({
+    workOrder: scriptWaitWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-script-wait-coverage-self-test",
+      name: "Browser wait check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/done",
+      status: "passed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      steps: [
+        { kind: "action" as const, name: "action:waitForText", status: "passed" as const, detail: "Ready after async load" },
+        { kind: "action" as const, name: "action:waitForSelector", status: "passed" as const, detail: "selector=#ready" },
+        { kind: "action" as const, name: "action:waitForUrl", status: "passed" as const, detail: "/done" },
+      ],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const failedWaitCoverage = buildRequiredCheckCoverage({
+    workOrder: scriptWaitWorkOrder,
+    commandResults: [],
+    devServerResults: [],
+    httpResults: [],
+    browserToolCalls: [],
+    browserResults: [{
+      project: "required-script-wait-coverage-self-test",
+      name: "Failed browser wait check",
+      url: "http://example.test/app",
+      finalUrl: "http://example.test/app",
+      status: "failed" as const,
+      provider: "playwright" as const,
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      durationMs: 1,
+      error: "Timed out waiting for async text.",
+      steps: [{ kind: "action" as const, name: "action:waitForText", status: "failed" as const, detail: "Ready after async load", error: "Timed out waiting for async text." }],
+      screenshots: [],
+      consoleErrors: [],
+      pageErrors: [],
+      networkErrors: [],
+    } as any],
+  });
+  const genericByCheck = new Map(genericBrowserCoverage.map(item => [item.check, item]));
+  const networkByCheck = new Map(networkBrowserCoverage.map(item => [item.check, item]));
+  const failedNetworkByCheck = new Map(failedNetworkBrowserCoverage.map(item => [item.check, item]));
+  const genericAccessibilityByCheck = new Map(genericAccessibilityCoverage.map(item => [item.check, item]));
+  const accessibilityByCheck = new Map(accessibilityBrowserCoverage.map(item => [item.check, item]));
+  const failedAccessibilityByCheck = new Map(failedAccessibilityCoverage.map(item => [item.check, item]));
+  const genericConsoleWarningByCheck = new Map(genericConsoleWarningCoverage.map(item => [item.check, item]));
+  const warningFreeConsoleByCheck = new Map(warningFreeConsoleCoverage.map(item => [item.check, item]));
+  const warningConsoleByCheck = new Map(warningConsoleCoverage.map(item => [item.check, item]));
+  const failedWarningAssertionByCheck = new Map(failedWarningAssertionCoverage.map(item => [item.check, item]));
+  const failedConsoleErrorByCheck = new Map(failedConsoleErrorCoverage.map(item => [item.check, item]));
+  const computerUseConsoleByCheck = new Map(computerUseConsoleCoverage.map(item => [item.check, item]));
+  const genericInteractionByCheck = new Map(genericInteractionCoverage.map(item => [item.check, item]));
+  const dialogInteractionByCheck = new Map(dialogInteractionCoverage.map(item => [item.check, item]));
+  const failedDialogInteractionByCheck = new Map(failedDialogInteractionCoverage.map(item => [item.check, item]));
+  const popupInteractionByCheck = new Map(popupInteractionCoverage.map(item => [item.check, item]));
+  const failedPopupInteractionByCheck = new Map(failedPopupInteractionCoverage.map(item => [item.check, item]));
+  const genericTransferByCheck = new Map(genericTransferCoverage.map(item => [item.check, item]));
+  const uploadTransferByCheck = new Map(uploadTransferCoverage.map(item => [item.check, item]));
+  const failedUploadTransferByCheck = new Map(failedUploadTransferCoverage.map(item => [item.check, item]));
+  const downloadTransferByCheck = new Map(downloadTransferCoverage.map(item => [item.check, item]));
+  const failedDownloadTransferByCheck = new Map(failedDownloadTransferCoverage.map(item => [item.check, item]));
+  const genericInputByCheck = new Map(genericInputCoverage.map(item => [item.check, item]));
+  const clipboardInputByCheck = new Map(clipboardInputCoverage.map(item => [item.check, item]));
+  const failedClipboardInputByCheck = new Map(failedClipboardInputCoverage.map(item => [item.check, item]));
+  const focusInputByCheck = new Map(focusInputCoverage.map(item => [item.check, item]));
+  const failedFocusInputByCheck = new Map(failedFocusInputCoverage.map(item => [item.check, item]));
+  const keyboardInputByCheck = new Map(keyboardInputCoverage.map(item => [item.check, item]));
+  const failedKeyboardInputByCheck = new Map(failedKeyboardInputCoverage.map(item => [item.check, item]));
+  const genericVisualLayoutByCheck = new Map(genericVisualLayoutCoverage.map(item => [item.check, item]));
+  const visualAssertionByCheck = new Map(visualAssertionCoverage.map(item => [item.check, item]));
+  const failedVisualAssertionByCheck = new Map(failedVisualAssertionCoverage.map(item => [item.check, item]));
+  const layoutAssertionByCheck = new Map(layoutAssertionCoverage.map(item => [item.check, item]));
+  const failedLayoutAssertionByCheck = new Map(failedLayoutAssertionCoverage.map(item => [item.check, item]));
+  const genericUiStructureByCheck = new Map(genericUiStructureCoverage.map(item => [item.check, item]));
+  const formFlowByCheck = new Map(formFlowCoverage.map(item => [item.check, item]));
+  const formStateByCheck = new Map(formStateCoverage.map(item => [item.check, item]));
+  const failedFormStateByCheck = new Map(failedFormStateCoverage.map(item => [item.check, item]));
+  const tableByCheck = new Map(tableCoverage.map(item => [item.check, item]));
+  const failedTableByCheck = new Map(failedTableCoverage.map(item => [item.check, item]));
+  const listByCheck = new Map(listCoverage.map(item => [item.check, item]));
+  const failedListByCheck = new Map(failedListCoverage.map(item => [item.check, item]));
+  const textOrderByCheck = new Map(textOrderCoverage.map(item => [item.check, item]));
+  const failedTextOrderByCheck = new Map(failedTextOrderCoverage.map(item => [item.check, item]));
+  const genericPageStateByCheck = new Map(genericPageStateCoverage.map(item => [item.check, item]));
+  const urlTitleNavigationByCheck = new Map(urlTitleNavigationCoverage.map(item => [item.check, item]));
+  const failedUrlTitleNavigationByCheck = new Map(failedUrlTitleNavigationCoverage.map(item => [item.check, item]));
+  const attributeByCheck = new Map(attributeCoverage.map(item => [item.check, item]));
+  const failedAttributeByCheck = new Map(failedAttributeCoverage.map(item => [item.check, item]));
+  const networkStateByCheck = new Map(networkStateCoverage.map(item => [item.check, item]));
+  const failedNetworkStateByCheck = new Map(failedNetworkStateCoverage.map(item => [item.check, item]));
+  const presenceByCheck = new Map(presenceCoverage.map(item => [item.check, item]));
+  const failedPresenceByCheck = new Map(failedPresenceCoverage.map(item => [item.check, item]));
+  const genericInteractionActionByCheck = new Map(genericInteractionActionCoverage.map(item => [item.check, item]));
+  const hoverInteractionActionByCheck = new Map(hoverInteractionActionCoverage.map(item => [item.check, item]));
+  const failedHoverInteractionActionByCheck = new Map(failedHoverInteractionActionCoverage.map(item => [item.check, item]));
+  const dragInteractionActionByCheck = new Map(dragInteractionActionCoverage.map(item => [item.check, item]));
+  const failedDragInteractionActionByCheck = new Map(failedDragInteractionActionCoverage.map(item => [item.check, item]));
+  const scrollInteractionActionByCheck = new Map(scrollInteractionActionCoverage.map(item => [item.check, item]));
+  const failedScrollInteractionActionByCheck = new Map(failedScrollInteractionActionCoverage.map(item => [item.check, item]));
+  const historyInteractionActionByCheck = new Map(historyInteractionActionCoverage.map(item => [item.check, item]));
+  const failedHistoryInteractionActionByCheck = new Map(failedHistoryInteractionActionCoverage.map(item => [item.check, item]));
+  const genericScriptWaitByCheck = new Map(genericScriptWaitCoverage.map(item => [item.check, item]));
+  const scriptByCheck = new Map(scriptCoverage.map(item => [item.check, item]));
+  const failedScriptByCheck = new Map(failedScriptCoverage.map(item => [item.check, item]));
+  const waitByCheck = new Map(waitCoverage.map(item => [item.check, item]));
+  const failedWaitByCheck = new Map(failedWaitCoverage.map(item => [item.check, item]));
   const pass = report.status === "partial"
     && byCheck.get("commands")?.status === "verified"
     && byCheck.get("screenshots")?.status === "unknown"
     && !!byCheck.get("screenshots")?.missingReason
-    && report.risks.some(item => item.includes("required check screenshots"));
+    && report.risks.some(item => item.includes("required check screenshots"))
+    && genericByCheck.get("browser_e2e")?.status === "verified"
+    && genericByCheck.get("browser_network")?.status === "unknown"
+    && genericByCheck.get("browser_network_logs")?.status === "unknown"
+    && String(genericByCheck.get("browser_network")?.missingReason || "").includes("No browser network assertion")
+    && networkByCheck.get("browser_e2e")?.status === "verified"
+    && networkByCheck.get("browser_network")?.status === "verified"
+    && networkByCheck.get("browser_network")?.evidence.some(item => item.includes("assert:networkRequest"))
+    && networkByCheck.get("browser_network_logs")?.status === "verified"
+    && failedNetworkByCheck.get("browser_network")?.status === "not_verified"
+    && genericAccessibilityByCheck.get("browser_e2e")?.status === "verified"
+    && genericAccessibilityByCheck.get("accessibility")?.status === "unknown"
+    && genericAccessibilityByCheck.get("aria")?.status === "unknown"
+    && genericAccessibilityByCheck.get("browser_accessibility_snapshot")?.status === "unknown"
+    && String(genericAccessibilityByCheck.get("accessibility")?.missingReason || "").includes("No accessibility/ARIA")
+    && accessibilityByCheck.get("accessibility")?.status === "verified"
+    && accessibilityByCheck.get("accessibility")?.evidence.some(item => item.includes("assert:accessibleNameEquals"))
+    && accessibilityByCheck.get("aria")?.status === "verified"
+    && accessibilityByCheck.get("browser_accessibility_snapshot")?.status === "verified"
+    && failedAccessibilityByCheck.get("accessibility")?.status === "not_verified"
+    && genericConsoleWarningByCheck.get("browser_e2e")?.status === "verified"
+    && genericConsoleWarningByCheck.get("console_warnings")?.status === "unknown"
+    && genericConsoleWarningByCheck.get("console_errors")?.status === "unknown"
+    && String(genericConsoleWarningByCheck.get("console_warnings")?.missingReason || "").includes("No console warning assertion")
+    && warningFreeConsoleByCheck.get("console_warnings")?.status === "verified"
+    && warningFreeConsoleByCheck.get("console_warnings")?.evidence.some(item => item.includes("assert:consoleNoWarnings"))
+    && warningFreeConsoleByCheck.get("console_errors")?.status === "verified"
+    && warningConsoleByCheck.get("console_warnings")?.status === "not_verified"
+    && warningConsoleByCheck.get("console_warnings")?.evidence.some(item => item.includes("deprecated API"))
+    && warningConsoleByCheck.get("console_errors")?.status === "verified"
+    && failedWarningAssertionByCheck.get("console_warnings")?.status === "not_verified"
+    && failedWarningAssertionByCheck.get("console_errors")?.status === "verified"
+    && failedConsoleErrorByCheck.get("console_errors")?.status === "not_verified"
+    && failedConsoleErrorByCheck.get("console_errors")?.evidence.some(item => item.includes("Uncaught TypeError"))
+    && computerUseConsoleByCheck.get("browser_e2e")?.status === "verified"
+    && computerUseConsoleByCheck.get("console_warnings")?.status === "unknown"
+    && computerUseConsoleByCheck.get("console_errors")?.status === "unknown"
+    && genericInteractionByCheck.get("browser_e2e")?.status === "verified"
+    && genericInteractionByCheck.get("browser_dialog")?.status === "unknown"
+    && genericInteractionByCheck.get("browser_popup")?.status === "unknown"
+    && genericInteractionByCheck.get("browser_dialog_log")?.status === "verified"
+    && genericInteractionByCheck.get("browser_popup_log")?.status === "verified"
+    && dialogInteractionByCheck.get("browser_dialog")?.status === "verified"
+    && dialogInteractionByCheck.get("browser_dialog")?.evidence.some(item => item.includes("assert:dialogMessageIncludes"))
+    && dialogInteractionByCheck.get("browser_popup")?.status === "unknown"
+    && failedDialogInteractionByCheck.get("browser_dialog")?.status === "not_verified"
+    && failedDialogInteractionByCheck.get("browser_dialog_log")?.status === "not_verified"
+    && popupInteractionByCheck.get("browser_popup")?.status === "verified"
+    && popupInteractionByCheck.get("browser_popup")?.evidence.some(item => item.includes("assert:popupTextIncludes"))
+    && popupInteractionByCheck.get("browser_dialog")?.status === "unknown"
+    && failedPopupInteractionByCheck.get("browser_popup")?.status === "not_verified"
+    && failedPopupInteractionByCheck.get("browser_popup_log")?.status === "not_verified"
+    && genericTransferByCheck.get("browser_e2e")?.status === "verified"
+    && genericTransferByCheck.get("browser_upload")?.status === "unknown"
+    && genericTransferByCheck.get("browser_download")?.status === "unknown"
+    && uploadTransferByCheck.get("browser_upload")?.status === "verified"
+    && uploadTransferByCheck.get("browser_upload")?.evidence.some(item => item.includes("action:uploadFile"))
+    && uploadTransferByCheck.get("browser_download")?.status === "unknown"
+    && failedUploadTransferByCheck.get("browser_upload")?.status === "not_verified"
+    && failedUploadTransferByCheck.get("browser_upload")?.evidence.some(item => item.includes("uploadFile requires"))
+    && downloadTransferByCheck.get("browser_download")?.status === "verified"
+    && downloadTransferByCheck.get("browser_download")?.evidence.some(item => item.includes("assert:downloadedFile"))
+    && downloadTransferByCheck.get("browser_upload")?.status === "unknown"
+    && failedDownloadTransferByCheck.get("browser_download")?.status === "not_verified"
+    && failedDownloadTransferByCheck.get("browser_download")?.evidence.some(item => item.includes("No downloads were observed"))
+    && genericInputByCheck.get("browser_e2e")?.status === "verified"
+    && genericInputByCheck.get("browser_clipboard")?.status === "unknown"
+    && genericInputByCheck.get("browser_focus")?.status === "unknown"
+    && genericInputByCheck.get("browser_keyboard")?.status === "unknown"
+    && clipboardInputByCheck.get("browser_clipboard")?.status === "verified"
+    && clipboardInputByCheck.get("browser_clipboard")?.evidence.some(item => item.includes("assert:clipboardTextEquals"))
+    && clipboardInputByCheck.get("browser_focus")?.status === "unknown"
+    && failedClipboardInputByCheck.get("browser_clipboard")?.status === "not_verified"
+    && failedClipboardInputByCheck.get("browser_clipboard")?.evidence.some(item => item.includes("Clipboard text length"))
+    && focusInputByCheck.get("browser_focus")?.status === "verified"
+    && focusInputByCheck.get("browser_focus")?.evidence.some(item => item.includes("assert:focused"))
+    && focusInputByCheck.get("browser_keyboard")?.status === "unknown"
+    && failedFocusInputByCheck.get("browser_focus")?.status === "not_verified"
+    && failedFocusInputByCheck.get("browser_focus")?.evidence.some(item => item.includes("Expected target to be focused"))
+    && keyboardInputByCheck.get("browser_keyboard")?.status === "verified"
+    && keyboardInputByCheck.get("browser_keyboard")?.evidence.some(item => item.includes("action:typeText"))
+    && keyboardInputByCheck.get("browser_focus")?.status === "unknown"
+    && failedKeyboardInputByCheck.get("browser_keyboard")?.status === "not_verified"
+    && failedKeyboardInputByCheck.get("browser_keyboard")?.evidence.some(item => item.includes("press requires"))
+    && genericVisualLayoutByCheck.get("browser_e2e")?.status === "verified"
+    && genericVisualLayoutByCheck.get("screenshots")?.status === "verified"
+    && genericVisualLayoutByCheck.get("browser_visual")?.status === "unknown"
+    && genericVisualLayoutByCheck.get("browser_layout")?.status === "unknown"
+    && visualAssertionByCheck.get("browser_visual")?.status === "verified"
+    && visualAssertionByCheck.get("browser_visual")?.evidence.some(item => item.includes("assert:elementScreenshotNotBlank"))
+    && visualAssertionByCheck.get("browser_layout")?.status === "unknown"
+    && failedVisualAssertionByCheck.get("browser_visual")?.status === "not_verified"
+    && failedVisualAssertionByCheck.get("browser_visual")?.evidence.some(item => item.includes("non-blank visual content"))
+    && layoutAssertionByCheck.get("browser_layout")?.status === "verified"
+    && layoutAssertionByCheck.get("browser_layout")?.evidence.some(item => item.includes("assert:inViewport"))
+    && layoutAssertionByCheck.get("browser_visual")?.status === "unknown"
+    && failedLayoutAssertionByCheck.get("browser_layout")?.status === "not_verified"
+    && failedLayoutAssertionByCheck.get("browser_layout")?.evidence.some(item => item.includes("horizontal overflow"))
+    && genericUiStructureByCheck.get("browser_e2e")?.status === "verified"
+    && genericUiStructureByCheck.get("browser_form")?.status === "unknown"
+    && genericUiStructureByCheck.get("form_state")?.status === "unknown"
+    && genericUiStructureByCheck.get("input_value")?.status === "unknown"
+    && genericUiStructureByCheck.get("selected")?.status === "unknown"
+    && genericUiStructureByCheck.get("checked")?.status === "unknown"
+    && genericUiStructureByCheck.get("enabled")?.status === "unknown"
+    && genericUiStructureByCheck.get("browser_table")?.status === "unknown"
+    && genericUiStructureByCheck.get("browser_list")?.status === "unknown"
+    && genericUiStructureByCheck.get("browser_text_order")?.status === "unknown"
+    && String(genericUiStructureByCheck.get("browser_form")?.missingReason || "").includes("No browser form")
+    && String(genericUiStructureByCheck.get("browser_table")?.missingReason || "").includes("No browser table")
+    && String(genericUiStructureByCheck.get("browser_list")?.missingReason || "").includes("No browser list")
+    && String(genericUiStructureByCheck.get("browser_text_order")?.missingReason || "").includes("No browser text-order")
+    && formFlowByCheck.get("browser_form")?.status === "verified"
+    && formFlowByCheck.get("browser_form")?.evidence.some(item => item.includes("probe=acceptance_form_flow"))
+    && formFlowByCheck.get("form_state")?.status === "unknown"
+    && formStateByCheck.get("browser_form")?.status === "verified"
+    && formStateByCheck.get("form_state")?.status === "verified"
+    && formStateByCheck.get("input_value")?.status === "verified"
+    && formStateByCheck.get("input_value")?.evidence.some(item => item.includes("assert:inputValueEquals"))
+    && formStateByCheck.get("selected")?.status === "verified"
+    && formStateByCheck.get("selected")?.evidence.some(item => item.includes("assert:selectedTextIncludes"))
+    && formStateByCheck.get("checked")?.status === "verified"
+    && formStateByCheck.get("checked")?.evidence.some(item => item.includes("assert:checked"))
+    && formStateByCheck.get("enabled")?.status === "verified"
+    && formStateByCheck.get("enabled")?.evidence.some(item => item.includes("assert:enabled"))
+    && failedFormStateByCheck.get("form_state")?.status === "not_verified"
+    && failedFormStateByCheck.get("input_value")?.status === "not_verified"
+    && failedFormStateByCheck.get("input_value")?.evidence.some(item => item.includes("Expected input value"))
+    && tableByCheck.get("browser_table")?.status === "verified"
+    && tableByCheck.get("browser_table")?.evidence.some(item => item.includes("assert:tableRowIncludes"))
+    && tableByCheck.get("browser_list")?.status === "unknown"
+    && failedTableByCheck.get("browser_table")?.status === "not_verified"
+    && failedTableByCheck.get("browser_table")?.evidence.some(item => item.includes("table cell Status"))
+    && listByCheck.get("browser_list")?.status === "verified"
+    && listByCheck.get("browser_list")?.evidence.some(item => item.includes("assert:elementCountAtLeast"))
+    && listByCheck.get("browser_table")?.status === "unknown"
+    && failedListByCheck.get("browser_list")?.status === "not_verified"
+    && failedListByCheck.get("browser_list")?.evidence.some(item => item.includes("element count"))
+    && textOrderByCheck.get("browser_text_order")?.status === "verified"
+    && textOrderByCheck.get("browser_text_order")?.evidence.some(item => item.includes("assert:textOrder"))
+    && textOrderByCheck.get("browser_list")?.status === "unknown"
+    && failedTextOrderByCheck.get("browser_text_order")?.status === "not_verified"
+    && failedTextOrderByCheck.get("browser_text_order")?.evidence.some(item => item.includes("Expected text order"))
+    && genericPageStateByCheck.get("browser_e2e")?.status === "verified"
+    && genericPageStateByCheck.get("browser_url")?.status === "unknown"
+    && genericPageStateByCheck.get("browser_title")?.status === "unknown"
+    && genericPageStateByCheck.get("browser_navigation")?.status === "unknown"
+    && genericPageStateByCheck.get("browser_attribute")?.status === "unknown"
+    && genericPageStateByCheck.get("browser_network_state")?.status === "unknown"
+    && genericPageStateByCheck.get("browser_presence")?.status === "unknown"
+    && genericPageStateByCheck.get("browser_visibility")?.status === "unknown"
+    && String(genericPageStateByCheck.get("browser_url")?.missingReason || "").includes("No browser URL assertion")
+    && String(genericPageStateByCheck.get("browser_title")?.missingReason || "").includes("No browser title assertion")
+    && String(genericPageStateByCheck.get("browser_attribute")?.missingReason || "").includes("No browser DOM/attribute")
+    && String(genericPageStateByCheck.get("browser_network_state")?.missingReason || "").includes("No browser online/offline")
+    && String(genericPageStateByCheck.get("browser_presence")?.missingReason || "").includes("No browser presence/visibility")
+    && urlTitleNavigationByCheck.get("browser_url")?.status === "verified"
+    && urlTitleNavigationByCheck.get("browser_url")?.evidence.some(item => item.includes("assert:urlIncludes"))
+    && urlTitleNavigationByCheck.get("browser_title")?.status === "verified"
+    && urlTitleNavigationByCheck.get("browser_title")?.evidence.some(item => item.includes("assert:titleEquals"))
+    && urlTitleNavigationByCheck.get("browser_navigation")?.status === "verified"
+    && urlTitleNavigationByCheck.get("browser_navigation")?.evidence.some(item => item.includes("action:waitForUrl") || item.includes("assert:urlIncludes"))
+    && failedUrlTitleNavigationByCheck.get("browser_url")?.status === "not_verified"
+    && failedUrlTitleNavigationByCheck.get("browser_url")?.evidence.some(item => item.includes("Expected URL"))
+    && failedUrlTitleNavigationByCheck.get("browser_title")?.status === "not_verified"
+    && failedUrlTitleNavigationByCheck.get("browser_title")?.evidence.some(item => item.includes("Expected title"))
+    && attributeByCheck.get("browser_attribute")?.status === "verified"
+    && attributeByCheck.get("browser_attribute")?.evidence.some(item => item.includes("assert:attributeEquals"))
+    && failedAttributeByCheck.get("browser_attribute")?.status === "not_verified"
+    && failedAttributeByCheck.get("browser_attribute")?.evidence.some(item => item.includes("aria-expanded"))
+    && networkStateByCheck.get("browser_network_state")?.status === "verified"
+    && networkStateByCheck.get("browser_network_state")?.evidence.some(item => item.includes("assert:browserOffline"))
+    && failedNetworkStateByCheck.get("browser_network_state")?.status === "not_verified"
+    && failedNetworkStateByCheck.get("browser_network_state")?.evidence.some(item => item.includes("Expected browser to be online"))
+    && presenceByCheck.get("browser_presence")?.status === "verified"
+    && presenceByCheck.get("browser_presence")?.evidence.some(item => item.includes("assert:visible"))
+    && presenceByCheck.get("browser_visibility")?.status === "verified"
+    && presenceByCheck.get("browser_visibility")?.evidence.some(item => item.includes("assert:notPresent") || item.includes("assert:visible"))
+    && failedPresenceByCheck.get("browser_presence")?.status === "not_verified"
+    && failedPresenceByCheck.get("browser_presence")?.evidence.some(item => item.includes("Expected target to be hidden"))
+    && failedPresenceByCheck.get("browser_visibility")?.status === "not_verified"
+    && genericInteractionActionByCheck.get("browser_e2e")?.status === "verified"
+    && genericInteractionActionByCheck.get("browser_hover")?.status === "unknown"
+    && genericInteractionActionByCheck.get("browser_drag")?.status === "unknown"
+    && genericInteractionActionByCheck.get("browser_scroll")?.status === "unknown"
+    && genericInteractionActionByCheck.get("browser_history")?.status === "unknown"
+    && genericInteractionActionByCheck.get("browser_reload")?.status === "unknown"
+    && String(genericInteractionActionByCheck.get("browser_hover")?.missingReason || "").includes("No browser hover action")
+    && String(genericInteractionActionByCheck.get("browser_drag")?.missingReason || "").includes("No browser drag/drop action")
+    && String(genericInteractionActionByCheck.get("browser_scroll")?.missingReason || "").includes("No browser scroll action")
+    && String(genericInteractionActionByCheck.get("browser_history")?.missingReason || "").includes("No browser history/reload")
+    && hoverInteractionActionByCheck.get("browser_hover")?.status === "verified"
+    && hoverInteractionActionByCheck.get("browser_hover")?.evidence.some(item => item.includes("action:hover"))
+    && failedHoverInteractionActionByCheck.get("browser_hover")?.status === "not_verified"
+    && failedHoverInteractionActionByCheck.get("browser_hover")?.evidence.some(item => item.includes("Expected hover target"))
+    && dragInteractionActionByCheck.get("browser_drag")?.status === "verified"
+    && dragInteractionActionByCheck.get("browser_drag")?.evidence.some(item => item.includes("action:dragTo"))
+    && failedDragInteractionActionByCheck.get("browser_drag")?.status === "not_verified"
+    && failedDragInteractionActionByCheck.get("browser_drag")?.evidence.some(item => item.includes("Drag destination missing"))
+    && scrollInteractionActionByCheck.get("browser_scroll")?.status === "verified"
+    && scrollInteractionActionByCheck.get("browser_scroll")?.evidence.some(item => item.includes("action:scroll"))
+    && failedScrollInteractionActionByCheck.get("browser_scroll")?.status === "not_verified"
+    && failedScrollInteractionActionByCheck.get("browser_scroll")?.evidence.some(item => item.includes("Scroll target missing"))
+    && historyInteractionActionByCheck.get("browser_history")?.status === "verified"
+    && historyInteractionActionByCheck.get("browser_history")?.evidence.some(item => item.includes("action:goBack"))
+    && historyInteractionActionByCheck.get("browser_reload")?.status === "verified"
+    && historyInteractionActionByCheck.get("browser_reload")?.evidence.some(item => item.includes("action:reload"))
+    && failedHistoryInteractionActionByCheck.get("browser_history")?.status === "not_verified"
+    && failedHistoryInteractionActionByCheck.get("browser_history")?.evidence.some(item => item.includes("History navigation failed"))
+    && failedHistoryInteractionActionByCheck.get("browser_reload")?.status === "not_verified"
+    && genericScriptWaitByCheck.get("browser_e2e")?.status === "verified"
+    && genericScriptWaitByCheck.get("browser_js")?.status === "unknown"
+    && genericScriptWaitByCheck.get("browser_script")?.status === "unknown"
+    && genericScriptWaitByCheck.get("browser_wait")?.status === "unknown"
+    && String(genericScriptWaitByCheck.get("browser_js")?.missingReason || "").includes("No browser JavaScript")
+    && String(genericScriptWaitByCheck.get("browser_wait")?.missingReason || "").includes("No browser conditional wait")
+    && scriptByCheck.get("browser_js")?.status === "verified"
+    && scriptByCheck.get("browser_js")?.evidence.some(item => item.includes("assert:jsTruthy") || item.includes("action:evaluate"))
+    && scriptByCheck.get("browser_script")?.status === "verified"
+    && scriptByCheck.get("browser_script")?.evidence.some(item => item.includes("assert:jsEquals"))
+    && scriptByCheck.get("browser_wait")?.status === "unknown"
+    && failedScriptByCheck.get("browser_js")?.status === "not_verified"
+    && failedScriptByCheck.get("browser_js")?.evidence.some(item => item.includes("JavaScript expression"))
+    && failedScriptByCheck.get("browser_script")?.status === "not_verified"
+    && waitByCheck.get("browser_wait")?.status === "verified"
+    && waitByCheck.get("browser_wait")?.evidence.some(item => item.includes("action:waitForText"))
+    && waitByCheck.get("browser_js")?.status === "unknown"
+    && failedWaitByCheck.get("browser_wait")?.status === "not_verified"
+    && failedWaitByCheck.get("browser_wait")?.evidence.some(item => item.includes("Timed out waiting"));
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
   return {
     pass,
     report,
+    genericBrowserCoverage,
+    networkBrowserCoverage,
+    failedNetworkBrowserCoverage,
+    genericAccessibilityCoverage,
+    accessibilityBrowserCoverage,
+    failedAccessibilityCoverage,
+    genericConsoleWarningCoverage,
+    warningFreeConsoleCoverage,
+    warningConsoleCoverage,
+    failedWarningAssertionCoverage,
+    failedConsoleErrorCoverage,
+    computerUseConsoleCoverage,
+    genericInteractionCoverage,
+    dialogInteractionCoverage,
+    failedDialogInteractionCoverage,
+    popupInteractionCoverage,
+    failedPopupInteractionCoverage,
+    genericTransferCoverage,
+    uploadTransferCoverage,
+    failedUploadTransferCoverage,
+    downloadTransferCoverage,
+    failedDownloadTransferCoverage,
+    genericInputCoverage,
+    clipboardInputCoverage,
+    failedClipboardInputCoverage,
+    focusInputCoverage,
+    failedFocusInputCoverage,
+    keyboardInputCoverage,
+    failedKeyboardInputCoverage,
+    genericVisualLayoutCoverage,
+    visualAssertionCoverage,
+    failedVisualAssertionCoverage,
+    layoutAssertionCoverage,
+    failedLayoutAssertionCoverage,
+    genericUiStructureCoverage,
+    formFlowCoverage,
+    formStateCoverage,
+    failedFormStateCoverage,
+    tableCoverage,
+    failedTableCoverage,
+    listCoverage,
+    failedListCoverage,
+    textOrderCoverage,
+    failedTextOrderCoverage,
+    genericPageStateCoverage,
+    urlTitleNavigationCoverage,
+    failedUrlTitleNavigationCoverage,
+    attributeCoverage,
+    failedAttributeCoverage,
+    networkStateCoverage,
+    failedNetworkStateCoverage,
+    presenceCoverage,
+    failedPresenceCoverage,
+    genericInteractionActionCoverage,
+    hoverInteractionActionCoverage,
+    failedHoverInteractionActionCoverage,
+    dragInteractionActionCoverage,
+    failedDragInteractionActionCoverage,
+    scrollInteractionActionCoverage,
+    failedScrollInteractionActionCoverage,
+    historyInteractionActionCoverage,
+    failedHistoryInteractionActionCoverage,
+    genericScriptWaitCoverage,
+    scriptCoverage,
+    failedScriptCoverage,
+    waitCoverage,
+    failedWaitCoverage,
   };
 }
 
@@ -9121,6 +15540,23 @@ export async function runTestAgentCliSelfTest() {
   ]);
   const invalid = parseTestAgentCliArgs([workOrderPath, "--browser-provider", "unknown"]);
   const invalidHandoffCombo = parseTestAgentCliArgs([workOrderPath, "--from-handoff", handoffPath]);
+  const selfTestModulePath = path.join(dir, "fake-cli-self-test.js");
+  const selfTestMatrixParsed = parseTestAgentCliArgs([
+    "--self-test-matrix",
+    "--self-test",
+    "runTestAgentFastSelfTest,runTestAgentSecondSelfTest",
+    "--self-test-pattern",
+    "Cli",
+    "--self-test-timeout-ms",
+    "1234",
+    "--self-test-stop-on-failure",
+    "--self-test-module",
+    selfTestModulePath,
+    "--summary",
+  ]);
+  const invalidSelfTestMatrixCombo = parseTestAgentCliArgs([workOrderPath, "--self-test-matrix"]);
+  const invalidSelfTestTimeout = parseTestAgentCliArgs(["--self-test-matrix", "--self-test-timeout-ms", "0"]);
+  const invalidSelfTestSelector = parseTestAgentCliArgs(["--self-test", "runTestAgentFastSelfTest"]);
   const overrides = cliOverrides(parsed.options);
   const handoffOverrides = cliOverrides(handoffParsed.options);
   const contractValidation = validateTestAgentWorkOrderContract(workOrder, overrides);
@@ -9221,6 +15657,86 @@ export async function runTestAgentCliSelfTest() {
   let warningHandoffValidation: any = null;
   try { warningHandoffValidation = JSON.parse(warningHandoffStdout.join("")); } catch {}
 
+  const selfTestMatrixStdout: string[] = [];
+  const selfTestMatrixStderr: string[] = [];
+  const selfTestMatrixCalls: any[] = [];
+  const selfTestMatrixResult = await runTestAgentCli([
+    "--self-test-matrix",
+    "--self-test",
+    "runTestAgentFastSelfTest",
+    "--self-test",
+    "runTestAgentSecondSelfTest",
+    "--self-test-pattern",
+    "Cli",
+    "--self-test-timeout-ms",
+    "1234",
+    "--self-test-stop-on-failure",
+    "--self-test-module",
+    selfTestModulePath,
+    "--summary",
+  ], {
+    stdout: { write: message => selfTestMatrixStdout.push(String(message)) },
+    stderr: { write: message => selfTestMatrixStderr.push(String(message)) },
+    runSelfTestMatrix: async options => {
+      selfTestMatrixCalls.push(options);
+      const names = options.names || [];
+      return {
+        pass: true,
+        total: names.length,
+        passed: names.length,
+        failed: 0,
+        durationMs: 12,
+        modulePath: String(options.selfTestModulePath || ""),
+        timeoutMs: Number(options.timeoutMs || 0),
+        results: names.map(name => ({
+          name,
+          pass: true,
+          durationMs: 4,
+          exitCode: 0,
+          timedOut: false,
+          reason: null,
+          status: "passed",
+          stdoutTail: "",
+          stderrTail: "",
+        })),
+      };
+    },
+  });
+
+  const failingSelfTestMatrixStdout: string[] = [];
+  const failingSelfTestMatrixStderr: string[] = [];
+  const failingSelfTestMatrixResult = await runTestAgentCli([
+    "--self-test-matrix",
+    "--self-test",
+    "runTestAgentFailSelfTest",
+    "--json",
+  ], {
+    stdout: { write: message => failingSelfTestMatrixStdout.push(String(message)) },
+    stderr: { write: message => failingSelfTestMatrixStderr.push(String(message)) },
+    runSelfTestMatrix: async options => ({
+      pass: false,
+      total: 1,
+      passed: 0,
+      failed: 1,
+      durationMs: 7,
+      modulePath: String(options.selfTestModulePath || "self-test.js"),
+      timeoutMs: Number(options.timeoutMs || 180000),
+      results: [{
+        name: options.names?.[0] || "runTestAgentFailSelfTest",
+        pass: false,
+        durationMs: 7,
+        exitCode: 1,
+        timedOut: false,
+        reason: "intentional cli matrix failure",
+        status: "failed",
+        stdoutTail: "",
+        stderrTail: "",
+      }],
+    }),
+  });
+  let failingSelfTestMatrixJson: any = null;
+  try { failingSelfTestMatrixJson = JSON.parse(failingSelfTestMatrixStdout.join("")); } catch {}
+
   const pass = parsed.errors.length === 0
     && parsed.options.workOrderPath === workOrderPath
     && parsed.options.summary === true
@@ -9234,8 +15750,20 @@ export async function runTestAgentCliSelfTest() {
     && handoffParsed.options.artifactDir === handoffArtifactDir
     && handoffOverrides.artifactDir === handoffArtifactDir
     && handoffOverrides.browserProvider === "none"
+    && selfTestMatrixParsed.errors.length === 0
+    && selfTestMatrixParsed.options.selfTestMatrix === true
+    && selfTestMatrixParsed.options.selfTestNames.join(",") === "runTestAgentFastSelfTest,runTestAgentSecondSelfTest"
+    && selfTestMatrixParsed.options.selfTestPattern === "Cli"
+    && selfTestMatrixParsed.options.selfTestTimeoutMs === 1234
+    && selfTestMatrixParsed.options.selfTestStopOnFailure === true
+    && selfTestMatrixParsed.options.selfTestModulePath === selfTestModulePath
+    && selfTestMatrixParsed.options.summary === true
+    && selfTestMatrixParsed.options.json === false
     && invalid.errors.some(error => error.includes("Unsupported browser provider"))
     && invalidHandoffCombo.errors.some(error => error.includes("--from-handoff cannot be combined"))
+    && invalidSelfTestMatrixCombo.errors.some(error => error.includes("--self-test-matrix cannot be combined with a work order path"))
+    && invalidSelfTestTimeout.errors.some(error => error.includes("--self-test-timeout-ms requires a positive integer"))
+    && invalidSelfTestSelector.errors.some(error => error.includes("--self-test requires --self-test-matrix"))
     && overrides.artifactDir === artifactDir
     && overrides.browserProvider === "none"
     && overrides.autoDiscoverVerificationCommands === false
@@ -9248,9 +15776,16 @@ export async function runTestAgentCliSelfTest() {
     && runResult.exitCode === 0
     && runStdout.join("").includes("TestAgent report: passed")
     && runStdout.join("").includes("Commands: passed:1")
+    && runStdout.join("").includes("Required checks: verified:1, not_verified:0, unknown:0, total:1")
+    && runStdout.join("").includes("Required check attention: none")
+    && runStdout.join("").includes("Required check verified evidence:")
+    && runStdout.join("").includes("Acceptance coverage: verified:1, not_verified:0, unknown:0, total:1")
+    && runStdout.join("").includes("Acceptance attention: none")
     && runStderr.length === 0
     && report?.status === "passed"
     && reportSummary.includes("Artifacts:")
+    && reportSummary.includes("Required checks: verified:1, not_verified:0, unknown:0, total:1")
+    && reportSummary.includes("Acceptance coverage: verified:1, not_verified:0, unknown:0, total:1")
     && handoffValidateResult.exitCode === 0
     && handoffValidateStdout.join("").includes("TestAgent work order: valid")
     && handoffValidateStdout.join("").includes("Projects: cli-handoff-self-test")
@@ -9258,12 +15793,18 @@ export async function runTestAgentCliSelfTest() {
     && handoffRunResult.exitCode === 0
     && handoffRunStdout.join("").includes("TestAgent report: passed")
     && handoffRunStdout.join("").includes("Commands: passed:1")
+    && handoffRunStdout.join("").includes("Required checks: verified:1, not_verified:0, unknown:0, total:1")
+    && handoffRunStdout.join("").includes("Acceptance coverage: verified:0, not_verified:0, unknown:3, total:3")
+    && handoffRunStdout.join("").includes("Acceptance attention:")
     && handoffRunStderr.length === 0
     && handoffReport?.status === "passed"
     && handoffReport?.requiredChecks?.includes("commands")
     && handoffReport?.metadata?.handoffSource === "test-agent-handoff-builder"
     && handoffReport?.metadata?.completedByProjectAgents?.includes("handoff-builder-agent")
     && handoffReportSummary.includes("Artifacts:")
+    && handoffReportSummary.includes("Required check attention: none")
+    && handoffReportSummary.includes("Acceptance attention:")
+    && handoffReportSummary.includes("unknown Handoff input becomes a runnable TestAgent work order")
     && invalidHandoffResult.exitCode === 2
     && invalidHandoffStdout.length === 0
     && invalidHandoffStderr.join("").includes("root value must be a JSON object")
@@ -9272,7 +15813,22 @@ export async function runTestAgentCliSelfTest() {
     && warningHandoffValidation?.valid === true
     && warningHandoffValidation?.warnings?.some((item: any) => item.code === "handoff_builder_warning" && String(item.message || "").includes("missing workDir"))
     && warningHandoffValidation?.warnings?.some((item: any) => item.code === "handoff_builder_warning" && String(item.message || "").includes("No acceptance criteria"))
-    && warningHandoffValidation?.normalized?.metadata?.handoffWarnings?.some((item: string) => item.includes("missing workDir"));
+    && warningHandoffValidation?.normalized?.metadata?.handoffWarnings?.some((item: string) => item.includes("missing workDir"))
+    && selfTestMatrixResult.exitCode === 0
+    && selfTestMatrixStderr.length === 0
+    && selfTestMatrixStdout.join("").includes("TestAgent self-test matrix: passed")
+    && selfTestMatrixStdout.join("").includes("PASS runTestAgentFastSelfTest")
+    && selfTestMatrixCalls.length === 1
+    && selfTestMatrixCalls[0]?.names?.join(",") === "runTestAgentFastSelfTest,runTestAgentSecondSelfTest"
+    && selfTestMatrixCalls[0]?.pattern === "Cli"
+    && selfTestMatrixCalls[0]?.timeoutMs === 1234
+    && selfTestMatrixCalls[0]?.stopOnFailure === true
+    && selfTestMatrixCalls[0]?.selfTestModulePath === selfTestModulePath
+    && failingSelfTestMatrixResult.exitCode === 1
+    && failingSelfTestMatrixStderr.length === 0
+    && failingSelfTestMatrixJson?.pass === false
+    && failingSelfTestMatrixJson?.failed === 1
+    && failingSelfTestMatrixJson?.results?.[0]?.reason === "intentional cli matrix failure";
 
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
   return {
@@ -9281,17 +15837,25 @@ export async function runTestAgentCliSelfTest() {
     handoffParsed,
     invalid,
     invalidHandoffCombo,
+    selfTestMatrixParsed,
+    invalidSelfTestMatrixCombo,
+    invalidSelfTestTimeout,
+    invalidSelfTestSelector,
     validateResult,
     runResult,
     handoffValidateResult,
     handoffRunResult,
     invalidHandoffResult,
     warningHandoffResult,
+    selfTestMatrixResult,
+    failingSelfTestMatrixResult,
     validationSummary,
     reportSummary,
     handoffReportSummary,
     invalidHandoffError: invalidHandoffStderr.join(""),
     warningHandoffValidation,
+    selfTestMatrixSummary: selfTestMatrixStdout.join(""),
+    failingSelfTestMatrixJson,
   };
 }
 
@@ -9322,6 +15886,7 @@ export function runTestAgentContractSelfTest() {
     httpResults: [],
     browserResults: [],
     browserToolCalls: [],
+    browserProviderGaps: [],
     requiredCheckCoverage: [],
     acceptanceCoverage: [],
     evidence: [],
@@ -9347,6 +15912,39 @@ export function runTestAgentContractSelfTest() {
     unknownRequiredChecks: [],
     failedAcceptanceCriteria: [],
     unknownAcceptanceCriteria: [],
+    requiredCheckSummary: {
+      total: 0,
+      statusCounts: {
+        verified: 0,
+        not_verified: 0,
+        unknown: 0,
+      },
+      verified: [],
+      notVerified: [],
+      unknown: [],
+    },
+    acceptanceSummary: {
+      total: 0,
+      statusCounts: {
+        verified: 0,
+        not_verified: 0,
+        unknown: 0,
+      },
+      matchStrengthCounts: {
+        direct: 0,
+        token: 0,
+        fallback: 0,
+        none: 0,
+      },
+      evidenceSourceCounts: {
+        matched_evidence: 0,
+        single_criterion_report_status: 0,
+        none: 0,
+      },
+      verified: [],
+      notVerified: [],
+      unknown: [],
+    },
     blockedReasons: [],
     risks: [],
     nextActions: ["Accept the delivery if it matches the user-facing goal."],
@@ -9356,8 +15954,10 @@ export function runTestAgentContractSelfTest() {
       httpChecks: {},
       browserChecks: {},
       browserToolCalls: {},
+      browserProviderGaps: 0,
       artifacts: 4,
     },
+    browserProviderGaps: [],
     keyEvidence: [],
     artifacts: {
       artifactDir: process.cwd(),

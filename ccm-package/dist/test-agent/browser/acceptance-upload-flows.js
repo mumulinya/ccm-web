@@ -40,9 +40,13 @@ function explicitUrlPath(criterion) {
     return clean(match?.[2] || "").replace(/[),.;:!?，。；：！？]+$/g, "");
 }
 function looksLikeUploadCriterion(criterion) {
-    return /\b(?:upload|uploads|uploaded|attach|attaches|attached)\b/i.test(criterion)
-        && /\b(?:click|clicking|press|tap|submit)\b/i.test(criterion)
-        && !/\b(?:download|downloads|downloaded|export|exports|exported)\b/i.test(criterion);
+    const hasUpload = /\b(?:upload|uploads|uploaded|attach|attaches|attached)\b/i.test(criterion)
+        || /(?:上传|导入|添加附件|选择文件|附加)/.test(criterion);
+    const hasSubmitAction = /\b(?:click|clicking|press|tap|submit)\b/i.test(criterion)
+        || /(?:点击|点按|轻触|按下|提交)/.test(criterion);
+    const hasDownload = /\b(?:download|downloads|downloaded|export|exports|exported)\b/i.test(criterion)
+        || /(?:下载|导出)/.test(criterion);
+    return hasUpload && hasSubmitAction && !hasDownload;
 }
 function looksLikeFileName(value) {
     return /^[^\\/:*?"<>|\r\n]+\.[a-z0-9]{1,12}$/i.test(value.trim());
@@ -55,37 +59,37 @@ function fileNameFromCriterion(criterion) {
     return clean(match?.[1] || "");
 }
 function uploadSegment(criterion) {
-    const start = /\b(?:upload|uploads|uploaded|attach|attaches|attached)\b/i.exec(criterion)?.index ?? -1;
+    const start = /(?:\b(?:upload|uploads|uploaded|attach|attaches|attached)\b|上传|导入|添加附件|选择文件|附加)/i.exec(criterion)?.index ?? -1;
     if (start < 0)
         return "";
     const tail = criterion.slice(start);
-    const boundary = /\b(?:click|clicking|press|tap|submit|then|afterwards|after|should|must|will)\b/i.exec(tail.slice(1));
+    const boundary = /(?:\b(?:click|clicking|press|tap|submit|then|afterwards|after|should|must|will)\b|点击|点按|轻触|按下|提交|然后|之后|随后|应该|应当|必须|会)/i.exec(tail.slice(1));
     return boundary ? tail.slice(0, boundary.index + 1) : tail;
 }
 function fileContentFromCriterion(segment, fileName) {
-    const quoted = firstQuotedAfter(segment, /\b(?:contain|contains|containing|include|includes|including|with\s+content|content)\b[^"'`“‘「『]{0,80}["'`“‘「『]/i);
+    const quoted = firstQuotedAfter(segment, /(?:\b(?:contain|contains|containing|include|includes|including|with\s+content|content)\b|内容包含|内容为|内容是|包含|包括|含有)[^"'`“‘「『]{0,80}["'`“‘「『]/i);
     if (quoted && quoted !== fileName)
         return quoted;
     return `TestAgent upload content for ${fileName || "upload.txt"}`;
 }
 function fieldLabelFromCriterion(segment, fileName, fileContent) {
-    const quoted = firstQuotedAfter(segment, /\b(?:to|into|in|for)\b[^"'`“‘「『]{0,80}["'`“‘「『]/i);
+    const quoted = firstQuotedAfter(segment, /(?:\b(?:to|into|in|for)\b|到|至|进|进入|给|为)[^"'`“‘「『]{0,80}["'`“‘「『]/i);
     if (quoted && quoted !== fileName && quoted !== fileContent)
         return quoted;
     const candidates = quotedText(segment).filter(item => item !== fileName && item !== fileContent);
     return candidates[candidates.length - 1] || "";
 }
 function buttonNameFromCriterion(criterion, fileName, fieldLabel, fileContent) {
-    const quoted = firstQuotedAfter(criterion, /\b(?:click|clicking|press|tap|submit)\b[^"'`“‘「『]{0,80}["'`“‘「『]/i);
+    const quoted = firstQuotedAfter(criterion, /(?:\b(?:click|clicking|press|tap|submit)\b|点击|点按|轻触|按下|提交)[^"'`“‘「『]{0,80}["'`“‘「『]/i);
     if (quoted && quoted !== fileName && quoted !== fieldLabel && quoted !== fileContent)
         return quoted;
     const match = /\b(?:click|clicking|press|tap|submit)\s+(?:the\s+)?(?:button\s+)?([a-zA-Z][^,.;]{1,80}?)(?:\s+(?:then|and)\b|$)/i.exec(criterion);
     return clean(match?.[1] || "").replace(/^["'`“‘「『]+|["'`”’」』]+$/g, "");
 }
 function expectedTextFromCriterion(criterion, fileName, fieldLabel, fileContent, buttonName) {
-    const afterThen = /(?:then|after(?:wards)?|and then|should|must|will)\b/i.exec(criterion);
+    const afterThen = /(?:\b(?:then|after(?:wards)?|and then|should|must|will)\b|然后|之后|随后|应该|应当|必须|会)/i.exec(criterion);
     const tail = afterThen ? criterion.slice(afterThen.index) : criterion;
-    const expected = firstQuotedAfter(tail, /(?:show|shows|display|displays|see|visible|appear|appears|contain|contains|include|includes|list|lists|render|renders)\w*\s+["'`“‘「『]/i);
+    const expected = firstQuotedAfter(tail, /(?:\b(?:show|shows|display|displays|see|visible|appear|appears|contain|contains|include|includes|list|lists|render|renders)\w*\b|显示|出现|看到|可见|包含|包括|列出|渲染)[^"'`“‘「『]{0,80}["'`“‘「『]/i);
     if (expected)
         return expected;
     const ignored = new Set([fileName, fieldLabel, fileContent, buttonName]);
@@ -179,6 +183,15 @@ function buildAcceptanceUploadFlowBrowserChecks(project, acceptanceCriteria = []
         name: flowName(project, flow),
         url: flow.url,
         probeType: exports.ACCEPTANCE_UPLOAD_FLOW_PROBE_TYPE,
+        context: {
+            source: "acceptance_criteria",
+            generatedBy: exports.ACCEPTANCE_UPLOAD_FLOW_PROBE_TYPE,
+            acceptanceCriteria: [flow.criterion],
+            fieldLabel: flow.fieldLabel,
+            fileName: flow.fileName,
+            buttonName: flow.buttonName,
+            expectedText: flow.expectedText,
+        },
         actions: flowActions(flow),
         assertions: flowAssertions(flow),
         screenshot: true,

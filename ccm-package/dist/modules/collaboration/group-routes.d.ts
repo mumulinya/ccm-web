@@ -172,6 +172,12 @@ export declare function buildGroupMainAgentStatus(input: {
             technical_details_default_collapsed: boolean;
         };
     };
+    independent_review_summary: any;
+    independentReviewSummary: any;
+    test_agent_review_summary: any;
+    testAgentReviewSummary: any;
+    test_agent_execution_plan_summary: any;
+    testAgentExecutionPlanSummary: any;
     pickup_summary: {
         schema: string;
         source_schema: any;
@@ -248,8 +254,13 @@ export declare function runGroupStatusFollowupSelfTest(): {
         groupStatusFollowupUsesPickupSummary: boolean;
         groupStatusShowsProgressRefreshSummary: boolean;
         groupStatusFollowupUsesProgressRefreshSummary: boolean;
+        groupStatusWeakAcceptanceStaysReviewing: boolean;
+        groupStatusFollowupShowsIndependentReviewRework: boolean;
+        groupStatusFollowupShowsTestAgentPlanOnly: boolean;
+        groupStatusSynthesizesTestAgentFailureSummary: boolean;
         groupStatusFollowupShowsReworkState: boolean;
         groupStatusFollowupShowsUserActionSummary: boolean;
+        groupStatusFollowupAvoidsInternalNeedsUserAction: boolean;
         groupStatusFollowupHidesProtocol: boolean;
         groupStatusFollowupNoTodo: boolean;
     };

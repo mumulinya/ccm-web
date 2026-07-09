@@ -199,9 +199,9 @@ export function buildGlobalSystemHealth(resources: any = {}) {
     },
     {
       id: "supervisors",
-      label: "全局任务监工",
+      label: "全局任务跟进",
       severity: failedSupervisors.length ? "error" : waitingSupervisors.length ? "warn" : "ok",
-      summary: `${supervisors.length} 个监工，${waitingSupervisors.length} 个等待人工，${failedSupervisors.length} 个异常终态`,
+      summary: `${supervisors.length} 个跟进任务，${waitingSupervisors.length} 个等待人工，${failedSupervisors.length} 个异常终态`,
     },
     {
       id: "cron",

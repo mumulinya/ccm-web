@@ -1068,6 +1068,17 @@ export declare function runGroupTypedMemoryContextSelfTest(): {
     };
     recalled: any;
 };
+export declare function runGroupTypedMemoryContextPressureRepairProvenanceSelfTest(): {
+    pass: boolean;
+    checks: {
+        bundleRecallCarriesRepair: any;
+        bundleRenderedTextCarriesRepair: boolean;
+        bundleCarriesPreDispatchDiscipline: boolean;
+        workerContextPacketCarriesRepairMemory: any;
+    };
+    scoring: any;
+    renderedExcerpt: string;
+};
 export declare function buildGroupContextPacket(groupId: string, options?: any): string;
 export declare function findLatestWorkerLedger(memory: any, project: string): any;
 export declare function appendWorkerLedger(memory: any, item: any): any;

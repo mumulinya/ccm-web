@@ -1,5 +1,7 @@
 import {
   AcceptanceCoverageItem,
+  AcceptanceEvidenceMatchStrength,
+  AcceptanceEvidenceSource,
   BrowserCheckResult,
   BrowserToolCallRecord,
   CommandRunResult,
@@ -17,6 +19,11 @@ interface CoverageCandidate {
   status: "passed" | "failed" | "blocked" | "skipped";
   haystack: string;
   evidence: string;
+}
+
+interface ScoredCoverageCandidate {
+  item: CoverageCandidate;
+  score: number;
 }
 
 const STOP_WORDS = new Set([
@@ -150,6 +157,7 @@ function browserCandidate(result: BrowserCheckResult) {
       result.finalUrl || "",
       result.title || "",
       result.pageTextPreview || "",
+      result.context ? JSON.stringify(result.context) : "",
       (result.consoleMessages || []).join("\n"),
       result.consoleLogPath || "",
       (result.dialogMessages || []).join("\n"),
@@ -204,16 +212,50 @@ function scoreCandidate(criterion: string, item: CoverageCandidate) {
   return hits.length / Math.min(criterionTokens.length, 6);
 }
 
-function matchingCandidates(criterion: string, candidates: CoverageCandidate[]) {
+function matchingCandidates(criterion: string, candidates: CoverageCandidate[]): ScoredCoverageCandidate[] {
   return candidates
     .map(item => ({ item, score: scoreCandidate(criterion, item) }))
     .filter(match => match.score >= 0.34 || match.score === 100)
-    .sort((a, b) => b.score - a.score)
-    .map(match => match.item);
+    .sort((a, b) => b.score - a.score);
 }
 
 function evidenceStrings(candidates: CoverageCandidate[]) {
   return candidates.slice(0, 8).map(item => `${item.label}: ${item.evidence}`);
+}
+
+function evidenceStringsFromMatches(matches: ScoredCoverageCandidate[]) {
+  return evidenceStrings(matches.map(match => match.item));
+}
+
+function roundedScore(score: number) {
+  return Number(score.toFixed(3));
+}
+
+function bestMatchScore(matches: ScoredCoverageCandidate[]) {
+  return matches.length ? roundedScore(matches[0].score) : 0;
+}
+
+function matchStrength(matches: ScoredCoverageCandidate[]): AcceptanceEvidenceMatchStrength {
+  if (!matches.length) return "none";
+  return matches[0].score === 100 ? "direct" : "token";
+}
+
+function coverageItem(
+  criterion: string,
+  status: AcceptanceCoverageItem["status"],
+  evidence: string[],
+  matchStrength: AcceptanceEvidenceMatchStrength,
+  evidenceSource: AcceptanceEvidenceSource,
+  matchScore = 0,
+): AcceptanceCoverageItem {
+  return {
+    criterion,
+    status,
+    evidence,
+    matchStrength,
+    matchScore: roundedScore(matchScore),
+    evidenceSource,
+  };
 }
 
 export function buildAcceptanceCoverage(input: {
@@ -243,41 +285,54 @@ export function buildAcceptanceCoverage(input: {
 
   return input.workOrder.acceptanceCriteria.map(criterion => {
     const matched = matchingCandidates(criterion, candidates);
-    const matchedNegative = matched.filter(item => item.status === "failed" || item.status === "blocked");
-    const matchedPositive = matched.filter(item => item.status === "passed");
+    const matchedNegative = matched.filter(match => match.item.status === "failed" || match.item.status === "blocked");
+    const matchedPositive = matched.filter(match => match.item.status === "passed");
 
     if (matchedNegative.length) {
-      return {
+      const combinedMatches = [...matchedNegative, ...matchedPositive];
+      return coverageItem(
         criterion,
-        status: "not_verified",
-        evidence: evidenceStrings([...matchedNegative, ...matchedPositive]),
-      };
+        "not_verified",
+        evidenceStringsFromMatches(combinedMatches),
+        matchStrength(combinedMatches),
+        "matched_evidence",
+        bestMatchScore(combinedMatches),
+      );
     }
     if (matchedPositive.length) {
-      return {
+      return coverageItem(
         criterion,
-        status: "verified",
-        evidence: evidenceStrings(matchedPositive),
-      };
+        "verified",
+        evidenceStringsFromMatches(matchedPositive),
+        matchStrength(matchedPositive),
+        "matched_evidence",
+        bestMatchScore(matchedPositive),
+      );
     }
     if (singleCriterion && input.status === "passed" && positiveCandidates.length) {
-      return {
+      return coverageItem(
         criterion,
-        status: "verified",
-        evidence: evidenceStrings(positiveCandidates),
-      };
+        "verified",
+        evidenceStrings(positiveCandidates),
+        "fallback",
+        "single_criterion_report_status",
+      );
     }
     if (singleCriterion && input.status === "failed" && negativeCandidates.length) {
-      return {
+      return coverageItem(
         criterion,
-        status: "not_verified",
-        evidence: evidenceStrings(negativeCandidates),
-      };
+        "not_verified",
+        evidenceStrings(negativeCandidates),
+        "fallback",
+        "single_criterion_report_status",
+      );
     }
-    return {
+    return coverageItem(
       criterion,
-      status: "unknown",
-      evidence: [],
-    };
+      "unknown",
+      [],
+      "none",
+      "none",
+    );
   });
 }

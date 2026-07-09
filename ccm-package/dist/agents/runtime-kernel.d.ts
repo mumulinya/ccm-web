@@ -146,6 +146,8 @@ export declare function buildWorkerContextPacket(input: {
     project: string;
     task: string;
     analysis?: any;
+    agentType?: string;
+    agent_type?: string;
     traceId?: string;
     taskId?: string;
     dependencies?: any[];
@@ -153,6 +155,14 @@ export declare function buildWorkerContextPacket(input: {
     replayRepairDispatchBriefs?: any[];
     memory?: any;
     memoryPolicy?: any;
+    pressureMemoryProvenanceReceiptDiscipline?: any;
+    pressure_memory_provenance_receipt_discipline?: any;
+    pressureProvenanceDispatchFeedbackPolicy?: any;
+    pressure_provenance_dispatch_feedback_policy?: any;
+    pressureProvenanceProviderDispatchAdvisory?: any;
+    pressure_provenance_provider_dispatch_advisory?: any;
+    pressureProvenanceProviderDispatchOverrideFollowupReceiptContract?: any;
+    pressure_provenance_provider_dispatch_override_followup_receipt_contract?: any;
     verification?: any;
     contextUsageOptions?: any;
 }): any;
@@ -256,4 +266,21 @@ export declare function runWorkerContextUsageSelfTest(): {
         free_tokens: any;
         top_categories: any;
     };
+};
+export declare function runWorkerContextProviderDispatchOverrideFollowupReceiptContractSelfTest(): {
+    pass: boolean;
+    checks: {
+        packetCarriesContract: boolean;
+        acceptanceRequiresSamplingReceipt: boolean;
+        usageCategorizesContract: boolean;
+        renderedShowsContract: boolean;
+        advisoryDoesNotHold: boolean;
+    };
+    contract: {
+        schema: any;
+        active: boolean;
+        rel_paths: any;
+        followup_work_item_ids: any;
+    };
+    acceptance: any;
 };

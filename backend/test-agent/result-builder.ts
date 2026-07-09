@@ -14,6 +14,9 @@ import {
 import { buildAcceptanceCoverage } from "./coverage";
 import { buildBrowserInteractionSummary } from "./browser/interaction-summary";
 import { buildBrowserNetworkSummary } from "./browser/network-summary";
+import { buildBrowserProviderGaps } from "./browser/provider-gaps";
+import { buildBrowserProviderSummary } from "./browser/provider-summary";
+import { buildTestAgentFailureSummary } from "./failure-summary";
 import { buildRequiredCheckCoverage } from "./required-checks";
 import { makeRunId, nowIso } from "./utils";
 
@@ -22,6 +25,13 @@ function resultStatusToAgent(status: string): TestAgentStatus | "skipped" {
   if (status === "failed" || status === "timed_out") return "failed";
   if (status === "blocked") return "blocked";
   return "skipped";
+}
+
+function browserSourceSummary(context: BrowserCheckResult["context"]) {
+  if (!context) return "";
+  const generatedBy = String(context.generatedBy || context.source || "").trim();
+  const criteria = Array.isArray(context.acceptanceCriteria) ? context.acceptanceCriteria.length : 0;
+  return [generatedBy, criteria ? `criteria=${criteria}` : ""].filter(Boolean).join("; ");
 }
 
 function buildEvidence(commandResults: CommandRunResult[], devServerResults: DevServerResult[], httpResults: HttpCheckResult[], browserResults: BrowserCheckResult[], browserToolCalls: BrowserToolCallRecord[]): EvidenceItem[] {
@@ -54,12 +64,13 @@ function buildEvidence(commandResults: CommandRunResult[], devServerResults: Dev
     });
   }
   for (const result of browserResults) {
+    const source = browserSourceSummary(result.context);
     evidence.push({
       type: "browser",
       project: result.project,
       title: `${result.adversarial ? "Adversarial " : ""}${result.name}`,
       status: resultStatusToAgent(result.status),
-      detail: result.error || `${result.url}${result.finalUrl ? `; final=${result.finalUrl}` : ""}${result.title ? `; title=${result.title}` : ""}${result.probeType ? `; probe=${result.probeType}` : ""}`,
+      detail: result.error || `${result.url}${result.finalUrl ? `; final=${result.finalUrl}` : ""}${result.title ? `; title=${result.title}` : ""}${source ? `; source=${source}` : ""}${result.probeType ? `; probe=${result.probeType}` : ""}`,
     });
     for (const screenshot of result.screenshots) {
       evidence.push({
@@ -167,6 +178,8 @@ export function buildTestAgentReport(input: {
   const finishedAt = nowIso();
   const browserInteractionSummary = buildBrowserInteractionSummary(browserResults);
   const browserNetworkSummary = buildBrowserNetworkSummary(browserResults);
+  const browserProviderSummary = buildBrowserProviderSummary(workOrder, browserResults);
+  const browserProviderGaps = buildBrowserProviderGaps(browserResults);
   const requiredCheckCoverage = buildRequiredCheckCoverage({
     workOrder,
     commandResults,
@@ -191,6 +204,7 @@ export function buildTestAgentReport(input: {
     ...failedCommands.map(item => `${item.project}: command failed: ${item.command}`),
     ...failedHttp.map(item => `${item.project}: ${item.adversarial ? "adversarial " : ""}HTTP probe failed: ${item.error || item.url}`),
     ...failedBrowser.map(item => `${item.project}: ${item.adversarial ? "adversarial " : ""}browser check failed: ${item.name}`),
+    ...browserProviderGaps.map(item => `${item.project || "browser"}: provider gap ${item.provider} ${item.step || item.check}: ${item.reason}`),
     ...requiredCheckCoverage.filter(item => item.status !== "verified").map(item => `required check ${item.check}: ${item.missingReason || item.status}`),
   ];
   const evidence = buildEvidence(commandResults, devServerResults, httpResults, browserResults, browserToolCalls);
@@ -204,6 +218,15 @@ export function buildTestAgentReport(input: {
     browserResults,
     browserToolCalls,
     evidence,
+  });
+  const failureSummary = buildTestAgentFailureSummary({
+    issues,
+    commandResults,
+    devServerResults,
+    httpResults,
+    browserResults,
+    requiredCheckCoverage,
+    acceptanceCoverage,
   });
 
   const summary = status === "passed"
@@ -236,6 +259,9 @@ export function buildTestAgentReport(input: {
     browserToolCalls,
     browserNetworkSummary,
     browserInteractionSummary,
+    browserProviderSummary,
+    browserProviderGaps,
+    failureSummary,
     requiredCheckCoverage,
     acceptanceCoverage,
     evidence,
