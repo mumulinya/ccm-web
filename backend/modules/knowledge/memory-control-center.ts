@@ -9401,6 +9401,161 @@ function evaluateWorkerContextPacketCompactStrategyMemory(options: any = {}) {
   return check;
 }
 
+function buildWorkerContextPacketCompactStrategyTypedMemoryReport(options: any = {}) {
+  const strategyReport = options.strategyReport
+    || options.strategy_report
+    || buildWorkerContextPacketCompactStrategyMemoryReport(options);
+  const {
+    buildGroupTypedMemoryRecall,
+    distillCompactStrategyToTypedMemory,
+    readGroupTypedMemoryDistillationLedger,
+    scanGroupTypedMemoryDocuments,
+  } = require("../collaboration/group-memory-index");
+  const rows = (strategyReport.groups || []).map((group: any) => {
+    const groupId = String(group.groupId || "").trim();
+    const outcomeLedger = readGroupWorkerContextCompactOutcomeLedger(groupId);
+    const strategy = readGroupWorkerContextCompactStrategyMemory(groupId);
+    const outcomeEntries = (Array.isArray(outcomeLedger.entries) ? outcomeLedger.entries : [])
+      .filter((entry: any) => entry.distillation_candidate !== false && workerContextCompactOutcomeCategoriesForCenter(entry).length > 0);
+    let distillation: any = null;
+    let distillationError = "";
+    try {
+      distillation = outcomeEntries.length || Number(strategy.sample_count || 0) > 0
+        ? distillCompactStrategyToTypedMemory(groupId, {
+          strategy,
+          outcomes: outcomeEntries,
+        }, {
+          reason: "memory-center-compact-strategy-typed-memory-report",
+          updatedAt: options.generatedAt || options.generated_at || now(),
+        })
+        : null;
+    } catch (error: any) {
+      distillationError = String(error?.message || error);
+    }
+    const distillationLedger = readGroupTypedMemoryDistillationLedger(groupId);
+    const archive = distillationLedger.compactStrategyArchive || {};
+    const docs = scanGroupTypedMemoryDocuments(groupId);
+    const referenceDoc = (Array.isArray(docs) ? docs : []).find((doc: any) => doc.relPath === "worker-context-compact-strategy-memory.md" || String(doc.source || "") === "auto:compact-strategy-memory-distillation" && doc.type === "reference");
+    const cautionDoc = (Array.isArray(docs) ? docs : []).find((doc: any) => doc.relPath === "worker-context-compact-strategy-cautions.md");
+    const docText = [referenceDoc?.body || "", cautionDoc?.body || ""].join("\n");
+    const recall = outcomeEntries.length || Number(strategy.sample_count || 0) > 0
+      ? buildGroupTypedMemoryRecall(groupId, "WorkerContextPacket compact strategy metadata_partial_compact preferred categories free_token_delta task_hash_unchanged dependencies constraints_and_documents", {
+        max: 8,
+        disableLedger: true,
+        forceMemory: true,
+        snippetChars: 260,
+      })
+      : { recalled: [] };
+    const recallText = JSON.stringify(Array.isArray(recall.recalled) ? recall.recalled : []);
+    const gaps: any[] = [];
+    if (distillationError) gaps.push({ reason: `compact strategy typed memory 蒸馏失败：${distillationError}` });
+    if ((outcomeEntries.length || Number(strategy.sample_count || 0) > 0) && !distillation) gaps.push({ reason: "存在 compact strategy 样本但未触发 typed memory 蒸馏" });
+    if (outcomeEntries.length && Number(archive.outcome_count || 0) < outcomeEntries.length) gaps.push({ reason: "compact strategy archive 未覆盖所有 outcome 样本" });
+    if (Number(strategy.sample_count || 0) > 0 && Number(archive.category_count || 0) < 1) gaps.push({ reason: "compact strategy archive 缺少 category 统计" });
+    if ((outcomeEntries.length || Number(strategy.sample_count || 0) > 0) && !referenceDoc) gaps.push({ reason: "未写入 compact strategy reference typed MEMORY.md 文档" });
+    if (referenceDoc && !/Preferred categories|Category Strategy|free_token_delta/i.test(docText)) gaps.push({ reason: "compact strategy typed memory 缺少 preferred/category/free token 规则" });
+    if (referenceDoc && !/task_hash_unchanged|task_preserved/i.test(docText)) gaps.push({ reason: "compact strategy typed memory 缺少 task preservation 约束" });
+    if (Number(archive.avoid_count || 0) > 0 || Number(archive.blocked_outcome_count || 0) > 0) {
+      if (!cautionDoc) gaps.push({ reason: "存在 avoid/blocked compact strategy 样本但未写入 caution typed memory" });
+    }
+    if ((outcomeEntries.length || Number(strategy.sample_count || 0) > 0) && !/worker-context-compact-strategy-memory\.md|metadata_partial_compact|free_token_delta|task_hash_unchanged/i.test(recallText)) {
+      gaps.push({ reason: "compact strategy typed memory 无法通过 recall probe 召回" });
+    }
+    const status = outcomeEntries.length === 0 && Number(strategy.sample_count || 0) === 0 ? "empty" : gaps.length ? "fail" : "ok";
+    return {
+      schema: "ccm-worker-context-packet-compact-strategy-typed-memory-group-v1",
+      groupId,
+      status,
+      outcomeCount: outcomeEntries.length,
+      strategySampleCount: Number(strategy.sample_count || 0),
+      archivedOutcomeCount: Number(archive.outcome_count || 0),
+      categoryCount: Number(archive.category_count || 0),
+      preferredCount: Number(archive.preferred_count || 0),
+      avoidCount: Number(archive.avoid_count || 0),
+      recoveredOutcomeCount: Number(archive.recovered_outcome_count || 0),
+      blockedOutcomeCount: Number(archive.blocked_outcome_count || 0),
+      typedDocCount: Number(!!referenceDoc) + Number(!!cautionDoc),
+      recallMatchCount: Array.isArray(recall.recalled) ? recall.recalled.length : 0,
+      typedMemoryLedgerFile: distillationLedger.file || "",
+      sourceStrategyFile: strategy.file || group.file || "",
+      sourceOutcomeFile: outcomeLedger.file || group.outcomeFile || "",
+      distillation: distillation ? {
+        archivedCount: distillation.archivedCount || 0,
+        categoryCount: distillation.categoryCount || 0,
+        preferredCount: distillation.preferredCount || 0,
+        avoidCount: distillation.avoidCount || 0,
+        writeCount: distillation.writeCount || 0,
+      } : null,
+      docs: [referenceDoc, cautionDoc].filter(Boolean).map((doc: any) => ({
+        relPath: doc.relPath,
+        type: doc.type,
+        source: doc.source,
+        file: doc.file,
+      })),
+      gaps: gaps.slice(0, 8),
+    };
+  });
+  const checkedRows = rows.filter(row => Number(row.outcomeCount || 0) > 0 || Number(row.strategySampleCount || 0) > 0 || Number(row.archivedOutcomeCount || 0) > 0);
+  const passedRows = checkedRows.filter(row => row.status === "ok");
+  const coverageRate = checkedRows.length ? Math.round((passedRows.length / checkedRows.length) * 1000) / 10 : null;
+  const status = coverageRate === null ? "empty" : coverageRate >= 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail";
+  return {
+    schema: "ccm-worker-context-packet-compact-strategy-typed-memory-report-v1",
+    generatedAt: now(),
+    overall: {
+      status,
+      coverageRate,
+      groupCount: rows.length,
+      checkedGroupCount: checkedRows.length,
+      groupsCovered: passedRows.length,
+      outcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.outcomeCount || 0), 0),
+      strategySampleCount: checkedRows.reduce((sum, row) => sum + Number(row.strategySampleCount || 0), 0),
+      archivedOutcomeCount: checkedRows.reduce((sum, row) => sum + Number(row.archivedOutcomeCount || 0), 0),
+      categoryCount: checkedRows.reduce((sum, row) => sum + Number(row.categoryCount || 0), 0),
+      preferredCount: checkedRows.reduce((sum, row) => sum + Number(row.preferredCount || 0), 0),
+      avoidCount: checkedRows.reduce((sum, row) => sum + Number(row.avoidCount || 0), 0),
+      typedDocCount: checkedRows.reduce((sum, row) => sum + Number(row.typedDocCount || 0), 0),
+      recallMatchCount: checkedRows.reduce((sum, row) => sum + Number(row.recallMatchCount || 0), 0),
+      metadataGapCount: checkedRows.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+    },
+    groups: rows.sort((a, b) => Number(b.outcomeCount || 0) - Number(a.outcomeCount || 0) || Number(b.strategySampleCount || 0) - Number(a.strategySampleCount || 0)).slice(0, 50),
+    weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn").slice(0, 20),
+  };
+}
+
+function evaluateWorkerContextPacketCompactStrategyTypedMemory(options: any = {}) {
+  const report = buildWorkerContextPacketCompactStrategyTypedMemoryReport(options);
+  const checked = Number(report.overall.checkedGroupCount || 0);
+  const passed = Number(report.overall.groupsCovered || 0);
+  const evidence = (report.groups || []).filter((row: any) => row.status === "ok").slice(0, 12).map((row: any) => ({
+    groupId: row.groupId,
+    outcomeCount: row.outcomeCount,
+    strategySampleCount: row.strategySampleCount,
+    archivedOutcomeCount: row.archivedOutcomeCount,
+    categoryCount: row.categoryCount,
+    typedDocCount: row.typedDocCount,
+    recallMatchCount: row.recallMatchCount,
+    typedMemoryLedgerFile: row.typedMemoryLedgerFile,
+  }));
+  const gaps = (report.weakGroups || []).flatMap((row: any) => (row.gaps || []).slice(0, 3).map((gap: any) => ({
+    groupId: row.groupId,
+    reason: gap.reason || "WorkerContextPacket compact strategy typed memory 缺失",
+    outcomeCount: row.outcomeCount || 0,
+    categoryCount: row.categoryCount || 0,
+  }))).slice(0, 12);
+  const check: any = makeQualityCheck(
+    "worker_context_packet_compact_strategy_typed_memory",
+    "WorkerContextPacket Compact Strategy Typed Memory",
+    checked,
+    passed,
+    evidence,
+    gaps,
+    "把 WorkerContextPacket compact strategy JSON/ledger 进一步写入 typed MEMORY.md，使后续子 Agent 会话能召回 preferred/avoid compact categories、free_token_delta 和 task preservation 经验。"
+  );
+  check.report = report;
+  return check;
+}
+
 function buildWorkerContextPacketPtlEmergencyDowngradeReport(options: any = {}) {
   const groupIds = replayRepairDispatchBindingGroupIds(options);
   const rows = groupIds.map((groupId: string) => {
@@ -15364,6 +15519,7 @@ function memoryQualityCheckDescriptors(lightweight: boolean, options: any = {}) 
     { id: "worker_context_packet_compact_hook_ledger", run: () => evaluateWorkerContextPacketCompactHookLedger(options) },
     { id: "worker_context_packet_compact_outcome_ledger", run: () => evaluateWorkerContextPacketCompactOutcomeLedger(options) },
     { id: "worker_context_packet_compact_strategy_memory", run: () => evaluateWorkerContextPacketCompactStrategyMemory(options) },
+    { id: "worker_context_packet_compact_strategy_typed_memory", run: () => evaluateWorkerContextPacketCompactStrategyTypedMemory(options) },
     { id: "worker_context_packet_ptl_emergency_downgrade", run: () => evaluateWorkerContextPacketPtlEmergencyDowngrade(options) },
     { id: "worker_context_packet_ignore_memory_policy", run: () => evaluateWorkerContextPacketIgnoreMemoryPolicy(options) },
     { id: "worker_context_packet_ignore_memory_receipt_compliance", run: () => evaluateWorkerContextPacketIgnoreMemoryReceiptCompliance(options) },
