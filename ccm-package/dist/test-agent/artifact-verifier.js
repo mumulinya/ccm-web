@@ -51,6 +51,7 @@ const adversarial_summary_1 = require("./adversarial-summary");
 const acceptance_gate_1 = require("./acceptance-gate");
 const http_concurrency_1 = require("./http-concurrency");
 const http_page_resources_1 = require("./http-page-resources");
+const check_execution_coverage_1 = require("./browser/check-execution-coverage");
 function sha256(filePath) {
     const hash = crypto.createHash("sha256");
     hash.update(fs.readFileSync(filePath));
@@ -996,6 +997,22 @@ function verifyBrowserStabilityEvidenceConsistency(report, errors) {
         }
     }
 }
+function verifyBrowserCheckExecutionCoverageConsistency(report, errors) {
+    const plan = report?.metadata?.browserCheckExecutionPlan;
+    const hasExecutionIdentity = (report?.browserResults || []).some(result => result.execution);
+    if (!plan) {
+        if (hasExecutionIdentity || report?.browserCheckExecutionCoverage) {
+            errors.push("Browser execution evidence exists without metadata.browserCheckExecutionPlan.");
+        }
+        return;
+    }
+    errors.push(...(0, check_execution_coverage_1.browserCheckExecutionEvidenceErrors)({
+        plan,
+        results: report?.browserResults || [],
+        summary: report?.browserCheckExecutionCoverage,
+        reportStatus: report?.status,
+    }));
+}
 function verifyReportVerdictConsistency(manifest, manifestPath, manifestFiles, integrityItems) {
     const reportIndex = manifestFiles.findIndex(item => item.type === "report_json");
     const verdictIndex = manifestFiles.findIndex(item => item.type === "verdict_json");
@@ -1126,6 +1143,20 @@ function verifyReportVerdictConsistency(manifest, manifestPath, manifestFiles, i
         expectEqual("verdict.evidenceSummary.browserStabilityRuns", verdict?.evidenceSummary?.browserStabilityRuns, expectedStabilitySummary.runCount, errors);
         expectEqual("verdict.evidenceSummary.browserFailedStabilityRuns", verdict?.evidenceSummary?.browserFailedStabilityRuns, expectedStabilitySummary.failedRunCount, errors);
     }
+    if (report?.browserCheckExecutionCoverage || verdict?.browserCheckExecutionCoverage) {
+        const plan = report?.metadata?.browserCheckExecutionPlan;
+        const expectedCoverage = plan
+            ? (0, check_execution_coverage_1.buildBrowserCheckExecutionCoverage)(plan, report?.browserResults || [])
+            : undefined;
+        expectEqual("report.browserCheckExecutionCoverage", report?.browserCheckExecutionCoverage || null, expectedCoverage || null, errors);
+        expectEqual("verdict.browserCheckExecutionCoverage", verdict?.browserCheckExecutionCoverage || null, report?.browserCheckExecutionCoverage || null, errors);
+        expectEqual("verdict.evidenceSummary.browserPlannedChecks", verdict?.evidenceSummary?.browserPlannedChecks, expectedCoverage?.plannedCheckCount || 0, errors);
+        expectEqual("verdict.evidenceSummary.browserExpectedRuns", verdict?.evidenceSummary?.browserExpectedRuns, expectedCoverage?.expectedRunCount || 0, errors);
+        expectEqual("verdict.evidenceSummary.browserCoveredRuns", verdict?.evidenceSummary?.browserCoveredRuns, expectedCoverage?.coveredRunCount || 0, errors);
+        expectEqual("verdict.evidenceSummary.browserMissingRuns", verdict?.evidenceSummary?.browserMissingRuns, expectedCoverage?.missingRunCount || 0, errors);
+        expectEqual("verdict.evidenceSummary.browserDuplicateResults", verdict?.evidenceSummary?.browserDuplicateResults, expectedCoverage?.duplicateResultCount || 0, errors);
+        expectEqual("verdict.evidenceSummary.browserInvalidResults", verdict?.evidenceSummary?.browserInvalidResults, expectedCoverage?.invalidResultCount || 0, errors);
+    }
     if (report?.browserRecoverySummary
         || verdict?.browserRecoverySummary
         || (report?.browserResults || []).some(result => result.recovery)) {
@@ -1176,6 +1207,7 @@ function verifyReportVerdictConsistency(manifest, manifestPath, manifestFiles, i
     }
     verifyBrowserSessionEvidenceConsistency(report, errors);
     verifyBrowserStabilityEvidenceConsistency(report, errors);
+    verifyBrowserCheckExecutionCoverageConsistency(report, errors);
     verifyBrowserAuthenticationEvidenceConsistency(report, errors);
     verifyBrowserRecoveryEvidenceConsistency(report, errors);
     verifyBrowserActionEffectEvidenceConsistency(report, errors);
@@ -1202,6 +1234,33 @@ function recoveryEvidenceItem(reportItem, status, error) {
         status,
         ...(error ? { error } : {}),
     };
+}
+function browserExecutionCoverageEvidenceItem(reportItem, status, error) {
+    return {
+        type: "browser_execution_coverage_evidence",
+        title: "Browser check execution coverage integrity",
+        path: reportItem.path,
+        status,
+        ...(error ? { error } : {}),
+    };
+}
+function verifyReportBrowserExecutionCoverage(manifestPath, manifestFiles, integrityItems) {
+    const reportIndex = manifestFiles.findIndex(item => item.type === "report_json");
+    if (reportIndex < 0)
+        return [];
+    const reportItem = manifestFiles[reportIndex];
+    if (integrityItems[reportIndex]?.status !== "passed") {
+        return [browserExecutionCoverageEvidenceItem(reportItem, "skipped", "Report artifact integrity did not pass, so browser execution coverage could not be checked.")];
+    }
+    try {
+        const report = readJsonForSemantic(manifestPath, reportItem);
+        const errors = [];
+        verifyBrowserCheckExecutionCoverageConsistency(report, errors);
+        return [browserExecutionCoverageEvidenceItem(reportItem, errors.length ? "failed" : "passed", errors.join(" "))];
+    }
+    catch (error) {
+        return [browserExecutionCoverageEvidenceItem(reportItem, "failed", `Unable to read browser execution coverage: ${error.message || String(error)}`)];
+    }
 }
 function verifyReportRecoveryEvidence(manifestPath, manifestFiles, integrityItems) {
     const reportIndex = manifestFiles.findIndex(item => item.type === "report_json");
@@ -1424,6 +1483,7 @@ function verifyTestAgentArtifactManifest(manifest, manifestPath = "") {
     items.push(...verifyReportAuthenticationEvidence(resolvedManifestPath, manifestFiles, items));
     items.push(...verifyReportRecoveryEvidence(resolvedManifestPath, manifestFiles, items));
     items.push(...verifyReportActionEffectEvidence(resolvedManifestPath, manifestFiles, items));
+    items.push(...verifyReportBrowserExecutionCoverage(resolvedManifestPath, manifestFiles, items));
     items.push(...verifyReportAdversarialEvidence(resolvedManifestPath, manifestFiles, items));
     items.push(...verifyReportAcceptanceEvidence(resolvedManifestPath, manifestFiles, items));
     items.push(...verifyReportHttpPageResourceEvidence(resolvedManifestPath, manifestFiles, items));

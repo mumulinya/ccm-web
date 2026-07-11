@@ -54,6 +54,12 @@ function nextActionsFor(report, failedRequired, unknownRequired) {
     }
     if (report.status === "partial") {
         const unknown = unknownRequired.map(item => item.check).join(", ");
+        if (report.browserCheckExecutionCoverage && report.browserCheckExecutionCoverage.status !== "complete") {
+            return [
+                `Run every planned browser check before accepting: ${report.browserCheckExecutionCoverage.missingRunCount} run(s) are missing and ${report.browserCheckExecutionCoverage.duplicateResultCount + report.browserCheckExecutionCoverage.invalidResultCount} result(s) are invalid.`,
+                "Use the browser execution coverage items to rerun the exact missing check and stability-run identities.",
+            ];
+        }
         if (report.adversarialEvidenceSummary.status === "missing" && report.adversarialEvidenceSummary.required) {
             return [
                 "Run at least one relevant adversarial probe and record its actual result before accepting the delivery.",
@@ -96,6 +102,7 @@ function buildTestAgentVerdict(report) {
     const canAccept = report.status === "passed"
         && report.recommendation === "accept"
         && ["verified", "waived"].includes(report.adversarialEvidenceSummary.status)
+        && (!report.browserCheckExecutionCoverage || report.browserCheckExecutionCoverage.status === "complete")
         && report.acceptanceEvidenceGateSummary.canAccept;
     const requiredCheckSummary = (0, required_check_summary_1.buildRequiredCheckSummary)(report.requiredCheckCoverage);
     const acceptanceSummary = (0, acceptance_summary_1.buildAcceptanceSummary)(report.acceptanceCoverage);
@@ -148,6 +155,12 @@ function buildTestAgentVerdict(report) {
             browserFlakyStabilityGroups: report.browserStabilitySummary?.statusCounts.flaky || 0,
             browserStabilityRuns: report.browserStabilitySummary?.runCount || 0,
             browserFailedStabilityRuns: report.browserStabilitySummary?.failedRunCount || 0,
+            browserPlannedChecks: report.browserCheckExecutionCoverage?.plannedCheckCount || 0,
+            browserExpectedRuns: report.browserCheckExecutionCoverage?.expectedRunCount || 0,
+            browserCoveredRuns: report.browserCheckExecutionCoverage?.coveredRunCount || 0,
+            browserMissingRuns: report.browserCheckExecutionCoverage?.missingRunCount || 0,
+            browserDuplicateResults: report.browserCheckExecutionCoverage?.duplicateResultCount || 0,
+            browserInvalidResults: report.browserCheckExecutionCoverage?.invalidResultCount || 0,
             browserRecoveryAttempts: report.browserRecoverySummary?.attempted || 0,
             browserRecoveredOperations: report.browserRecoverySummary?.recovered || 0,
             browserFailedRecoveries: report.browserRecoverySummary?.failed || 0,
@@ -175,6 +188,7 @@ function buildTestAgentVerdict(report) {
         browserFlowSummary: report.browserFlowSummary,
         browserMultiSessionSummary: report.browserMultiSessionSummary,
         browserStabilitySummary: report.browserStabilitySummary,
+        browserCheckExecutionCoverage: report.browserCheckExecutionCoverage,
         browserRecoverySummary: report.browserRecoverySummary,
         browserActionEffectSummary: report.browserActionEffectSummary,
         adversarialEvidenceSummary: report.adversarialEvidenceSummary,

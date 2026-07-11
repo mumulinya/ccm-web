@@ -14,6 +14,7 @@ const provider_summary_1 = require("./browser/provider-summary");
 const recovery_summary_1 = require("./browser/recovery-summary");
 const action_effect_summary_1 = require("./browser/action-effect-summary");
 const stability_summary_1 = require("./browser/stability-summary");
+const check_execution_coverage_1 = require("./browser/check-execution-coverage");
 const failure_summary_1 = require("./failure-summary");
 const required_checks_1 = require("./required-checks");
 const utils_1 = require("./utils");
@@ -188,6 +189,10 @@ function buildTestAgentReport(input) {
     const browserFlowSummary = (0, flow_summary_1.buildBrowserFlowSummary)(browserResults);
     const browserMultiSessionSummary = (0, multi_session_summary_1.buildBrowserMultiSessionSummary)(browserResults);
     const browserStabilitySummary = (0, stability_summary_1.buildBrowserStabilitySummary)(browserResults);
+    const browserCheckExecutionPlan = workOrder.metadata?.browserCheckExecutionPlan;
+    const browserCheckExecutionCoverage = browserCheckExecutionPlan
+        ? (0, check_execution_coverage_1.buildBrowserCheckExecutionCoverage)(browserCheckExecutionPlan, browserResults)
+        : undefined;
     const browserRecoverySummary = (0, recovery_summary_1.buildBrowserRecoverySummary)(browserResults);
     const browserActionEffectSummary = (0, action_effect_summary_1.buildBrowserActionEffectSummary)(browserResults);
     const httpConcurrencySummary = (0, http_concurrency_1.buildHttpConcurrencySummary)(httpResults);
@@ -248,6 +253,9 @@ function buildTestAgentReport(input) {
         ...browserStabilitySummary.items
             .filter(item => item.status === "flaky" || item.status === "stable_fail")
             .map(item => `${item.project}: browser stability ${item.status}: ${item.name}; failedRuns=${item.failedRuns.join(",") || "none"}`),
+        ...(browserCheckExecutionCoverage && browserCheckExecutionCoverage.status !== "complete"
+            ? [`browser check execution coverage ${browserCheckExecutionCoverage.status}: runs=${browserCheckExecutionCoverage.coveredRunCount}/${browserCheckExecutionCoverage.expectedRunCount}; missing=${browserCheckExecutionCoverage.missingRunCount}; duplicate=${browserCheckExecutionCoverage.duplicateResultCount}; invalid=${browserCheckExecutionCoverage.invalidResultCount}`]
+            : []),
         ...browserRecoverySummary.items
             .filter(item => item.failed > 0 || item.notRetried > 0)
             .map(item => `${item.project}: browser recovery incomplete: ${item.name}; failed=${item.failed}; unsafeRetriesPrevented=${item.notRetried}`),
@@ -327,6 +335,7 @@ function buildTestAgentReport(input) {
         browserFlowSummary,
         browserMultiSessionSummary,
         browserStabilitySummary,
+        browserCheckExecutionCoverage,
         browserRecoverySummary,
         browserActionEffectSummary,
         adversarialEvidenceSummary,

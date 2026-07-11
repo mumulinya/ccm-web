@@ -28,6 +28,7 @@ import {
   suppressBrowserActionEffectDetails,
   verifyBrowserActionEffect,
 } from "./action-effects";
+import { withBrowserCheckExecutionIdentity } from "./check-execution-coverage";
 
 async function listTools(context: BrowserProviderContext) {
   const listed = await context.runtime.browserToolExecutor?.listTools?.();
@@ -462,7 +463,12 @@ export const McpBrowserProvider: BrowserProvider = {
       const checks = checksForProject(project, context.workOrder.acceptanceCriteria);
       for (let i = 0; i < checks.length; i += 1) {
         if (context.checkFilter && !context.checkFilter(project, checks[i], i)) continue;
-        results.push(await runMcpCheck(context, tools, project, checks[i], i));
+        results.push(withBrowserCheckExecutionIdentity({
+          result: await runMcpCheck(context, tools, project, checks[i], i),
+          workOrder: context.workOrder,
+          project,
+          checkIndex: i,
+        }));
       }
     }
     return results;

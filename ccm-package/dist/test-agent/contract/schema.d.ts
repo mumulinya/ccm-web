@@ -12114,6 +12114,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -12161,6 +12167,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -12208,6 +12220,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -13957,6 +13975,121 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             firstFailure: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">>, "many">;
     }, z.ZodTypeAny, "passthrough">>>;
+    browserCheckExecutionCoverage: z.ZodOptional<z.ZodObject<{
+        status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
+        plannedCheckCount: z.ZodNumber;
+        expectedRunCount: z.ZodNumber;
+        coveredRunCount: z.ZodNumber;
+        missingRunCount: z.ZodNumber;
+        providerResultCount: z.ZodNumber;
+        duplicateResultCount: z.ZodNumber;
+        invalidResultCount: z.ZodNumber;
+        diagnosticResultCount: z.ZodNumber;
+        syntheticBlockedCount: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            complete: z.ZodNumber;
+            incomplete: z.ZodNumber;
+            invalid: z.ZodNumber;
+        }, "strict", z.ZodTypeAny, {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        }, {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        }>;
+        items: z.ZodArray<z.ZodObject<{
+            checkId: z.ZodString;
+            project: z.ZodString;
+            name: z.ZodString;
+            plannedProvider: z.ZodEnum<["playwright", "mcp", "none"]>;
+            expectedRuns: z.ZodNumber;
+            observedRuns: z.ZodArray<z.ZodNumber, "many">;
+            missingRuns: z.ZodArray<z.ZodNumber, "many">;
+            duplicateRuns: z.ZodArray<z.ZodNumber, "many">;
+            syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
+            status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
+        }, "strict", z.ZodTypeAny, {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }, {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }>, "many">;
+    }, "strict", z.ZodTypeAny, {
+        status?: "complete" | "invalid" | "incomplete";
+        items?: {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }[];
+        statusCounts?: {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        };
+        expectedRunCount?: number;
+        plannedCheckCount?: number;
+        coveredRunCount?: number;
+        missingRunCount?: number;
+        providerResultCount?: number;
+        duplicateResultCount?: number;
+        invalidResultCount?: number;
+        diagnosticResultCount?: number;
+        syntheticBlockedCount?: number;
+    }, {
+        status?: "complete" | "invalid" | "incomplete";
+        items?: {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }[];
+        statusCounts?: {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        };
+        expectedRunCount?: number;
+        plannedCheckCount?: number;
+        coveredRunCount?: number;
+        missingRunCount?: number;
+        providerResultCount?: number;
+        duplicateResultCount?: number;
+        invalidResultCount?: number;
+        diagnosticResultCount?: number;
+        syntheticBlockedCount?: number;
+    }>>;
     browserRecoverySummary: z.ZodOptional<z.ZodEffects<z.ZodObject<{
         checks: z.ZodNumber;
         attempted: z.ZodNumber;
@@ -16208,6 +16341,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -16255,6 +16394,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -16302,6 +16447,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -18051,6 +18202,121 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             firstFailure: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">>, "many">;
     }, z.ZodTypeAny, "passthrough">>>;
+    browserCheckExecutionCoverage: z.ZodOptional<z.ZodObject<{
+        status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
+        plannedCheckCount: z.ZodNumber;
+        expectedRunCount: z.ZodNumber;
+        coveredRunCount: z.ZodNumber;
+        missingRunCount: z.ZodNumber;
+        providerResultCount: z.ZodNumber;
+        duplicateResultCount: z.ZodNumber;
+        invalidResultCount: z.ZodNumber;
+        diagnosticResultCount: z.ZodNumber;
+        syntheticBlockedCount: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            complete: z.ZodNumber;
+            incomplete: z.ZodNumber;
+            invalid: z.ZodNumber;
+        }, "strict", z.ZodTypeAny, {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        }, {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        }>;
+        items: z.ZodArray<z.ZodObject<{
+            checkId: z.ZodString;
+            project: z.ZodString;
+            name: z.ZodString;
+            plannedProvider: z.ZodEnum<["playwright", "mcp", "none"]>;
+            expectedRuns: z.ZodNumber;
+            observedRuns: z.ZodArray<z.ZodNumber, "many">;
+            missingRuns: z.ZodArray<z.ZodNumber, "many">;
+            duplicateRuns: z.ZodArray<z.ZodNumber, "many">;
+            syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
+            status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
+        }, "strict", z.ZodTypeAny, {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }, {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }>, "many">;
+    }, "strict", z.ZodTypeAny, {
+        status?: "complete" | "invalid" | "incomplete";
+        items?: {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }[];
+        statusCounts?: {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        };
+        expectedRunCount?: number;
+        plannedCheckCount?: number;
+        coveredRunCount?: number;
+        missingRunCount?: number;
+        providerResultCount?: number;
+        duplicateResultCount?: number;
+        invalidResultCount?: number;
+        diagnosticResultCount?: number;
+        syntheticBlockedCount?: number;
+    }, {
+        status?: "complete" | "invalid" | "incomplete";
+        items?: {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }[];
+        statusCounts?: {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        };
+        expectedRunCount?: number;
+        plannedCheckCount?: number;
+        coveredRunCount?: number;
+        missingRunCount?: number;
+        providerResultCount?: number;
+        duplicateResultCount?: number;
+        invalidResultCount?: number;
+        diagnosticResultCount?: number;
+        syntheticBlockedCount?: number;
+    }>>;
     browserRecoverySummary: z.ZodOptional<z.ZodEffects<z.ZodObject<{
         checks: z.ZodNumber;
         attempted: z.ZodNumber;
@@ -20302,6 +20568,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -20349,6 +20621,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -20396,6 +20674,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -22145,6 +22429,121 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             firstFailure: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">>, "many">;
     }, z.ZodTypeAny, "passthrough">>>;
+    browserCheckExecutionCoverage: z.ZodOptional<z.ZodObject<{
+        status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
+        plannedCheckCount: z.ZodNumber;
+        expectedRunCount: z.ZodNumber;
+        coveredRunCount: z.ZodNumber;
+        missingRunCount: z.ZodNumber;
+        providerResultCount: z.ZodNumber;
+        duplicateResultCount: z.ZodNumber;
+        invalidResultCount: z.ZodNumber;
+        diagnosticResultCount: z.ZodNumber;
+        syntheticBlockedCount: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            complete: z.ZodNumber;
+            incomplete: z.ZodNumber;
+            invalid: z.ZodNumber;
+        }, "strict", z.ZodTypeAny, {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        }, {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        }>;
+        items: z.ZodArray<z.ZodObject<{
+            checkId: z.ZodString;
+            project: z.ZodString;
+            name: z.ZodString;
+            plannedProvider: z.ZodEnum<["playwright", "mcp", "none"]>;
+            expectedRuns: z.ZodNumber;
+            observedRuns: z.ZodArray<z.ZodNumber, "many">;
+            missingRuns: z.ZodArray<z.ZodNumber, "many">;
+            duplicateRuns: z.ZodArray<z.ZodNumber, "many">;
+            syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
+            status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
+        }, "strict", z.ZodTypeAny, {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }, {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }>, "many">;
+    }, "strict", z.ZodTypeAny, {
+        status?: "complete" | "invalid" | "incomplete";
+        items?: {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }[];
+        statusCounts?: {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        };
+        expectedRunCount?: number;
+        plannedCheckCount?: number;
+        coveredRunCount?: number;
+        missingRunCount?: number;
+        providerResultCount?: number;
+        duplicateResultCount?: number;
+        invalidResultCount?: number;
+        diagnosticResultCount?: number;
+        syntheticBlockedCount?: number;
+    }, {
+        status?: "complete" | "invalid" | "incomplete";
+        items?: {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }[];
+        statusCounts?: {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        };
+        expectedRunCount?: number;
+        plannedCheckCount?: number;
+        coveredRunCount?: number;
+        missingRunCount?: number;
+        providerResultCount?: number;
+        duplicateResultCount?: number;
+        invalidResultCount?: number;
+        diagnosticResultCount?: number;
+        syntheticBlockedCount?: number;
+    }>>;
     browserRecoverySummary: z.ZodOptional<z.ZodEffects<z.ZodObject<{
         checks: z.ZodNumber;
         attempted: z.ZodNumber;
@@ -24396,6 +24795,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -24443,6 +24848,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -24490,6 +24901,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -26239,6 +26656,121 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             firstFailure: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">>, "many">;
     }, z.ZodTypeAny, "passthrough">>>;
+    browserCheckExecutionCoverage: z.ZodOptional<z.ZodObject<{
+        status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
+        plannedCheckCount: z.ZodNumber;
+        expectedRunCount: z.ZodNumber;
+        coveredRunCount: z.ZodNumber;
+        missingRunCount: z.ZodNumber;
+        providerResultCount: z.ZodNumber;
+        duplicateResultCount: z.ZodNumber;
+        invalidResultCount: z.ZodNumber;
+        diagnosticResultCount: z.ZodNumber;
+        syntheticBlockedCount: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            complete: z.ZodNumber;
+            incomplete: z.ZodNumber;
+            invalid: z.ZodNumber;
+        }, "strict", z.ZodTypeAny, {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        }, {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        }>;
+        items: z.ZodArray<z.ZodObject<{
+            checkId: z.ZodString;
+            project: z.ZodString;
+            name: z.ZodString;
+            plannedProvider: z.ZodEnum<["playwright", "mcp", "none"]>;
+            expectedRuns: z.ZodNumber;
+            observedRuns: z.ZodArray<z.ZodNumber, "many">;
+            missingRuns: z.ZodArray<z.ZodNumber, "many">;
+            duplicateRuns: z.ZodArray<z.ZodNumber, "many">;
+            syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
+            status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
+        }, "strict", z.ZodTypeAny, {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }, {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }>, "many">;
+    }, "strict", z.ZodTypeAny, {
+        status?: "complete" | "invalid" | "incomplete";
+        items?: {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }[];
+        statusCounts?: {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        };
+        expectedRunCount?: number;
+        plannedCheckCount?: number;
+        coveredRunCount?: number;
+        missingRunCount?: number;
+        providerResultCount?: number;
+        duplicateResultCount?: number;
+        invalidResultCount?: number;
+        diagnosticResultCount?: number;
+        syntheticBlockedCount?: number;
+    }, {
+        status?: "complete" | "invalid" | "incomplete";
+        items?: {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }[];
+        statusCounts?: {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        };
+        expectedRunCount?: number;
+        plannedCheckCount?: number;
+        coveredRunCount?: number;
+        missingRunCount?: number;
+        providerResultCount?: number;
+        duplicateResultCount?: number;
+        invalidResultCount?: number;
+        diagnosticResultCount?: number;
+        syntheticBlockedCount?: number;
+    }>>;
     browserRecoverySummary: z.ZodOptional<z.ZodEffects<z.ZodObject<{
         checks: z.ZodNumber;
         attempted: z.ZodNumber;
@@ -28490,6 +29022,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -28537,6 +29075,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -28584,6 +29128,12 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
         browserFlakyStabilityGroups: z.ZodOptional<z.ZodNumber>;
         browserStabilityRuns: z.ZodOptional<z.ZodNumber>;
         browserFailedStabilityRuns: z.ZodOptional<z.ZodNumber>;
+        browserPlannedChecks: z.ZodOptional<z.ZodNumber>;
+        browserExpectedRuns: z.ZodOptional<z.ZodNumber>;
+        browserCoveredRuns: z.ZodOptional<z.ZodNumber>;
+        browserMissingRuns: z.ZodOptional<z.ZodNumber>;
+        browserDuplicateResults: z.ZodOptional<z.ZodNumber>;
+        browserInvalidResults: z.ZodOptional<z.ZodNumber>;
         browserRecoveryAttempts: z.ZodOptional<z.ZodNumber>;
         browserRecoveredOperations: z.ZodOptional<z.ZodNumber>;
         browserFailedRecoveries: z.ZodOptional<z.ZodNumber>;
@@ -30333,6 +30883,121 @@ export declare const TestAgentVerdictContractSchema: z.ZodEffects<z.ZodObject<{
             firstFailure: z.ZodOptional<z.ZodString>;
         }, z.ZodTypeAny, "passthrough">>, "many">;
     }, z.ZodTypeAny, "passthrough">>>;
+    browserCheckExecutionCoverage: z.ZodOptional<z.ZodObject<{
+        status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
+        plannedCheckCount: z.ZodNumber;
+        expectedRunCount: z.ZodNumber;
+        coveredRunCount: z.ZodNumber;
+        missingRunCount: z.ZodNumber;
+        providerResultCount: z.ZodNumber;
+        duplicateResultCount: z.ZodNumber;
+        invalidResultCount: z.ZodNumber;
+        diagnosticResultCount: z.ZodNumber;
+        syntheticBlockedCount: z.ZodNumber;
+        statusCounts: z.ZodObject<{
+            complete: z.ZodNumber;
+            incomplete: z.ZodNumber;
+            invalid: z.ZodNumber;
+        }, "strict", z.ZodTypeAny, {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        }, {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        }>;
+        items: z.ZodArray<z.ZodObject<{
+            checkId: z.ZodString;
+            project: z.ZodString;
+            name: z.ZodString;
+            plannedProvider: z.ZodEnum<["playwright", "mcp", "none"]>;
+            expectedRuns: z.ZodNumber;
+            observedRuns: z.ZodArray<z.ZodNumber, "many">;
+            missingRuns: z.ZodArray<z.ZodNumber, "many">;
+            duplicateRuns: z.ZodArray<z.ZodNumber, "many">;
+            syntheticBlockedRuns: z.ZodArray<z.ZodNumber, "many">;
+            status: z.ZodEnum<["complete", "incomplete", "invalid"]>;
+        }, "strict", z.ZodTypeAny, {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }, {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }>, "many">;
+    }, "strict", z.ZodTypeAny, {
+        status?: "complete" | "invalid" | "incomplete";
+        items?: {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }[];
+        statusCounts?: {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        };
+        expectedRunCount?: number;
+        plannedCheckCount?: number;
+        coveredRunCount?: number;
+        missingRunCount?: number;
+        providerResultCount?: number;
+        duplicateResultCount?: number;
+        invalidResultCount?: number;
+        diagnosticResultCount?: number;
+        syntheticBlockedCount?: number;
+    }, {
+        status?: "complete" | "invalid" | "incomplete";
+        items?: {
+            name?: string;
+            status?: "complete" | "invalid" | "incomplete";
+            project?: string;
+            expectedRuns?: number;
+            checkId?: string;
+            plannedProvider?: "mcp" | "none" | "playwright";
+            observedRuns?: number[];
+            missingRuns?: number[];
+            duplicateRuns?: number[];
+            syntheticBlockedRuns?: number[];
+        }[];
+        statusCounts?: {
+            complete?: number;
+            invalid?: number;
+            incomplete?: number;
+        };
+        expectedRunCount?: number;
+        plannedCheckCount?: number;
+        coveredRunCount?: number;
+        missingRunCount?: number;
+        providerResultCount?: number;
+        duplicateResultCount?: number;
+        invalidResultCount?: number;
+        diagnosticResultCount?: number;
+        syntheticBlockedCount?: number;
+    }>>;
     browserRecoverySummary: z.ZodOptional<z.ZodEffects<z.ZodObject<{
         checks: z.ZodNumber;
         attempted: z.ZodNumber;

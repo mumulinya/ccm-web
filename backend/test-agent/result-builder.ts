@@ -1,5 +1,6 @@
 import {
   BrowserCheckResult,
+  BrowserCheckExecutionPlan,
   BrowserToolCallRecord,
   CommandRunResult,
   DevServerResult,
@@ -24,6 +25,7 @@ import { buildBrowserProviderSummary } from "./browser/provider-summary";
 import { buildBrowserRecoverySummary } from "./browser/recovery-summary";
 import { buildBrowserActionEffectSummary } from "./browser/action-effect-summary";
 import { buildBrowserStabilitySummary } from "./browser/stability-summary";
+import { buildBrowserCheckExecutionCoverage } from "./browser/check-execution-coverage";
 import { buildTestAgentFailureSummary } from "./failure-summary";
 import { buildRequiredCheckCoverage } from "./required-checks";
 import { makeRunId, nowIso } from "./utils";
@@ -211,6 +213,10 @@ export function buildTestAgentReport(input: {
   const browserFlowSummary = buildBrowserFlowSummary(browserResults);
   const browserMultiSessionSummary = buildBrowserMultiSessionSummary(browserResults);
   const browserStabilitySummary = buildBrowserStabilitySummary(browserResults);
+  const browserCheckExecutionPlan = workOrder.metadata?.browserCheckExecutionPlan as BrowserCheckExecutionPlan | undefined;
+  const browserCheckExecutionCoverage = browserCheckExecutionPlan
+    ? buildBrowserCheckExecutionCoverage(browserCheckExecutionPlan, browserResults)
+    : undefined;
   const browserRecoverySummary = buildBrowserRecoverySummary(browserResults);
   const browserActionEffectSummary = buildBrowserActionEffectSummary(browserResults);
   const httpConcurrencySummary = buildHttpConcurrencySummary(httpResults);
@@ -279,6 +285,9 @@ export function buildTestAgentReport(input: {
     ...browserStabilitySummary.items
       .filter(item => item.status === "flaky" || item.status === "stable_fail")
       .map(item => `${item.project}: browser stability ${item.status}: ${item.name}; failedRuns=${item.failedRuns.join(",") || "none"}`),
+    ...(browserCheckExecutionCoverage && browserCheckExecutionCoverage.status !== "complete"
+      ? [`browser check execution coverage ${browserCheckExecutionCoverage.status}: runs=${browserCheckExecutionCoverage.coveredRunCount}/${browserCheckExecutionCoverage.expectedRunCount}; missing=${browserCheckExecutionCoverage.missingRunCount}; duplicate=${browserCheckExecutionCoverage.duplicateResultCount}; invalid=${browserCheckExecutionCoverage.invalidResultCount}`]
+      : []),
     ...browserRecoverySummary.items
       .filter(item => item.failed > 0 || item.notRetried > 0)
       .map(item => `${item.project}: browser recovery incomplete: ${item.name}; failed=${item.failed}; unsafeRetriesPrevented=${item.notRetried}`),
@@ -360,6 +369,7 @@ export function buildTestAgentReport(input: {
     browserFlowSummary,
     browserMultiSessionSummary,
     browserStabilitySummary,
+    browserCheckExecutionCoverage,
     browserRecoverySummary,
     browserActionEffectSummary,
     adversarialEvidenceSummary,

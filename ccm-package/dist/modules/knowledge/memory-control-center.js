@@ -175,6 +175,7 @@ exports.runMemoryCenterPostCompactReinjectionRepairReceiptTypedMemorySelfTest = 
 exports.runMemoryCenterPostCompactReinjectionRepairReceiptWorkerContextUsageSelfTest = runMemoryCenterPostCompactReinjectionRepairReceiptWorkerContextUsageSelfTest;
 exports.runMemoryCenterPostCompactReinjectionRepairReceiptMemoryUsageRepairSelfTest = runMemoryCenterPostCompactReinjectionRepairReceiptMemoryUsageRepairSelfTest;
 exports.runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionTypedMemorySelfTest = runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionTypedMemorySelfTest;
+exports.runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionWorkerContextSelfTest = runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionWorkerContextSelfTest;
 exports.runMemoryCenterCompactFileReferenceUsageDisciplineSelfTest = runMemoryCenterCompactFileReferenceUsageDisciplineSelfTest;
 exports.runMemoryCenterHistoricalCompactBoundaryReplaySelfTest = runMemoryCenterHistoricalCompactBoundaryReplaySelfTest;
 exports.runMemoryCenterChildAgentTypeReplayMatrixSelfTest = runMemoryCenterChildAgentTypeReplayMatrixSelfTest;
@@ -24887,6 +24888,211 @@ function evaluatePostCompactReceiptMemoryUsageRepairCompletionTypedMemory(option
     check.report = report;
     return check;
 }
+function buildPostCompactReceiptMemoryUsageRepairCompletionWorkerContextReport(options = {}) {
+    const groupIds = replayRepairDispatchTimelineBindingGroupIds(options);
+    const { readGroupTypedMemoryDistillationLedger } = require("../collaboration/group-memory-index");
+    const { buildAgentMemoryContextBundle } = require("../collaboration/memory");
+    const { buildWorkerContextPacket, renderWorkerContextPacket } = require("../../agents/runtime-kernel");
+    const targetProject = String(options.targetProject || options.target_project || "api");
+    const task = String(options.task || options.query || "continue corrected receipt memory usage repair completion current source memoryUsed memoryIgnored");
+    const completionDocRelPath = "post-compact-receipt-memory-usage-repair-completions.md";
+    const rows = groupIds.map((groupId) => {
+        const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+        const archive = ledger.postCompactReceiptMemoryUsageRepairCompletionArchive || {};
+        const archiveRows = Array.isArray(archive.rows) ? archive.rows : [];
+        const archivedCount = Number(archive.archived_count || archiveRows.length || 0);
+        if (archivedCount <= 0) {
+            return {
+                schema: "ccm-post-compact-receipt-memory-usage-repair-completion-worker-context-group-v1",
+                groupId,
+                status: "empty",
+                archivedCompletionCount: 0,
+                gaps: [],
+            };
+        }
+        const firstTaskSessionId = String(options.firstTaskAgentSessionId || options.first_task_agent_session_id || `phase183-task-session-a-${sidecarFileId(groupId)}`);
+        const firstNativeSessionId = String(options.firstNativeSessionId || options.first_native_session_id || `phase183-native-session-a-${sidecarFileId(groupId)}`);
+        const secondTaskSessionId = String(options.secondTaskAgentSessionId || options.second_task_agent_session_id || `phase183-task-session-b-${sidecarFileId(groupId)}`);
+        const secondNativeSessionId = String(options.secondNativeSessionId || options.second_native_session_id || `phase183-native-session-b-${sidecarFileId(groupId)}`);
+        const buildSession = (label, taskAgentSessionId, nativeSessionId) => {
+            const bundle = buildAgentMemoryContextBundle(groupId, targetProject, task, {
+                includeGlobalClaudeMemory: false,
+                includeProjectMemory: false,
+                maxTypedMemory: Number(options.maxTypedMemory || options.max_typed_memory || 8),
+                maxRenderedChars: Number(options.maxRenderedChars || options.max_rendered_chars || 16000),
+                taskAgentSessionId,
+                nativeSessionId,
+                executionId: `phase183-execution-${label}-${sidecarFileId(groupId)}`,
+                forcePostCompactReceiptMemoryUsageRepairCompletionRecall: true,
+            });
+            const packet = buildWorkerContextPacket({
+                group: { id: groupId, name: `Phase 183 ${label}`, members: [{ project: targetProject }] },
+                project: targetProject,
+                task,
+                taskId: `phase183-task-${label}-${sidecarFileId(groupId)}`,
+                traceId: `phase183-trace-${label}-${sidecarFileId(groupId)}`,
+                agentType: String(options.agentType || options.agent_type || "codex"),
+                memory: bundle,
+                contextUsageOptions: { maxTokens: Number(options.maxContextTokens || options.max_context_tokens || 90000) },
+            });
+            const recall = bundle.group_state?.typedMemory?.postCompactReinjectionRepairReceiptRecall
+                || bundle.post_compact_reinjection_repair_receipt_recall
+                || {};
+            const contract = workerContextPacketPostCompactReinjectionRepairReceiptMemoryContract(packet) || {};
+            return {
+                bundle,
+                packet,
+                recall,
+                contract,
+                packetText: renderWorkerContextPacket(packet),
+                recallText: JSON.stringify(bundle.group_state?.typedMemory?.recall?.recalled || []),
+            };
+        };
+        const first = buildSession("a", firstTaskSessionId, firstNativeSessionId);
+        const second = buildSession("b", secondTaskSessionId, secondNativeSessionId);
+        const requiredDocs = normalizeQualityStringList(first.contract.memory_receipt_required_doc_rel_paths || first.contract.doc_rel_paths || []);
+        const completionDocs = normalizeQualityStringList(first.contract.corrected_receipt_completion_doc_rel_paths || []);
+        const completionWorkItemIds = normalizeQualityStringList(first.contract.corrected_receipt_completion_work_item_ids || []);
+        const completionTimelineBindingIds = normalizeQualityStringList(first.contract.corrected_receipt_completion_timeline_binding_ids || []);
+        const historicalTaskSessions = normalizeQualityStringList(first.contract.historical_task_agent_session_ids || []);
+        const historicalNativeSessions = normalizeQualityStringList(first.contract.historical_native_session_ids || []);
+        const expectedWorkItemIds = normalizeQualityStringList(archiveRows.map((row) => row.work_item_id));
+        const expectedTimelineIds = normalizeQualityStringList(archiveRows.map((row) => row.timeline_binding_id));
+        const expectedHistoricalTaskSessions = normalizeQualityStringList(archiveRows.flatMap((row) => [row.original_task_agent_session_id, row.repair_task_agent_session_id]));
+        const expectedHistoricalNativeSessions = normalizeQualityStringList(archiveRows.flatMap((row) => [row.original_native_session_id, row.repair_native_session_id]));
+        const loadEntries = first.bundle.group_state?.typedMemory?.loadPlan?.entries || [];
+        const contextCategories = new Map((first.packet.context_usage?.categories || []).map((item) => [item.id, item]));
+        const contractCategory = contextCategories.get("post_compact_reinjection_repair_receipt_memory_contract") || {};
+        const goodCoverage = postCompactReinjectionRepairReceiptMemoryUsageCoverage(first.contract, {
+            task_agent_session_id: firstTaskSessionId,
+            native_session_id: firstNativeSessionId,
+            memoryUsed: requiredDocs.map((relPath) => `${relPath}; usageState=verified; currentSourceVerified=true; historical repair completion is recovery evidence, not permanent repository truth`),
+            memoryIgnored: [],
+        });
+        const ignoredCoverage = postCompactReinjectionRepairReceiptMemoryUsageCoverage(first.contract, {
+            task_agent_session_id: firstTaskSessionId,
+            native_session_id: firstNativeSessionId,
+            memoryUsed: [],
+            memoryIgnored: requiredDocs.map((relPath) => `${relPath}; usageState=ignored; reason=not relevant to this fresh task; historical repair completion is recovery evidence, not permanent repository truth`),
+        });
+        const staleCoverage = postCompactReinjectionRepairReceiptMemoryUsageCoverage(first.contract, {
+            task_agent_session_id: firstTaskSessionId,
+            native_session_id: firstNativeSessionId,
+            memoryUsed: requiredDocs.map((relPath) => `${relPath}; usageState=verified`),
+            memoryIgnored: [],
+        });
+        const historicalSessionCoverage = postCompactReinjectionRepairReceiptMemoryUsageCoverage(first.contract, {
+            task_agent_session_id: expectedHistoricalTaskSessions[0] || "historical-task-session",
+            native_session_id: expectedHistoricalNativeSessions[0] || "historical-native-session",
+            memoryUsed: requiredDocs.map((relPath) => `${relPath}; usageState=verified; currentSourceVerified=true; historical repair completion is recovery evidence, not permanent repository truth`),
+            memoryIgnored: [],
+        });
+        const gaps = [];
+        if (first.recall.active !== true || first.recall.recalledThisTurn !== true)
+            gaps.push({ reason: "first fresh session did not recall corrected-receipt completion memory" });
+        if (second.recall.active !== true || second.recall.recalledThisTurn !== true)
+            gaps.push({ reason: "second fresh session did not repeat corrected-receipt completion memory recall" });
+        if (!first.recallText.includes(completionDocRelPath) || !second.recallText.includes(completionDocRelPath))
+            gaps.push({ reason: "typed recall missing completion MEMORY.md in one fresh session" });
+        if (!first.packetText.includes(completionDocRelPath) || !second.packetText.includes(completionDocRelPath))
+            gaps.push({ reason: "WorkerContextPacket missing completion MEMORY.md" });
+        if (!loadEntries.some((entry) => entry.relPath === completionDocRelPath))
+            gaps.push({ reason: "typed-memory load plan missing completion MEMORY.md" });
+        if (!requiredDocs.includes(completionDocRelPath) || !completionDocs.includes(completionDocRelPath))
+            gaps.push({ reason: "memory usage contract does not require completion MEMORY.md" });
+        if (first.contract.corrected_receipt_completion_memory_active !== true || second.contract.corrected_receipt_completion_memory_active !== true)
+            gaps.push({ reason: "fresh packets missing corrected-receipt completion contract marker" });
+        if (!expectedWorkItemIds.every((id) => completionWorkItemIds.includes(id)) || !expectedTimelineIds.every((id) => completionTimelineBindingIds.includes(id)))
+            gaps.push({ reason: "contract missing completion work-item/timeline identities" });
+        if (!expectedHistoricalTaskSessions.every((id) => historicalTaskSessions.includes(id)) || !expectedHistoricalNativeSessions.every((id) => historicalNativeSessions.includes(id)))
+            gaps.push({ reason: "contract missing original/repair historical session identities" });
+        if (first.contract.current_task_agent_session_id !== firstTaskSessionId || first.contract.current_native_session_id !== firstNativeSessionId
+            || second.contract.current_task_agent_session_id !== secondTaskSessionId || second.contract.current_native_session_id !== secondNativeSessionId)
+            gaps.push({ reason: "completion memory contract not rebound to each fresh task/native session" });
+        if (first.bundle.session_binding?.binding_id === second.bundle.session_binding?.binding_id)
+            gaps.push({ reason: "two fresh sessions reused one session binding" });
+        if (historicalTaskSessions.includes(firstTaskSessionId) || historicalTaskSessions.includes(secondTaskSessionId)
+            || historicalNativeSessions.includes(firstNativeSessionId) || historicalNativeSessions.includes(secondNativeSessionId))
+            gaps.push({ reason: "current session identity leaked into historical completion evidence" });
+        if (first.packet.acceptance?.post_compact_receipt_memory_usage_repair_completion_memory_usage_required !== true
+            || first.packet.acceptance?.post_compact_receipt_memory_usage_repair_completion_current_session_binding_required !== true)
+            gaps.push({ reason: "WorkerContextPacket acceptance missing completion-memory usage/session requirements" });
+        if (contractCategory.required !== true || Number(contractCategory.tokens || 0) <= 0)
+            gaps.push({ reason: "context usage missing required completion-memory contract category" });
+        if (!/Historical original\/repair sessions never authorize this child Agent session/i.test(first.packetText))
+            gaps.push({ reason: "WorkerContextPacket missing historical session non-authorization rule" });
+        if (goodCoverage.pass !== true || ignoredCoverage.pass !== true || staleCoverage.pass === true || historicalSessionCoverage.pass === true)
+            gaps.push({ reason: "completion-memory validator failed used/ignored/freshness/session discrimination" });
+        const status = gaps.length ? "fail" : "ok";
+        return {
+            schema: "ccm-post-compact-receipt-memory-usage-repair-completion-worker-context-group-v1",
+            groupId,
+            status,
+            archivedCompletionCount: archivedCount,
+            completionWorkItemIds,
+            completionTimelineBindingIds,
+            requiredDocRelPaths: requiredDocs,
+            firstSessionRecalled: first.recall.recalledThisTurn === true,
+            secondSessionRecalled: second.recall.recalledThisTurn === true,
+            distinctSessionBindings: first.bundle.session_binding?.binding_id !== second.bundle.session_binding?.binding_id,
+            firstSessionContractBound: first.contract.current_task_agent_session_id === firstTaskSessionId && first.contract.current_native_session_id === firstNativeSessionId,
+            secondSessionContractBound: second.contract.current_task_agent_session_id === secondTaskSessionId && second.contract.current_native_session_id === secondNativeSessionId,
+            completionDocCovered: requiredDocs.includes(completionDocRelPath) && first.packetText.includes(completionDocRelPath) && second.packetText.includes(completionDocRelPath),
+            historicalSessionBoundaryCovered: /Historical original\/repair sessions never authorize this child Agent session/i.test(first.packetText),
+            goodCoverage,
+            ignoredCoverage,
+            staleCoverage,
+            historicalSessionCoverage,
+            packet: {
+                first_packet_id: first.packet.packet_id || "",
+                second_packet_id: second.packet.packet_id || "",
+                first_task_agent_session_id: firstTaskSessionId,
+                second_task_agent_session_id: secondTaskSessionId,
+            },
+            gaps: gaps.slice(0, 16),
+        };
+    });
+    const checked = rows.filter(row => Number(row.archivedCompletionCount || 0) > 0);
+    const passed = checked.filter(row => row.status === "ok");
+    const coverageRate = checked.length ? Math.round((passed.length / checked.length) * 1000) / 10 : null;
+    return {
+        schema: "ccm-post-compact-receipt-memory-usage-repair-completion-worker-context-report-v1",
+        generatedAt: now(),
+        overall: {
+            status: coverageRate === null ? "empty" : coverageRate === 100 ? "ok" : coverageRate >= 75 ? "warn" : "fail",
+            coverageRate,
+            checkedGroupCount: checked.length,
+            groupsCovered: passed.length,
+            archivedCompletionCount: checked.reduce((sum, row) => sum + Number(row.archivedCompletionCount || 0), 0),
+            firstSessionRecallCount: checked.filter(row => row.firstSessionRecalled === true).length,
+            secondSessionRecallCount: checked.filter(row => row.secondSessionRecalled === true).length,
+            distinctSessionBindingCount: checked.filter(row => row.distinctSessionBindings === true).length,
+            completionDocCoveredCount: checked.filter(row => row.completionDocCovered === true).length,
+            historicalSessionBoundaryCoveredCount: checked.filter(row => row.historicalSessionBoundaryCovered === true).length,
+            validatorCoveredCount: checked.filter(row => row.goodCoverage?.pass === true && row.ignoredCoverage?.pass === true && row.staleCoverage?.pass === false && row.historicalSessionCoverage?.pass === false).length,
+            metadataGapCount: checked.reduce((sum, row) => sum + Number((row.gaps || []).length), 0),
+        },
+        groups: rows,
+        weakGroups: rows.filter(row => row.status === "fail" || row.status === "warn"),
+    };
+}
+function evaluatePostCompactReceiptMemoryUsageRepairCompletionWorkerContext(options = {}) {
+    const report = buildPostCompactReceiptMemoryUsageRepairCompletionWorkerContextReport(options);
+    const checked = Number(report.overall.checkedGroupCount || 0);
+    const passed = Number(report.overall.groupsCovered || 0);
+    const evidence = (report.groups || []).filter((row) => row.status === "ok").slice(0, 12).map((row) => ({
+        groupId: row.groupId,
+        archivedCompletionCount: row.archivedCompletionCount,
+        completionWorkItemIds: row.completionWorkItemIds,
+        firstSessionRecalled: row.firstSessionRecalled,
+        secondSessionRecalled: row.secondSessionRecalled,
+        distinctSessionBindings: row.distinctSessionBindings,
+    }));
+    const gaps = (report.weakGroups || []).flatMap((row) => (row.gaps || []).slice(0, 3).map((gap) => ({ groupId: row.groupId, reason: gap.reason || "completion memory worker context usage missing" }))).slice(0, 12);
+    const check = makeQualityCheck("post_compact_reinjection_repair_receipt_memory_usage_repair_completion_worker_context_usage", "Post-Compact Receipt Memory Usage Repair Completion Worker Context Usage", checked, passed, evidence, gaps, "Relevant fresh child Agent sessions must repeatedly receive corrected-receipt completion MEMORY.md, bind its usage contract to the current task/native session, independently report memoryUsed/memoryIgnored, and never treat historical original/repair sessions as current authority.");
+    check.report = report;
+    return check;
+}
 function buildGroupSessionMemorySnapshotReport(options = {}) {
     const explicitGroupIds = Array.isArray(options.groupIds || options.group_ids)
         ? (options.groupIds || options.group_ids).map((item) => String(item || "").trim()).filter(Boolean)
@@ -27148,6 +27354,7 @@ function memoryQualityCheckDescriptors(lightweight, options = {}) {
         { id: "post_compact_reinjection_repair_receipt_memory_usage_repair_dispatch_briefs", run: () => evaluatePostCompactReinjectionRepairReceiptMemoryUsageRepairDispatchBriefs(options) },
         { id: "post_compact_reinjection_repair_receipt_memory_usage_repair_receipt_consumption", run: () => evaluatePostCompactReinjectionRepairReceiptMemoryUsageRepairReceiptConsumption(options) },
         { id: "post_compact_reinjection_repair_receipt_memory_usage_repair_completion_typed_memory", run: () => evaluatePostCompactReceiptMemoryUsageRepairCompletionTypedMemory(options) },
+        { id: "post_compact_reinjection_repair_receipt_memory_usage_repair_completion_worker_context_usage", run: () => evaluatePostCompactReceiptMemoryUsageRepairCompletionWorkerContext(options) },
         { id: "group_session_memory_snapshots", run: () => evaluateGroupSessionMemorySnapshots({}) },
         { id: "group_tool_continuity_snapshots", run: () => evaluateGroupToolContinuitySnapshots({}) },
         { id: "task_agent_memory_context_snapshots", run: () => evaluateTaskAgentMemoryContextSnapshots({}) },
@@ -48465,6 +48672,243 @@ function runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionTypedMemory
         };
     }
     finally {
+        for (const dir of [typedDirA, typedDirB]) {
+            try {
+                if (fs.existsSync(dir))
+                    fs.rmSync(dir, { recursive: true, force: true });
+            }
+            catch { }
+        }
+    }
+}
+function runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionWorkerContextSelfTest() {
+    const suffix = `${process.pid}-${Date.now()}`;
+    const groupA = `memory-center-post-compact-receipt-memory-usage-repair-worker-context-a-${suffix}`;
+    const groupB = `memory-center-post-compact-receipt-memory-usage-repair-worker-context-b-${suffix}`;
+    const typedDirA = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupA));
+    const typedDirB = path.join(GROUP_TYPED_MEMORY_MD_DIR, sidecarFileId(groupB));
+    const bindingFileA = getGroupReplayRepairDispatchBindingLedgerFile(groupA);
+    const timelineFileA = getGroupReplayRepairDispatchTimelineBindingLedgerFile(groupA);
+    const completionDoc = "post-compact-receipt-memory-usage-repair-completions.md";
+    const sourceMemoryDoc = "post-compact-reinjection-repair-receipt-memory.md";
+    const { distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory, } = require("../collaboration/group-memory-index");
+    const { buildAgentMemoryContextBundle } = require("../collaboration/memory");
+    const { buildWorkerContextPacket, renderWorkerContextPacket } = require("../../agents/runtime-kernel");
+    const { buildSelfContainedWorkerHandoff, renderSelfContainedWorkerHandoff } = require("../../agents/worker-handoff");
+    const { recordReplayRepairDispatchBriefAssignmentBinding, recordReplayRepairDispatchBriefTimelineBinding, readReplayRepairDispatchBindingLedgerForCoordinator, } = require("../collaboration/group-orchestrator");
+    const makeRow = (groupId, marker) => ({
+        groupId,
+        source: "post_compact_reinjection_repair_receipt_memory_usage_receipt_repair",
+        project: "api",
+        task_id: `task-${marker}`,
+        work_item_id: `post-compact-receipt-memory-usage-repair:${marker}`,
+        brief_id: `replay-repair-dispatch-brief:${marker}`,
+        timeline_binding_id: `replay-repair-brief-timeline:${marker}`,
+        assignment_id: `assignment-repair-${marker}`,
+        dispatch_key: `dispatch-repair-${marker}`,
+        original_worker_context_packet_id: `original-packet-${marker}`,
+        original_binding_id: `original-binding-${marker}`,
+        original_assignment_id: `original-assignment-${marker}`,
+        original_dispatch_key: `original-dispatch-${marker}`,
+        original_task_agent_session_id: `original-task-session-${marker}`,
+        original_native_session_id: `original-native-session-${marker}`,
+        task_agent_session_id: `repair-task-session-${marker}`,
+        native_session_id: `repair-native-session-${marker}`,
+        execution_id: `repair-execution-${marker}`,
+        post_compact_receipt_memory_gap_codes: ["receipt_usage_state_or_reverify", "receipt_historical_boundary"],
+        post_compact_receipt_memory_usage_repair_required_doc_rel_paths: [sourceMemoryDoc],
+        post_compact_receipt_memory_usage_repair_covered_doc_rel_paths: [sourceMemoryDoc],
+        post_compact_receipt_memory_usage_repair_coverage_rows: [{
+                relPath: sourceMemoryDoc,
+                usageState: "verified",
+                covered: true,
+                compliant: true,
+                currentSourceVerified: true,
+                ignoredReasonCovered: false,
+                reason: "",
+            }],
+        post_compact_receipt_memory_usage_repair_all_docs_compliant: true,
+        post_compact_receipt_memory_usage_repair_historical_boundary_covered: true,
+        post_compact_receipt_memory_usage_repair_task_session_matched: true,
+        post_compact_receipt_memory_usage_repair_native_session_matched: true,
+        post_compact_receipt_memory_usage_repair_verified: true,
+        receipt_status: "done",
+        replay_repair_consumption_status: "verified",
+        replay_repair_consumption_source: "receipt.replayRepairDispatchBriefUsage",
+        event_types: [...REPLAY_REPAIR_TIMELINE_REQUIRED_EVENTS],
+        completion_source: "post_compact_reinjection_receipt_memory_usage_repair_receipt_consumption",
+        resolution_reason: "post_compact_reinjection_receipt_memory_usage_corrected_receipt_verified",
+        completed_at: "2026-07-11T00:40:00.000Z",
+    });
+    try {
+        const rowA = makeRow(groupA, "PHASE183_GROUP_A_SENTINEL");
+        const rowB = makeRow(groupB, "PHASE183_GROUP_B_SENTINEL");
+        distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(groupA, { rows: [rowA] }, { reason: "phase183-worker-context-a", updatedAt: "2026-07-11T00:40:00.000Z" });
+        distillPostCompactReceiptMemoryUsageRepairCompletionToTypedMemory(groupB, { rows: [rowB] }, { reason: "phase183-worker-context-b", updatedAt: "2026-07-11T00:40:00.000Z" });
+        const task = "继续 corrected receipt memory usage repair PHASE183_GROUP_A_SENTINEL PHASE183_GROUP_B_SENTINEL；重新核验 current source 并声明 memoryUsed memoryIgnored";
+        const report = buildPostCompactReceiptMemoryUsageRepairCompletionWorkerContextReport({ groupIds: [groupA, groupB], targetProject: "api", task });
+        const quality = evaluatePostCompactReceiptMemoryUsageRepairCompletionWorkerContext({ groupIds: [groupA, groupB], targetProject: "api", task });
+        const qualityReport = buildMemoryQualityReport({
+            checkIds: ["post_compact_reinjection_repair_receipt_memory_usage_repair_completion_worker_context_usage"],
+            groupIds: [groupA, groupB],
+            targetProject: "api",
+            task,
+            tasks: [],
+            refresh: true,
+        });
+        const qualityCheck = (qualityReport.checks || []).find((item) => item.id === "post_compact_reinjection_repair_receipt_memory_usage_repair_completion_worker_context_usage") || {};
+        const currentTaskSession = "task-agent-session-phase183-current";
+        const currentNativeSession = "native-session-phase183-current";
+        const bundle = buildAgentMemoryContextBundle(groupA, "api", task, {
+            includeGlobalClaudeMemory: false,
+            includeProjectMemory: false,
+            maxTypedMemory: 8,
+            maxRenderedChars: 16000,
+            taskAgentSessionId: currentTaskSession,
+            nativeSessionId: currentNativeSession,
+            executionId: "execution-phase183-current",
+            forcePostCompactReceiptMemoryUsageRepairCompletionRecall: true,
+        });
+        const packet = buildWorkerContextPacket({
+            group: { id: groupA, name: "Phase 183 Completion Memory", members: [{ project: "api" }] },
+            project: "api",
+            task,
+            taskId: "task-phase183-current",
+            traceId: "trace-phase183-current",
+            agentType: "codex",
+            memory: bundle,
+            contextUsageOptions: { maxTokens: 90000 },
+        });
+        const contract = workerContextPacketPostCompactReinjectionRepairReceiptMemoryContract(packet) || {};
+        const requiredDocs = normalizeQualityStringList(contract.memory_receipt_required_doc_rel_paths || []);
+        const handoff = buildSelfContainedWorkerHandoff({
+            group: { id: groupA, name: "Phase 183 Completion Memory", members: [{ project: "api", agent: "codex" }] },
+            project: "api",
+            task,
+            agentType: "codex",
+            memory: bundle,
+            workerContextPacket: packet,
+            traceId: "trace-phase183-current",
+            taskId: "task-phase183-current",
+        });
+        const handoffText = renderSelfContainedWorkerHandoff(handoff);
+        const brief = {
+            brief_id: "replay-repair-dispatch-brief:phase183-current",
+            work_item_id: "post-compact-reinjection-repair:phase183-current",
+            source: "compact_boundary_replay_repair",
+            component: "post_compact_reinject",
+            target_project: "api",
+        };
+        const assignment = {
+            project: "api",
+            assignmentId: "assignment-phase183-current",
+            dispatchKey: "dispatch-phase183-current",
+            taskFingerprint: "task-phase183-current",
+            worker_context_packet: packet,
+        };
+        const binding = recordReplayRepairDispatchBriefAssignmentBinding(groupA, assignment, { brief });
+        const receipt = {
+            status: "done",
+            worker_context_packet_id: packet.packet_id,
+            task_agent_session_id: currentTaskSession,
+            native_session_id: currentNativeSession,
+            memoryUsed: requiredDocs.map((relPath) => `${relPath}; usageState=verified; currentSourceVerified=true; historical repair completion is recovery evidence, not permanent repository truth`),
+            memoryIgnored: [],
+            replayRepairDispatchBriefUsage: [{ briefId: brief.brief_id, workItemId: brief.work_item_id, usageState: "verified", reason: "Used the bound brief and independently reverified current source." }],
+            blockers: [],
+            needs: [],
+        };
+        recordReplayRepairDispatchBriefTimelineBinding(groupA, {
+            brief,
+            task_id: "task-phase183-current",
+            project: "api",
+            assignment_id: "assignment-phase183-current",
+            dispatch_key: "dispatch-phase183-current",
+            worker_context_packet_id: packet.packet_id,
+            worker_handoff_id: handoff.handoff_id || "handoff-phase183-current",
+            memory_context_snapshot_id: "snapshot-phase183-current",
+            memory_context_snapshot_checksum: "snapshot-checksum-phase183-current",
+            task_agent_session_id: currentTaskSession,
+            native_session_id: currentNativeSession,
+            execution_id: "execution-phase183-current",
+            receipt_status: "done",
+            receipt,
+            timeline_event: { id: "phase183-child-agent-receipt", type: "child_agent_receipt", at: "2026-07-11T00:41:00.000Z" },
+        }, { at: "2026-07-11T00:41:00.000Z" });
+        const assignmentLedger = readReplayRepairDispatchBindingLedgerForCoordinator(groupA);
+        const persistedBinding = (assignmentLedger.entries || []).find((entry) => entry.binding_id === binding?.binding_id) || {};
+        const receiptReport = buildPostCompactReinjectionRepairReceiptMemoryUsageReceiptReport({ groupIds: [groupA], tasks: [] });
+        const groupAReport = (report.groups || []).find((row) => row.groupId === groupA) || {};
+        const groupBReport = (report.groups || []).find((row) => row.groupId === groupB) || {};
+        const renderedPacket = renderWorkerContextPacket(packet);
+        const historicalTaskSessions = normalizeQualityStringList(contract.historical_task_agent_session_ids || []);
+        const historicalNativeSessions = normalizeQualityStringList(contract.historical_native_session_ids || []);
+        const checks = {
+            twoGroupsAndTwoFreshSessionsPass: report.overall?.status === "ok"
+                && Number(report.overall?.checkedGroupCount || 0) === 2
+                && Number(report.overall?.groupsCovered || 0) === 2
+                && Number(report.overall?.firstSessionRecallCount || 0) === 2
+                && Number(report.overall?.secondSessionRecallCount || 0) === 2
+                && Number(report.overall?.distinctSessionBindingCount || 0) === 2,
+            groupRecallIdentityIsIsolated: (groupAReport.completionWorkItemIds || []).includes(rowA.work_item_id)
+                && !(groupAReport.completionWorkItemIds || []).includes(rowB.work_item_id)
+                && (groupBReport.completionWorkItemIds || []).includes(rowB.work_item_id)
+                && !(groupBReport.completionWorkItemIds || []).includes(rowA.work_item_id),
+            packetCarriesCompletionMemoryContract: contract.corrected_receipt_completion_memory_active === true
+                && requiredDocs.includes(completionDoc)
+                && (contract.corrected_receipt_completion_work_item_ids || []).includes(rowA.work_item_id)
+                && (contract.corrected_receipt_completion_timeline_binding_ids || []).includes(rowA.timeline_binding_id)
+                && contract.current_task_agent_session_id === currentTaskSession
+                && contract.current_native_session_id === currentNativeSession
+                && packet.acceptance?.post_compact_receipt_memory_usage_repair_completion_memory_usage_required === true,
+            historicalSessionsRemainEvidenceOnly: historicalTaskSessions.includes(rowA.original_task_agent_session_id)
+                && historicalTaskSessions.includes(rowA.task_agent_session_id)
+                && historicalNativeSessions.includes(rowA.original_native_session_id)
+                && historicalNativeSessions.includes(rowA.native_session_id)
+                && !historicalTaskSessions.includes(currentTaskSession)
+                && !historicalNativeSessions.includes(currentNativeSession)
+                && renderedPacket.includes("Historical original/repair sessions never authorize this child Agent session"),
+            handoffRendersPerSessionReceiptContract: handoffText.includes(completionDoc)
+                && handoffText.includes("不能替代当前会话")
+                && handoffText.includes("memoryUsed")
+                && handoffText.includes("memoryIgnored"),
+            assignmentPersistsContractAndReceipt: persistedBinding.post_compact_reinjection_repair_receipt_memory_contract?.corrected_receipt_completion_memory_active === true
+                && persistedBinding.worker_context_packet_receipt?.worker_context_packet_id === packet.packet_id
+                && persistedBinding.worker_context_packet_receipt?.task_agent_session_id === currentTaskSession
+                && persistedBinding.worker_context_packet_receipt?.native_session_id === currentNativeSession,
+            realFreshReceiptPassesExistingValidator: receiptReport.overall?.status === "ok"
+                && Number(receiptReport.overall?.receiptContractCount || 0) === 1
+                && Number(receiptReport.overall?.coveredReceiptCount || 0) === 1,
+            staleAndHistoricalSessionReceiptsRejected: groupAReport.staleCoverage?.pass === false
+                && groupAReport.staleCoverage?.gaps?.includes("current_source_verified_missing")
+                && groupAReport.historicalSessionCoverage?.pass === false
+                && groupAReport.historicalSessionCoverage?.gaps?.includes("task_agent_session_mismatch")
+                && groupAReport.historicalSessionCoverage?.gaps?.includes("native_session_mismatch"),
+            qualityCheckRegisteredAndPasses: quality.status === "ok"
+                && Number(quality.checked || 0) === 2
+                && Number(quality.passed || 0) === 2
+                && qualityCheck.status === "ok"
+                && Number(qualityCheck.checked || 0) === 2
+                && Number(qualityCheck.passed || 0) === 2,
+        };
+        return {
+            pass: Object.values(checks).every(Boolean),
+            checks,
+            report: report.overall,
+            receiptReport: receiptReport.overall,
+            quality: { status: qualityCheck.status || "", checked: qualityCheck.checked || 0, passed: qualityCheck.passed || 0 },
+            groupA: { workItemIds: groupAReport.completionWorkItemIds || [], requiredDocs: groupAReport.requiredDocRelPaths || [] },
+            groupB: { workItemIds: groupBReport.completionWorkItemIds || [], requiredDocs: groupBReport.requiredDocRelPaths || [] },
+        };
+    }
+    finally {
+        for (const file of [bindingFileA, `${bindingFileA}.bak`, timelineFileA, `${timelineFileA}.bak`]) {
+            try {
+                if (file && fs.existsSync(file))
+                    fs.unlinkSync(file);
+            }
+            catch { }
+        }
         for (const dir of [typedDirA, typedDirB]) {
             try {
                 if (fs.existsSync(dir))

@@ -48,6 +48,7 @@ const stability_summary_1 = require("./stability-summary");
 const authentication_1 = require("./authentication");
 const existing_session_1 = require("./existing-session");
 const action_effects_1 = require("./action-effects");
+const check_execution_coverage_1 = require("./check-execution-coverage");
 async function listTools(context) {
     const listed = await context.runtime.browserToolExecutor?.listTools?.();
     return Array.isArray(listed) ? listed.map(String) : [];
@@ -462,7 +463,12 @@ exports.McpBrowserProvider = {
             for (let i = 0; i < checks.length; i += 1) {
                 if (context.checkFilter && !context.checkFilter(project, checks[i], i))
                     continue;
-                results.push(await runMcpCheck(context, tools, project, checks[i], i));
+                results.push((0, check_execution_coverage_1.withBrowserCheckExecutionIdentity)({
+                    result: await runMcpCheck(context, tools, project, checks[i], i),
+                    workOrder: context.workOrder,
+                    project,
+                    checkIndex: i,
+                }));
             }
         }
         return results;

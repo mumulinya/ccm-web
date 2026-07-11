@@ -21,6 +21,7 @@ import { formatBrowserProviderSummaryLine } from "./browser/provider-summary";
 import { formatBrowserFlowSummaryLine } from "./browser/flow-summary";
 import { formatBrowserMultiSessionSummaryLine } from "./browser/multi-session-summary";
 import { formatBrowserStabilitySummaryLine } from "./browser/stability-summary";
+import { formatBrowserCheckExecutionCoverageLine } from "./browser/check-execution-coverage";
 import {
   buildBrowserAuthenticationSummary,
   formatBrowserAuthenticationEvidence,
@@ -207,6 +208,24 @@ function browserStabilitySummaryLines(report: TestAgentReport) {
       item.firstFailure ? `firstFailure=${item.firstFailure}` : "",
     ].filter(Boolean).join("; ");
     lines.push(statusLine(`${item.project} / ${item.name}`, item.status, detail));
+  }
+  return lines;
+}
+
+function browserCheckExecutionCoverageLines(report: TestAgentReport) {
+  const summary = report.browserCheckExecutionCoverage;
+  if (!summary) return ["- none"];
+  const lines = [`- ${formatBrowserCheckExecutionCoverageLine(summary)}; syntheticBlocked=${summary.syntheticBlockedCount}`];
+  for (const item of summary.items) {
+    const detail = [
+      `provider=${item.plannedProvider}`,
+      `runs=${item.observedRuns.length}/${item.expectedRuns}`,
+      `observed=${item.observedRuns.join(",") || "none"}`,
+      `missing=${item.missingRuns.join(",") || "none"}`,
+      `duplicate=${item.duplicateRuns.join(",") || "none"}`,
+      `syntheticBlocked=${item.syntheticBlockedRuns.join(",") || "none"}`,
+    ].join("; ");
+    lines.push(statusLine(`${item.project} / ${item.name} [${item.checkId}]`, item.status, detail));
   }
   return lines;
 }
@@ -799,6 +818,10 @@ export function buildTestAgentMarkdownReport(report: TestAgentReport) {
     "## Browser Stability Summary",
     "",
     ...browserStabilitySummaryLines(report),
+    "",
+    "## Browser Check Execution Coverage",
+    "",
+    ...browserCheckExecutionCoverageLines(report),
     "",
     "## Browser Acceptance Flow Summary",
     "",

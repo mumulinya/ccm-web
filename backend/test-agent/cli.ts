@@ -9,6 +9,10 @@ import { formatBrowserProviderSummaryLine } from "./browser/provider-summary";
 import { formatBrowserFlowAttentionLines, formatBrowserFlowSummaryLine } from "./browser/flow-summary";
 import { formatBrowserMultiSessionAttentionLines, formatBrowserMultiSessionSummaryLine } from "./browser/multi-session-summary";
 import { formatBrowserStabilityAttentionLines, formatBrowserStabilitySummaryLine } from "./browser/stability-summary";
+import {
+  formatBrowserCheckExecutionCoverageAttentionLines,
+  formatBrowserCheckExecutionCoverageLine,
+} from "./browser/check-execution-coverage";
 import { buildBrowserAuthenticationSummary, formatBrowserAuthenticationSummaryLine } from "./browser/authentication-summary";
 import { formatBrowserRecoverySummaryLine } from "./browser/recovery-summary";
 import { formatBrowserActionEffectSummaryLine } from "./browser/action-effect-summary";
@@ -107,6 +111,8 @@ export function formatTestAgentCliReportSummary(report: TestAgentReport) {
     `HTTP concurrency: ${formatHttpConcurrencySummaryLine(report.httpConcurrencySummary)}`,
     `Adversarial evidence: ${formatAdversarialEvidenceSummaryLine(report.adversarialEvidenceSummary)}`,
     `Browser checks: ${statusCounts(report.browserResults)}`,
+    `Browser execution coverage: ${formatBrowserCheckExecutionCoverageLine(report.browserCheckExecutionCoverage)}`,
+    ...formatBrowserCheckExecutionCoverageAttentionLines(report.browserCheckExecutionCoverage, 5),
     `Browser multi-session: ${formatBrowserMultiSessionSummaryLine(report.browserMultiSessionSummary)}`,
     ...formatBrowserMultiSessionAttentionLines(report.browserMultiSessionSummary, 5),
     `Browser stability: ${formatBrowserStabilitySummaryLine(report.browserStabilitySummary)}`,

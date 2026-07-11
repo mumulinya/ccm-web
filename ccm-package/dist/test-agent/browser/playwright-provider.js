@@ -49,6 +49,7 @@ const stability_summary_1 = require("./stability-summary");
 const shared_1 = require("./shared");
 const authentication_1 = require("./authentication");
 const existing_session_1 = require("./existing-session");
+const check_execution_coverage_1 = require("./check-execution-coverage");
 const action_effects_1 = require("./action-effects");
 const network_assertions_1 = require("./network-assertions");
 const console_assertions_1 = require("./console-assertions");
@@ -3391,7 +3392,12 @@ exports.PlaywrightBrowserProvider = {
             result.adversarial = check.adversarial === true;
             result.probeType = check.probeType || check.probe_type;
             result.context = check.context;
-            return result;
+            return (0, check_execution_coverage_1.withBrowserCheckExecutionIdentity)({
+                result,
+                workOrder: context.workOrder,
+                project,
+                checkIndex: index,
+            });
         });
         if (!executableChecks.length)
             return existingSessionBlocked;
@@ -3435,7 +3441,14 @@ exports.PlaywrightBrowserProvider = {
                             ? await runMultiSessionBrowserCheck(browser, context, project, checks[i], artifactIndex)
                             : await runBrowserCheck(browser, context, project, checks[i], artifactIndex);
                         artifactIndex += 1;
-                        results.push((0, stability_summary_1.withBrowserStabilityMetadata)({ result, groupId, run, runs }));
+                        results.push((0, check_execution_coverage_1.withBrowserCheckExecutionIdentity)({
+                            result: (0, stability_summary_1.withBrowserStabilityMetadata)({ result, groupId, run, runs }),
+                            workOrder: context.workOrder,
+                            project,
+                            checkIndex: i,
+                            run,
+                            expectedRuns: runs,
+                        }));
                     }
                 }
             }

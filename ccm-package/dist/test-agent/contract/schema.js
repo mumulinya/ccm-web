@@ -9,6 +9,7 @@ const adversarial_summary_1 = require("../adversarial-summary");
 const acceptance_gate_1 = require("../acceptance-gate");
 const http_concurrency_1 = require("../http-concurrency");
 const http_page_resources_1 = require("../http-page-resources");
+const check_execution_coverage_1 = require("../browser/check-execution-coverage");
 exports.TEST_AGENT_CONTRACT_IDS = {
     handoff: "ccm-test-agent-handoff-v1",
     workOrder: "ccm-test-agent-work-order-v1",
@@ -1226,6 +1227,64 @@ const browserStabilitySummarySchema = zod_1.z.object({
     screenshotCount: zod_1.z.number().int().nonnegative(),
     items: zod_1.z.array(browserStabilitySummaryItemSchema),
 }).passthrough();
+const browserCheckExecutionIdentitySchema = zod_1.z.object({
+    checkId: zod_1.z.string().min(1),
+    projectIndex: zod_1.z.number().int().nonnegative(),
+    checkIndex: zod_1.z.number().int().nonnegative(),
+    run: zod_1.z.number().int().positive(),
+    expectedRuns: zod_1.z.number().int().positive(),
+    evidence: zod_1.z.enum(["provider", "synthetic_missing"]),
+}).strict();
+const browserCheckExecutionPlanItemSchema = zod_1.z.object({
+    checkId: zod_1.z.string().min(1),
+    project: zod_1.z.string().min(1),
+    projectIndex: zod_1.z.number().int().nonnegative(),
+    checkIndex: zod_1.z.number().int().nonnegative(),
+    name: zod_1.z.string().min(1),
+    url: zod_1.z.string(),
+    expectedRuns: zod_1.z.number().int().positive(),
+    plannedProvider: zod_1.z.enum(["playwright", "mcp", "none"]),
+    providerRoutingReason: zod_1.z.string().min(1),
+    adversarial: zod_1.z.boolean(),
+    probeType: optionalString,
+}).strict();
+const browserCheckExecutionPlanSchema = zod_1.z.object({
+    schema: zod_1.z.literal("ccm-test-agent-browser-execution-plan-v1"),
+    preferredProvider: zod_1.z.string().min(1),
+    plannedCheckCount: zod_1.z.number().int().nonnegative(),
+    expectedRunCount: zod_1.z.number().int().nonnegative(),
+    items: zod_1.z.array(browserCheckExecutionPlanItemSchema),
+}).strict();
+const browserCheckExecutionCoverageItemSchema = zod_1.z.object({
+    checkId: zod_1.z.string().min(1),
+    project: zod_1.z.string(),
+    name: zod_1.z.string(),
+    plannedProvider: zod_1.z.enum(["playwright", "mcp", "none"]),
+    expectedRuns: zod_1.z.number().int().positive(),
+    observedRuns: zod_1.z.array(zod_1.z.number().int().positive()),
+    missingRuns: zod_1.z.array(zod_1.z.number().int().positive()),
+    duplicateRuns: zod_1.z.array(zod_1.z.number().int().positive()),
+    syntheticBlockedRuns: zod_1.z.array(zod_1.z.number().int().positive()),
+    status: zod_1.z.enum(["complete", "incomplete", "invalid"]),
+}).strict();
+const browserCheckExecutionCoverageSchema = zod_1.z.object({
+    status: zod_1.z.enum(["complete", "incomplete", "invalid"]),
+    plannedCheckCount: zod_1.z.number().int().nonnegative(),
+    expectedRunCount: zod_1.z.number().int().nonnegative(),
+    coveredRunCount: zod_1.z.number().int().nonnegative(),
+    missingRunCount: zod_1.z.number().int().nonnegative(),
+    providerResultCount: zod_1.z.number().int().nonnegative(),
+    duplicateResultCount: zod_1.z.number().int().nonnegative(),
+    invalidResultCount: zod_1.z.number().int().nonnegative(),
+    diagnosticResultCount: zod_1.z.number().int().nonnegative(),
+    syntheticBlockedCount: zod_1.z.number().int().nonnegative(),
+    statusCounts: zod_1.z.object({
+        complete: zod_1.z.number().int().nonnegative(),
+        incomplete: zod_1.z.number().int().nonnegative(),
+        invalid: zod_1.z.number().int().nonnegative(),
+    }).strict(),
+    items: zod_1.z.array(browserCheckExecutionCoverageItemSchema),
+}).strict();
 const browserProviderGapSchema = zod_1.z.object({
     provider: zod_1.z.string(),
     project: optionalString,
@@ -1636,6 +1695,7 @@ const browserActionEffectSummarySchema = zod_1.z.object({
 });
 const browserCheckResultSchema = zod_1.z.object({
     status: resultStatus,
+    execution: browserCheckExecutionIdentitySchema.optional(),
     browserSessions: zod_1.z.array(browserSessionResultSchema).optional(),
     browserSessionComparisons: zod_1.z.array(browserSessionComparisonResultSchema).optional(),
     authentication: browserAuthenticationEvidenceSchema.optional(),
@@ -1783,6 +1843,7 @@ exports.TestAgentReportContractSchema = zod_1.z.object({
     browserFlowSummary: browserFlowSummarySchema.optional(),
     browserMultiSessionSummary: browserMultiSessionSummarySchema.optional(),
     browserStabilitySummary: browserStabilitySummarySchema.optional(),
+    browserCheckExecutionCoverage: browserCheckExecutionCoverageSchema.optional(),
     browserRecoverySummary: browserRecoverySummarySchema.optional(),
     browserActionEffectSummary: browserActionEffectSummarySchema.optional(),
     adversarialEvidenceSummary: adversarialEvidenceSummarySchema,
@@ -1804,6 +1865,38 @@ exports.TestAgentReportContractSchema = zod_1.z.object({
     metadata: zod_1.z.record(zod_1.z.any()),
 }).passthrough().superRefine((value, ctx) => {
     validateMinimalBrowserToolCalls(value, ctx);
+    const browserExecutionPlanValue = value.metadata?.browserCheckExecutionPlan;
+    if (browserExecutionPlanValue !== undefined) {
+        const parsedPlan = browserCheckExecutionPlanSchema.safeParse(browserExecutionPlanValue);
+        if (!parsedPlan.success) {
+            ctx.addIssue({
+                code: zod_1.z.ZodIssueCode.custom,
+                message: "metadata.browserCheckExecutionPlan is invalid.",
+                path: ["metadata", "browserCheckExecutionPlan"],
+            });
+        }
+        else {
+            for (const error of (0, check_execution_coverage_1.browserCheckExecutionEvidenceErrors)({
+                plan: parsedPlan.data,
+                results: Array.isArray(value.browserResults) ? value.browserResults : [],
+                summary: value.browserCheckExecutionCoverage,
+                reportStatus: value.status,
+            })) {
+                ctx.addIssue({
+                    code: zod_1.z.ZodIssueCode.custom,
+                    message: error,
+                    path: ["browserCheckExecutionCoverage"],
+                });
+            }
+        }
+    }
+    else if ((Array.isArray(value.browserResults) ? value.browserResults : []).some((result) => result?.execution)) {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: "Browser execution identities require metadata.browserCheckExecutionPlan.",
+            path: ["metadata", "browserCheckExecutionPlan"],
+        });
+    }
     const hasEffects = (Array.isArray(value.browserResults) ? value.browserResults : [])
         .some((result) => Array.isArray(result?.actionEffects) && result.actionEffects.length);
     if (hasEffects && !value.browserActionEffectSummary) {
@@ -1956,6 +2049,12 @@ exports.TestAgentVerdictContractSchema = zod_1.z.object({
         browserFlakyStabilityGroups: zod_1.z.number().optional(),
         browserStabilityRuns: zod_1.z.number().optional(),
         browserFailedStabilityRuns: zod_1.z.number().optional(),
+        browserPlannedChecks: zod_1.z.number().optional(),
+        browserExpectedRuns: zod_1.z.number().optional(),
+        browserCoveredRuns: zod_1.z.number().optional(),
+        browserMissingRuns: zod_1.z.number().optional(),
+        browserDuplicateResults: zod_1.z.number().optional(),
+        browserInvalidResults: zod_1.z.number().optional(),
         browserRecoveryAttempts: zod_1.z.number().optional(),
         browserRecoveredOperations: zod_1.z.number().optional(),
         browserFailedRecoveries: zod_1.z.number().optional(),
@@ -1983,6 +2082,7 @@ exports.TestAgentVerdictContractSchema = zod_1.z.object({
     browserFlowSummary: browserFlowSummarySchema.optional(),
     browserMultiSessionSummary: browserMultiSessionSummarySchema.optional(),
     browserStabilitySummary: browserStabilitySummarySchema.optional(),
+    browserCheckExecutionCoverage: browserCheckExecutionCoverageSchema.optional(),
     browserRecoverySummary: browserRecoverySummarySchema.optional(),
     browserActionEffectSummary: browserActionEffectSummarySchema.optional(),
     adversarialEvidenceSummary: adversarialEvidenceSummarySchema,
@@ -2019,6 +2119,13 @@ exports.TestAgentVerdictContractSchema = zod_1.z.object({
         ctx.addIssue({
             code: zod_1.z.ZodIssueCode.custom,
             message: "canAccept requires criterion-linked acceptance evidence or no acceptance criteria.",
+            path: ["canAccept"],
+        });
+    }
+    if (value.canAccept && value.browserCheckExecutionCoverage && value.browserCheckExecutionCoverage.status !== "complete") {
+        ctx.addIssue({
+            code: zod_1.z.ZodIssueCode.custom,
+            message: "canAccept requires complete browser check execution coverage.",
             path: ["canAccept"],
         });
     }

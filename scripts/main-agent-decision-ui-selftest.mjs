@@ -1252,6 +1252,21 @@ const checks = {
     && renderFixture.includes('case-global-single-project-supervision')
     && renderRegression.includes('07i-global-single-project-supervision.png')
     && renderRegression.includes('global single-project technical details should be folded by default'),
+  globalWebLegacyDispatchUsesPersistentTaskChains: globalAgent.includes('dispatchTrackedGlobalMission')
+    && globalAgent.includes("source: 'global-agent-chat-single-project'")
+    && globalAgent.includes("schema: 'ccm-global-single-project-supervision-v1'")
+    && globalAgent.includes("message_mode: 'project_task'")
+    && globalAgent.includes('global_direct_dispatch')
+    && !globalAgent.includes("fetch('/api/send'")
+    && globalAgent.includes('当前只是已派发，不代表最终完成'),
+  globalMissionConversationNotificationsAreDurable: globalAgentSessions.includes('globalMissionConversationState')
+    && globalAgentSessions.includes('globalMissionNotificationId')
+    && globalAgentSessions.includes('upsertGlobalMissionConversationNotification')
+    && globalAgent.includes('globalMissionNotificationContent')
+    && globalAgent.includes("['completed', 'failed', 'cancelled'].includes(state)")
+    && globalAgent.includes('stopMissionTracking(missionId)')
+    && taskExperienceSelftest.includes('globalMissionNotificationsAreIdempotentPerState')
+    && taskExperienceSelftest.includes('globalMissionNotificationsSurviveHistoryMergeWithoutDuplicates'),
   backendGlobalBuildsDispatchLaunchSummary: backendGlobalLoop.includes('buildGlobalDispatchLaunchSummary') && backendGlobalLoop.includes('emitGlobalDispatchLaunchProgress') && backendGlobalLoop.includes('ccm-main-agent-dispatch-launch-summary-v1') && backendGlobalLoop.includes('dispatch_launch_summary: dispatchLaunchSummary') && backendGlobalLoop.includes('main_agent_decision: mainAgentDecision') && backendGlobalLoop.includes('globalDispatchLaunchSummaryVisible') && backendGlobalLoop.includes('globalDispatchLaunchSummaryStreamsLive') && backendGlobalLoop.includes('globalOrdinaryAnswerHasNoDispatchLaunchSummary') && backendGlobalLoop.includes('globalOrdinaryAnswerHasNoDispatchLaunchEvent'),
   backendGlobalDispatchLaunchDoesNotClaimCompletion: backendGlobalLoop.includes('normalizeGlobalDispatchLaunchRowStatus')
     && backendGlobalLoop.includes('已回传结果，待验收')

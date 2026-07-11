@@ -49,6 +49,7 @@ const provider_summary_1 = require("./browser/provider-summary");
 const flow_summary_1 = require("./browser/flow-summary");
 const multi_session_summary_1 = require("./browser/multi-session-summary");
 const stability_summary_1 = require("./browser/stability-summary");
+const check_execution_coverage_1 = require("./browser/check-execution-coverage");
 const authentication_summary_1 = require("./browser/authentication-summary");
 const recovery_summary_1 = require("./browser/recovery-summary");
 const action_effect_summary_1 = require("./browser/action-effect-summary");
@@ -121,6 +122,8 @@ function formatTestAgentCliReportSummary(report) {
         `HTTP concurrency: ${(0, http_concurrency_1.formatHttpConcurrencySummaryLine)(report.httpConcurrencySummary)}`,
         `Adversarial evidence: ${(0, adversarial_summary_1.formatAdversarialEvidenceSummaryLine)(report.adversarialEvidenceSummary)}`,
         `Browser checks: ${statusCounts(report.browserResults)}`,
+        `Browser execution coverage: ${(0, check_execution_coverage_1.formatBrowserCheckExecutionCoverageLine)(report.browserCheckExecutionCoverage)}`,
+        ...(0, check_execution_coverage_1.formatBrowserCheckExecutionCoverageAttentionLines)(report.browserCheckExecutionCoverage, 5),
         `Browser multi-session: ${(0, multi_session_summary_1.formatBrowserMultiSessionSummaryLine)(report.browserMultiSessionSummary)}`,
         ...(0, multi_session_summary_1.formatBrowserMultiSessionAttentionLines)(report.browserMultiSessionSummary, 5),
         `Browser stability: ${(0, stability_summary_1.formatBrowserStabilitySummaryLine)(report.browserStabilitySummary)}`,

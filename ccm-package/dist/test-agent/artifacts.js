@@ -46,6 +46,7 @@ const provider_summary_1 = require("./browser/provider-summary");
 const flow_summary_1 = require("./browser/flow-summary");
 const multi_session_summary_1 = require("./browser/multi-session-summary");
 const stability_summary_1 = require("./browser/stability-summary");
+const check_execution_coverage_1 = require("./browser/check-execution-coverage");
 const authentication_summary_1 = require("./browser/authentication-summary");
 const recovery_summary_1 = require("./browser/recovery-summary");
 const action_effect_summary_1 = require("./browser/action-effect-summary");
@@ -220,6 +221,24 @@ function browserStabilitySummaryLines(report) {
             item.firstFailure ? `firstFailure=${item.firstFailure}` : "",
         ].filter(Boolean).join("; ");
         lines.push(statusLine(`${item.project} / ${item.name}`, item.status, detail));
+    }
+    return lines;
+}
+function browserCheckExecutionCoverageLines(report) {
+    const summary = report.browserCheckExecutionCoverage;
+    if (!summary)
+        return ["- none"];
+    const lines = [`- ${(0, check_execution_coverage_1.formatBrowserCheckExecutionCoverageLine)(summary)}; syntheticBlocked=${summary.syntheticBlockedCount}`];
+    for (const item of summary.items) {
+        const detail = [
+            `provider=${item.plannedProvider}`,
+            `runs=${item.observedRuns.length}/${item.expectedRuns}`,
+            `observed=${item.observedRuns.join(",") || "none"}`,
+            `missing=${item.missingRuns.join(",") || "none"}`,
+            `duplicate=${item.duplicateRuns.join(",") || "none"}`,
+            `syntheticBlocked=${item.syntheticBlockedRuns.join(",") || "none"}`,
+        ].join("; ");
+        lines.push(statusLine(`${item.project} / ${item.name} [${item.checkId}]`, item.status, detail));
     }
     return lines;
 }
@@ -776,6 +795,10 @@ function buildTestAgentMarkdownReport(report) {
         "## Browser Stability Summary",
         "",
         ...browserStabilitySummaryLines(report),
+        "",
+        "## Browser Check Execution Coverage",
+        "",
+        ...browserCheckExecutionCoverageLines(report),
         "",
         "## Browser Acceptance Flow Summary",
         "",

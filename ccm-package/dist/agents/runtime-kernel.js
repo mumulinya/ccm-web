@@ -443,14 +443,37 @@ function extractPostCompactReinjectionRepairReceiptMemoryContract(memory = {}, f
         candidate.candidate_values,
         rows.map((row) => row.post_compact_candidate_value || row.postCompactCandidateValue),
     ], 16);
+    const completionDocRelPaths = uniqueRuntimeStrings([
+        candidate.completionDocRelPaths,
+        candidate.completion_doc_rel_paths,
+        rows.filter((row) => row.row_kind === "receipt_memory_usage_repair_completion").flatMap((row) => row.required_doc_rel_paths || []),
+    ], 12);
+    const completionWorkItemIds = uniqueRuntimeStrings([
+        candidate.completionWorkItemIds,
+        candidate.completion_work_item_ids,
+        rows.filter((row) => row.row_kind === "receipt_memory_usage_repair_completion").map((row) => row.work_item_id),
+    ], 16);
+    const completionTimelineBindingIds = uniqueRuntimeStrings([
+        candidate.completionTimelineBindingIds,
+        candidate.completion_timeline_binding_ids,
+        rows.filter((row) => row.row_kind === "receipt_memory_usage_repair_completion").map((row) => row.timeline_binding_id),
+    ], 16);
     const historicalTaskAgentSessionIds = uniqueRuntimeStrings([
         candidate.taskAgentSessionIds,
         candidate.task_agent_session_ids,
+        candidate.originalTaskAgentSessionIds,
+        candidate.original_task_agent_session_ids,
+        candidate.repairTaskAgentSessionIds,
+        candidate.repair_task_agent_session_ids,
         rows.map((row) => row.historical_task_agent_session_id || row.task_agent_session_id),
     ], 16);
     const historicalNativeSessionIds = uniqueRuntimeStrings([
         candidate.nativeSessionIds,
         candidate.native_session_ids,
+        candidate.originalNativeSessionIds,
+        candidate.original_native_session_ids,
+        candidate.repairNativeSessionIds,
+        candidate.repair_native_session_ids,
         rows.map((row) => row.historical_native_session_id || row.native_session_id),
     ], 16);
     return {
@@ -473,17 +496,29 @@ function extractPostCompactReinjectionRepairReceiptMemoryContract(memory = {}, f
         reinjection_gate_ids: gateIds,
         post_compact_candidate_ids: candidateIds,
         post_compact_candidate_values: candidateValues,
+        corrected_receipt_completion_memory_active: completionWorkItemIds.length > 0,
+        corrected_receipt_completion_doc_rel_paths: completionDocRelPaths,
+        corrected_receipt_completion_work_item_ids: completionWorkItemIds,
+        corrected_receipt_completion_timeline_binding_ids: completionTimelineBindingIds,
         historical_task_agent_session_ids: historicalTaskAgentSessionIds,
         historical_native_session_ids: historicalNativeSessionIds,
         rows: rows.map((row) => ({
             row_id: row.row_id || "",
+            row_kind: row.row_kind || "",
             reinjection_gate_id: row.reinjection_gate_id || "",
             post_compact_candidate_id: row.post_compact_candidate_id || "",
             post_compact_candidate_kind: row.post_compact_candidate_kind || "",
             post_compact_candidate_value: row.post_compact_candidate_value || "",
             usage_state: row.usage_state || "",
+            work_item_id: row.work_item_id || "",
+            timeline_binding_id: row.timeline_binding_id || "",
+            original_worker_context_packet_id: row.original_worker_context_packet_id || "",
+            required_doc_rel_paths: Array.isArray(row.required_doc_rel_paths) ? row.required_doc_rel_paths.slice(0, 8) : [],
+            coverage_rows: Array.isArray(row.coverage_rows) ? row.coverage_rows.slice(0, 8) : [],
             historical_task_agent_session_id: row.historical_task_agent_session_id || "",
             historical_native_session_id: row.historical_native_session_id || "",
+            repair_task_agent_session_id: row.repair_task_agent_session_id || "",
+            repair_native_session_id: row.repair_native_session_id || "",
             completion_source: row.completion_source || "",
             resolution_reason: row.resolution_reason || "",
         })),
@@ -502,6 +537,8 @@ function renderPostCompactReinjectionRepairReceiptMemoryContract(contract = {}) 
     ], 8);
     const gateIds = uniqueRuntimeStrings([contract.reinjection_gate_ids, contract.reinjectionGateIds], 8);
     const candidateIds = uniqueRuntimeStrings([contract.post_compact_candidate_ids, contract.postCompactCandidateIds], 8);
+    const completionWorkItemIds = uniqueRuntimeStrings([contract.corrected_receipt_completion_work_item_ids, contract.correctedReceiptCompletionWorkItemIds], 8);
+    const completionTimelineBindingIds = uniqueRuntimeStrings([contract.corrected_receipt_completion_timeline_binding_ids, contract.correctedReceiptCompletionTimelineBindingIds], 8);
     const historicalTaskSessions = uniqueRuntimeStrings([contract.historical_task_agent_session_ids, contract.historicalTaskAgentSessionIds], 6);
     const historicalNativeSessions = uniqueRuntimeStrings([contract.historical_native_session_ids, contract.historicalNativeSessionIds], 6);
     return [
@@ -512,7 +549,9 @@ function renderPostCompactReinjectionRepairReceiptMemoryContract(contract = {}) 
         "- Freshness boundary: historical repair completion is recovery evidence, not permanent repository truth; future use must reverify the current source.",
         contract.current_session_binding_id ? `- Current child session binding: ${contract.current_session_binding_id}; task_agent_session=${contract.current_task_agent_session_id || ""}; native_session=${contract.current_native_session_id || ""}.` : "",
         gateIds.length || candidateIds.length ? `- Historical repair identities: gates=${gateIds.join(",") || "none"}; candidates=${candidateIds.join(",") || "none"}.` : "",
+        completionWorkItemIds.length || completionTimelineBindingIds.length ? `- Corrected-receipt completion identities: work_items=${completionWorkItemIds.join(",") || "none"}; timelines=${completionTimelineBindingIds.join(",") || "none"}.` : "",
         historicalTaskSessions.length || historicalNativeSessions.length ? `- Historical sessions are evidence only: task_agent_sessions=${historicalTaskSessions.join(",") || "none"}; native_sessions=${historicalNativeSessions.join(",") || "none"}.` : "",
+        contract.corrected_receipt_completion_memory_active === true ? "- Historical original/repair sessions never authorize this child Agent session; bind the new memoryUsed/memoryIgnored decision to the current task/native session." : "",
         ...(Array.isArray(contract.memory_used_templates) ? contract.memory_used_templates.slice(0, 4).map((item) => `- memoryUsed template: ${item}`) : []),
         ...(Array.isArray(contract.memory_ignored_templates) ? contract.memory_ignored_templates.slice(0, 4).map((item) => `- memoryIgnored template: ${item}`) : []),
     ].filter(Boolean).join("\n");
@@ -1167,6 +1206,9 @@ function buildWorkerContextPacket(input) {
             post_compact_reinjection_repair_receipt_memory_current_source_reverification_required: postCompactReinjectionRepairReceiptMemoryContract?.active === true,
             post_compact_reinjection_repair_receipt_memory_ignored_reason_required: postCompactReinjectionRepairReceiptMemoryContract?.active === true,
             post_compact_reinjection_repair_receipt_memory_required_doc_rel_paths: postCompactReinjectionRepairReceiptMemoryContract?.memory_receipt_required_doc_rel_paths || [],
+            post_compact_receipt_memory_usage_repair_completion_memory_usage_required: postCompactReinjectionRepairReceiptMemoryContract?.corrected_receipt_completion_memory_active === true,
+            post_compact_receipt_memory_usage_repair_completion_current_session_binding_required: postCompactReinjectionRepairReceiptMemoryContract?.corrected_receipt_completion_memory_active === true,
+            post_compact_receipt_memory_usage_repair_completion_required_doc_rel_paths: postCompactReinjectionRepairReceiptMemoryContract?.corrected_receipt_completion_doc_rel_paths || [],
             cross_group_provider_reliability_sampling_required: pressureProvenanceProviderSelectedCandidate.cross_group_provider_reliability_actionable === true
                 && pressureProvenanceProviderDispatchAdvisory?.should_hold_dispatch !== true,
             cross_group_provider_reliability_local_policy_override_allowed: false,

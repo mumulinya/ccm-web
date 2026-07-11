@@ -154,6 +154,50 @@ const messagesChanged = (before = [], after = []) => {
   return before.some((message, index) => messageSignature(message) !== messageSignature(after[index]))
 }
 
+const globalMissionConversationState = ({ mission = {}, supervisor = {}, run = {} } = {}) => {
+  const missionStatus = String(mission?.status || '').toLowerCase()
+  const supervisorStatus = String(supervisor?.status || '').toLowerCase()
+  const runStatus = String(run?.status || '').toLowerCase()
+  const statuses = [missionStatus, supervisorStatus, runStatus]
+  if (statuses.includes('cancelled') || statuses.includes('canceled')) return 'cancelled'
+  if (statuses.includes('failed')) return 'failed'
+  if (statuses.some(status => ['waiting_user', 'needs_user', 'waiting_clarification'].includes(status))) return 'waiting_user'
+  const missionDone = missionStatus === 'done' || missionStatus === 'completed'
+  const supervisorDone = !supervisorStatus || supervisorStatus === 'completed'
+  const runDone = !runStatus || runStatus === 'completed'
+  if (missionDone && supervisorDone && runDone) return 'completed'
+  return 'active'
+}
+
+const globalMissionNotificationId = (missionId, state) => `global-mission-notification:${String(missionId || '').trim()}:${String(state || 'active').trim()}`
+
+const upsertGlobalMissionConversationNotification = (messages = [], input = {}) => {
+  const missionId = String(input.missionId || input.mission_id || '').trim()
+  const state = String(input.state || 'active').trim()
+  const content = String(input.content || '').trim()
+  if (!missionId || !content || state === 'active') return { changed: false, created: false, message: null }
+  const id = globalMissionNotificationId(missionId, state)
+  const index = messages.findIndex(message => String(message?.id || '') === id)
+  const previous = index >= 0 ? messages[index] : null
+  const notification = {
+    ...(previous || {}),
+    ...(input.extra || {}),
+    id,
+    role: 'assistant',
+    type: state === 'waiting_user' ? 'global_mission_waiting_user' : 'global_mission_terminal',
+    missionNotificationState: state,
+    mission_notification_state: state,
+    missionId,
+    mission_id: missionId,
+    content,
+    timestamp: previous?.timestamp || input.timestamp || new Date().toISOString(),
+    updated_at: input.updatedAt || input.updated_at || new Date().toISOString(),
+  }
+  if (index >= 0) messages.splice(index, 1, notification)
+  else messages.push(notification)
+  return { changed: !previous || messageSignature(previous) !== messageSignature(notification), created: !previous, message: notification }
+}
+
 const sessionUpdatedAt = (session) => {
   const messages = Array.isArray(session?.messages) ? session.messages : []
   return session?.updatedAt || session?.updated_at || messages[messages.length - 1]?.timestamp || session?.createdAt || ''
@@ -180,7 +224,12 @@ export const __globalAgentSessionTestHooks = {
   messageRevisionAt,
   mergeHistoryMessages,
   messagesChanged,
+  globalMissionConversationState,
+  globalMissionNotificationId,
+  upsertGlobalMissionConversationNotification,
 }
+
+export { globalMissionConversationState, globalMissionNotificationId, upsertGlobalMissionConversationNotification }
 
 export function useGlobalAgentSessions(options = {}) {
   const sessions = ref([])

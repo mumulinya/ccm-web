@@ -54,6 +54,7 @@ import {
 import {
   browserCheckUsesExistingSession,
 } from "./existing-session";
+import { withBrowserCheckExecutionIdentity } from "./check-execution-coverage";
 import {
   BrowserActionEffectObservation,
   browserActionEffectRequired,
@@ -3471,7 +3472,12 @@ export const PlaywrightBrowserProvider: BrowserProvider = {
       result.adversarial = check.adversarial === true;
       result.probeType = check.probeType || check.probe_type;
       result.context = check.context;
-      return result;
+      return withBrowserCheckExecutionIdentity({
+        result,
+        workOrder: context.workOrder,
+        project,
+        checkIndex: index,
+      });
     });
     if (!executableChecks.length) return existingSessionBlocked;
 
@@ -3512,7 +3518,14 @@ export const PlaywrightBrowserProvider: BrowserProvider = {
               ? await runMultiSessionBrowserCheck(browser, context, project, checks[i], artifactIndex)
               : await runBrowserCheck(browser, context, project, checks[i], artifactIndex);
             artifactIndex += 1;
-            results.push(withBrowserStabilityMetadata({ result, groupId, run, runs }));
+            results.push(withBrowserCheckExecutionIdentity({
+              result: withBrowserStabilityMetadata({ result, groupId, run, runs }),
+              workOrder: context.workOrder,
+              project,
+              checkIndex: i,
+              run,
+              expectedRuns: runs,
+            }));
           }
         }
       }

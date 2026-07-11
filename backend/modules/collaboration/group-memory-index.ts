@@ -2980,6 +2980,7 @@ function preservedGroupTypedMemoryDistillationArchives(...ledgers: any[]) {
     "providerSwitchExecutionArchive",
     "providerRankingProvenanceCompactRepairReceiptConsumptionArchive",
     "postCompactReinjectionRepairReceiptConsumptionArchive",
+    "postCompactReceiptMemoryUsageRepairCompletionArchive",
     "providerRankingMemoryUsageReceiptRepairArchive",
     "contextUsageRepairArchive",
     "compactStrategyTypedArchive",

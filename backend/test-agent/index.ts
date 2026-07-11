@@ -7,6 +7,13 @@ export { runTestAgentAcceptanceEvidenceGateSelfTest } from "./acceptance-gate-se
 export { runTestAgentHttpConcurrencySelfTest } from "./http-concurrency-self-test";
 export { runTestAgentCapabilityAwareProviderRoutingSelfTest } from "./browser/provider-routing-self-test";
 export { runTestAgentHttpPageResourcesSelfTest } from "./http-page-resources-self-test";
+export { runTestAgentBrowserCheckExecutionCoverageSelfTest } from "./browser/check-execution-coverage-self-test";
+export {
+  browserCheckExecutionEvidenceErrors,
+  buildBrowserCheckExecutionCoverage,
+  buildBrowserCheckExecutionPlan,
+  reconcileBrowserCheckExecution,
+} from "./browser/check-execution-coverage";
 export { runTestAgentFailureSummarySelfTest } from "./self-test";
 export { runTestAgentBrowserProviderGapSummarySelfTest } from "./self-test";
 export { runTestAgentBrowserSessionComparisonSelfTest } from "./self-test";

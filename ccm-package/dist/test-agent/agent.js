@@ -7,6 +7,7 @@ const tool_executor_1 = require("./browser/tool-executor");
 const authentication_summary_1 = require("./browser/authentication-summary");
 const existing_session_1 = require("./browser/existing-session");
 const shared_1 = require("./browser/shared");
+const check_execution_coverage_1 = require("./browser/check-execution-coverage");
 const artifacts_1 = require("./artifacts");
 const command_planner_1 = require("./command-planner");
 const command_runner_1 = require("./command-runner");
@@ -20,6 +21,12 @@ async function runTestAgent(input, options = {}) {
     const normalized = (0, work_order_1.normalizeTestAgentWorkOrder)(input, options);
     const planned = (0, command_planner_1.planVerificationCommands)(normalized.workOrder, normalized.issues);
     const { workOrder, issues } = planned;
+    if ((0, shared_1.wantsBrowser)(workOrder)) {
+        workOrder.metadata = {
+            ...workOrder.metadata,
+            browserCheckExecutionPlan: (0, check_execution_coverage_1.buildBrowserCheckExecutionPlan)(workOrder, options.browserProvider || workOrder.options.browserProvider),
+        };
+    }
     const suppressBrowserToolDetails = workOrder.projects.some(project => (0, shared_1.checksForProject)(project, workOrder.acceptanceCriteria).some(existing_session_1.browserExistingSessionUsesMinimalEvidence));
     const browserToolRecorder = options.browserToolExecutor
         ? (0, tool_executor_1.createRecordingBrowserToolExecutor)(options.browserToolExecutor, workOrder.options.artifactDir, { suppressDetails: suppressBrowserToolDetails })
@@ -63,6 +70,15 @@ async function runTestAgent(input, options = {}) {
         workOrder.metadata = {
             ...workOrder.metadata,
             browserToolTranscriptPath: browserToolRecorder.transcriptPath,
+        };
+    }
+    const browserExecutionPlan = workOrder.metadata?.browserCheckExecutionPlan;
+    if (browserExecutionPlan && !workOrder.metadata?.browserCheckExecutionCoverage) {
+        const reconciled = (0, check_execution_coverage_1.reconcileBrowserCheckExecution)(browserExecutionPlan, browserResults);
+        browserResults = reconciled.results;
+        workOrder.metadata = {
+            ...workOrder.metadata,
+            browserCheckExecutionCoverage: reconciled.summary,
         };
     }
     const report = (0, result_builder_1.buildTestAgentReport)({

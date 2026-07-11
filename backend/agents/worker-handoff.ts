@@ -554,6 +554,9 @@ export function renderReceiptSchemaForWorker(handoff: any) {
     postCompactReinjectionRepairReceiptMemoryContract?.active === true
       ? `如果工作包包含 Post-compact reinjection repair receipt memory usage contract，回执 memoryUsed/memoryIgnored 必须逐条引用 ${(postCompactReinjectionRepairReceiptMemoryContract.memory_receipt_required_doc_rel_paths || postCompactReinjectionRepairReceiptMemoryContract.doc_rel_paths || []).join("、") || "post-compact-reinjection-repair-receipt-memory.md"}；used/verified 必须 currentSourceVerified=true，ignored 必须写 reason；历史完成只作 recovery evidence，不是永久新鲜的仓库事实。`
       : "",
+    postCompactReinjectionRepairReceiptMemoryContract?.corrected_receipt_completion_memory_active === true
+      ? `如果包含 corrected-receipt completion memory，历史 original/repair task/native session 只作证据，不能替代当前会话；本轮回执必须绑定当前 task/native session，并逐条声明 ${(postCompactReinjectionRepairReceiptMemoryContract.corrected_receipt_completion_doc_rel_paths || []).join("、") || "post-compact-receipt-memory-usage-repair-completions.md"} 的 memoryUsed 或 memoryIgnored。`
+      : "",
     "如果存在 read_plan_revalidation_gate，memoryUsed/memoryIgnored 或 readPlanRevalidationUsage 必须同时引用 gateId、readPlanId，并声明 currentSourceVerified=true；回执 session id 必须匹配工作包 session_binding。",
     "如果存在 API microcompact edit plan，回执 apiMicrocompactUsage 或 memoryUsed/memoryIgnored 必须引用 planChecksum，并声明 usageState=native_applied/advisory/ignored/not_supported；apiMicrocompactUsage 应绑定本轮 taskAgentSessionId/nativeSessionId/memoryContextSnapshotId；第三方 CLI 未实际调用 native API context-management 时不得声明 native_applied。",
     "如果工作包包含 Provider switch decision receipt，回执 providerSwitchExecution 必须引用 decisionReceiptId，并声明 expectedProvider、executedProvider、taskAgentSessionId、nativeSessionId、executionId；CCM 会用实际 runner/session 做系统见证，字段不一致时该切换不能视为已执行。",

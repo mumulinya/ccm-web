@@ -5,6 +5,10 @@ import { PlaywrightBrowserProvider } from "./playwright-provider";
 import { browserCheckUsesExistingSession } from "./existing-session";
 import { browserProviderRouteForCheck } from "./provider-routing";
 import { checksForProject, wantsBrowser } from "./shared";
+import {
+  buildBrowserCheckExecutionPlan,
+  reconcileBrowserCheckExecution,
+} from "./check-execution-coverage";
 
 export interface BrowserProviderPreflightResult {
   provider: BrowserProvider["id"];
@@ -67,8 +71,36 @@ export async function collectBrowserProviderPreflight(workOrder: NormalizedTestA
 export async function runBrowserVerificationWithProviders(workOrder: NormalizedTestAgentWorkOrder, runtime: TestAgentRuntimeOptions = {}): Promise<BrowserCheckResult[]> {
   if (!wantsBrowser(workOrder)) return [];
   const preferred = preferredProvider(workOrder, runtime);
-  if (preferred === "none") return [];
+  const plan = buildBrowserCheckExecutionPlan(workOrder, preferred);
+  workOrder.metadata = {
+    ...workOrder.metadata,
+    browserCheckExecutionPlan: plan,
+  };
+  let providerResults: BrowserCheckResult[];
+  try {
+    providerResults = preferred === "none"
+      ? []
+      : await runRoutedBrowserProviders(workOrder, runtime, preferred);
+  } catch (error: any) {
+    providerResults = [blockedBrowserResult(
+      "none",
+      "Browser provider orchestration",
+      error?.message || String(error),
+    )];
+  }
+  const reconciled = reconcileBrowserCheckExecution(plan, providerResults);
+  workOrder.metadata = {
+    ...workOrder.metadata,
+    browserCheckExecutionCoverage: reconciled.summary,
+  };
+  return reconciled.results;
+}
 
+async function runRoutedBrowserProviders(
+  workOrder: NormalizedTestAgentWorkOrder,
+  runtime: TestAgentRuntimeOptions,
+  preferred: string,
+): Promise<BrowserCheckResult[]> {
   const hasExistingSessionChecks = workOrder.projects.some(project =>
     checksForProject(project, workOrder.acceptanceCriteria).some(browserCheckUsesExistingSession)
   );

@@ -722,6 +722,14 @@ export interface BrowserAuthenticationEvidence {
     existingSession?: BrowserExistingSessionEvidence;
     sensitiveArtifactsSuppressed?: boolean;
 }
+export interface BrowserCheckExecutionIdentity {
+    checkId: string;
+    projectIndex: number;
+    checkIndex: number;
+    run: number;
+    expectedRuns: number;
+    evidence: "provider" | "synthetic_missing";
+}
 export interface BrowserCheckResult {
     provider?: "playwright" | "mcp" | "none";
     project: string;
@@ -774,6 +782,7 @@ export interface BrowserCheckResult {
     authentication?: BrowserAuthenticationEvidence;
     recovery?: BrowserRecoveryEvidence;
     actionEffects?: BrowserActionEffectEvidence[];
+    execution?: BrowserCheckExecutionIdentity;
     adversarial?: boolean;
     probeType?: string;
     context?: Record<string, any>;
@@ -1036,6 +1045,53 @@ export interface HttpResourceCheckResult {
     expectedContentTypes?: string[];
     contentTypeMatched?: boolean;
     error?: string;
+}
+export interface BrowserCheckExecutionPlanItem {
+    checkId: string;
+    project: string;
+    projectIndex: number;
+    checkIndex: number;
+    name: string;
+    url: string;
+    expectedRuns: number;
+    plannedProvider: "playwright" | "mcp" | "none";
+    providerRoutingReason: string;
+    adversarial: boolean;
+    probeType?: string;
+}
+export interface BrowserCheckExecutionPlan {
+    schema: "ccm-test-agent-browser-execution-plan-v1";
+    preferredProvider: string;
+    plannedCheckCount: number;
+    expectedRunCount: number;
+    items: BrowserCheckExecutionPlanItem[];
+}
+export type BrowserCheckExecutionCoverageStatus = "complete" | "incomplete" | "invalid";
+export interface BrowserCheckExecutionCoverageItem {
+    checkId: string;
+    project: string;
+    name: string;
+    plannedProvider: "playwright" | "mcp" | "none";
+    expectedRuns: number;
+    observedRuns: number[];
+    missingRuns: number[];
+    duplicateRuns: number[];
+    syntheticBlockedRuns: number[];
+    status: BrowserCheckExecutionCoverageStatus;
+}
+export interface BrowserCheckExecutionCoverageSummary {
+    status: BrowserCheckExecutionCoverageStatus;
+    plannedCheckCount: number;
+    expectedRunCount: number;
+    coveredRunCount: number;
+    missingRunCount: number;
+    providerResultCount: number;
+    duplicateResultCount: number;
+    invalidResultCount: number;
+    diagnosticResultCount: number;
+    syntheticBlockedCount: number;
+    statusCounts: Record<BrowserCheckExecutionCoverageStatus, number>;
+    items: BrowserCheckExecutionCoverageItem[];
 }
 export type HttpPageResourceKind = "script" | "stylesheet" | "image" | "font" | "media" | "document" | "manifest" | "other";
 export interface HttpAssertionResult {
@@ -1337,6 +1393,12 @@ export interface TestAgentVerdict {
         browserFlakyStabilityGroups?: number;
         browserStabilityRuns?: number;
         browserFailedStabilityRuns?: number;
+        browserPlannedChecks?: number;
+        browserExpectedRuns?: number;
+        browserCoveredRuns?: number;
+        browserMissingRuns?: number;
+        browserDuplicateResults?: number;
+        browserInvalidResults?: number;
         browserRecoveryAttempts?: number;
         browserRecoveredOperations?: number;
         browserFailedRecoveries?: number;
@@ -1364,6 +1426,7 @@ export interface TestAgentVerdict {
     browserFlowSummary?: BrowserFlowSummary;
     browserMultiSessionSummary?: BrowserMultiSessionSummary;
     browserStabilitySummary?: BrowserStabilitySummary;
+    browserCheckExecutionCoverage?: BrowserCheckExecutionCoverageSummary;
     browserRecoverySummary?: BrowserRecoverySummary;
     browserActionEffectSummary?: BrowserActionEffectSummary;
     adversarialEvidenceSummary: AdversarialEvidenceSummary;
@@ -1409,6 +1472,7 @@ export interface TestAgentReport {
     browserFlowSummary?: BrowserFlowSummary;
     browserMultiSessionSummary?: BrowserMultiSessionSummary;
     browserStabilitySummary?: BrowserStabilitySummary;
+    browserCheckExecutionCoverage?: BrowserCheckExecutionCoverageSummary;
     browserRecoverySummary?: BrowserRecoverySummary;
     browserActionEffectSummary?: BrowserActionEffectSummary;
     adversarialEvidenceSummary: AdversarialEvidenceSummary;

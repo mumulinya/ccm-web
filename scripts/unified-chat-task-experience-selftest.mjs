@@ -176,6 +176,65 @@ checks.globalHistoryMergeKeepsDistinctStableRuns = mergedAmbiguousLegacyRuns.len
   && mergedAmbiguousLegacyRuns.some(message => message?.agenticRun?.id === 'run_same_text_a')
   && mergedAmbiguousLegacyRuns.some(message => message?.agenticRun?.id === 'run_same_text_b')
 
+checks.globalMissionNotificationRequiresAllCompletionSignals = __globalAgentSessionTestHooks.globalMissionConversationState({
+  mission: { status: 'done' },
+  supervisor: { status: 'completed' },
+  run: { status: 'supervising' },
+}) === 'active'
+  && __globalAgentSessionTestHooks.globalMissionConversationState({
+    mission: { status: 'done' },
+    supervisor: { status: 'completed' },
+    run: { status: 'completed' },
+  }) === 'completed'
+
+checks.globalMissionNotificationRecognizesWaitingAndCancellation = __globalAgentSessionTestHooks.globalMissionConversationState({
+  mission: { status: 'in_progress' },
+  supervisor: { status: 'waiting_user' },
+  run: { status: 'supervising' },
+}) === 'waiting_user'
+  && __globalAgentSessionTestHooks.globalMissionConversationState({
+    mission: { status: 'cancelled' },
+    supervisor: { status: 'cancelled' },
+    run: { status: 'cancelled' },
+  }) === 'cancelled'
+
+const missionNotifications = []
+const firstWaitingNotification = __globalAgentSessionTestHooks.upsertGlobalMissionConversationNotification(missionNotifications, {
+  missionId: 'mission-notification-selftest',
+  state: 'waiting_user',
+  content: '任务需要你补充测试账号。',
+  timestamp: '2026-07-07T13:00:00.000Z',
+  updatedAt: '2026-07-07T13:00:00.000Z',
+})
+const updatedWaitingNotification = __globalAgentSessionTestHooks.upsertGlobalMissionConversationNotification(missionNotifications, {
+  missionId: 'mission-notification-selftest',
+  state: 'waiting_user',
+  content: '任务需要你补充测试账号和登录地址。',
+  updatedAt: '2026-07-07T13:05:00.000Z',
+})
+const completedMissionNotification = __globalAgentSessionTestHooks.upsertGlobalMissionConversationNotification(missionNotifications, {
+  missionId: 'mission-notification-selftest',
+  state: 'completed',
+  content: '任务已经通过全部交付验收。',
+  timestamp: '2026-07-07T13:10:00.000Z',
+  updatedAt: '2026-07-07T13:10:00.000Z',
+})
+checks.globalMissionNotificationsAreIdempotentPerState = firstWaitingNotification.created === true
+  && updatedWaitingNotification.created === false
+  && completedMissionNotification.created === true
+  && missionNotifications.length === 2
+  && missionNotifications.filter(message => message.missionNotificationState === 'waiting_user').length === 1
+  && missionNotifications.some(message => message.content.includes('登录地址'))
+  && missionNotifications.some(message => message.missionNotificationState === 'completed')
+
+const mergedMissionNotifications = __globalAgentSessionTestHooks.mergeHistoryMessages([], [
+  ...missionNotifications,
+  { ...missionNotifications[1], content: '任务已经通过全部交付验收，最终总结已生成。', updated_at: '2026-07-07T13:11:00.000Z' },
+])
+checks.globalMissionNotificationsSurviveHistoryMergeWithoutDuplicates = mergedMissionNotifications.length === 2
+  && mergedMissionNotifications.filter(message => message.missionNotificationState === 'completed').length === 1
+  && mergedMissionNotifications.some(message => message.content.includes('最终总结已生成'))
+
 const deliveryReportHandoffCard = globalAgentRunTaskCard({
   role: 'assistant',
   type: 'global_agent_result',

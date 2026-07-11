@@ -19,6 +19,7 @@ import {
   httpConcurrencySummaryErrors,
 } from "../http-concurrency";
 import { httpPageResourceEvidenceErrors } from "../http-page-resources";
+import { browserCheckExecutionEvidenceErrors } from "../browser/check-execution-coverage";
 
 export const TEST_AGENT_CONTRACT_IDS = {
   handoff: "ccm-test-agent-handoff-v1",
@@ -1299,6 +1300,69 @@ const browserStabilitySummarySchema = z.object({
   items: z.array(browserStabilitySummaryItemSchema),
 }).passthrough();
 
+const browserCheckExecutionIdentitySchema = z.object({
+  checkId: z.string().min(1),
+  projectIndex: z.number().int().nonnegative(),
+  checkIndex: z.number().int().nonnegative(),
+  run: z.number().int().positive(),
+  expectedRuns: z.number().int().positive(),
+  evidence: z.enum(["provider", "synthetic_missing"]),
+}).strict();
+
+const browserCheckExecutionPlanItemSchema = z.object({
+  checkId: z.string().min(1),
+  project: z.string().min(1),
+  projectIndex: z.number().int().nonnegative(),
+  checkIndex: z.number().int().nonnegative(),
+  name: z.string().min(1),
+  url: z.string(),
+  expectedRuns: z.number().int().positive(),
+  plannedProvider: z.enum(["playwright", "mcp", "none"]),
+  providerRoutingReason: z.string().min(1),
+  adversarial: z.boolean(),
+  probeType: optionalString,
+}).strict();
+
+const browserCheckExecutionPlanSchema = z.object({
+  schema: z.literal("ccm-test-agent-browser-execution-plan-v1"),
+  preferredProvider: z.string().min(1),
+  plannedCheckCount: z.number().int().nonnegative(),
+  expectedRunCount: z.number().int().nonnegative(),
+  items: z.array(browserCheckExecutionPlanItemSchema),
+}).strict();
+
+const browserCheckExecutionCoverageItemSchema = z.object({
+  checkId: z.string().min(1),
+  project: z.string(),
+  name: z.string(),
+  plannedProvider: z.enum(["playwright", "mcp", "none"]),
+  expectedRuns: z.number().int().positive(),
+  observedRuns: z.array(z.number().int().positive()),
+  missingRuns: z.array(z.number().int().positive()),
+  duplicateRuns: z.array(z.number().int().positive()),
+  syntheticBlockedRuns: z.array(z.number().int().positive()),
+  status: z.enum(["complete", "incomplete", "invalid"]),
+}).strict();
+
+const browserCheckExecutionCoverageSchema = z.object({
+  status: z.enum(["complete", "incomplete", "invalid"]),
+  plannedCheckCount: z.number().int().nonnegative(),
+  expectedRunCount: z.number().int().nonnegative(),
+  coveredRunCount: z.number().int().nonnegative(),
+  missingRunCount: z.number().int().nonnegative(),
+  providerResultCount: z.number().int().nonnegative(),
+  duplicateResultCount: z.number().int().nonnegative(),
+  invalidResultCount: z.number().int().nonnegative(),
+  diagnosticResultCount: z.number().int().nonnegative(),
+  syntheticBlockedCount: z.number().int().nonnegative(),
+  statusCounts: z.object({
+    complete: z.number().int().nonnegative(),
+    incomplete: z.number().int().nonnegative(),
+    invalid: z.number().int().nonnegative(),
+  }).strict(),
+  items: z.array(browserCheckExecutionCoverageItemSchema),
+}).strict();
+
 const browserProviderGapSchema = z.object({
   provider: z.string(),
   project: optionalString,
@@ -1724,6 +1788,7 @@ const browserActionEffectSummarySchema = z.object({
 
 const browserCheckResultSchema = z.object({
   status: resultStatus,
+  execution: browserCheckExecutionIdentitySchema.optional(),
   browserSessions: z.array(browserSessionResultSchema).optional(),
   browserSessionComparisons: z.array(browserSessionComparisonResultSchema).optional(),
   authentication: browserAuthenticationEvidenceSchema.optional(),
@@ -1873,6 +1938,7 @@ export const TestAgentReportContractSchema: z.ZodType<Record<string, any>> = z.o
   browserFlowSummary: browserFlowSummarySchema.optional(),
   browserMultiSessionSummary: browserMultiSessionSummarySchema.optional(),
   browserStabilitySummary: browserStabilitySummarySchema.optional(),
+  browserCheckExecutionCoverage: browserCheckExecutionCoverageSchema.optional(),
   browserRecoverySummary: browserRecoverySummarySchema.optional(),
   browserActionEffectSummary: browserActionEffectSummarySchema.optional(),
   adversarialEvidenceSummary: adversarialEvidenceSummarySchema,
@@ -1894,6 +1960,36 @@ export const TestAgentReportContractSchema: z.ZodType<Record<string, any>> = z.o
   metadata: z.record(z.any()),
 }).passthrough().superRefine((value: Record<string, any>, ctx: z.RefinementCtx) => {
   validateMinimalBrowserToolCalls(value, ctx);
+  const browserExecutionPlanValue = value.metadata?.browserCheckExecutionPlan;
+  if (browserExecutionPlanValue !== undefined) {
+    const parsedPlan = browserCheckExecutionPlanSchema.safeParse(browserExecutionPlanValue);
+    if (!parsedPlan.success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "metadata.browserCheckExecutionPlan is invalid.",
+        path: ["metadata", "browserCheckExecutionPlan"],
+      });
+    } else {
+      for (const error of browserCheckExecutionEvidenceErrors({
+        plan: parsedPlan.data as any,
+        results: Array.isArray(value.browserResults) ? value.browserResults : [],
+        summary: value.browserCheckExecutionCoverage,
+        reportStatus: value.status,
+      })) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: error,
+          path: ["browserCheckExecutionCoverage"],
+        });
+      }
+    }
+  } else if ((Array.isArray(value.browserResults) ? value.browserResults : []).some((result: any) => result?.execution)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Browser execution identities require metadata.browserCheckExecutionPlan.",
+      path: ["metadata", "browserCheckExecutionPlan"],
+    });
+  }
   const hasEffects = (Array.isArray(value.browserResults) ? value.browserResults : [])
     .some((result: any) => Array.isArray(result?.actionEffects) && result.actionEffects.length);
   if (hasEffects && !value.browserActionEffectSummary) {
@@ -2064,6 +2160,12 @@ export const TestAgentVerdictContractSchema = z.object({
     browserFlakyStabilityGroups: z.number().optional(),
     browserStabilityRuns: z.number().optional(),
     browserFailedStabilityRuns: z.number().optional(),
+    browserPlannedChecks: z.number().optional(),
+    browserExpectedRuns: z.number().optional(),
+    browserCoveredRuns: z.number().optional(),
+    browserMissingRuns: z.number().optional(),
+    browserDuplicateResults: z.number().optional(),
+    browserInvalidResults: z.number().optional(),
     browserRecoveryAttempts: z.number().optional(),
     browserRecoveredOperations: z.number().optional(),
     browserFailedRecoveries: z.number().optional(),
@@ -2091,6 +2193,7 @@ export const TestAgentVerdictContractSchema = z.object({
   browserFlowSummary: browserFlowSummarySchema.optional(),
   browserMultiSessionSummary: browserMultiSessionSummarySchema.optional(),
   browserStabilitySummary: browserStabilitySummarySchema.optional(),
+  browserCheckExecutionCoverage: browserCheckExecutionCoverageSchema.optional(),
   browserRecoverySummary: browserRecoverySummarySchema.optional(),
   browserActionEffectSummary: browserActionEffectSummarySchema.optional(),
   adversarialEvidenceSummary: adversarialEvidenceSummarySchema,
@@ -2129,6 +2232,13 @@ export const TestAgentVerdictContractSchema = z.object({
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: "canAccept requires criterion-linked acceptance evidence or no acceptance criteria.",
+      path: ["canAccept"],
+    });
+  }
+  if (value.canAccept && value.browserCheckExecutionCoverage && value.browserCheckExecutionCoverage.status !== "complete") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "canAccept requires complete browser check execution coverage.",
       path: ["canAccept"],
     });
   }

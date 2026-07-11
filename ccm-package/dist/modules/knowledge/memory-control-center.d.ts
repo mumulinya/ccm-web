@@ -8710,6 +8710,66 @@ export declare function runMemoryCenterPostCompactReceiptMemoryUsageRepairComple
         recalled: any;
     };
 };
+export declare function runMemoryCenterPostCompactReceiptMemoryUsageRepairCompletionWorkerContextSelfTest(): {
+    pass: boolean;
+    checks: {
+        twoGroupsAndTwoFreshSessionsPass: boolean;
+        groupRecallIdentityIsIsolated: boolean;
+        packetCarriesCompletionMemoryContract: boolean;
+        historicalSessionsRemainEvidenceOnly: any;
+        handoffRendersPerSessionReceiptContract: any;
+        assignmentPersistsContractAndReceipt: boolean;
+        realFreshReceiptPassesExistingValidator: boolean;
+        staleAndHistoricalSessionReceiptsRejected: any;
+        qualityCheckRegisteredAndPasses: boolean;
+    };
+    report: {
+        status: string;
+        coverageRate: number;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        archivedCompletionCount: any;
+        firstSessionRecallCount: any;
+        secondSessionRecallCount: any;
+        distinctSessionBindingCount: any;
+        completionDocCoveredCount: any;
+        historicalSessionBoundaryCoveredCount: any;
+        validatorCoveredCount: any;
+        metadataGapCount: any;
+    };
+    receiptReport: {
+        status: string;
+        coverageRate: number;
+        groupCount: any;
+        checkedGroupCount: any;
+        groupsCovered: any;
+        receiptContractCount: any;
+        coveredReceiptCount: any;
+        missingReceiptCoverageCount: number;
+        missingReceiptCount: any;
+        missingDocCoverageCount: any;
+        missingUsageOrReverifyCount: any;
+        missingBoundaryCount: any;
+        sessionMismatchCount: any;
+        repairedReceiptCount: any;
+        repairItemCount: any;
+        openRepairItemCount: any;
+        metadataGapCount: any;
+    };
+    quality: {
+        status: any;
+        checked: any;
+        passed: any;
+    };
+    groupA: {
+        workItemIds: any;
+        requiredDocs: any;
+    };
+    groupB: {
+        workItemIds: any;
+        requiredDocs: any;
+    };
+};
 export declare function runMemoryCenterCompactFileReferenceUsageDisciplineSelfTest(): {
     pass: boolean;
     checks: {

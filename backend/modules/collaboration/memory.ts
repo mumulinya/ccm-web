@@ -5953,6 +5953,7 @@ const PROVIDER_RANKING_PROVENANCE_COMPACT_REPAIR_RECEIPT_MEMORY_REL_PATH = "prov
 const PROVIDER_RANKING_MEMORY_USAGE_RECEIPT_DISCIPLINE_REL_PATH = "provider-ranking-memory-usage-receipt-discipline.md";
 const POST_COMPACT_REINJECTION_REPAIR_RECEIPT_MEMORY_REL_PATH = "post-compact-reinjection-repair-receipt-memory.md";
 const POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CAUTION_REL_PATH = "post-compact-reinjection-repair-receipt-cautions.md";
+const POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_REL_PATH = "post-compact-receipt-memory-usage-repair-completions.md";
 
 function uniqueProviderRankingCompactRepairRecallStrings(values: any[] = [], limit = 40) {
   const seen = new Set<string>();
@@ -6124,6 +6125,23 @@ function isPostCompactReinjectionRepairReceiptRecallQuery(value: any, rows: any[
   }));
 }
 
+function isPostCompactReceiptMemoryUsageRepairCompletionRecallQuery(value: any, rows: any[] = []) {
+  const text = String(value || "").toLowerCase();
+  if (/corrected[-_\s]?receipt|receipt[-_\s]?memory[-_\s]?usage|memoryused|memoryignored|current source|recovery evidence|回执修复|记忆使用|当前源|恢复证据/.test(text)) {
+    return true;
+  }
+  return rows.some((row: any) => [
+    row.work_item_id,
+    row.brief_id,
+    row.timeline_binding_id,
+    row.original_worker_context_packet_id,
+    ...(Array.isArray(row.required_doc_rel_paths) ? row.required_doc_rel_paths : []),
+  ].some((token: any) => {
+    const normalized = String(token || "").trim().toLowerCase();
+    return normalized.length >= 4 && text.includes(normalized);
+  }));
+}
+
 function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: string, task = "", memory: any = {}, options: any = {}) {
   const disabled = options.disablePostCompactReinjectionRepairReceiptRecall === true
     || options.disable_post_compact_reinjection_repair_receipt_recall === true;
@@ -6139,6 +6157,8 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
     usedCount: 0,
     verifiedCount: 0,
     ignoredCount: 0,
+    completionArchivedCount: 0,
+    completionVerifiedCount: 0,
     taskMatched: false,
     recalledThisTurn: false,
     docRelPaths: [],
@@ -6146,8 +6166,15 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
     targetPaths: [],
     gateIds: [],
     candidateIds: [],
+    completionWorkItemIds: [],
+    completionTimelineBindingIds: [],
+    completionOriginalWorkerContextPacketIds: [],
     taskAgentSessionIds: [],
     nativeSessionIds: [],
+    originalTaskAgentSessionIds: [],
+    originalNativeSessionIds: [],
+    repairTaskAgentSessionIds: [],
+    repairNativeSessionIds: [],
     queryAppend: "",
     freshnessBoundary: "historical repair completion is recovery evidence, not permanent repository truth; future use must reverify the current source",
     requiredReceiptFields: ["memoryUsed", "memoryIgnored"],
@@ -6155,15 +6182,25 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
   };
   if (disabled) return empty;
   let archive: any = {};
+  let completionArchive: any = {};
+  let archiveReadError = "";
   try {
-    archive = readGroupTypedMemoryDistillationLedger(groupId).postCompactReinjectionRepairReceiptConsumptionArchive || {};
-  } catch {
+    const ledger = readGroupTypedMemoryDistillationLedger(groupId);
+    archive = ledger.postCompactReinjectionRepairReceiptConsumptionArchive || {};
+    completionArchive = ledger.postCompactReceiptMemoryUsageRepairCompletionArchive || {};
+  } catch (error: any) {
     archive = {};
+    completionArchive = {};
+    archiveReadError = compactMemoryText(error?.message || error || "typed memory distillation ledger read failed", 500);
   }
   const rows = Array.isArray(archive.rows) ? archive.rows : [];
-  const archivedCount = Number(archive.archived_count || rows.length || 0);
-  if (archivedCount <= 0) return empty;
+  const completionRows = Array.isArray(completionArchive.rows) ? completionArchive.rows : [];
+  const repairArchivedCount = Number(archive.archived_count || rows.length || 0);
+  const completionArchivedCount = Number(completionArchive.archived_count || completionRows.length || 0);
+  const archivedCount = repairArchivedCount + completionArchivedCount;
+  if (archivedCount <= 0) return archiveReadError ? { ...empty, reason: "archive_read_failed", archiveReadError } : empty;
   const recentRows = rows.slice(-12);
+  const recentCompletionRows = completionRows.slice(-12);
   const taskText = [
     task,
     memory.goal,
@@ -6174,12 +6211,16 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
   ].map((item: any) => typeof item === "string" ? item : JSON.stringify(item || "")).join("\n");
   const taskMatched = options.forcePostCompactReinjectionRepairReceiptRecall === true
     || options.force_post_compact_reinjection_repair_receipt_recall === true
-    || isPostCompactReinjectionRepairReceiptRecallQuery(taskText, recentRows);
+    || options.forcePostCompactReceiptMemoryUsageRepairCompletionRecall === true
+    || options.force_post_compact_receipt_memory_usage_repair_completion_recall === true
+    || isPostCompactReinjectionRepairReceiptRecallQuery(taskText, recentRows)
+    || isPostCompactReceiptMemoryUsageRepairCompletionRecallQuery(taskText, recentCompletionRows);
   const restoredCount = Number(archive.restored_count || rows.filter((row: any) => row.category !== "caution").length || 0);
   const cautionCount = Number(archive.caution_count || rows.filter((row: any) => row.category === "caution").length || 0);
   const docRelPaths = uniqueProviderRankingCompactRepairRecallStrings([
     restoredCount > 0 ? POST_COMPACT_REINJECTION_REPAIR_RECEIPT_MEMORY_REL_PATH : "",
     cautionCount > 0 ? POST_COMPACT_REINJECTION_REPAIR_RECEIPT_CAUTION_REL_PATH : "",
+    completionArchivedCount > 0 ? POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_REL_PATH : "",
   ], 4);
   if (!taskMatched) {
     return {
@@ -6191,6 +6232,8 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
       usedCount: Number(archive.used_count || 0),
       verifiedCount: Number(archive.verified_count || 0),
       ignoredCount: Number(archive.ignored_count || 0),
+      completionArchivedCount,
+      completionVerifiedCount: Number(completionArchive.verified_count || 0),
       taskMatched: false,
       docRelPaths,
     };
@@ -6201,17 +6244,31 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
   const sourceMessageIds = uniqueProviderRankingCompactRepairRecallStrings(recentRows.map((row: any) => row.post_compact_candidate_source_message_id), 16);
   const taskAgentSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recentRows.map((row: any) => row.task_agent_session_id), 16);
   const nativeSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recentRows.map((row: any) => row.native_session_id), 16);
-  const rowIds = uniqueProviderRankingCompactRepairRecallStrings(recentRows.map((row: any) => row.row_id), 16);
+  const completionWorkItemIds = uniqueProviderRankingCompactRepairRecallStrings(recentCompletionRows.map((row: any) => row.work_item_id), 16);
+  const completionTimelineBindingIds = uniqueProviderRankingCompactRepairRecallStrings(recentCompletionRows.map((row: any) => row.timeline_binding_id), 16);
+  const completionOriginalWorkerContextPacketIds = uniqueProviderRankingCompactRepairRecallStrings(recentCompletionRows.map((row: any) => row.original_worker_context_packet_id), 16);
+  const originalTaskAgentSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recentCompletionRows.map((row: any) => row.original_task_agent_session_id), 16);
+  const originalNativeSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recentCompletionRows.map((row: any) => row.original_native_session_id), 16);
+  const repairTaskAgentSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recentCompletionRows.map((row: any) => row.repair_task_agent_session_id), 16);
+  const repairNativeSessionIds = uniqueProviderRankingCompactRepairRecallStrings(recentCompletionRows.map((row: any) => row.repair_native_session_id), 16);
+  const rowIds = uniqueProviderRankingCompactRepairRecallStrings([
+    recentRows.map((row: any) => row.row_id),
+    recentCompletionRows.map((row: any) => row.row_id),
+  ], 24);
   const queryAppend = [
     "post-compact reinjection repair receipt typed MEMORY.md",
     ...docRelPaths,
     "postCompactCandidateUsage memoryUsed memoryIgnored currentSourceVerified",
     "historical repair completion is recovery evidence, not permanent repository truth",
     "future use must reverify the current source",
+    completionArchivedCount > 0 ? "corrected receipt completion memory per-session memoryUsed memoryIgnored" : "",
     ...gateIds,
     ...candidateIds,
     ...candidateValues,
     ...sourceMessageIds,
+    ...completionWorkItemIds,
+    ...completionTimelineBindingIds,
+    ...completionOriginalWorkerContextPacketIds,
     ...rowIds,
   ].filter(Boolean).join("\n");
   return {
@@ -6224,6 +6281,8 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
     usedCount: Number(archive.used_count || 0),
     verifiedCount: Number(archive.verified_count || 0),
     ignoredCount: Number(archive.ignored_count || 0),
+    completionArchivedCount,
+    completionVerifiedCount: Number(completionArchive.verified_count || 0),
     currentSourceVerifiedCount: Number(archive.current_source_verified_count || 0),
     taskMatched: true,
     docRelPaths,
@@ -6236,11 +6295,21 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
     candidateIds,
     candidateValues,
     sourceMessageIds,
-    taskAgentSessionIds,
-    nativeSessionIds,
+    completionWorkItemIds,
+    completionTimelineBindingIds,
+    completionOriginalWorkerContextPacketIds,
+    completionDocRelPaths: completionArchivedCount > 0 ? [POST_COMPACT_RECEIPT_MEMORY_USAGE_REPAIR_COMPLETION_REL_PATH] : [],
+    taskAgentSessionIds: uniqueProviderRankingCompactRepairRecallStrings([taskAgentSessionIds, originalTaskAgentSessionIds, repairTaskAgentSessionIds], 24),
+    nativeSessionIds: uniqueProviderRankingCompactRepairRecallStrings([nativeSessionIds, originalNativeSessionIds, repairNativeSessionIds], 24),
+    originalTaskAgentSessionIds,
+    originalNativeSessionIds,
+    repairTaskAgentSessionIds,
+    repairNativeSessionIds,
     rowIds,
     queryAppend: compactMemoryText(queryAppend, 4200),
-    rows: recentRows.map((row: any) => ({
+    rows: [
+      ...recentRows.map((row: any) => ({
+      row_kind: "reinjection_repair_receipt",
       row_id: row.row_id || "",
       timeline_binding_id: row.timeline_binding_id || "",
       brief_id: row.brief_id || "",
@@ -6256,7 +6325,24 @@ function buildPostCompactReinjectionRepairReceiptWorkerContextRecall(groupId: st
       historical_native_session_id: row.native_session_id || "",
       completion_source: row.completion_source || "",
       resolution_reason: row.resolution_reason || "",
-    })),
+      })),
+      ...recentCompletionRows.map((row: any) => ({
+        row_kind: "receipt_memory_usage_repair_completion",
+        row_id: row.row_id || "",
+        timeline_binding_id: row.timeline_binding_id || "",
+        brief_id: row.brief_id || "",
+        work_item_id: row.work_item_id || "",
+        original_worker_context_packet_id: row.original_worker_context_packet_id || "",
+        required_doc_rel_paths: Array.isArray(row.required_doc_rel_paths) ? row.required_doc_rel_paths.slice(0, 8) : [],
+        coverage_rows: Array.isArray(row.coverage_rows) ? row.coverage_rows.slice(0, 8) : [],
+        historical_task_agent_session_id: row.original_task_agent_session_id || "",
+        historical_native_session_id: row.original_native_session_id || "",
+        repair_task_agent_session_id: row.repair_task_agent_session_id || "",
+        repair_native_session_id: row.repair_native_session_id || "",
+        completion_source: row.completion_source || "",
+        resolution_reason: row.resolution_reason || "",
+      })),
+    ].slice(-20),
   };
 }
 

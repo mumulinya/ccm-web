@@ -74,6 +74,7 @@ export { runTestAgentAcceptanceEvidenceGateSelfTest } from "./acceptance-gate-se
 export { runTestAgentHttpConcurrencySelfTest } from "./http-concurrency-self-test";
 export { runTestAgentCapabilityAwareProviderRoutingSelfTest } from "./browser/provider-routing-self-test";
 export { runTestAgentHttpPageResourcesSelfTest } from "./http-page-resources-self-test";
+export { runTestAgentBrowserCheckExecutionCoverageSelfTest } from "./browser/check-execution-coverage-self-test";
 
 function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {

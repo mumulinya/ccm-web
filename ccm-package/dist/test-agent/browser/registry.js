@@ -8,6 +8,7 @@ const playwright_provider_1 = require("./playwright-provider");
 const existing_session_1 = require("./existing-session");
 const provider_routing_1 = require("./provider-routing");
 const shared_1 = require("./shared");
+const check_execution_coverage_1 = require("./check-execution-coverage");
 function preferredProvider(workOrder, runtime) {
     return runtime.browserProvider || workOrder.options.browserProvider || "auto";
 }
@@ -57,8 +58,28 @@ async function runBrowserVerificationWithProviders(workOrder, runtime = {}) {
     if (!(0, shared_1.wantsBrowser)(workOrder))
         return [];
     const preferred = preferredProvider(workOrder, runtime);
-    if (preferred === "none")
-        return [];
+    const plan = (0, check_execution_coverage_1.buildBrowserCheckExecutionPlan)(workOrder, preferred);
+    workOrder.metadata = {
+        ...workOrder.metadata,
+        browserCheckExecutionPlan: plan,
+    };
+    let providerResults;
+    try {
+        providerResults = preferred === "none"
+            ? []
+            : await runRoutedBrowserProviders(workOrder, runtime, preferred);
+    }
+    catch (error) {
+        providerResults = [(0, provider_types_1.blockedBrowserResult)("none", "Browser provider orchestration", error?.message || String(error))];
+    }
+    const reconciled = (0, check_execution_coverage_1.reconcileBrowserCheckExecution)(plan, providerResults);
+    workOrder.metadata = {
+        ...workOrder.metadata,
+        browserCheckExecutionCoverage: reconciled.summary,
+    };
+    return reconciled.results;
+}
+async function runRoutedBrowserProviders(workOrder, runtime, preferred) {
     const hasExistingSessionChecks = workOrder.projects.some(project => (0, shared_1.checksForProject)(project, workOrder.acceptanceCriteria).some(existing_session_1.browserCheckUsesExistingSession));
     const hasStandardChecks = workOrder.projects.some(project => (0, shared_1.checksForProject)(project, workOrder.acceptanceCriteria).some(check => !(0, existing_session_1.browserCheckUsesExistingSession)(check)));
     const results = [];
